@@ -17,9 +17,16 @@ import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ICoin, ICoreFees, ILauncher, Mainnet} from "./interfaces/Interfaces.sol";
 
 /// @notice the swap fee hook. serves the coin/eth launch pool and, once the core names it, one coin/exitToken pool.
-/// @dev the fee is always taken in the non coin currency of the pool, as a share of the swap notional measured in
-/// that currency. the coin never touches the hook. every swap and liquidity change grants the coin exactly the
-/// transient allowance the pool manager needs to move the coin legs of that action, and nothing more.
+/// @dev the fee is always taken in the non coin currency of the pool, and is exactly `FEE_BPS` of the trader's gross
+/// notional in that currency, in all four swap kinds. the gross is what the trader pays (buys) or what the pool pays
+/// out before the fee (sells):
+///   buy exact in, trader pays E:        fee = E * FEE_BPS / BPS, the pool gets the rest
+///   sell exact in, pool pays out G:     fee = G * FEE_BPS / BPS, the trader nets the rest
+///   buy exact out, the pool needs P:    trader pays P / (1 - fee), fee = P * FEE_BPS / (BPS - FEE_BPS)
+///   sell exact out, trader wants net N: pool pays N / (1 - fee), fee = N * FEE_BPS / (BPS - FEE_BPS)
+/// fees round down, so the fee is within one wei of the exact share of the gross. the coin never touches the hook.
+/// every swap and liquidity change grants the coin exactly the transient allowance the pool manager needs to move
+/// the coin legs of that action, and nothing more.
 contract FeeHook is BaseHook, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -200,8 +207,9 @@ contract FeeHook is BaseHook, IUnlockCallback {
         return (this.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
     }
 
-    /// @dev when the fee currency is the specified currency the fee comes off the specified amount here.
-    /// the positive specified delta shrinks an exact in swap and grows an exact out swap by the fee
+    /// @dev when the fee currency is the specified currency the fee is taken here. the positive specified delta
+    /// shrinks an exact in swap by the fee (the fee is FEE_BPS of the amount the trader pays) and grows an exact out
+    /// swap by the fee (the pool pays the net amount plus the fee, so the fee is FEE_BPS of that gross)
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
@@ -210,9 +218,10 @@ contract FeeHook is BaseHook, IUnlockCallback {
         bool feeIs0 = Currency.unwrap(key.currency1) == coin;
         bool specifiedIs0 = (params.amountSpecified < 0) == params.zeroForOne;
         if (specifiedIs0 == feeIs0) {
-            uint256 amount =
-                params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified);
-            uint256 fee = amount * FEE_BPS / BPS;
+            uint256 fee = _feeOf(
+                params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified),
+                params.amountSpecified < 0
+            );
             if (fee != 0) {
                 _collect(key, feeIs0 ? key.currency0 : key.currency1, fee);
                 return (this.beforeSwap.selector, toBeforeSwapDelta(fee.toInt128(), 0), 0);
@@ -222,7 +231,8 @@ contract FeeHook is BaseHook, IUnlockCallback {
     }
 
     /// @dev grants the coin allowance for the swap, then takes the fee when the fee currency is the unspecified one.
-    /// the returned fee is a positive unspecified delta, so the swapper receives less or pays more by the fee
+    /// the returned fee is a positive unspecified delta, so the swapper receives less or pays more by the fee. the
+    /// pool delta is the gross for an exact in sell and the net amount the pool needs for an exact out buy
     function _afterSwap(address, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
         internal
         override
@@ -233,13 +243,19 @@ contract FeeHook is BaseHook, IUnlockCallback {
         bool specifiedIs0 = (params.amountSpecified < 0) == params.zeroForOne;
         if (specifiedIs0 != feeIs0) {
             int128 feeLeg = feeIs0 ? delta.amount0() : delta.amount1();
-            uint256 fee = uint256(uint128(feeLeg < 0 ? -feeLeg : feeLeg)) * FEE_BPS / BPS;
+            uint256 fee = _feeOf(uint256(uint128(feeLeg < 0 ? -feeLeg : feeLeg)), params.amountSpecified < 0);
             if (fee != 0) {
                 _collect(key, feeIs0 ? key.currency0 : key.currency1, fee);
                 return (this.afterSwap.selector, fee.toInt128());
             }
         }
         return (this.afterSwap.selector, 0);
+    }
+
+    /// @dev the fee for a pool side amount in the fee currency. exact in, the amount is already the gross.
+    /// exact out, the amount is the gross less the fee, so the fee is amount * FEE_BPS / (BPS - FEE_BPS)
+    function _feeOf(uint256 amount, bool exactIn) private pure returns (uint256) {
+        return exactIn ? amount * FEE_BPS / BPS : amount * FEE_BPS / (BPS - FEE_BPS);
     }
 
     /// @dev grants exactly the coin the pool manager moves for this action, in either direction

@@ -50,8 +50,13 @@ permissions: beforeInitialize, afterAddLiquidity, afterRemoveLiquidity, beforeSw
 * beforeInitialize: allow the launch key only while `launcher.launching()`. allow another key only if its id equals `core.exitPoolId()` and that is non zero. everything else reverts.
 * afterAddLiquidity: launch pool only while `launching`. exit pool: anyone. grant coin allowance equal to the coin owed by the caller.
 * afterRemoveLiquidity: exit pool only (the launch position is owned by dead). grant allowance equal to the coin paid out.
-* fee: `FEE_BPS` of the swap notional measured in the fee currency, where the fee currency is the non coin side (eth, or exitToken in the exit pool). always taken in the fee currency, never in coin, with no nested swap:
-  * fee currency is the specified currency (exact in buy, exact out sell): take it in beforeSwap, `fee = |amountSpecified| * FEE_BPS / 10_000`, return a positive specified delta and `poolManager.take` it.
+* fee: exactly `FEE_BPS` of the trader's gross notional in the fee currency, where the fee currency is the non coin side (eth, or exitToken in the exit pool). always taken in the fee currency, never in coin, with no nested swap. the gross is what the trader pays (buys) or what the pool pays out before the fee (sells):
+  * buy exact in, trader pays E: `fee = E * FEE_BPS / 10_000`. the pool gets the rest.
+  * sell exact in, the pool pays out G: `fee = G * FEE_BPS / 10_000`. the trader nets the rest.
+  * buy exact out, the pool needs P: the trader pays `P / 0.9`, `fee = P * FEE_BPS / (10_000 - FEE_BPS)`.
+  * sell exact out, the trader wants net N: the pool pays `N / 0.9`, `fee = N * FEE_BPS / (10_000 - FEE_BPS)`.
+  * fees round down, so the fee is within one wei of the exact share of the gross.
+  * fee currency is the specified currency (exact in buy, exact out sell): take it in beforeSwap, return a positive specified delta and `poolManager.take` it.
   * fee currency is the unspecified currency (exact in sell, exact out buy): take it in afterSwap from the swap delta, return the fee as the hook delta.
   * both exact in and exact out are supported.
 * afterSwap also grants the coin allowance: exactly `abs(coin delta)` of that swap. never over grant.

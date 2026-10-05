@@ -148,6 +148,39 @@ abstract contract CoinHookBase is Test, MockWiring {
         return c.feeIs0 ? (a0, a1) : (a1, a0);
     }
 
+    uint256 internal constant FEE = 1000;
+    uint256 internal constant BPS = 10_000;
+
+    /// @dev the fee expected for a swap kind and the trader's gross notional in the fee currency. the fee is
+    /// FEE_BPS of the gross in all four kinds:
+    ///   buy in:   gross is what the trader pays, the amount
+    ///   sell in:  gross is what the pool pays out, the pool leg
+    ///   buy out:  gross is the pool leg P over 0.9, so the fee is P * FEE / (BPS - FEE)
+    ///   sell out: gross is the net amount N over 0.9, so the fee is N * FEE / (BPS - FEE)
+    function _expectedFee(Kind k, uint256 amt, int128 feeLeg) internal pure returns (uint256 fee, uint256 gross) {
+        if (k == Kind.BuyIn) {
+            fee = amt * FEE / BPS;
+            gross = amt;
+            assertEq(_abs(feeLeg), amt - fee, "pool swapped the amount net of the fee");
+        } else if (k == Kind.SellOut) {
+            fee = amt * FEE / (BPS - FEE);
+            gross = amt + fee;
+            assertEq(_abs(feeLeg), gross, "pool paid the net amount plus the fee");
+        } else if (k == Kind.BuyOut) {
+            fee = _abs(feeLeg) * FEE / (BPS - FEE);
+            gross = _abs(feeLeg) + fee;
+        } else {
+            fee = _abs(feeLeg) * FEE / BPS;
+            gross = _abs(feeLeg);
+        }
+        _assertGrossRule(fee, gross);
+    }
+
+    /// @dev the fee is 10 percent of the trader's gross notional, within one wei
+    function _assertGrossRule(uint256 fee, uint256 gross) internal pure {
+        assertApproxEqAbs(fee, gross * FEE / BPS, 1, "fee is FEE_BPS of the gross");
+    }
+
     // ------------------------------------------------------------------ exit pool
 
     MockExitToken internal xt;
@@ -496,25 +529,12 @@ contract CoinHookLaunchTest is CoinHookBase {
         s.pmCoin = w.coin.balanceOf(address(PM));
     }
 
-    /// @dev the fee expected for a swap kind, from the notional that kind of swap is expressed in
-    function _expectedFee(Kind k, uint256 amt, int128 feeLeg) internal pure returns (uint256 fee) {
-        if (k == Kind.BuyIn) {
-            fee = amt * 1000 / 10_000;
-            assertEq(_abs(feeLeg), amt - fee, "pool swapped the amount net of the fee");
-        } else if (k == Kind.SellOut) {
-            fee = amt * 1000 / 10_000;
-            assertEq(_abs(feeLeg), amt + fee, "pool paid the amount plus the fee");
-        } else {
-            fee = _abs(feeLeg) * 1000 / 10_000;
-        }
-    }
-
     function _feeCase(Ctx memory c, Kind k, uint256 amt) internal {
         Snap memory a = _snap();
         (int128 a0, int128 a1) = _exec(c, k, alice, amt);
         Snap memory b = _snap();
         (int128 feeLeg, int128 coinLeg) = _splitLegs(c, a0, a1);
-        uint256 fee = _expectedFee(k, amt, feeLeg);
+        (uint256 fee,) = _expectedFee(k, amt, feeLeg);
 
         uint256 creatorCut = fee * 50 / 1000;
         assertEq(b.creator - a.creator, creatorCut, "creator share");
@@ -570,6 +590,50 @@ contract CoinHookLaunchTest is CoinHookBase {
     function test_fee_sellExactOut() public {
         _fundCoin(alice, 10 ether);
         _feeCase(_launchCtx(), Kind.SellOut, 2 ether + 999);
+    }
+
+    /// @dev an exact out buy of the coin an exact in buy of 10 eth returned costs the same 10 eth and pays the same fee
+    function test_fee_exactOutBuyCostsTheSameAsExactIn() public {
+        uint256 snap = vm.snapshotState();
+        uint256 eth0 = alice.balance;
+        _buyIn(alice, 10 ether);
+        uint256 coinGot = _coinOf(alice);
+        uint256 paidIn = eth0 - alice.balance;
+        uint256 feesIn = w.core.ethFees();
+        assertEq(paidIn, 10 ether);
+        assertEq(feesIn, 0.95 ether);
+
+        vm.revertToState(snap);
+        vm.prank(alice);
+        router.swap{value: 500 ether}(w.launchKey, true, int256(coinGot), alice);
+        assertEq(_coinOf(alice), coinGot);
+        assertApproxEqAbs(eth0 - alice.balance, paidIn, 10, "the trader pays the same gross");
+        assertApproxEqAbs(w.core.ethFees(), feesIn, 10, "and the pot gets the same fee");
+        assertApproxEqAbs(creator.balance, 0.05 ether, 10);
+    }
+
+    /// @dev an exact out sell of the eth an exact in sell returned nets the same and pays the same fee
+    function test_fee_exactOutSellCostsTheSameAsExactIn() public {
+        _fundCoin(alice, 10 ether);
+        uint256 coinSold = _coinOf(alice) / 2;
+        uint256 coin0 = _coinOf(alice);
+        uint256 snap = vm.snapshotState();
+        uint256 eth0 = alice.balance;
+        uint256 fees0 = w.core.ethFees();
+        vm.prank(alice);
+        router.swap(w.launchKey, false, -int256(coinSold), alice);
+        uint256 net = alice.balance - eth0;
+        uint256 feeIn = w.core.ethFees() - fees0;
+        // net is 90 percent of the gross, so the core fee is 9.5 percent of it
+        assertApproxEqAbs(feeIn, net * 950 / 9000, 2);
+
+        vm.revertToState(snap);
+        eth0 = alice.balance;
+        vm.prank(alice);
+        router.swap(w.launchKey, false, int256(net), alice);
+        assertEq(alice.balance - eth0, net, "the trader nets exactly what was asked");
+        assertApproxEqAbs(w.core.ethFees() - fees0, feeIn, 2, "same fee");
+        assertApproxEqRel(coin0 - _coinOf(alice), coinSold, 1e9, "for the same coin");
     }
 
     function test_fee_split() public {
@@ -682,18 +746,7 @@ contract CoinHookExitPoolTest is CoinHookBase {
         (int128 a0, int128 a1) = _exec(c, k, user, amt);
         (int128 feeLeg, int128 coinLeg) = _splitLegs(c, a0, a1);
 
-        uint256 fee;
-        if (k == Kind.BuyIn) {
-            fee = amt * 1000 / 10_000;
-            assertEq(_abs(feeLeg), amt - fee);
-        } else if (k == Kind.BuyOut) {
-            fee = _abs(feeLeg) * 1000 / 10_000;
-        } else if (k == Kind.SellIn) {
-            fee = _abs(feeLeg) * 1000 / 10_000;
-        } else {
-            fee = amt * 1000 / 10_000;
-            assertEq(_abs(feeLeg), amt + fee);
-        }
+        (uint256 fee,) = _expectedFee(k, amt, feeLeg);
         uint256 creatorCut = fee * 50 / 1000;
 
         // the fee sits as claims in the pool manager, split between creator and core
