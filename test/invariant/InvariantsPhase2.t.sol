@@ -3,18 +3,18 @@ pragma solidity ^0.8.28;
 
 import {InvariantsBase} from "./Invariants.t.sol";
 
-/// phase 2: setUp has executed SetExitModule and SetExitPoolKey through the real timelock, with MockExitModule
-/// and MockExitToken, and opened a live coin and exit token pool on the real PoolManager with deep liquidity.
-/// the extra actions are sellForExitToken, composeExit, exitStatement, buybackExit, a module switch that makes it
-/// underpay or fail its unit read or change its unit, the hook's sendExitFeesToCore, and exit pool trades.
-/// all nine invariants of SPEC section 10 run again, with the exit token legs of 1, 4 and 5 live.
+/// phase 2: setUp has executed SetExitModule through the real timelock, with MockExitModule and MockExitToken. the
+/// extra actions are sellForExitToken, composeExit, exitStatement, the dutch auction fill buybackExit (an actor buys
+/// coin in the real pool, approves the core and fills), and a module switch that makes it underpay, fail its unit
+/// read or change its unit. there is no exit pool. all invariants run again, with the exit token legs of 1, 4 and 5
+/// live and the supply of invariant 9 falling by auction burns as well as buyback burns.
 /// run it with `forge test --match-path test/invariant/InvariantsPhase2.t.sol -vv`. see Invariants.t.sol.
 /// forge-config: default.invariant.runs = 24
 /// forge-config: default.invariant.depth = 80
 /// forge-config: default.invariant.fail-on-revert = false
 contract InvariantsPhase2 is InvariantsBase {
-    function setUp() public virtual {
-        _build(true, false, true, "p2");
+    function setUp() public virtual override {
+        _build(true, false, true, false, "p2");
     }
 }
 
@@ -38,8 +38,8 @@ contract InvariantsPhase2Deep is InvariantsPhase2 {
 /// forge-config: default.invariant.depth = 80
 /// forge-config: default.invariant.fail-on-revert = false
 contract InvariantsHostileController is InvariantsBase {
-    function setUp() public virtual {
-        _build(true, true, false, "hc");
+    function setUp() public virtual override {
+        _build(true, true, false, false, "hc");
     }
 }
 

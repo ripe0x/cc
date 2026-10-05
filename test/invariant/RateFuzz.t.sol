@@ -2,13 +2,35 @@
 pragma solidity ^0.8.28;
 
 import {Core} from "../../src/Core.sol";
-import {CoreBase} from "../CoreUnit.t.sol";
+import {Fixture} from "../utils/Fixture.sol";
 
-/// @notice plain fuzz tests for the eth rate and the hourly cap (SPEC 5.1 and 5.2) with fuzzed times and amounts.
-/// the model is an independent whole hour integer walk, so it shares no code with the core's wad pow.
-contract RateFuzzTest is CoreBase {
+/// @notice plain fuzz tests for the eth rate and the hourly cap (SPEC 5.1 and 5.2) with fuzzed times and amounts,
+/// against the real Core on the real stack. the model is an independent whole hour integer walk, so it shares no
+/// code with the core's wad pow. the pot is funded to an exact size by sending eth to the core and calling its real
+/// `skim()`, which is how the core books any eth that did not arrive through the hook. credits are real ones.
+contract RateFuzzTest is Fixture {
+    /// @dev the seller of the credits, named as in the old unit tests
+    address internal alice;
+
     uint256 internal constant AVG = 4_330_000;
     uint256 internal constant START = 4e12;
+
+    function setUp() public override {
+        super.setUp();
+        alice = seller;
+    }
+
+    /// @dev grows the pot by exactly `eth`: the eth is sent to the core and booked by the real `skim()`
+    function _fund(uint256 eth) internal {
+        uint256 pot = core.ethPot();
+        vm.deal(address(core), pot + core.ethToBuyback() + eth);
+        core.skim();
+        assertEq(core.ethPot(), pot + eth, "pot grew by the funded amount");
+    }
+
+    function _creditsTo(address to, uint256 n) internal returns (uint256[] memory) {
+        return _credits(to, n);
+    }
 
     /// the rate after `hrs` whole hours of climbing from `r`, where `offset` hours have passed since the last fill.
     function _model(uint256 r, uint256 offset, uint256 hrs, uint256 cap) internal pure returns (uint256) {

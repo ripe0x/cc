@@ -220,9 +220,11 @@ contract FuzzController {
         } else if (which == 1) {
             data = abi.encodeWithSignature("sellForExitToken(uint256[])", ids);
         } else if (which == 2) {
-            data = abi.encodeWithSignature("addFees()");
+            target = _coin();
+            data = abi.encodeWithSignature("burnFrom(address,uint256)", core, uint256(1e18));
         } else if (which == 3) {
-            data = abi.encodeWithSignature("addExitFees(uint256)", uint256(1));
+            target = _coin();
+            data = abi.encodeWithSignature("setTaxBps(uint16)", uint16(0));
         } else if (which == 4) {
             data = abi.encodeWithSignature("queue(uint8,bytes)", uint8(0), abi.encode(address(this)));
         } else if (which == 5) {
@@ -251,7 +253,7 @@ contract FuzzController {
             data = abi.encodeWithSignature("transferFrom(address,address,uint256)", core, address(this), uint256(1e18));
         } else if (which == 14) {
             target = _coin();
-            data = abi.encodeWithSignature("noteDelta(int256)", int256(1e30));
+            data = abi.encodeWithSignature("updateAdmin(address)", address(this));
         } else if (which == 15) {
             target = _exitToken();
             data = abi.encodeWithSignature("transferFrom(address,address,uint256)", core, address(this), uint256(1));
