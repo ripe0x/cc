@@ -90,7 +90,7 @@ interface ICreditStrategy {
 
 library Mainnet {
     address internal constant CREDITS = 0x97630aA70AB14ed9883B41dAfccBc11349723043;
-    address internal constant STATEMENTS = 0x75EDD94B7e49B3bd5C8047b91F165a5E265A069B;
+    address internal constant STATEMENTS = 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b;
     address internal constant CREDIT_SCORE = 0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7;
     address internal constant CREDIT_STRATEGY = 0x8e607209899b5d12Bd3167a6CD0E8E11FEB053d6;
     address internal constant SEAPORT = 0x0000000000000068F116a894984e2DB1123eB395;
