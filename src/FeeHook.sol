@@ -25,8 +25,11 @@ import {ICoin, ICoreFees, ILauncher, Mainnet} from "./interfaces/Interfaces.sol"
 ///   buy exact out, the pool needs P:    trader pays P / (1 - fee), fee = P * FEE_BPS / (BPS - FEE_BPS)
 ///   sell exact out, trader wants net N: pool pays N / (1 - fee), fee = N * FEE_BPS / (BPS - FEE_BPS)
 /// fees round down, so the fee is within one wei of the exact share of the gross. the coin never touches the hook.
-/// every swap and liquidity change grants the coin exactly the transient allowance the pool manager needs to move
-/// the coin legs of that action, and nothing more.
+/// every swap and liquidity change notes its signed coin leg on the coin's netted transient counter, so the pool
+/// manager may move exactly the net coin that hooked actions leave owed, and nothing more.
+/// when the fee is taken in beforeSwap a partial fill reverts, because the fee was sized on the whole amount. the
+/// core's exit buyback is the one exception: it swaps with a price limit, so the hook takes no fee up front and pulls
+/// the fee in afterSwap from the exit token the core actually spent.
 contract FeeHook is BaseHook, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -83,6 +86,8 @@ contract FeeHook is BaseHook, IUnlockCallback {
     error NothingToClaim();
     /// @notice the core has no exitToken yet
     error NoExitToken();
+    /// @notice the swap did not fill the amount the fee was sized on
+    error PartialFill();
 
     /// @param coin_ the coin
     /// @param core_ the core
@@ -210,14 +215,14 @@ contract FeeHook is BaseHook, IUnlockCallback {
     /// @dev when the fee currency is the specified currency the fee is taken here. the positive specified delta
     /// shrinks an exact in swap by the fee (the fee is FEE_BPS of the amount the trader pays) and grows an exact out
     /// swap by the fee (the pool pays the net amount plus the fee, so the fee is FEE_BPS of that gross)
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         bool feeIs0 = Currency.unwrap(key.currency1) == coin;
         bool specifiedIs0 = (params.amountSpecified < 0) == params.zeroForOne;
-        if (specifiedIs0 == feeIs0) {
+        if (specifiedIs0 == feeIs0 && !_isCoreExitIn(sender, key, params)) {
             uint256 fee = _feeOf(
                 params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified),
                 params.amountSpecified < 0
@@ -230,26 +235,69 @@ contract FeeHook is BaseHook, IUnlockCallback {
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
-    /// @dev grants the coin allowance for the swap, then takes the fee when the fee currency is the unspecified one.
-    /// the returned fee is a positive unspecified delta, so the swapper receives less or pays more by the fee. the
-    /// pool delta is the gross for an exact in sell and the net amount the pool needs for an exact out buy
-    function _afterSwap(address, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
-        internal
-        override
-        returns (bytes4, int128)
-    {
+    /// @dev notes the coin leg of the swap, then settles the fee. when the fee currency is the unspecified one the fee
+    /// is taken here as a positive unspecified delta, so the swapper receives less or pays more by the fee. the pool
+    /// delta is the gross for an exact in sell and the net amount the pool needs for an exact out buy. when the fee
+    /// currency is the specified one beforeSwap already took it on the whole amount, so the swap must have filled
+    /// that amount or it reverts. the core's exit buyback instead pays the fee on what it actually spent.
+    function _afterSwap(
+        address sender,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        BalanceDelta delta,
+        bytes calldata
+    ) internal override returns (bytes4, int128) {
         _grant(key, delta);
         bool feeIs0 = Currency.unwrap(key.currency1) == coin;
         bool specifiedIs0 = (params.amountSpecified < 0) == params.zeroForOne;
-        if (specifiedIs0 != feeIs0) {
-            int128 feeLeg = feeIs0 ? delta.amount0() : delta.amount1();
-            uint256 fee = _feeOf(uint256(uint128(feeLeg < 0 ? -feeLeg : feeLeg)), params.amountSpecified < 0);
-            if (fee != 0) {
-                _collect(key, feeIs0 ? key.currency0 : key.currency1, fee);
-                return (this.afterSwap.selector, fee.toInt128());
-            }
+        if (specifiedIs0 == feeIs0) {
+            _settleSpecifiedFee(sender, key, params, specifiedIs0 ? delta.amount0() : delta.amount1());
+            return (this.afterSwap.selector, 0);
+        }
+        int128 feeLeg = feeIs0 ? delta.amount0() : delta.amount1();
+        uint256 fee = _feeOf(_abs(feeLeg), params.amountSpecified < 0);
+        if (fee != 0) {
+            _collect(key, feeIs0 ? key.currency0 : key.currency1, fee);
+            return (this.afterSwap.selector, fee.toInt128());
         }
         return (this.afterSwap.selector, 0);
+    }
+
+    /// @dev the fee currency is the specified currency. a normal swap must have filled exactly what beforeSwap sized
+    /// the fee on: the offered amount less the fee for exact in, the wanted amount plus the fee for exact out. the
+    /// core's exit buyback took no fee up front, so the fee is pulled from the core on the exit token it spent,
+    /// with the same gross rule: fee = spent * FEE_BPS / (BPS - FEE_BPS)
+    function _settleSpecifiedFee(address sender, PoolKey calldata key, SwapParams calldata params, int128 specLeg)
+        private
+    {
+        uint256 got = _abs(specLeg);
+        if (_isCoreExitIn(sender, key, params)) {
+            uint256 coreFee = _feeOf(got, false);
+            if (coreFee == 0) return;
+            Currency currency = Currency.unwrap(key.currency1) == coin ? key.currency0 : key.currency1;
+            poolManager.sync(currency);
+            SafeTransferLib.safeTransferFrom(Currency.unwrap(currency), core, address(poolManager), coreFee);
+            poolManager.settle();
+            _collect(key, currency, coreFee);
+            return;
+        }
+        bool exactIn = params.amountSpecified < 0;
+        uint256 offered = _abs(params.amountSpecified);
+        uint256 fee = _feeOf(offered, exactIn);
+        if (got != (exactIn ? offered - fee : offered + fee)) revert PartialFill();
+    }
+
+    /// @dev true for the core's exact in swap of the exit token in the exit pool
+    function _isCoreExitIn(address sender, PoolKey calldata key, SwapParams calldata params)
+        private
+        view
+        returns (bool)
+    {
+        return sender == core && params.amountSpecified < 0 && PoolId.unwrap(key.toId()) != launchPoolId;
+    }
+
+    function _abs(int256 x) private pure returns (uint256) {
+        return uint256(x < 0 ? -x : x);
     }
 
     /// @dev the fee for a pool side amount in the fee currency. exact in, the amount is already the gross.
@@ -258,10 +306,11 @@ contract FeeHook is BaseHook, IUnlockCallback {
         return exactIn ? amount * FEE_BPS / BPS : amount * FEE_BPS / (BPS - FEE_BPS);
     }
 
-    /// @dev grants exactly the coin the pool manager moves for this action, in either direction
+    /// @dev notes the signed coin leg of the action from the locker's side: positive when the pool manager owes the
+    /// locker coin, negative when the locker owes it. liquidity adds then removes net to zero, and so do round trips
     function _grant(PoolKey calldata key, BalanceDelta delta) private {
         int128 coinLeg = Currency.unwrap(key.currency0) == coin ? delta.amount0() : delta.amount1();
-        if (coinLeg != 0) ICoin(coin).increaseTransferAllowance(uint256(uint128(coinLeg < 0 ? -coinLeg : coinLeg)));
+        if (coinLeg != 0) ICoin(coin).noteDelta(coinLeg);
     }
 
     /// @dev eth is taken and paid out at once. the exit token is kept as pool manager claims, because a buyer

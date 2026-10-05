@@ -251,7 +251,7 @@ contract FuzzController {
             data = abi.encodeWithSignature("transferFrom(address,address,uint256)", core, address(this), uint256(1e18));
         } else if (which == 14) {
             target = _coin();
-            data = abi.encodeWithSignature("increaseTransferAllowance(uint256)", uint256(1e30));
+            data = abi.encodeWithSignature("noteDelta(int256)", int256(1e30));
         } else if (which == 15) {
             target = _exitToken();
             data = abi.encodeWithSignature("transferFrom(address,address,uint256)", core, address(this), uint256(1));

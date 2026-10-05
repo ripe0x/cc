@@ -377,7 +377,7 @@ contract CoinHookLaunchTest is CoinHookBase {
             vm.prank(alice);
             lp.modify{value: 10 ether}(w.launchKey, ranges[i][0], ranges[i][1], 1e18);
         }
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
     }
 
     function test_launchPool_deadPositionCannotBeTouched() public {
@@ -439,7 +439,7 @@ contract CoinHookLaunchTest is CoinHookBase {
         vm.prank(alice);
         vm.expectRevert(Coin.InvalidTransfer.selector);
         router.swap(side, false, -1e18, alice);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
     }
 
     function test_transfer_allowlist() public {
@@ -471,7 +471,7 @@ contract CoinHookLaunchTest is CoinHookBase {
         vm.prank(alice);
         router.swap{value: 2 ether}(w.launchKey, true, -2 ether, Mainnet.DEAD);
         assertGt(w.coin.balanceOf(Mainnet.DEAD), dead0);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         assertEq(_coinOf(alice), 0);
         assertEq(w.coin.totalSupply(), w.coin.SUPPLY());
     }
@@ -479,8 +479,75 @@ contract CoinHookLaunchTest is CoinHookBase {
     function test_transfer_onlyHookCanGrant() public {
         vm.prank(alice);
         vm.expectRevert(Coin.OnlyHook.selector);
-        w.coin.increaseTransferAllowance(1);
-        assertEq(w.coin.transferAllowance(), 0);
+        w.coin.noteDelta(1);
+        assertEq(w.coin.pendingDelta(), 0);
+    }
+
+    function _note(int256 d) internal {
+        vm.prank(address(w.hook));
+        w.coin.noteDelta(d);
+    }
+
+    /// the counter is signed and direction bound: coin leaves the pool manager only against coin it owes
+    function test_delta_outOfPoolManagerNeedsAPositiveCount() public {
+        vm.prank(Mainnet.POOL_MANAGER);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(alice, 1);
+
+        _note(100);
+        assertEq(w.coin.pendingDelta(), 100);
+        vm.prank(Mainnet.POOL_MANAGER);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(alice, 101);
+        vm.prank(Mainnet.POOL_MANAGER);
+        w.coin.transfer(alice, 60);
+        assertEq(w.coin.pendingDelta(), 40);
+        // a positive count never covers a transfer into the pool manager
+        deal(address(w.coin), alice, 10);
+        vm.prank(alice);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(Mainnet.POOL_MANAGER, 1);
+        vm.prank(Mainnet.POOL_MANAGER);
+        w.coin.transfer(alice, 40);
+        assertEq(w.coin.pendingDelta(), 0);
+    }
+
+    function test_delta_intoPoolManagerNeedsANegativeCount() public {
+        deal(address(w.coin), alice, 1000);
+        vm.prank(alice);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(Mainnet.POOL_MANAGER, 1);
+
+        _note(-100);
+        vm.prank(alice);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(Mainnet.POOL_MANAGER, 101);
+        vm.prank(alice);
+        w.coin.transfer(Mainnet.POOL_MANAGER, 100);
+        assertEq(w.coin.pendingDelta(), 0);
+        // a negative count never covers a transfer out of the pool manager
+        _note(-5);
+        vm.prank(Mainnet.POOL_MANAGER);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(bob, 1);
+    }
+
+    /// notes of opposite sign net, so an add then a remove or a buy then a sell leaves nothing to spend
+    function test_delta_oppositeNotesNet() public {
+        _note(-777);
+        _note(777);
+        assertEq(w.coin.pendingDelta(), 0);
+        vm.prank(Mainnet.POOL_MANAGER);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(bob, 1);
+        deal(address(w.coin), alice, 1);
+        vm.prank(alice);
+        vm.expectRevert(Coin.InvalidTransfer.selector);
+        w.coin.transfer(Mainnet.POOL_MANAGER, 1);
+
+        _note(300);
+        _note(-120);
+        assertEq(w.coin.pendingDelta(), 180);
     }
 
     function test_transfer_noMintEntryPoint() public {
@@ -497,7 +564,7 @@ contract CoinHookLaunchTest is CoinHookBase {
         uint256 half = _coinOf(alice) / 2;
         vm.prank(alice);
         router.swap(w.launchKey, false, -int256(half), alice);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         assertEq(w.coin.totalSupply(), w.coin.SUPPLY());
         assertEq(
             w.coin.balanceOf(address(PM)) + _coinOf(alice) + _coinOf(bob) + w.coin.balanceOf(Mainnet.DEAD),
@@ -546,7 +613,7 @@ contract CoinHookLaunchTest is CoinHookBase {
 
         assertEq(address(w.hook).balance, 0, "hook keeps nothing");
         assertEq(w.coin.balanceOf(address(w.hook)), 0);
-        assertEq(w.coin.transferAllowance(), 0, "no allowance left behind");
+        assertEq(w.coin.pendingDelta(), 0, "no allowance left behind");
         assertEq(w.coin.totalSupply(), w.coin.SUPPLY());
         int256 ethNet = int256(b.userEth) - int256(a.userEth) + int256(b.creator - a.creator) + int256(b.core - a.core)
             + int256(b.pmEth) - int256(a.pmEth);
@@ -710,7 +777,7 @@ contract CoinHookLaunchTest is CoinHookBase {
         uint256 coinBal = _coinOf(alice);
         uint256 sell = bound(sellFraction, 1, coinBal);
         _feeCase(_launchCtx(), Kind.SellIn, sell);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         assertEq(w.coin.totalSupply(), w.coin.SUPPLY());
     }
 }
@@ -768,7 +835,7 @@ contract CoinHookExitPoolTest is CoinHookBase {
             assertEq(xt.balanceOf(user) - x0, amt);
             assertEq(coin0 - _coinOf(user), _abs(coinLeg));
         }
-        assertEq(w.coin.transferAllowance(), 0, "no allowance left behind");
+        assertEq(w.coin.pendingDelta(), 0, "no allowance left behind");
         assertEq(w.coin.totalSupply(), w.coin.SUPPLY());
         // the exit token never leaves the pool manager until the claim functions run
         assertEq(int256(xt.balanceOf(address(PM))) - int256(pmX0), int256(x0) - int256(xt.balanceOf(user)));
@@ -813,17 +880,17 @@ contract CoinHookExitPoolTest is CoinHookBase {
         lp.modify(xKey, -3000, 3000, 5e23);
         assertLt(_coinOf(bob), coinBefore);
         assertLt(xt.balanceOf(bob), xBefore);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         // alice can add too
         vm.prank(alice);
         lp.modify(xKey, -600, 600, 1e22);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         // bob takes his position out again, coin comes back to his wallet
         uint256 coinMid = _coinOf(bob);
         vm.prank(bob);
         lp.modify(xKey, -3000, 3000, -5e23);
         assertGt(_coinOf(bob), coinMid);
-        assertEq(w.coin.transferAllowance(), 0);
+        assertEq(w.coin.pendingDelta(), 0);
         // no fee is charged on liquidity changes
         assertEq(_exitClaims(), 0);
     }

@@ -24,6 +24,11 @@ contract MockExitModule is IExitModule {
         return _unit;
     }
 
+    /// the unit the module pays by, whether or not unitPerPoint is set to revert.
+    function currentUnit() external view returns (uint256) {
+        return _unit;
+    }
+
     /// makes unitPerPoint revert.
     function setRevertUnit(bool on) external {
         revertUnit = on;

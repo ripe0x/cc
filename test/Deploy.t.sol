@@ -73,4 +73,23 @@ contract DeployTest is Test, SystemDeployer {
         _check(d);
         assertEq(d.launcher, vm.computeCreateAddress(deployer, 17));
     }
+
+    /// H6 regression: someone deploys the hook first with the public salt and initcode, after the deployer mined
+    /// it. the script treats the existing hook as done and still launches
+    function test_deployAfterHookFrontRun() public {
+        uint64 n = vm.getNonce(deployer);
+        address launcher = vm.computeCreateAddress(deployer, n);
+        address core = vm.computeCreateAddress(deployer, n + 1);
+        address coin = vm.computeCreateAddress(deployer, n + 2);
+        (address hook, bytes32 salt) = mineHook(coin, core, creator, launcher);
+
+        vm.prank(makeAddr("fx.attacker.9c1e"));
+        assertEq(create2Hook(salt, coin, core, creator, launcher), hook, "front run lands at the same address");
+
+        vm.startPrank(deployer);
+        Deployed memory d = deploySystemWithSalt(deployer, owner, creator, "Name", "SYM", hook, salt);
+        vm.stopPrank();
+        assertEq(d.hook, hook);
+        _check(d);
+    }
 }

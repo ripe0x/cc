@@ -47,7 +47,8 @@ interface ILauncher {
 }
 
 interface ICoin {
-    function increaseTransferAllowance(uint256 amount) external; // hook only
+    function noteDelta(int256 coinDelta) external; // hook only. signed coin leg, positive when the pool manager owes coin out
+    function pendingDelta() external view returns (int256);
 }
 
 interface ICredits {

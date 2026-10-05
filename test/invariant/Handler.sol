@@ -1442,10 +1442,10 @@ contract Handler is Test {
         _rsCheck(rs, 0);
     }
 
+    /// the unit the core stored when the module was set. the module can change what it reports, the core never
+    /// reads it again
     function _unitOf() internal view returns (uint256 u) {
-        try module.unitPerPoint() returns (uint256 v) {
-            u = v;
-        } catch {}
+        return core.unitPerPoint();
     }
 
     struct EPre {
@@ -1494,7 +1494,10 @@ contract Handler is Test {
         } catch (bytes memory why) {
             _failed(p.b0, p.pot0, p.rate0, "exitStatement");
             if (_ownerOf(sid) != address(core)) _flag(V_DEPART, "an exit reverted but the statement left the core");
-            if (p.ripe && p.unit != 0 && module.shortfallBps() == 0 && !module.revertUnit()) _unexpected(a, why);
+            // the module pays by what it reports now. a payout below the stored unit must be refused
+            if (p.ripe && p.unit != 0 && module.shortfallBps() == 0 && module.currentUnit() >= p.unit) {
+                _unexpected(a, why);
+            }
         }
         _rsCheck(rs, 0);
     }
@@ -1527,7 +1530,13 @@ contract Handler is Test {
         if (pool0 == 0 || unit == 0) return _skip(a);
         uint256 maxSlice = 20 * core.AVG_SCORE() * unit;
         uint256 slice = pool0 < maxSlice ? pool0 : maxSlice;
-        uint256 tipExp = slice * 50 / 10_000;
+        // the swap amount leaves room for the hook fee, which is taken on what the swap actually spent
+        uint256 tip0 = slice * 50 / 10_000;
+        uint256 budget = slice - tip0;
+        uint256 swapIn = budget * 9000 / 10_000;
+        uint256 fee = swapIn * 1000 / 9000;
+        uint256 spentExp = swapIn + fee;
+        uint256 tipExp = tip0 * spentExp / budget;
         uint256 xb0 = exitToken.balanceOf(address(core));
         uint256 whoX = exitToken.balanceOf(who);
         uint256 dead0 = coin.balanceOf(DEAD);
@@ -1543,14 +1552,13 @@ contract Handler is Test {
             _ok(a);
             uint256 tip = exitToken.balanceOf(who) - whoX;
             if (tip != tipExp) _flag(V_BUYBACK, "exit buyback tip is not 0.5 percent of the slice");
-            if (core.xToBuyback() != pool0 - slice) {
-                _flag(V_BUYBACK, "exit buyback slice is not min(pot, 20 average credits)");
+            if (core.xToBuyback() != pool0 - spentExp - tipExp) {
+                _flag(V_BUYBACK, "exit buyback pot is not the pot less what was spent and tipped");
             }
-            _x(xb0, slice, 0, "buybackExit");
+            _x(xb0, spentExp + tipExp, 0, "buybackExit");
             _eth(b0, 0, 0, "buybackExit");
             if (coin.balanceOf(DEAD) <= dead0) _flag(V_BUYBACK, "exit buyback sent no coin to the dead address");
             if (coin.totalSupply() != supply0) _flag(V_BUYBACK, "coin supply moved in an exit buyback");
-            uint256 fee = (slice - tip) * 1000 / 10_000;
             if (hook.creatorExitOwed() != owed0 + fee * 50 / 1000) _flag(V_BUYBACK, "exit buyback creator share off");
         } catch {
             _failed(b0, pot0, rate0, "buybackExit");

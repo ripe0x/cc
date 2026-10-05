@@ -47,7 +47,7 @@ contract LifecycleSwapsTest is Fixture {
         assertApproxEqAbs(fee, (net + fee) / 10, 1, "fee is a tenth of the gross");
         assertEq(core.ethToBuyback(), 0);
         assertEq(address(core).balance, core.ethPot());
-        assertEq(coin.transferAllowance(), 0);
+        assertEq(coin.pendingDelta(), 0);
         assertEq(coin.totalSupply(), coin.SUPPLY());
         _solvent();
     }
@@ -132,8 +132,8 @@ contract LifecycleSwapsTest is Fixture {
         // nobody but the hook can grant allowance, not even the core
         vm.prank(address(core));
         vm.expectRevert(Coin.OnlyHook.selector);
-        coin.increaseTransferAllowance(1);
-        assertEq(coin.transferAllowance(), 0);
+        coin.noteDelta(1);
+        assertEq(coin.pendingDelta(), 0);
         assertEq(coin.totalSupply(), coin.SUPPLY());
     }
 
@@ -641,7 +641,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(address(PM).balance - b.pmEth, b.slice - b.tip - b.fee, "the pool took the swap net of the fee");
         assertEq(address(core).balance, b.balance - b.slice + coreCut);
         assertEq(address(hook).balance, 0);
-        assertEq(coin.transferAllowance(), 0, "no allowance left behind");
+        assertEq(coin.pendingDelta(), 0, "no allowance left behind");
         assertEq(core.lastBuybackBlock(), block.number);
         _solvent();
     }
@@ -773,7 +773,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(_hookClaims() - claims0, fee, "the hook holds the exit pool fee as claims");
         assertEq(hook.creatorExitOwed() - owed0, fee * 50 / 1000);
         assertEq(core.xPot(), xPot0, "fees reach the pot only when sent");
-        assertEq(coin.transferAllowance(), 0);
+        assertEq(coin.pendingDelta(), 0);
         assertEq(coin.balanceOf(address(core)), 0);
         _solvent();
 
@@ -924,10 +924,10 @@ contract LifecycleComposeTest is Fixture {
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);
 
-        // a module whose unit cannot be read
+        // a module that lowers the unit it pays by after it was set. the core holds the unit from set time
         mod.setShortfallBps(0);
-        mod.setRevertUnit(true);
-        vm.expectRevert(Core.BadModule.selector);
+        mod.setUnitPerPoint(1);
+        vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);
 
         assertEq(keccak256(abi.encode(core.xPot(), core.xToBuyback(), xt.balanceOf(address(core)))), before);
@@ -936,7 +936,7 @@ contract LifecycleComposeTest is Fixture {
         assertTrue(held);
 
         // an honest module goes through afterwards
-        mod.setRevertUnit(false);
+        mod.setUnitPerPoint(UNIT);
         core.exitStatement(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), address(mod));
         _solvent();

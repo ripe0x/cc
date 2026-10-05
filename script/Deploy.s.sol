@@ -50,11 +50,31 @@ abstract contract SystemDeployer is CommonBase {
         returns (Deployed memory d)
     {
         uint64 nonce = vm.getNonce(deployer);
+        (address hook, bytes32 salt) = mineHook(
+            vm.computeCreateAddress(deployer, nonce + 2),
+            vm.computeCreateAddress(deployer, nonce + 1),
+            creator,
+            vm.computeCreateAddress(deployer, nonce)
+        );
+        return deploySystemWithSalt(deployer, owner, creator, name, symbol, hook, salt);
+    }
+
+    /// @notice the same as deploySystem with the hook address and salt already mined. the hook step is skipped when
+    /// the hook is already deployed at that address, as after a front run of the public salt
+    function deploySystemWithSalt(
+        address deployer,
+        address owner,
+        address creator,
+        string memory name,
+        string memory symbol,
+        address hook,
+        bytes32 salt
+    ) internal returns (Deployed memory d) {
+        uint64 nonce = vm.getNonce(deployer);
         address launcher = vm.computeCreateAddress(deployer, nonce);
         address core = vm.computeCreateAddress(deployer, nonce + 1);
         address coin = vm.computeCreateAddress(deployer, nonce + 2);
         address controller = vm.computeCreateAddress(deployer, nonce + 3);
-        (address hook, bytes32 salt) = mineHook(coin, core, creator, launcher);
 
         d.launcher = address(new Launcher(deployer));
         d.core = createContract(
@@ -64,7 +84,7 @@ abstract contract SystemDeployer is CommonBase {
         d.controller = createContract(
             abi.encodePacked(vm.getCode("ControllerV1.sol:ControllerV1"), abi.encode(core)), "controller"
         );
-        d.hook = create2Hook(salt, coin, core, creator, launcher);
+        d.hook = ensureHook(salt, hook, coin, core, creator, launcher);
 
         if (d.launcher != launcher) revert AddressMismatch("launcher");
         if (d.core != core) revert AddressMismatch("core");
@@ -91,6 +111,21 @@ abstract contract SystemDeployer is CommonBase {
         return HookMiner.find(
             CREATE2_DEPLOYER, HOOK_FLAGS, type(FeeHook).creationCode, abi.encode(coin, core, creator, launcher)
         );
+    }
+
+    /// @notice deploys the hook unless it is already there. the salt and initcode are public, so anyone can deploy the
+    /// same hook first. it then lands at the same address and nothing is lost, so the step counts as done once the
+    /// contract at the predicted address reports the expected constructor values
+    function ensureHook(bytes32 salt, address hook, address coin, address core, address creator, address launcher)
+        internal
+        returns (address)
+    {
+        if (hook.code.length == 0) return create2Hook(salt, coin, core, creator, launcher);
+        FeeHook h = FeeHook(payable(hook));
+        if (h.coin() != coin || h.core() != core || h.creator() != creator || h.launcher() != launcher) {
+            revert AddressMismatch("hook");
+        }
+        return hook;
     }
 
     /// @notice deploys the hook through the create2 deployer proxy

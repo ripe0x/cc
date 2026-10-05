@@ -6,6 +6,7 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Core} from "../../src/Core.sol";
 import {Coin} from "../../src/Coin.sol";
 import {FeeHook} from "../../src/FeeHook.sol";
@@ -147,6 +148,12 @@ abstract contract InvariantFixture is Test, SystemDeployer {
                                   STEPS
     //////////////////////////////////////////////////////////////*/
 
+    /// the loosest legal exit buyback limit for the swap direction of the exit key
+    function _wideLimit() internal view returns (uint160) {
+        bool exitIs0 = Currency.unwrap(exitKey.currency0) == address(xt);
+        return exitIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+    }
+
     function _queue(Core.Action action, bytes memory data) internal {
         vm.prank(owner);
         core.queue(action, data);
@@ -165,7 +172,7 @@ abstract contract InvariantFixture is Test, SystemDeployer {
         if (hostile || canSwapController) _queue(Core.Action.SetController, abi.encode(address(fuzz)));
         if (phase2) {
             _queue(Core.Action.SetExitModule, abi.encode(address(module)));
-            _queue(Core.Action.SetExitPoolKey, abi.encode(exitKey));
+            _queue(Core.Action.SetExitPoolKey, abi.encode(exitKey, _wideLimit()));
         }
         vm.warp(block.timestamp + 7 days + 1);
         _execute(Core.Action.AddTarget, abi.encode(address(seller)));
@@ -173,7 +180,7 @@ abstract contract InvariantFixture is Test, SystemDeployer {
         if (hostile) _execute(Core.Action.SetController, abi.encode(address(fuzz)));
         if (phase2) {
             _execute(Core.Action.SetExitModule, abi.encode(address(module)));
-            _execute(Core.Action.SetExitPoolKey, abi.encode(exitKey));
+            _execute(Core.Action.SetExitPoolKey, abi.encode(exitKey, _wideLimit()));
         }
         assertTrue(core.allowedTarget(address(seller)));
         assertTrue(core.allowedTarget(address(probeTarget)));

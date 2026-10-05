@@ -10,6 +10,7 @@ import {Lane, ICredits, ICreditScore, ICreditStrategy, IStatements, Mainnet} fro
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {MockExitToken} from "./mocks/MockExitToken.sol";
 import {MockExitModule} from "./mocks/MockExitModule.sol";
 import {HostileTarget} from "./mocks/HostileTarget.sol";
@@ -937,13 +938,15 @@ contract CoreUnitTest is CoreBase {
         k = PoolKey(Currency.wrap(c0), Currency.wrap(c1), 0, 60, IHooks(hooks));
     }
 
+    uint160 internal constant LIM = TickMath.MIN_SQRT_PRICE + 1;
+
     function test_timelock_exitPoolKeyOnce() public {
         PoolKey memory early = _key(address(coin), address(0x7777), hook);
         vm.startPrank(owner);
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(early));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(early, LIM));
         _warp(7 days);
         vm.expectRevert(Core.NoExitModule.selector);
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(early));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(early, LIM));
         vm.stopPrank();
 
         (MockExitToken xt,) = _setModule(1e10);
@@ -953,32 +956,51 @@ contract CoreUnitTest is CoreBase {
         PoolKey memory unsorted = _key(address(coin), address(xt), hook);
         (unsorted.currency0, unsorted.currency1) = (unsorted.currency1, unsorted.currency0);
         PoolKey memory good = _key(address(coin), address(xt), hook);
+        PoolKey memory lpFee = _key(address(coin), address(xt), hook);
+        lpFee.fee = 3000;
+        PoolKey memory spacing = _key(address(coin), address(xt), hook);
+        spacing.tickSpacing = 10;
 
         vm.startPrank(owner);
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(wrongHook));
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(wrongPair));
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(unsorted));
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(good));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(wrongHook, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(wrongPair, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(unsorted, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(good, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(lpFee, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(spacing, LIM));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(good, uint160(TickMath.MIN_SQRT_PRICE)));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(good, uint160(TickMath.MAX_SQRT_PRICE)));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(good, uint160(0)));
         _warp(7 days);
         vm.expectRevert(Core.BadKey.selector);
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(wrongHook));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(wrongHook, LIM));
         vm.expectRevert(Core.BadKey.selector);
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(wrongPair));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(wrongPair, LIM));
         vm.expectRevert(Core.BadKey.selector);
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(unsorted));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(unsorted, LIM));
+        vm.expectRevert(Core.BadKey.selector);
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(lpFee, LIM));
+        vm.expectRevert(Core.BadKey.selector);
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(spacing, LIM));
+        vm.expectRevert(Core.BadKey.selector);
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(good, uint160(TickMath.MIN_SQRT_PRICE)));
+        vm.expectRevert(Core.BadKey.selector);
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(good, uint160(TickMath.MAX_SQRT_PRICE)));
+        vm.expectRevert(Core.BadKey.selector);
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(good, uint160(0)));
         assertEq(core.exitPoolId(), bytes32(0));
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(good));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(good, LIM));
         vm.stopPrank();
 
         assertEq(core.exitPoolId(), keccak256(abi.encode(good)));
 
-        PoolKey memory second = good;
-        second.fee = 3000;
+        PoolKey memory second = _key(address(coin), address(xt), hook);
+        second.fee = 500;
         vm.startPrank(owner);
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(second));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(second, LIM));
         _warp(7 days);
         vm.expectRevert(Core.AlreadySet.selector);
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(second));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(second, LIM));
         vm.stopPrank();
     }
 
@@ -1612,21 +1634,26 @@ contract CoreComposedTest is CoreBase {
         assertEq(STATEMENTS.ownerOf(sid), address(mod));
     }
 
-    function test_exit_unitIsReadLive() public {
+    /// R3 regression: the unit is fixed when the module is set. a module that pays by a lower unit later is refused
+    /// by the stored one, and one that pays more is simply paid
+    function test_exit_unitIsFixedAtSetTime() public {
+        assertEq(core.unitPerPoint(), UNIT);
         _warp(72 hours);
         mod.setUnitPerPoint(0);
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(sid);
 
         mod.setUnitPerPoint(3e10);
         uint256 out = STATEMENTS.creditScoreOf(sid) * 3e10;
         core.exitStatement(sid);
         assertEq(xt.balanceOf(address(core)), out);
+        assertEq(core.unitPerPoint(), UNIT, "the stored unit did not follow the module");
     }
 
-    function test_exit_brokenUnitOnlyBlocksPricedPaths() public {
-        _exitSplitState();
-        uint256 pot = core.xPot();
+    /// R3 regression: whatever the module reports later changes nothing. fee intake, the rate, the bid and the
+    /// buyback slice all use the stored unit
+    function test_exit_laterModuleUnitsChangeNothing() public {
+        uint256 pot = _exitSplitState();
         _warp(1 hours);
         assertEq(core.xRate(), 6100);
 
@@ -1637,26 +1664,39 @@ contract CoreComposedTest is CoreBase {
                 mod.setRevertUnit(false);
                 mod.setUnitPerPoint(type(uint256).max);
             }
-            // fee intake and skim keep working, the rate view just reports the stored value.
             xt.mint(address(core), 1e18);
             vm.prank(hook);
             core.addExitFees(1e18);
             xt.mint(address(core), 1e18);
             core.skim();
-            assertEq(core.xRate(), 6000, "an unreadable unit freezes the rate at its stored value");
+            assertEq(core.xRate(), 6100, "the rate follows the stored unit");
             _solvent();
-
-            // anything that prices or pays in exit token refuses.
-            uint256[] memory ids = _creditsTo(alice, 1);
-            vm.prank(alice);
-            vm.expectRevert(Core.BadModule.selector);
-            core.sellForExitToken(ids);
-            uint256 sid2 = _freshStatement();
-            _warp(72 hours);
-            vm.expectRevert(Core.BadModule.selector);
-            core.exitStatement(sid2);
         }
         assertEq(core.xPot(), pot + 4e18);
+
+        uint256[] memory ids = _creditsTo(alice, 1);
+        uint256 price = core.scoreOf(ids[0]) * core.xRate() * UNIT / 10_000;
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        assertEq(xt.balanceOf(alice), price, "paid at the stored unit");
+        _solvent();
+    }
+
+    /// R3: a module whose unit is zero, above uint128, or unreadable is refused when it is set
+    function test_exit_setModuleRefusesBadUnits() public {
+        uint256[4] memory units = [uint256(0), uint256(type(uint128).max) + 1, type(uint256).max, 1e10];
+        for (uint256 i; i < units.length; ++i) {
+            MockExitModule m = new MockExitModule(address(new MockExitToken("X", "X")), units[i]);
+            if (i == 3) m.setRevertUnit(true);
+            Core fresh = new Core(owner, address(coin), hook, address(ctl));
+            vm.startPrank(owner);
+            fresh.queue(Core.Action.SetExitModule, abi.encode(address(m)));
+            _warp(7 days);
+            vm.expectRevert(Core.BadModule.selector);
+            fresh.execute(Core.Action.SetExitModule, abi.encode(address(m)));
+            vm.stopPrank();
+            assertEq(fresh.exitModule(), address(0));
+        }
     }
 
     function test_exit_refusesFeeCallbackMidExit() public {

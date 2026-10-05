@@ -7,6 +7,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IERC6909Claims} from "v4-core/src/interfaces/external/IERC6909Claims.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Core} from "../../src/Core.sol";
 import {Coin} from "../../src/Coin.sol";
 import {FeeHook} from "../../src/FeeHook.sol";
@@ -266,10 +267,10 @@ abstract contract Fixture is Test, SystemDeployer {
 
         vm.startPrank(owner);
         core.queue(Core.Action.SetExitModule, abi.encode(address(mod)));
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(xKey));
+        core.queue(Core.Action.SetExitPoolKey, abi.encode(xKey, _wideLimit(_exitIs0())));
         vm.warp(block.timestamp + 7 days);
         core.execute(Core.Action.SetExitModule, abi.encode(address(mod)));
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(xKey));
+        core.execute(Core.Action.SetExitPoolKey, abi.encode(xKey, _wideLimit(_exitIs0())));
         vm.stopPrank();
 
         PM.initialize(xKey, SQRT_PRICE_1_1);
@@ -284,6 +285,12 @@ abstract contract Fixture is Test, SystemDeployer {
         lp.modify(xKey, -6000, 6000, int256(coinBal * 3));
         vm.stopPrank();
         inPhase2 = true;
+    }
+
+    /// @notice the loosest legal exit buyback price limit for the swap direction (exit token is currency0 means the
+    /// swap is zero for one and the price falls)
+    function _wideLimit(bool exitIs0) internal pure returns (uint160) {
+        return exitIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
     }
 
     function _exitIs0() internal view returns (bool) {
