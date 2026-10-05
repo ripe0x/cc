@@ -2,33 +2,31 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
-import {IERC6909Claims} from "v4-core/src/interfaces/external/IERC6909Claims.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {Currency} from "v4-core/src/types/Currency.sol";
-import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Core} from "../../src/Core.sol";
-import {Coin} from "../../src/Coin.sol";
-import {FeeHook} from "../../src/FeeHook.sol";
 import {ControllerV1} from "../../src/ControllerV1.sol";
-import {Launcher} from "../../src/Launcher.sol";
 import {Lane, ICredits, IStatements, Mainnet} from "../../src/interfaces/Interfaces.sol";
+import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
-import {MockExitToken} from "../mocks/MockExitToken.sol";
-import {MockExitModule} from "../mocks/MockExitModule.sol";
+import {MockExitToken} from "../standins/MockExitToken.sol";
+import {MockExitModule} from "../standins/MockExitModule.sol";
 import {CreditIds} from "./CreditIds.sol";
 import {TestSwapRouter} from "./TestSwapRouter.sol";
-import {TestLiquidityHelper} from "./TestLiquidityHelper.sol";
 
-/// @notice the full system on a mainnet fork. the real Core, Coin, FeeHook, ControllerV1 and Launcher are deployed
-/// through `SystemDeployer.deploySystem` and the launch pool lives in the real pool manager. only the exit module and
-/// the exit token are test doubles, and they appear only after `_enterPhase2`.
+/// @notice the full system on a mainnet fork, built only from real contracts. Core and ControllerV1 are deployed
+/// through `SystemDeployer.deploySystem`, the coin is launched through the live artcoins factory, the pool lives in
+/// the live pool manager under the live skim hook. the only state forced on artcoins is what the real factory owner
+/// does in production: marking the deployer as a factory admin so it may launch while the factory is deprecated.
+/// the only stand ins are the exit module and exit token, which appear only after `_enterPhase2`.
+/// the sniper window is OPEN after setUp (the pool was just born). call `_skipSniperWindow` for steady state fees.
 /// @dev every address is namespaced because common labels are delegated accounts on mainnet that sweep eth
 abstract contract Fixture is Test, SystemDeployer {
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
     IPoolManager internal constant PM = IPoolManager(Mainnet.POOL_MANAGER);
+    IArtCoinsFactory internal constant FACTORY = IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY);
+    IArtCoinsFeeEscrow internal constant ESCROW = IArtCoinsFeeEscrow(Mainnet.FEE_ESCROW);
     address internal constant STRATEGY = Mainnet.CREDIT_STRATEGY;
     address internal constant DEAD = Mainnet.DEAD;
 
@@ -37,20 +35,40 @@ abstract contract Fixture is Test, SystemDeployer {
     uint256 internal constant LISTED_B = 28352;
     uint256 internal constant LISTED_C = 18683;
 
-    /// @dev exit token base units per 1e4 scaled score point reported by the mock exit module
+    /// @dev exit token base units per 1e4 scaled score point reported by the stand in exit module
     uint256 internal constant UNIT = 1e10;
-    uint160 internal constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    /// @dev the sniper window of the launch, seconds
+    uint256 internal constant SNIPER_WINDOW = 1800;
+    bytes32 internal constant FIXTURE_SALT = keccak256("credits-engine fixture coin");
+
+    // ------------------------------------------------------------------ swap attribution hook data
+
+    struct PoolSwapData {
+        bytes mevModuleSwapData;
+        bytes poolExtensionSwapData;
+    }
+
+    struct PCAttribution {
+        bytes32 sourceId;
+        address referrer;
+        bytes16 campaignId;
+        uint24 referralBps;
+    }
+
+    struct PCSwapData {
+        PCAttribution attribution;
+        bytes extensionPayload;
+    }
 
     // ------------------------------------------------------------------ the system
 
     Core internal core;
-    Coin internal coin;
-    FeeHook internal hook;
+    IArtCoinsToken internal coin;
     ControllerV1 internal ctl;
-    Launcher internal launcher;
     PoolKey internal launchKey;
+    bytes32 internal poolId;
     TestSwapRouter internal router;
-    TestLiquidityHelper internal lp;
+    uint256 internal launchTime;
 
     address internal deployer;
     address internal owner;
@@ -65,7 +83,6 @@ abstract contract Fixture is Test, SystemDeployer {
 
     MockExitToken internal xt;
     MockExitModule internal mod;
-    PoolKey internal xKey;
     bool internal inPhase2;
 
     // ------------------------------------------------------------------ compose
@@ -101,18 +118,22 @@ abstract contract Fixture is Test, SystemDeployer {
         seller = _user("seller");
         funder = _user("funder");
         router = new TestSwapRouter();
-        lp = new TestLiquidityHelper();
+
+        // the real factory owner lets the deployer launch while the factory is deprecated
+        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
+        FACTORY.setAdmin(deployer, true);
+        vm.deal(deployer, 1 ether);
 
         vm.startPrank(deployer);
-        Deployed memory d = deploySystem(deployer, owner, creator, "Lifecycle Coin", "LIFE");
+        Deployed memory d = deploySystem(deployer, owner, creator, "Fixture Coin", "FIXT", FIXTURE_SALT);
         vm.stopPrank();
 
         core = Core(payable(d.core));
-        coin = Coin(d.coin);
-        hook = FeeHook(payable(d.hook));
+        coin = IArtCoinsToken(d.coin);
         ctl = ControllerV1(d.controller);
-        launcher = Launcher(d.launcher);
         launchKey = d.launchKey;
+        poolId = d.poolId;
+        launchTime = block.timestamp;
     }
 
     /// @notice a namespaced account with no code
@@ -121,9 +142,9 @@ abstract contract Fixture is Test, SystemDeployer {
         assertEq(a.code.length, 0, "account has code on the fork");
     }
 
-    // ------------------------------------------------------------------ swaps through the launch pool
+    // ------------------------------------------------------------------ swaps through the real pool
 
-    /// @notice buys coin with `ethIn` eth, exact in, through the real launch pool. `who` is funded for it
+    /// @notice buys coin with `ethIn` eth, exact in, through the real pool. `who` is funded for it
     /// @return coinOut the coin `who` received
     function _buyCoin(address who, uint256 ethIn) internal returns (uint256 coinOut) {
         vm.deal(who, who.balance + ethIn);
@@ -133,8 +154,8 @@ abstract contract Fixture is Test, SystemDeployer {
         coinOut = coin.balanceOf(who) - before;
     }
 
-    /// @notice sells `coinIn` coin for eth, exact in, through the real launch pool
-    /// @return ethOut the eth `who` received after the fee
+    /// @notice sells `coinIn` coin for eth, exact in, through the real pool
+    /// @return ethOut the eth `who` received after the skim
     function _sellCoin(address who, uint256 coinIn) internal returns (uint256 ethOut) {
         vm.prank(who);
         coin.approve(address(router), type(uint256).max);
@@ -144,12 +165,24 @@ abstract contract Fixture is Test, SystemDeployer {
         ethOut = who.balance - before;
     }
 
-    /// @notice generates fees through real buys until the eth pot holds at least `eth`
+    /// @notice swap hook data that names `referrer` and asks for `bps` of volume (100k denominator)
+    function _referralData(address referrer, uint24 bps) internal pure returns (bytes memory) {
+        PCSwapData memory inner = PCSwapData(PCAttribution(bytes32(0), referrer, bytes16(0), bps), "");
+        return abi.encode(PoolSwapData("", abi.encode(inner)));
+    }
+
+    /// @notice moves past the anti sniper window, so skim is the 10 points baseline
+    function _skipSniperWindow() internal {
+        uint256 end = launchTime + SNIPER_WINDOW + 1;
+        if (block.timestamp < end) vm.warp(end);
+    }
+
+    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state 9.5 percent
+    /// of every buy reaches the pot, inside the sniper window more
     function _fundPot(uint256 eth) internal {
         for (uint256 i; i < 8 && core.ethPot() < eth; ++i) {
             uint256 need = eth - core.ethPot();
-            // 9.5 percent of every buy reaches the pot
-            _buyCoin(funder, need * 10_000 / 950 + 2);
+            _buyCoin(funder, need * 10_000 / 950 + 1000);
         }
         assertGe(core.ethPot(), eth, "pot not funded");
     }
@@ -249,78 +282,23 @@ abstract contract Fixture is Test, SystemDeployer {
 
     // ------------------------------------------------------------------ phase 2
 
-    /// @notice fills the exit module slot and the exit pool key through the timelock, with the mock exit module and
-    /// mock exit token, then initializes the coin and exit token pool on the same hook and adds two sided
-    /// liquidity. the liquidity provider first buys the coin it needs in the launch pool
+    /// @notice sets the stand in exit module and exit token through the timelock. there is no exit pool: the coin
+    /// buyback of the exit token is a dutch auction inside the core
     function _enterPhase2() internal {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), UNIT);
-        (address a0, address a1) =
-            address(xt) < address(coin) ? (address(xt), address(coin)) : (address(coin), address(xt));
-        xKey = PoolKey({
-            currency0: Currency.wrap(a0),
-            currency1: Currency.wrap(a1),
-            fee: 0,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
-        });
-
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetExitModule, abi.encode(address(mod)));
-        core.queue(Core.Action.SetExitPoolKey, abi.encode(xKey, _wideLimit(_exitIs0())));
-        vm.warp(block.timestamp + 7 days);
-        core.execute(Core.Action.SetExitModule, abi.encode(address(mod)));
-        core.execute(Core.Action.SetExitPoolKey, abi.encode(xKey, _wideLimit(_exitIs0())));
-        vm.stopPrank();
-
-        PM.initialize(xKey, SQRT_PRICE_1_1);
-
-        address lper = _user("lper");
-        uint256 coinBal = _buyCoin(lper, 20 ether);
-        xt.mint(lper, 1e30);
-        vm.startPrank(lper);
-        coin.approve(address(lp), type(uint256).max);
-        xt.approve(address(lp), type(uint256).max);
-        // about a quarter of the liquidity is paid in each token over this range at a one to one price
-        lp.modify(xKey, -6000, 6000, int256(coinBal * 3));
-        vm.stopPrank();
+        _timelock(Core.Action.SetExitModule, abi.encode(address(mod)));
         inPhase2 = true;
     }
 
-    /// @notice the loosest legal exit buyback price limit for the swap direction (exit token is currency0 means the
-    /// swap is zero for one and the price falls)
-    function _wideLimit(bool exitIs0) internal pure returns (uint160) {
-        return exitIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
-    }
-
-    function _exitIs0() internal view returns (bool) {
-        return Currency.unwrap(xKey.currency0) == address(xt);
-    }
-
-    /// @notice buys coin with `xIn` exit token, exact in, through the exit pool. `who` is funded for it
-    function _buyCoinWithExit(address who, uint256 xIn) internal returns (uint256 coinOut) {
-        xt.mint(who, xIn);
-        vm.prank(who);
-        xt.approve(address(router), type(uint256).max);
-        uint256 before = coin.balanceOf(who);
-        vm.prank(who);
-        router.swap(xKey, _exitIs0(), -int256(xIn), who);
-        coinOut = coin.balanceOf(who) - before;
-    }
-
-    /// @notice sells `coinIn` coin for exit token, exact in, through the exit pool. `who` must hold the coin
-    function _sellCoinForExit(address who, uint256 coinIn) internal returns (uint256 xOut) {
-        vm.prank(who);
-        coin.approve(address(router), type(uint256).max);
-        uint256 before = xt.balanceOf(who);
-        vm.prank(who);
-        router.swap(xKey, !_exitIs0(), -int256(coinIn), who);
-        xOut = xt.balanceOf(who) - before;
-    }
-
-    /// @notice the exit token claims the hook holds in the pool manager
-    function _hookClaims() internal view returns (uint256) {
-        return IERC6909Claims(address(PM)).balanceOf(address(hook), uint256(uint160(address(xt))));
+    /// @notice composes the eth pile, lets its auction run out and exits the statement, which puts half of the
+    /// exit token into `xToBuyback`. needs phase 2. returns the exit token the core received
+    function _fillExitBuyback() internal returns (uint256 received) {
+        Composed memory c = _composeOnce();
+        vm.warp(block.timestamp + core.AUCTION_LENGTH());
+        uint256 before = xt.balanceOf(address(core));
+        core.exitStatement(c.sid);
+        received = xt.balanceOf(address(core)) - before;
     }
 
     // ------------------------------------------------------------------ checks and small helpers

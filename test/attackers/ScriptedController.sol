@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Lane, IController} from "../../src/interfaces/Interfaces.sol";
 
 /// settable controller for unit tests. it can also revert, burn gas or answer with an oversized word.
-contract MockController is IController {
+contract ScriptedController is IController {
     mapping(uint256 => uint16) public bonus;
     bool public revertWants;
     bool public burnWants;

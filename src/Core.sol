@@ -13,13 +13,11 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
-import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {
     Lane,
     IController,
     IExitModule,
-    ICoreFees,
+    ICoin,
     ICoreViews,
     ICredits,
     ICreditScore,
@@ -28,9 +26,10 @@ import {
 } from "./interfaces/Interfaces.sol";
 
 /// custody and every rule of the credits engine. the only mutable slots are the ones the owner can
-/// reach through the timelock: the controller, the exit module, the exit pool key and the target list.
+/// reach through the timelock: the controller, the exit module and the target list.
 /// credits and statements sent to the core outside its doors are not tracked and stay in the core.
-contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
+/// the core is the bounty recipient of the live skim hook: its `receive()` books the hook's eth into the pot.
+contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     using FixedPointMathLib for uint256;
     using LibTransient for LibTransient.TBool;
 
@@ -41,7 +40,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     enum Action {
         SetController,
         SetExitModule,
-        SetExitPoolKey,
         AddTarget,
         Freeze
     }
@@ -74,10 +72,8 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     error OnlyOwner();
-    error OnlyHook();
     error OnlyPoolManager();
     error BadSender();
-    error Busy();
     error ZeroAddress();
     error ZeroId();
     error ZeroAmount();
@@ -91,7 +87,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     error BadOverprint();
     error BadCost();
     error BadModule();
-    error BadKey();
     error BadSwap();
     error TargetNotAllowed();
     error ForbiddenTarget();
@@ -113,18 +108,14 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     error TooEarly();
     error NothingToBuy();
     error NothingBought();
-    error PriceBeyondLimit();
     error TooSoon();
     error DailyCap();
-    error Unfunded();
-    error Dormant();
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
     event FeesAdded(uint256 amount);
-    event ExitFeesAdded(uint256 amount);
     event Skimmed(uint256 eth, uint256 exitToken);
     event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
     event ListingBought(
@@ -139,13 +130,12 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     event StatementExited(uint256 indexed sid, Lane lane, uint256 received);
     event Overprinted(uint256 indexed baseId, uint256 indexed topId, uint256 cost);
     event Buyback(address indexed caller, uint256 amountIn, uint256 tip);
-    event ExitBuyback(address indexed caller, uint256 amountIn, uint256 tip);
+    event ExitBuyback(address indexed caller, uint256 slice, uint256 coinIn);
     event Queued(bytes32 indexed id, Action action, bytes data, uint256 eta);
     event Executed(bytes32 indexed id, Action action);
     event Cancelled(bytes32 indexed id, Action action);
     event ControllerSet(address controller);
     event ExitModuleSet(address exitModule, address exitToken, uint256 unitPerPoint);
-    event ExitPoolKeySet(bytes32 poolId, PoolKey key, uint160 sqrtPriceLimitX96);
     event TargetAdded(address target);
     event TargetRemoved(address target);
     event FrozenSet();
@@ -188,6 +178,11 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public constant XRATE_CLIMB_PER_HOUR = 100;
     /// bps of score per credit bought
     uint256 public constant XRATE_DROP_PER_CREDIT = 20;
+    /// the exit token auction price halves every hour
+    uint256 public constant XAUCTION_HALF_LIFE = 1 hours;
+    /// a fill restarts the auction at twice its clearing price, never below this, so a price that decayed to zero
+    /// cannot leave the auction giving the exit token away for ever
+    uint256 public constant XAUCTION_MIN_START = 1e18;
     uint256 public constant TIMELOCK = 7 days;
     uint256 public constant OVERPRINT_CAP_PER_DAY = 8;
 
@@ -200,7 +195,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 private constant REIMBURSE_CAP_BPS = 500;
     uint256 private constant EXIT_SLICE_CREDITS = 20;
     uint256 private constant READ_GAS = 200_000;
-    int24 private constant LAUNCH_TICK_SPACING = 60;
     address private constant DEAD = Mainnet.DEAD;
     bytes32 private constant MEASURING_SLOT = keccak256("core.measuring");
 
@@ -208,9 +202,10 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     IStatements private constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
     IPoolManager private constant MANAGER = IPoolManager(Mainnet.POOL_MANAGER);
 
+    address public constant HOOK = Mainnet.SKIM_HOOK;
+
     address public immutable OWNER;
     address public immutable COIN;
-    address public immutable HOOK;
 
     /*//////////////////////////////////////////////////////////////
                                 STATE
@@ -220,8 +215,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     bool public frozen;
     address public exitModule;
     address public exitToken;
-    bytes32 public exitPoolId;
-    PoolKey private _exitPoolKey;
     mapping(address => bool) public allowedTarget;
     mapping(bytes32 => uint256) public queuedEta;
 
@@ -244,7 +237,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     bool xFunded;
 
     uint256 public lastBuybackBlock;
-    uint256 lastExitBuybackBlock;
 
     uint256 public overprintDay;
     uint256 public overprintCount;
@@ -256,21 +248,20 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// exit token base units per one unit of 1e4 scaled score, read once from the module when it is set
     uint256 public unitPerPoint;
-    /// the worst sqrt price the exit buyback will ever accept, fixed with the exit pool key
-    uint160 public exitSqrtPriceLimit;
+    /// exit token auction: price in coin wei per exit token unit, wad scaled, at `xStartTime`. it halves every
+    /// `XAUCTION_HALF_LIFE`. the clock only runs while `xToBuyback` is not zero
+    uint256 public xStartPrice;
+    uint64 public xStartTime;
 
     modifier onlyOwner() {
         if (msg.sender != OWNER) revert OnlyOwner();
         _;
     }
 
-    constructor(address owner_, address coin_, address hook_, address controller_) {
-        if (owner_ == address(0) || coin_ == address(0) || hook_ == address(0) || controller_ == address(0)) {
-            revert ZeroAddress();
-        }
+    constructor(address owner_, address coin_, address controller_) {
+        if (owner_ == address(0) || coin_ == address(0) || controller_ == address(0)) revert ZeroAddress();
         OWNER = owner_;
         COIN = coin_;
-        HOOK = hook_;
         controller = controller_;
         allowedTarget[Mainnet.SEAPORT] = true;
         allowedTarget[Mainnet.CREDIT_STRATEGY] = true;
@@ -284,8 +275,22 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
         emit TargetAdded(Mainnet.CREDIT_STRATEGY);
     }
 
-    /// accepts eth and books nothing. refunds from a purchase land here. skim books the rest.
-    receive() external payable {}
+    /// accepts eth and never reverts, because the hook pushes its bounty here with all gas and a revert would
+    /// brick every swap in the pool. eth from the hook is booked into the pot unless a measurement is in flight.
+    /// anything else, refunds from a purchase included, is booked later by `skim`. a measurement in flight books
+    /// nothing, so eth arriving then just lowers the measured cost. there is no fallback on purpose: the hook
+    /// calls `streamForward` here once the balance reaches 0.01 eth and relies on that call reverting.
+    receive() external payable {
+        if (msg.sender != HOOK || _measuring().get()) return;
+        _checkpoint();
+        ethPot += msg.value;
+        _syncFunded();
+        emit FeesAdded(msg.value);
+    }
+
+    /// the skim hook's referral payout target. with the referral cap at zero the hook never calls it. if the token
+    /// admin raises the cap it pays referrals here, and the eth is booked later by `skim`, so it can never revert.
+    function notify(address) external payable {}
 
     /// accepts statements and credits from their own contracts only.
     function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
@@ -296,29 +301,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
     /*//////////////////////////////////////////////////////////////
                               FEE INTAKE
     //////////////////////////////////////////////////////////////*/
-
-    /// hook only. adds the eth sent to the buying pot. not guarded because the hook calls it during a buyback.
-    function addFees() external payable {
-        if (msg.sender != HOOK) revert OnlyHook();
-        if (_measuring().get()) revert Busy();
-        _checkpoint();
-        ethPot += msg.value;
-        _syncFunded();
-        emit FeesAdded(msg.value);
-    }
-
-    /// hook only. adds exit token the hook already transferred to the exit token bid pot.
-    function addExitFees(uint256 amount) external {
-        if (msg.sender != HOOK) revert OnlyHook();
-        if (_measuring().get()) revert Busy();
-        address token = exitToken;
-        if (token == address(0)) revert NoExitModule();
-        if (SafeTransferLib.balanceOf(token, address(this)) < xPot + xToBuyback + amount) revert Unfunded();
-        _xCheckpoint();
-        xPot += amount;
-        _syncXFunded();
-        emit ExitFeesAdded(amount);
-    }
 
     /// books any eth or exit token held above the recorded pots into the buying pots. anyone may call.
     function skim() external nonReentrant {
@@ -608,7 +590,8 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     function _forbidden(address t) private view returns (bool) {
         return t == address(CREDITS) || t == address(STATEMENTS) || t == address(this) || t == COIN || t == HOOK
-            || t == address(MANAGER) || t == exitModule || t == exitToken;
+            || t == address(MANAGER) || t == Mainnet.ARTCOINS_FACTORY || t == Mainnet.LP_LOCKER
+            || t == Mainnet.FEE_ESCROW || t == exitModule || t == exitToken;
     }
 
     function _measuring() private pure returns (LibTransient.TBool storage) {
@@ -731,6 +714,8 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
 
         uint256 toBuyback = s.lane == Lane.Eth ? received * EXIT_SPLIT / BPS : 0;
         _xCheckpoint();
+        // the auction clock only runs while something is for sale, so it restarts when the pot goes from empty
+        if (toBuyback != 0 && xToBuyback == 0) xStartTime = uint64(block.timestamp);
         xToBuyback += toBuyback;
         xPot += received - toBuyback;
         _syncXFunded();
@@ -768,7 +753,8 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
                                BUYBACKS
     //////////////////////////////////////////////////////////////*/
 
-    /// swaps up to one slice of the eth buyback pot for coin and sends it to the dead address. tips the caller.
+    /// swaps up to one slice of the eth buyback pot for coin in the canonical pool, then burns the coin on the token
+    /// so the total supply falls. tips the caller. the hook's skim on this swap comes back through `receive`.
     function buyback() external nonReentrant {
         uint256 pool = ethToBuyback;
         if (pool == 0) revert NothingToBuy();
@@ -776,97 +762,91 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 slice = pool.min(BUYBACK_SLICE);
         ethToBuyback = pool - slice;
         lastBuybackBlock = block.number;
-        PoolKey memory key = PoolKey({
-            currency0: Currency.wrap(address(0)),
-            currency1: Currency.wrap(COIN),
-            fee: 0,
-            tickSpacing: LAUNCH_TICK_SPACING,
-            hooks: IHooks(HOOK)
-        });
-        (uint256 spent, uint256 tip) = _swapSlice(key, true, slice, TickMath.MIN_SQRT_PRICE + 1, false);
+        uint256 tip0 = slice * KEEPER_TIP_BPS / BPS;
+        uint256 budget = slice - tip0;
+        (uint256 spent, uint256 bought) = abi.decode(MANAGER.unlock(abi.encode(budget)), (uint256, uint256));
+        if (bought == 0) revert NothingBought();
+        ICoin(COIN).burn(bought);
+        // the tip is sized on the full slice and scaled down when the fill is partial
+        uint256 tip = tip0 * spent / budget;
         ethToBuyback += slice - spent - tip;
         emit Buyback(msg.sender, spent, tip);
         if (tip != 0) SafeTransferLib.safeTransferETH(msg.sender, tip);
     }
 
-    /// same as buyback for the exit token pot through the coin and exit token pool, never past the fixed price
-    /// limit. whatever the pool does not take at or inside the limit stays in the exit token buyback pot.
-    function buybackExit() external nonReentrant {
-        if (exitPoolId == bytes32(0)) revert Dormant();
-        uint256 pool = xToBuyback;
-        if (pool == 0) revert NothingToBuy();
-        if (block.number < lastExitBuybackBlock + BUYBACK_DELAY) revert TooSoon();
-        uint256 slice = pool.min(EXIT_SLICE_CREDITS * AVG_SCORE * unitPerPoint);
-        xToBuyback = pool - slice;
-        lastExitBuybackBlock = block.number;
-        address token = exitToken;
-        PoolKey memory key = _exitPoolKey;
-        bool zeroForOne = Currency.unwrap(key.currency0) == token;
-        uint160 limit = exitSqrtPriceLimit;
-        (uint160 price,,,) = StateLibrary.getSlot0(MANAGER, PoolId.wrap(exitPoolId));
-        if (zeroForOne ? price <= limit : price >= limit) revert PriceBeyondLimit();
-        (uint256 spent, uint256 tip) = _swapSlice(key, zeroForOne, slice, limit, true);
-        xToBuyback += slice - spent - tip;
-        emit ExitBuyback(msg.sender, spent, tip);
-        if (tip != 0) SafeTransferLib.safeTransfer(token, msg.sender, tip);
-    }
-
-    /// runs one buyback swap. the keeper tip is sized on the full slice and scaled down when the fill is partial.
-    /// in the exit pool the hook takes its fee on what the swap actually spent, so the swap amount is cut to leave
-    /// room for it and the hook may pull at most that room from the core. returns the input spent, fee included,
-    /// and the tip owed. reverts when no coin was bought.
-    function _swapSlice(PoolKey memory key, bool zeroForOne, uint256 slice, uint160 limit, bool exitPool)
-        private
-        returns (uint256 spent, uint256 tip)
-    {
-        uint256 tip0 = slice * KEEPER_TIP_BPS / BPS;
-        uint256 budget = slice - tip0;
-        uint256 swapIn = exitPool ? budget * (BPS - FEE_BPS) / BPS : budget;
-        uint256 bought;
-        (spent, bought) = abi.decode(
-            MANAGER.unlock(abi.encode(key, zeroForOne, swapIn, limit, budget - swapIn, exitPool)), (uint256, uint256)
-        );
-        if (bought == 0) revert NothingBought();
-        tip = tip0 * spent / budget;
-    }
-
-    /// pool manager callback. swaps exact in up to the price limit and delivers the coin to the dead address.
-    /// returns the input spent and the coin bought. in the exit pool the hook is allowed to pull its fee from the
-    /// core while the swap runs, and the spend is what the core balance actually lost.
+    /// pool manager callback of `buyback`. swaps exact eth in for coin, which comes to the core. returns the eth
+    /// spent, skim included, and the coin bought. the core is exempt from the coin's tax.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(MANAGER)) revert OnlyPoolManager();
-        (PoolKey memory key, bool zeroForOne, uint256 amountIn, uint160 limit, uint256 feeRoom, bool exitPool) =
-            abi.decode(data, (PoolKey, bool, uint256, uint160, uint256, bool));
-        (Currency cIn, Currency cOut) = zeroForOne ? (key.currency0, key.currency1) : (key.currency1, key.currency0);
-        address tokenIn = Currency.unwrap(cIn);
-        uint256 balanceBefore;
-        if (exitPool) {
-            balanceBefore = SafeTransferLib.balanceOf(tokenIn, address(this));
-            SafeTransferLib.safeApprove(tokenIn, HOOK, feeRoom);
-        }
+        uint256 amountIn = abi.decode(data, (uint256));
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(COIN),
+            fee: Mainnet.POOL_FEE,
+            tickSpacing: Mainnet.TICK_SPACING,
+            hooks: IHooks(HOOK)
+        });
         // forge-lint: disable-next-line(unsafe-typecast)
-        BalanceDelta d = MANAGER.swap(key, SwapParams(zeroForOne, -int256(amountIn), limit), "");
-        (int128 inDelta, int128 outDelta) = zeroForOne ? (d.amount0(), d.amount1()) : (d.amount1(), d.amount0());
-        if (inDelta > 0 || outDelta < 0) revert BadSwap();
+        int256 specified = -int256(amountIn);
+        BalanceDelta d = MANAGER.swap(
+            key,
+            SwapParams({zeroForOne: true, amountSpecified: specified, sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1}),
+            ""
+        );
+        if (d.amount0() > 0 || d.amount1() < 0) revert BadSwap();
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 owed = uint256(uint128(-inDelta));
+        uint256 owed = uint256(uint128(-d.amount0()));
         if (owed > amountIn) revert BadSwap();
-        if (tokenIn == address(0)) {
-            MANAGER.settle{value: owed}();
-        } else {
-            MANAGER.sync(cIn);
-            SafeTransferLib.safeTransfer(tokenIn, address(MANAGER), owed);
-            MANAGER.settle();
-        }
-        uint256 spent = owed;
-        if (exitPool) {
-            SafeTransferLib.safeApprove(tokenIn, HOOK, 0);
-            spent = balanceBefore - SafeTransferLib.balanceOf(tokenIn, address(this));
-        }
+        MANAGER.settle{value: owed}();
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 bought = uint256(uint128(outDelta));
-        MANAGER.take(cOut, DEAD, bought);
-        return abi.encode(spent, bought);
+        uint256 bought = uint256(uint128(d.amount1()));
+        MANAGER.take(key.currency1, address(this), bought);
+        return abi.encode(owed, bought);
+    }
+
+    /// sells one slice of the exit token buyback pot for coin at the dutch auction price and burns the coin it
+    /// takes from the caller. the caller must have approved the core for it. phase 2 only.
+    function buybackExit(uint256 maxCoinIn) external nonReentrant {
+        address token = exitToken;
+        if (token == address(0)) revert NoExitModule();
+        (uint256 slice, uint256 coinIn, uint256 price) = _exitQuote();
+        if (slice == 0) revert NothingToBuy();
+        if (coinIn > maxCoinIn) revert Slippage();
+        xToBuyback -= slice;
+        xStartPrice = (2 * price).max(XAUCTION_MIN_START);
+        xStartTime = uint64(block.timestamp);
+        if (coinIn != 0) ICoin(COIN).burnFrom(msg.sender, coinIn);
+        SafeTransferLib.safeTransfer(token, msg.sender, slice);
+        emit ExitBuyback(msg.sender, slice, coinIn);
+    }
+
+    /// the exit token auction price now, coin wei per exit token unit in wad. it halves every hour from the start
+    /// price and may reach zero. while nothing is for sale the clock is stopped and this is the start price.
+    function exitAuctionPrice() public view returns (uint256) {
+        if (xToBuyback == 0) return xStartPrice;
+        uint256 elapsed = block.timestamp - xStartTime;
+        uint256 halvings = elapsed / XAUCTION_HALF_LIFE;
+        if (halvings >= 256) return 0;
+        uint256 p = xStartPrice >> halvings;
+        uint256 rest = elapsed % XAUCTION_HALF_LIFE;
+        if (rest != 0) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            int256 factor = FixedPointMathLib.powWad(0.5e18, int256(rest * 1e18 / XAUCTION_HALF_LIFE));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            p = p * uint256(factor) / 1e18;
+        }
+        return p;
+    }
+
+    /// the exit token slice a fill would take now and the coin it would burn.
+    function exitAuctionQuote() external view returns (uint256 slice, uint256 coinIn) {
+        (slice, coinIn,) = _exitQuote();
+    }
+
+    function _exitQuote() private view returns (uint256 slice, uint256 coinIn, uint256 price) {
+        slice = xToBuyback.min(EXIT_SLICE_CREDITS * AVG_SCORE * unitPerPoint);
+        price = exitAuctionPrice();
+        coinIn = slice.mulDivUp(price, 1e18);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -906,9 +886,6 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
             emit ControllerSet(c);
         } else if (action == Action.SetExitModule) {
             _setExitModule(abi.decode(data, (address)));
-        } else if (action == Action.SetExitPoolKey) {
-            (PoolKey memory k, uint160 limit) = abi.decode(data, (PoolKey, uint160));
-            _setExitPoolKey(k, limit);
         } else if (action == Action.AddTarget) {
             address t = abi.decode(data, (address));
             if (_forbidden(t)) revert ForbiddenTarget();
@@ -939,23 +916,10 @@ contract Core is ICoreFees, ICoreViews, IUnlockCallback, ReentrancyGuard {
         exitToken = token;
         unitPerPoint = unit;
         xCheckpointTime = uint64(block.timestamp);
+        // the opening price asks the whole coin supply for one full slice
+        xStartPrice = SUPPLY * 1e18 / (EXIT_SLICE_CREDITS * AVG_SCORE * unit);
+        xStartTime = uint64(block.timestamp);
         emit ExitModuleSet(module, token, unit);
-    }
-
-    function _setExitPoolKey(PoolKey memory k, uint160 limit) private {
-        if (exitModule == address(0)) revert NoExitModule();
-        if (exitPoolId != bytes32(0)) revert AlreadySet();
-        address c0 = Currency.unwrap(k.currency0);
-        address c1 = Currency.unwrap(k.currency1);
-        bool pair = (c0 == COIN && c1 == exitToken) || (c0 == exitToken && c1 == COIN);
-        if (address(k.hooks) != HOOK || c0 >= c1 || !pair) revert BadKey();
-        if (k.fee != 0 || k.tickSpacing != LAUNCH_TICK_SPACING) revert BadKey();
-        if (limit <= TickMath.MIN_SQRT_PRICE || limit >= TickMath.MAX_SQRT_PRICE) revert BadKey();
-        _exitPoolKey = k;
-        exitSqrtPriceLimit = limit;
-        bytes32 poolId = keccak256(abi.encode(k));
-        exitPoolId = poolId;
-        emit ExitPoolKeySet(poolId, k, limit);
     }
 
     /*//////////////////////////////////////////////////////////////

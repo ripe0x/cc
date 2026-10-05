@@ -15,6 +15,7 @@ contract TestSwapRouter is PoolActor {
         address receiver;
         PoolKey key;
         SwapParams params;
+        bytes hookData;
     }
 
     /// @notice swaps on behalf of the caller. eth sent along pays the eth legs and the unused part is refunded
@@ -24,6 +25,24 @@ contract TestSwapRouter is PoolActor {
         payable
         returns (BalanceDelta delta)
     {
+        return _swap(key, zeroForOne, amountSpecified, receiver, "");
+    }
+
+    /// @notice the same with hook data, which is how a swap carries a referrer to the skim hook
+    function swapWithData(
+        PoolKey memory key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        address receiver,
+        bytes memory hookData
+    ) external payable returns (BalanceDelta delta) {
+        return _swap(key, zeroForOne, amountSpecified, receiver, hookData);
+    }
+
+    function _swap(PoolKey memory key, bool zeroForOne, int256 amountSpecified, address receiver, bytes memory hookData)
+        private
+        returns (BalanceDelta delta)
+    {
         SwapParams memory params = SwapParams({
             zeroForOne: zeroForOne,
             amountSpecified: amountSpecified,
@@ -31,7 +50,9 @@ contract TestSwapRouter is PoolActor {
         });
         uint256 balanceBefore = address(this).balance - msg.value;
         delta = abi.decode(
-            PM.unlock(abi.encode(Job({payer: msg.sender, receiver: receiver, key: key, params: params}))),
+            PM.unlock(
+                abi.encode(Job({payer: msg.sender, receiver: receiver, key: key, params: params, hookData: hookData}))
+            ),
             (BalanceDelta)
         );
         _refund(msg.sender, balanceBefore);
@@ -40,7 +61,7 @@ contract TestSwapRouter is PoolActor {
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(PM)) revert NotPoolManager();
         Job memory job = abi.decode(data, (Job));
-        BalanceDelta delta = PM.swap(job.key, job.params, "");
+        BalanceDelta delta = PM.swap(job.key, job.params, job.hookData);
         _resolve(job.key.currency0, delta.amount0(), job.payer, job.receiver);
         _resolve(job.key.currency1, delta.amount1(), job.payer, job.receiver);
         return abi.encode(delta);

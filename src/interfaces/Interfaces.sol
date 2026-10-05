@@ -22,14 +22,6 @@ interface IExitModule {
     function exit(uint256 statementId) external returns (uint256 out);
 }
 
-/// the surface FeeHook and Coin rely on
-interface ICoreFees {
-    function addFees() external payable; // hook only. eth lands in ethPot
-    function addExitFees(uint256 amount) external; // hook only, after it transferred `amount` exit token to the core. lands in xPot
-    function exitPoolId() external view returns (bytes32); // 0 until the owner sets the coin/exitToken pool key
-    function exitToken() external view returns (address); // 0 until the exit module is set
-}
-
 /// the surface controllers rely on. piles are insertion ordered linked lists, oldest first
 interface ICoreViews {
     function pileSize(Lane lane) external view returns (uint256);
@@ -42,13 +34,10 @@ interface ICoreViews {
     function heldStatements() external view returns (uint256[] memory sids);
 }
 
-interface ILauncher {
-    function launching() external view returns (bool);
-}
-
+/// the coin calls the core makes. the live token burns from the caller or from an account that approved the caller
 interface ICoin {
-    function noteDelta(int256 coinDelta) external; // hook only. signed coin leg, positive when the pool manager owes coin out
-    function pendingDelta() external view returns (int256);
+    function burn(uint256 amount) external;
+    function burnFrom(address account, uint256 amount) external;
 }
 
 interface ICredits {
@@ -99,4 +88,18 @@ library Mainnet {
     address internal constant POSITION_MANAGER = 0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e;
     address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address internal constant DEAD = 0x000000000000000000000000000000000000dEaD;
+    address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address internal constant UNIVERSAL_ROUTER = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
+
+    // the live artcoins stack
+    address internal constant ARTCOINS_FACTORY = 0x49596c375c139E79bb937bcf826068a8F78D4e0e;
+    address internal constant ARTCOINS_FACTORY_OWNER = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+    address internal constant SKIM_HOOK = 0x636c050296B5Cc528D8785169Bf8923716FCa9cc;
+    address internal constant LP_LOCKER = 0x866ea3Dc2bf7A3e77374619cf50EB697FA766aab;
+    address internal constant FEE_ESCROW = 0x7559689765aE86cBB38e68CD1294830CccB125F2;
+    address internal constant MEV_LINEAR_SKIM = 0xb038D597365FfD108D63C265Bb0621444a1D8B83;
+
+    /// the dynamic fee flag every artcoins pool uses, and its tick spacing
+    uint24 internal constant POOL_FEE = 0x800000;
+    int24 internal constant TICK_SPACING = 200;
 }
