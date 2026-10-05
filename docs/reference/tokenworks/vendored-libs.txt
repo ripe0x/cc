@@ -1,0 +1,128 @@
+vendored libraries seen in the tokenworks verified sources (sourcify, solc 0.8.30, evm cancun, via_ir, optimizer 200)
+matched by git blob hash against upstream histories (see tokenworks-notes.md section 3)
+
+library | best match | evidence
+solady | tag v0.1.25 (d07f92e, 2025-08-25) | every vendored solady file blob identical at v0.1.25; SafeTransferLib window is only the 71d5107..d07f92e range
+v4-core | npm 1.0.2 = 59d3ecf (2025-05-13). src and test/utils identical across a7cf038..46c6834 | v4.0.0 tag (2025-01-21) does NOT match: PoolOperation.sol, new Hooks.sol and IPoolManager.sol postdate it
+v4-periphery | npm 1.0.2 = ad04c9f (2025-05-13). subset identical across 444c526..7ebd04b | only BaseHook, ImmutableState, IPositionManager, Actions, interfaces vendored
+v4-router (z0r0z/v4-router) | f5d5bfc (2025-08-21) or later. interface and PathKey identical across a1d9371..f5d5bfc | only IUniswapV4Router04 + PathKey vendored. its submodule pins v4-core 59d3ecf and v4-periphery ad04c9f, matching the above
+permit2 | cc56ad0 (2023-09-29, no tags in repo) | only ISignatureTransfer, IEIP712, IAllowanceTransfer vendored (interfaces)
+universal-router | none vendored | remapping only. v4-router submodule pin is 8bd498a (2025-02-11, pre 2.1). no universal-router code reaches any compiled contract
+openzeppelin, forge-std, v4-template, hookmate, uniswap-hooks | none vendored | remappings only
+
+== impl vendored files
+  lib/solady/src/tokens/ERC721.sol
+  lib/solady/src/utils/SafeTransferLib.sol
+  lib/solady/src/tokens/ERC20.sol
+  lib/solady/src/utils/ReentrancyGuard.sol
+  lib/v4-core/src/interfaces/IHooks.sol
+  lib/v4-core/src/types/Currency.sol
+  lib/v4-core/src/types/PoolKey.sol
+  lib/v4-router/src/interfaces/IUniswapV4Router04.sol
+  lib/v4-core/src/interfaces/IPoolManager.sol
+  lib/v4-core/src/types/BalanceDelta.sol
+  lib/solady/src/utils/Initializable.sol
+  lib/solady/src/utils/UUPSUpgradeable.sol
+  lib/solady/src/auth/Ownable.sol
+  lib/solady/src/utils/LibClone.sol
+  lib/v4-core/src/libraries/Hooks.sol
+  lib/v4-core/src/types/PoolOperation.sol
+  lib/v4-core/src/types/BeforeSwapDelta.sol
+  lib/v4-core/src/interfaces/external/IERC20Minimal.sol
+  lib/v4-core/src/libraries/CustomRevert.sol
+  lib/v4-core/src/types/PoolId.sol
+  lib/v4-router/src/libraries/PathKey.sol
+  lib/v4-router/lib/permit2/src/interfaces/ISignatureTransfer.sol
+  lib/v4-core/src/interfaces/external/IERC6909Claims.sol
+  lib/v4-core/src/interfaces/IProtocolFees.sol
+  lib/v4-core/src/interfaces/IExtsload.sol
+  lib/v4-core/src/interfaces/IExttload.sol
+  lib/v4-core/src/libraries/SafeCast.sol
+  lib/solady/src/utils/CallContextChecker.sol
+  lib/v4-core/src/libraries/LPFeeLibrary.sol
+  lib/v4-core/src/libraries/ParseBytes.sol
+  lib/v4-router/lib/permit2/src/interfaces/IEIP712.sol
+== hook vendored files
+  lib/v4-periphery/src/utils/BaseHook.sol
+  lib/v4-core/src/libraries/Hooks.sol
+  lib/v4-core/src/interfaces/IPoolManager.sol
+  lib/v4-core/src/types/PoolKey.sol
+  lib/v4-core/src/libraries/SafeCast.sol
+  lib/v4-core/src/types/PoolId.sol
+  lib/v4-core/src/types/BalanceDelta.sol
+  lib/v4-core/src/types/Currency.sol
+  lib/v4-core/test/utils/CurrencySettler.sol
+  lib/v4-core/src/libraries/TickMath.sol
+  lib/v4-core/src/interfaces/IHooks.sol
+  lib/v4-core/src/libraries/StateLibrary.sol
+  lib/solady/src/utils/SafeTransferLib.sol
+  lib/solady/src/utils/ReentrancyGuard.sol
+  lib/v4-core/src/types/PoolOperation.sol
+  lib/v4-core/src/types/BeforeSwapDelta.sol
+  lib/v4-periphery/src/base/ImmutableState.sol
+  lib/v4-core/src/libraries/LPFeeLibrary.sol
+  lib/v4-core/src/libraries/ParseBytes.sol
+  lib/v4-core/src/libraries/CustomRevert.sol
+  lib/v4-core/src/interfaces/external/IERC6909Claims.sol
+  lib/v4-core/src/interfaces/IProtocolFees.sol
+  lib/v4-core/src/interfaces/IExtsload.sol
+  lib/v4-core/src/interfaces/IExttload.sol
+  lib/v4-core/src/interfaces/external/IERC20Minimal.sol
+  lib/v4-core/src/libraries/BitMath.sol
+  lib/v4-core/src/libraries/Position.sol
+  lib/v4-router/src/interfaces/IUniswapV4Router04.sol
+  lib/v4-periphery/src/interfaces/IImmutableState.sol
+  lib/v4-core/src/libraries/FullMath.sol
+  lib/v4-core/src/libraries/FixedPoint128.sol
+  lib/v4-core/src/libraries/LiquidityMath.sol
+  lib/v4-router/src/libraries/PathKey.sol
+  lib/v4-router/lib/permit2/src/interfaces/ISignatureTransfer.sol
+  lib/v4-router/lib/permit2/src/interfaces/IEIP712.sol
+== factory vendored files
+  lib/solady/src/utils/LibClone.sol
+  lib/solady/src/tokens/ERC721.sol
+  lib/solady/src/utils/SafeTransferLib.sol
+  lib/v4-core/src/types/PoolKey.sol
+  lib/v4-core/src/libraries/Hooks.sol
+  lib/v4-router/src/interfaces/IUniswapV4Router04.sol
+  lib/solady/src/auth/Ownable.sol
+  lib/v4-periphery/src/interfaces/IPositionManager.sol
+  lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol
+  lib/v4-core/src/interfaces/IHooks.sol
+  lib/v4-core/src/types/Currency.sol
+  lib/v4-periphery/src/libraries/Actions.sol
+  lib/v4-core/src/libraries/TickMath.sol
+  lib/v4-core/src/interfaces/IPoolManager.sol
+  lib/solady/src/utils/ReentrancyGuard.sol
+  lib/solady/src/tokens/ERC20.sol
+  lib/v4-core/src/types/BalanceDelta.sol
+  lib/solady/src/utils/Initializable.sol
+  lib/solady/src/utils/UUPSUpgradeable.sol
+  lib/v4-core/src/types/PoolId.sol
+  lib/v4-core/src/libraries/SafeCast.sol
+  lib/v4-core/src/libraries/LPFeeLibrary.sol
+  lib/v4-core/src/types/BeforeSwapDelta.sol
+  lib/v4-core/src/types/PoolOperation.sol
+  lib/v4-core/src/libraries/ParseBytes.sol
+  lib/v4-core/src/libraries/CustomRevert.sol
+  lib/v4-router/src/libraries/PathKey.sol
+  lib/v4-router/lib/permit2/src/interfaces/ISignatureTransfer.sol
+  lib/v4-periphery/src/libraries/PositionInfoLibrary.sol
+  lib/v4-periphery/src/interfaces/INotifier.sol
+  lib/v4-periphery/src/interfaces/IImmutableState.sol
+  lib/v4-periphery/src/interfaces/IERC721Permit_v4.sol
+  lib/v4-periphery/src/interfaces/IEIP712_v4.sol
+  lib/v4-periphery/src/interfaces/IMulticall_v4.sol
+  lib/v4-periphery/src/interfaces/IPoolInitializer_v4.sol
+  lib/v4-periphery/src/interfaces/IUnorderedNonce.sol
+  lib/v4-periphery/src/interfaces/IPermit2Forwarder.sol
+  lib/v4-periphery/lib/permit2/src/interfaces/IEIP712.sol
+  lib/v4-core/src/interfaces/external/IERC20Minimal.sol
+  lib/v4-core/src/libraries/BitMath.sol
+  lib/v4-core/src/interfaces/external/IERC6909Claims.sol
+  lib/v4-core/src/interfaces/IProtocolFees.sol
+  lib/v4-core/src/interfaces/IExtsload.sol
+  lib/v4-core/src/interfaces/IExttload.sol
+  lib/solady/src/utils/CallContextChecker.sol
+  lib/v4-router/lib/permit2/src/interfaces/IEIP712.sol
+  lib/v4-periphery/src/interfaces/ISubscriber.sol
