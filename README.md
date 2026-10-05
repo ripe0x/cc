@@ -10,7 +10,7 @@ an erc20 on ethereum mainnet whose swap fees buy Credits nfts, compose them into
 | FeeHook | uniswap v4 hook on the coin/eth pool, takes swap fee in eth | immutable, no proxies |
 | Core | custody and every rule in this spec | immutable, no proxies |
 | ControllerV1 | first policy module | immutable, no proxies |
-| Launcher | create2 mining and launch | immutable, no proxies |
+| Launcher | one shot pool init and single sided launch liquidity | immutable, no proxies |
 
 ## flow
 
