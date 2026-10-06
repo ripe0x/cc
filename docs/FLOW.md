@@ -115,40 +115,43 @@ rules for a later set (the first set behaves as before):
 
 trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open behind the 7 day timelock for the life of the engine. a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
 
-## 9. buy now and fee share (owner confirmed)
+## 9. sale controller, no timelock, fee share (owner confirmed. replaces every earlier text on buy now)
+
+### 9.1 decisions
 
 | # | decision |
 |---|---|
 | 12 | the coin symbol is `CC` (script/config/mainnet.json). the name is still a placeholder |
-| 13 | launch keeps `exitToBuybackBps` 5_000. the owner may set it to 0 later, no code needed |
-| 14 | new setting `feeToBuybackBps`: share of swap fee eth booked from the hook that goes to `ethToBuyback`, the rest to `ethPot`. launch 0, bounds 0 to 10_000 |
-| 15 | buy now. a statement keeps its english auction at the reserve. once it has been listed for `buyNowAfter` with no bid, anyone may also buy it at once from the Core at a price that steps down |
+| 13 | launch keeps `exitToBuybackBps` 5_000 |
+| 14 | new setting `feeToBuybackBps`: share of swap fee eth booked from the hook in `receive()` that goes to `ethToBuyback`, the rest to `ethPot`. launch 0, bounds 0 to 10_000. eth booked later by `skim()` goes to the pot as today |
+| 15 | NO TIMELOCK anywhere. decision 7 of section 1 is revoked. the queue, the delay constant, the queue events and the cancel path are deleted. the owner sets the controller, the exitModule, allowed targets and whatever else was queued with plain owner functions that take effect at once and emit an event. the validity rules of each action stay exactly as they are (section 8 for the exitModule, the forbidden target list, and so on). if an action named freeze exists, keep its meaning, it is just immediate |
+| 16 | how a statement is priced and sold moves into the controller. the Core keeps custody, a hard floor and the booking of the money |
+| 17 | launch sale design: the asking price starts at 110 percent of cost and falls one point every 3 hours to 75 percent (hour 105). in auction mode (launch) a first bid at the asking price opens the english auction on the house. in buy only mode a buyer pays the asking price and gets the statement at once. the owner flips the mode in the controller |
 
-buy now rules:
-* settings: `buyNowAfter` (launch 48 hours, bounds 1 hour to 365 days; a long value is how the owner switches buy now off), `buyNowStepBps` (launch 500, bounds 0 to 5_000), `buyNowStepEvery` (launch 24 hours, bounds 1 hour to 30 days), `buyNowFloorBps` (launch 5_000, bounds 1_000 to 40_000).
-* price view `buyNowPrice(sid)`: with `age = now - listedAt`, reverts or returns 0 (pick one, document it) before `buyNowAfter`. after it: `steps = (age - buyNowAfter) / buyNowStepEvery`, `bps = max(reserveBps - steps * buyNowStepBps, min(buyNowFloorBps, reserveBps))`, `price = cost * bps / 10_000`. so with launch values: 90 percent of cost for the first 48 hours (auction only), buy now opens at 90 percent at hour 48, 85 at hour 72, 80 at hour 96, down to 50. points of cost, not compounding. it reads the live settings, not the reserve stored in the house.
-* `buyStatement(sid)` payable, guarded, eth lane statements only, must be held and listed. the Core cancels the house listing first (this reverts if a bid exists, so a live auction always wins over buy now), requires `msg.value >= price`, sends the statement to the caller with `transferFrom`, books the price exactly like collected sale proceeds (checkpoint, split by `saleToBuybackBps` into `ethToBuyback` and `ethPot`, resync funded), refunds any excess to the caller, clears the statement record, emits `StatementSold` (or a sibling event with the price). the refund must not be booked as fees and must not open reentrancy. 
-* the house reserve is NOT lowered by time. `repriceStatement` keeps its meaning (apply the current `reserveBps`). a relist after an unwound sale or an overprint restarts `listedAt`, so the 48 hours restart too.
-* phase 2 exit keeps its own clock (`exitAfter`). the two clocks are independent settings.
-* SPEC invariant 3 gains: or by a buy now that paid at least the stepped price.
+### 9.2 Core side
 
-fee share rules:
-* applied only where the Core books hook eth as fees in `receive()` (including the skim that returns during the Core's own buyback swap). eth booked later by `skim()` goes to the pot as today.
-* an injection into `ethToBuyback` needs no re anchor (the eth buyback has no auction).
+* setting `reserveBps` is replaced by `saleFloorBps` (launch 7_500, bounds 1_000 to 40_000): the hard floor. no statement leaves the Core by a sale for less than `cost * saleFloorBps / 10_000`.
+* `IController` gains `function statementPrice(uint256 sid, uint256 cost, uint64 listedAt) external view returns (uint256 priceWei)`. the Core calls it with the same fixed gas cap as the other controller reads. `_reserveFor(sid) = max(priceWei, floorWei)`. if the call fails or returns malformed data: compose and relists revert, `repriceStatement` reverts (the stored reserve stays).
+* listing at compose, relist after an unwound sale, relist after overprint: reserve `_reserveFor` at the new `listedAt` (age zero, so the start price).
+* `repriceStatement(sid)`, permissionless: sets the house reserve to `_reserveFor(sid)` when the listing has no bid. this is the call a first bidder makes before bidding.
+* `sellTo(uint256 sid, address buyer) external payable`, only the controller, guarded: eth lane statement, held and listed. cancels the house listing (reverts if a bid exists, a live auction always wins), requires `msg.value >= cost * saleFloorBps / 10_000`, sends the statement to `buyer` with `transferFrom`, books `msg.value` exactly like collected sale proceeds (checkpoint, split by `saleToBuybackBps`, resync funded), clears the record, emits a sold event with buyer and price. no refund logic in the Core.
+* `exitAfter` STAYS a Core setting, launch value 105 hours (378_000), bounds as before. redemption never depends on the controller.
+* redeem reimbursement: `exitStatement` repays the caller's gas in eth from `ethPot` with the same rule and settings as compose (`reimburseBps` of gas cost, capped at `reimburseCapBps` of the statement cost and at the pot; an exit lane statement uses the notional cap `composeExit` uses). nothing is added to a cost basis. bound the gas counted so a gas burning module cannot push it past the cap. paid after all state is final, no reentrancy opening.
+* SPEC invariant 3 becomes: a statement only leaves the Core by a house auction whose reserve was at least the hard floor when it was set, by `sellTo` with payment at least the hard floor, by an exit that returned at least `rating * unitPerPoint`, or as the top of an overprint.
 
-size: the Core has about 450 bytes of room. put the price math and anything else movable into `CoreLib`. the new settings may use a fourth storage word if three do not fit, keep the hot path (the two sell doors) at the loads it has today. margin after the change at least 100 bytes.
+### 9.3 controller side (src/ControllerV1.sol, nothing is deployed so extend it in place)
 
-### 9a. amendment (owner confirmed, wins over the text above where they differ)
+* owner of the controller settings is the Core's owner read live (`core.owner()`), no second owner.
+* settings, each owner settable at once with an event: `buyOnly` (launch false), `startBps` (11_000), `stepBps` (100), `stepEvery` (3 hours), `floorBps` (7_500). sane bounds: startBps 1_000 to 40_000, stepBps 0 to 5_000, stepEvery 1 minute to 30 days, floorBps 1_000 to startBps.
+* `statementPrice(sid, cost, listedAt)`: `steps = (now - listedAt) / stepEvery`, `bps = max(startBps - min(steps * stepBps, startBps), floorBps)`, `cost * bps / 10_000`. in buy only mode it returns the start price without decay, so the house reserve is not walked down.
+* `priceOf(sid)` view for frontends: the current asking price from the Core's `statementInfo`, in either mode.
+* `buy(uint256 sid) external payable`, guarded, only when `buyOnly`: price is the decayed asking price, `msg.value >= price`, calls `core.sellTo{value: price}(sid, msg.sender)`, refunds the excess to the caller last.
+* the credit picking functions are unchanged.
 
-| item | value |
-|---|---|
-| `buyNowAfter` | launch 48 hours, bounds 1 hour to 365 days |
-| `buyNowStepBps` | launch 100 (one point of cost per step), bounds 1 to 5_000 |
-| `buyNowStepEvery` | launch 4 hours, bounds 1 minute to 30 days (a short step makes the decay effectively smooth) |
-| `buyNowFloorBps` | launch 7_500, bounds 1_000 to 40_000 |
+### 9.4 trust note for the docs (replaces the timelock text everywhere)
 
-so with launch values: auction only at 90 percent for 48 hours, buy now opens at 90 at hour 48, 89 at hour 52, 84 at hour 72, 78 at hour 96, 75 (the floor) at hour 108 and it stays there.
+with no delay the owner key controls everything at once: it can point the exitModule at a contract that returns dust and take every statement, swap the controller and sell every statement at the hard floor, lower the hard floor to its bound, and overpay for credits as already documented. a stolen owner key means the whole engine at once. the owner chose this: the system is new and must adapt fast, and he will announce changes off chain. holders trust the owner key fully. say it in exactly this strength in ARCHITECTURE and DEPLOY, no softening.
 
-redeem rule. the setting `exitAfter` is REMOVED from the `Settings` struct, the bounds, the config, the scripts, the tests and the docs. an eth lane statement may be handed to the exitModule exactly when its buy now price has reached the floor: listed, no bid, and the current buy now bps equals the effective floor `min(buyNowFloorBps, reserveBps)`. with launch values that is hour 108. one shared helper must decide both the buy now price and "at the floor" so they can never disagree. while no exitModule is set the statement simply stays buyable at the floor. a buy or a bid that lands first wins, the exit then reverts.
+### 9.5 size
 
-redeem reimbursement. `exitStatement` repays the caller's gas in eth from `ethPot` with the same rule and settings as compose (`reimburseBps` of gas cost, capped at `reimburseCapBps` of the statement cost and at the pot; an exit lane statement uses the same notional cap `composeExit` uses). nothing is added to any cost basis. measure gas the way compose does, with a fixed gas cap or fixed allowance around the exitModule call so a gas burning module cannot inflate it beyond the cap. the payment happens after all state is final and must not open reentrancy.
+deleting the timelock machinery frees room. price math and anything movable go to `CoreLib`. final margin at least 150 bytes.
