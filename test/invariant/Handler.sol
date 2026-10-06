@@ -549,7 +549,7 @@ contract Handler is Test {
     function _rs() internal view returns (RS memory s) {
         s.rate = core.ethRate();
         s.pot = core.ethPot();
-        s.funded = s.pot * 10_000 >= core.AVG_SCORE() * s.rate;
+        s.funded = s.pot * 2000 >= core.AVG_SCORE() * s.rate;
     }
 
     /// invariant 6 and its companions. the rate may not rise in an interval that began unfunded. across a
@@ -566,7 +566,7 @@ contract Handler is Test {
             uint256 maxR = s.rate * uint256(FixedPointMathLib.powWad(1.08e18, int256(hoursWad))) / 1e18;
             if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above 8 percent an hour");
             if (s.funded) {
-                uint256 cap = s.pot * 10_000 / core.AVG_SCORE();
+                uint256 cap = s.pot * 2000 / core.AVG_SCORE();
                 uint256 minR = s.rate;
                 if (s.rate < cap) {
                     // forge-lint: disable-next-line(unsafe-typecast)
@@ -578,7 +578,7 @@ contract Handler is Test {
                 _flag(V_RATE_UNFUNDED, "unfunded rate moved");
             }
         }
-        if (core.funded() != (core.ethPot() * 10_000 >= core.AVG_SCORE() * rate1)) {
+        if (core.funded() != (core.ethPot() * 2000 >= core.AVG_SCORE() * rate1)) {
             _flag(V_FUNDED_STALE, "funded flag disagrees with pot and rate");
         }
     }
@@ -1086,7 +1086,7 @@ contract Handler is Test {
     //////////////////////////////////////////////////////////////*/
 
     /// mostly minutes to hours, now and then days. the rate climbs 1 to 8 percent an hour while funded, so a
-    /// fuzz that warps days at a time pins it at the funded clamp, where the hourly cap refuses every fill.
+    /// fuzz that warps days at a time pins it at the funded clamp, where 20 percent of the pot buys one average credit.
     function warp(uint256 dtSeed) external checked {
         _att(A_WARP);
         _advance(dtSeed % 10 == 0 ? _logBound(dtSeed / 10, 1 hours, 3 days) : _logBound(dtSeed / 10, 60, 6 hours), 0);

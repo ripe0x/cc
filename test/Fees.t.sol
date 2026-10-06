@@ -298,7 +298,7 @@ contract ReceiveTest is FeeBase {
         assertTrue(ok);
         emit log_named_uint("receive gas, 20 years, rate 1, pot 1e8 eth", g);
         assertLt(g, 400_000);
-        assertEq(core.rateAtCheckpoint(), (core.ethPot() - 1 ether) * 10_000 / core.AVG_SCORE(), "climbed to the cap");
+        assertEq(core.rateAtCheckpoint(), (core.ethPot() - 1 ether) * 2000 / core.AVG_SCORE(), "climbed to the cap");
     }
 
     function test_receiveGasRoutine() public {

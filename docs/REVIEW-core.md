@@ -95,8 +95,8 @@ accounting and eth
 * hourly cap: two fixed windows can spend 40 percent across a boundary (deviation 4). tips count, `x` is rechecked after the call.
 
 rate
-* `ethRate` ten years after the last checkpoint with a funded pot: clamps at `ethPot * 1e4 / AVG_SCORE`, 18k gas: `test_held_tenYearGapRateRead`. powWad exponent is at most 24e18 per segment, no overflow.
-* funded clamp equals the funded test (`cap >= rate` iff `ethPot * 1e4 >= AVG * rate`), every pot change checkpoints first, so no climb while unfunded. drop at `x == p` gives exactly 10 percent, `x > p` reverts first, a zero pot reverts.
+* `ethRate` ten years after the last checkpoint with a funded pot: clamps at `ethPot * 2000 / AVG_SCORE` (was `* 1e4` before the funded fix, see ARCHITECTURE section 10 item 8), 18k gas: `test_held_tenYearGapRateRead`. powWad exponent is at most 24e18 per segment, no overflow.
+* funded clamp equals the funded test (`cap >= rate` iff `ethPot * 2000 >= AVG * rate` (the funded fix)), every pot change checkpoints first, so no climb while unfunded. drop at `x == p` gives exactly 10 percent, `x > p` reverts first, a zero pot reverts.
 
 piles and statements
 * list operations for single, head, tail, middle, and an id that leaves and returns (the struct is deleted on pull). id 0 is refused at every door. `_unhold` is correct when the removed id is the last slot, and overprint calls it before the external call, with base kept intact. compose cannot be bricked by a third party: a pile credit cannot leave the core.

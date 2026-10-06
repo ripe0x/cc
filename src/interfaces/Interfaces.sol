@@ -78,6 +78,18 @@ interface ICreditStrategy {
     function sellTargetNFT(uint256 tokenId) external payable;
 }
 
+/// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
+/// `hook` is the only address whose eth the Core books as fees. the rest feed the pool key and the forbidden targets
+struct Stack {
+    address poolManager;
+    address hook;
+    int24 tickSpacing;
+    uint24 poolFee;
+    address factory;
+    address locker;
+    address escrow;
+}
+
 library Mainnet {
     address internal constant CREDITS = 0x97630aA70AB14ed9883B41dAfccBc11349723043;
     address internal constant STATEMENTS = 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b;
@@ -91,7 +103,8 @@ library Mainnet {
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant UNIVERSAL_ROUTER = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
-    // the live artcoins stack
+    // the live artcoins stack at the pin. this is the DEFAULT config only (script/config/mainnet.json and the tests).
+    // nothing in `src/` reads these, the Core takes its stack as a constructor argument
     address internal constant ARTCOINS_FACTORY = 0x49596c375c139E79bb937bcf826068a8F78D4e0e;
     address internal constant ARTCOINS_FACTORY_OWNER = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
     address internal constant SKIM_HOOK = 0x636c050296B5Cc528D8785169Bf8923716FCa9cc;
@@ -102,4 +115,17 @@ library Mainnet {
     /// the dynamic fee flag every artcoins pool uses, and its tick spacing
     uint24 internal constant POOL_FEE = 0x800000;
     int24 internal constant TICK_SPACING = 200;
+
+    /// the default stack: the live artcoins deployment
+    function defaultStack() internal pure returns (Stack memory) {
+        return Stack({
+            poolManager: POOL_MANAGER,
+            hook: SKIM_HOOK,
+            tickSpacing: TICK_SPACING,
+            poolFee: POOL_FEE,
+            factory: ARTCOINS_FACTORY,
+            locker: LP_LOCKER,
+            escrow: FEE_ESCROW
+        });
+    }
 }

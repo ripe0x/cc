@@ -13,7 +13,7 @@ we own two contracts. everything else is live on mainnet and is used as deployed
 | `Core` | custody and every rule: pots, rate, cap, piles, doors, compose, statement auction, exit, overprint, both buybacks, timelock. also the bounty recipient of the skim hook |
 | `ControllerV1` | first policy module. holds only the core address. `nextPage(lane)` is ready when the pile holds 80 credits and returns the first 80 ids with format 0. `wants` returns 0, `nextOverprint` is never ready |
 
-live artcoins stack (all pinned at block 26127622, verified in docs/reference/artcoins-notes.md):
+the artcoins stack is a deploy input. the Core takes it as the constructor argument `Stack { poolManager, hook, tickSpacing, poolFee, factory, locker, escrow }` and stores it as immutables (`MANAGER`, `HOOK`, `TICK_SPACING`, `POOL_FEE`, `FACTORY`, `LOCKER`, `ESCROW`). nothing in `src/Core.sol` names an artcoins address. the table below is the live stack at block 26127622 (verified in docs/reference/artcoins-notes.md), which is the DEFAULT config only: `script/config/mainnet.json`, `Mainnet.defaultStack()` and the tests. a new artcoins version changes the stack block of the config and nothing else in code (docs/DEPLOY.md section 5). the hook is the only address whose eth `receive()` books as fees. the factory, locker and escrow feed the pool key and the forbidden target list.
 
 | piece | address |
 |---|---|
@@ -26,17 +26,17 @@ live artcoins stack (all pinned at block 26127622, verified in docs/reference/ar
 | uniswap v4 pool manager | 0x000000000004444c5dc75cB358380D2e3dE08A90 |
 | universal router | 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af |
 
-the coin is an `ArtCoinsToken` launched through the factory. it is not our code. the other live pieces the core touches are Credits 0x97630aA70AB14ed9883B41dAfccBc11349723043, Statements 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b, CreditScore 0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7, CreditStrategy 0x8e607209899b5d12Bd3167a6CD0E8E11FEB053d6 and Seaport 1.6 0x0000000000000068F116a894984e2DB1123eB395. constants live in `src/interfaces/Interfaces.sol`.
+the coin is an `ArtCoinsToken` launched through the factory. it is not our code. the other live pieces the core touches are Credits 0x97630aA70AB14ed9883B41dAfccBc11349723043, Statements 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b, CreditScore 0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7, CreditStrategy 0x8e607209899b5d12Bd3167a6CD0E8E11FEB053d6 and Seaport 1.6 0x0000000000000068F116a894984e2DB1123eB395. constants live in `src/interfaces/Interfaces.sol`. Credits, Statements, CreditScore, CreditStrategy, Seaport, Permit2, the position manager and the universal router stay constants.
 
 toolchain: solc 0.8.30, cancun, via_ir, optimizer 200, solady, v4 core and periphery pinned in `lib/`. every runtime contract must stay under 24,576 bytes (`forge build --sizes`).
 
 ## 2. launch config
 
-one call to `ArtCoinsFactory.deployTokenWithProtocolBpsAndTax(cfg, 0, tax)` with `msg.value` equal to the live `deployFee()` (0.069 eth at the pin). script and tests use the same builder (`script/Deploy.s.sol`, `SystemDeployer`).
+one call to `ArtCoinsFactory.deployTokenWithProtocolBpsAndTax(cfg, 0, tax)` with `msg.value` equal to the live `deployFee()` (0.069 eth at the pin). script and tests use the same builder (`script/Builder.sol`, `script/Deploy.s.sol` `SystemDeployer`), driven by one `LaunchConfig` struct (`script/LaunchConfig.sol`) that the scripts load from `script/config/mainnet.json` and the tests fill in memory.
 
 | field | value |
 |---|---|
-| supply | 1,000,000,000e18, no extensions, all of it in the locker |
+| supply | `launch.supply` 1,000,000,000e18 (equal to the Core `SUPPLY` constant), no extensions, all of it in the locker |
 | pool | native eth against the coin, hook = skim hook, dynamic fee flag 0x800000, tick spacing 200 |
 | start price | `tickIfToken0IsArtCoins = -175000`, about 40M coin per eth |
 | position | one position from -175000 to 887200 (highest multiple of 200), 10,000 bps |
@@ -52,28 +52,31 @@ deploy order, no circularity:
 
 | step | action |
 |---|---|
+| 0 | `_requireConfig`: owner, creator, name, symbol and salt must be set and `rateStart` in bounds, then the whole preflight runs |
 | 1 | predict the Core and ControllerV1 addresses from the deployer nonce |
 | 2 | build the tax config with the Core in `exempt` and predict the coin with CREATE2 (factory as deployer, salt `keccak256(abi.encode(tokenAdmin, userSalt))`, initcode includes the tax config) |
 | 3 | deploy ControllerV1 with the predicted Core |
-| 4 | deploy Core at the predicted address with the predicted coin |
+| 4 | deploy Core at the predicted address with the predicted coin, the stack and `rateStart` |
 | 5 | launch through the factory and assert the returned coin equals the prediction |
-| 6 | `lockPoolExtension`, then `updateAdmin(owner)`, then read back every configured value |
+| 6 | `lockPoolExtension`, then `updateAdmin(owner)`, then the postflight read back of every configured value, which reverts on any mismatch |
 
 the factory is `deprecated` at the pin, so only its owner or an address the owner marks admin can launch. the owner calls `setAdmin(deployer, true)` first. that is the only artcoins state the tests force, through a prank of the real owner.
 
-launch runbook. the predicted coin address ignores the pool config, so a copy of the launch made first by anyone else would leave the already deployed Core bound to a pool that never pays it. the script refuses to start if code already exists at the predicted coin address.
+launch runbook. the exact commands in order are in docs/DEPLOY.md. the predicted coin address ignores the pool config, so a copy of the launch made first by anyone else would leave the already deployed Core bound to a pool that never pays it. so: keep the factory deprecated until the launch is mined, the factory owner enables only the deployer, the broadcast goes through a private relay, the script reverts on any prediction mismatch or if code already exists at the predicted coin address, and the factory owner revokes the deployer right after the postflight, since an admin can also set hooks, lockers and mev modules and claim team fees.
 
-| step | action |
+config, checks and rehearsal.
+
+| piece | what it is |
 |---|---|
-| 1 | keep the artcoins factory deprecated until the launch is mined |
-| 2 | the factory owner enables only the deployer address, `setAdmin(deployer, true)` |
-| 3 | broadcast through a private relay, never a public mempool |
-| 4 | verify the returned coin equals the prediction (the script reverts on a mismatch) |
-| 5 | the factory owner revokes the deployer, `setAdmin(deployer, false)`, since an admin can also set hooks, lockers and mev modules and claim team fees |
+| `script/config/mainnet.json` | everything a launch needs: the stack (live artcoins as default), mev module, factory owner, owner (core owner and final token admin), creator, name, symbol, salt, `rateStart` and the launch parameters. owner, creator, name, symbol and salt are placeholders (zero address, empty strings) that must be filled. `Deploy` refuses to run while any is unset. read with `vm.parseJson`, `LAUNCH_CONFIG` names another file, `PRIVATE_KEY` is the only env override and is a secret |
+| `script/Preflight.s.sol` | read only. checks chain id 1, code at every address, the hook, locker and mev module enabled on the factory, who may launch, deploy fee against the deployer balance, the predicted addresses empty, Credits, Statements and CreditScore sanity, placeholders and `rateStart`. prints a table, reverts with the failed names |
+| `script/Postflight.s.sol` | read only. reads a deployed core back and compares every immutable, the controller, allowed targets, coin supply and its place in the pool, pool key and id, skim config, tax config, exempt core, token admin, extension lock, locker reward slot and `ethRate` with the config. prints a table and the constructor args, reverts on a mismatch |
+| `test/Rehearsal.t.sol` | forks the latest block, runs preflight, the real deploy as the factory owner enables the deployer, postflight and a smoke (buy and sell through the universal router, the fee lands in the pot, a real credit sold into the bid). skipped unless `REHEARSAL` is set |
+| `test/Config.t.sol` | the json equals the default config, the placeholder guard, preflight and postflight pass and fail where they should |
 
 ## 3. fee intake
 
-there is no hook of ours. the live skim hook takes its skim in eth on every swap and pushes the bounty to `Core.receive()` with all gas.
+there is no hook of ours. the skim hook of the configured stack takes its skim in eth on every swap and pushes the bounty to `Core.receive()` with all gas.
 
 * from the skim hook while no measurement is in flight: checkpoint the rate, add to `ethPot`, resync the funded flag, emit `FeesAdded`.
 * anything else (donations, refunds from a purchase, a measurement in flight): accept and book nothing. `skim()` books it later. during a `buyListing` or exit measurement the unbooked eth lowers the measured cost, which keeps pot and balance consistent.
@@ -87,7 +90,7 @@ there is no hook of ours. the live skim hook takes its skim in eth on every swap
 
 accounting: `ethPot` (buying), `ethToBuyback`, `xPot` (exit token bid), `xToBuyback`. invariant: pots never exceed what the core holds.
 
-rate (wei per point of score, `RATE_START` 4e12), lazy and checkpointed:
+rate (wei per whole point of score). it opens at `RATE_START`, an immutable constructor argument bounded to [`RATE_START_MIN` 1e11, `RATE_START_MAX` 1e15] because the right opening bid depends on the market on launch day (the default in the config is 4e12). lazy and checkpointed:
 
 | since last fill | climb per hour |
 |---|---|
@@ -96,7 +99,8 @@ rate (wei per point of score, `RATE_START` 4e12), lazy and checkpointed:
 | 48h to 72h | 400 bps |
 | after 72h | 800 bps |
 
-* it climbs only while `funded`, and is clamped at `max(rateAtCheckpoint, ethPot * 1e4 / AVG_SCORE)`, the point where the pot can no longer pay one average credit (`AVG_SCORE` 4,330,000).
+* `funded` means the hourly cap can afford one average credit at the stored rate: `ethPot * 2000 >= AVG_SCORE * rate` (cap is 20 percent of the pot, one average credit costs `AVG_SCORE * rate / 1e4`, `AVG_SCORE` 4,330,000). at the start rate that is a pot of 5 average credits, 8.66e15 wei. between 1 and 5 average credits the pot is unfunded and the rate does not climb.
+* it climbs only while `funded`, and is clamped at `max(rateAtCheckpoint, ethPot * 2000 / AVG_SCORE)`, the exact point where 20 percent of the pot no longer buys one average credit. so at the clamp an average credit can still be sold in the same block, the bid never climbs to a level nobody can sell into.
 * every pot change checkpoints first. a fill of `x` from pot `p` drops the rate by `rate * 10% * min(x, p) / p` and sets `lastFillTime`. for `buyListing`, `x = cost + tip`.
 
 hourly cap: a fixed window. the first spend after `windowStart + 1 hours` opens a new window with `windowPot = ethPot`. a spend needs `windowSpent + x <= windowPot * 20%`. tips count, gas reimbursements do not.
@@ -113,7 +117,7 @@ piles: per lane (eth, exit) an insertion ordered doubly linked list keyed by cre
 | `buyListing(value, data, id, target)` | the caller builds the calldata, the core calls an allowed target (Seaport 1.6 and CreditStrategy at launch) with `value`. cost is measured as the eth balance fall. needs the credit to arrive, `cost <= value <= ceiling`, and pot and cap room. the keeper tip is `min(10% of savings, 2% of cost)`, and `cost + tip` is booked as the spend |
 | `sellForExitToken(ids)` and `(ids, minOut)` | phase 2. pays `score * xRate * unitPerPoint / 1e4` in exit token from `xPot` into the exit pile. `xRate` starts at 6000 bps of score, caps at 9700, floors at 3000, climbs 100 bps per hour and drops 20 bps per credit |
 
-forbidden targets, checked when a target is added and again at call time: Credits, Statements, the Core, the coin, the skim hook, the pool manager, the artcoins factory, locker and fee escrow, the exitModule and the exitToken.
+forbidden targets, checked when a target is added and again at call time: Credits, Statements, the Core, the coin, the hook, the pool manager, the factory, locker and fee escrow of the stack, Permit2, the position manager, the universal router, the exitModule and the exitToken.
 
 ## 6. compose, auction, exit, overprint
 
@@ -127,7 +131,7 @@ overprint: permissionless and guarded. asks `controller.nextOverprint()`, needs 
 
 ## 7. eth buyback with a real burn
 
-`buyback()`, guarded. slice `min(1 eth, ethToBuyback)`, at most once per 25 blocks, tip 0.5 percent of the slice to the caller. the core swaps exact in through `PoolManager.unlock` and `unlockCallback` on the canonical pool key `(0, coin, 0x800000, 200, skimHook)`, takes the coin to itself (the core is exempt from the tax) and calls `burn` on the token, so total supply falls. it reverts `NothingBought()` when no coin came out.
+`buyback()`, guarded. slice `min(1 eth, ethToBuyback)`, at most once per 25 blocks, tip 0.5 percent of the slice to the caller. the core swaps exact in through `PoolManager.unlock` and `unlockCallback` on the canonical pool key `(0, coin, POOL_FEE, TICK_SPACING, HOOK)` (0x800000 and 200 on the live stack), takes the coin to itself (the core is exempt from the tax) and calls `burn` on the token, so total supply falls. it reverts `NothingBought()` when no coin came out.
 
 the callback returns what was spent and what was bought and requires the pool took no more than it was given. the tip scales down on a partial fill and unspent input goes back to `ethToBuyback`. the hook's skim on this swap returns to the core through `receive()` during the guarded call, which is expected and books into the pot. there is no min out (section 10).
 
@@ -167,8 +171,9 @@ tests policy: real contracts only. fork at block 26127622 (`FORK_BLOCK`), rpc fr
 | attackers | hostile target, scripted and fuzz controllers, probes, statement buyers, mid swap callers, in `test/attackers/`. they attack the real system, they do not replace any of it |
 | swaps | a small unlock based test swapper (a caller, not a stand in) and one test that buys and sells through the real universal router |
 | owner action forced | one prank of the real factory owner: `setAdmin(deployer, true)` |
+| rehearsal | `test/Rehearsal.t.sol` forks the latest block instead of the pinned one and skips unless `REHEARSAL` is set. the default suite stays pinned and fast |
 
-suites: `CoreUnit`, `Fees`, `Launch`, `Lifecycle`, `ReviewCore`, `Seaport` and the invariant handlers in `test/invariant/` (the handler models the auction price with the 6 hour half life and the restart rule). listing tests must fund the pot and warp until the ceiling clears the listing price, because `RATE_START` is far below the CreditStrategy prices at the pin. the Seaport test builds genuine Seaport 1.6 orders on the fork and fulfills them through `buyListing`.
+suites: `CoreUnit`, `Config`, `Fees`, `Launch`, `Lifecycle`, `ReviewCore`, `Seaport` and the invariant handlers in `test/invariant/` (the handler models the auction price with the 6 hour half life and the restart rule). listing tests must fund the pot and warp until the ceiling clears the listing price, because `RATE_START` is far below the CreditStrategy prices at the pin. the Seaport test builds genuine Seaport 1.6 orders on the fork and fulfills them through `buyListing`.
 
 ## 10. deviations and accepted properties for the owner to confirm
 
@@ -183,7 +188,7 @@ none of these is a code change in this repo. each is either a deliberate departu
 | 5 | `receive()` gas | `receive()` adds about 15.6k gas to every swap in the pool, and must never revert or the pool is bricked for everyone, sells included |
 | 6 | referral cap is 0, `notify` is a no op | the core implements `notify` and books nothing, so a raised cap can never revert a swap. eth it receives that way is booked later by `skim` |
 | 7 | hourly cap is a fixed window | the window reopens on the first spend after it expires, so two adjacent windows can spend 40 percent of the pot across a boundary. tips count against it, gas reimbursements do not |
-| 8 | funded clamp against the hourly cap | the rate stops climbing where one average credit costs the whole pot, but the cap lets only 20 percent of the pot out per hour. with a small pot the rate can therefore climb until an average credit cannot be sold, and it recovers only when the pot grows or the window allows more |
+| 8 | funded clamp equals the hourly cap (changed, adopted) | `funded` and the climb clamp use the threshold where 20 percent of the pot buys one average credit, so the bid cannot climb above what the cap lets anyone sell into. the cost is that the bid stops lower: at the clamp the whole pot is five average credits, and with a pot under that the rate does not climb at all. credits with a score above the average or a bonus can still exceed the hourly cap and wait for a bigger pot |
 | 9 | eth buyback has no min out | the swap is exact in with no price floor, as in the upstream pattern. the launch liquidity is locked and no third party position can sit in the way of the slice, and a sandwich pays the skim and tax round trip. the 1 eth slice and the 25 block delay bound the exposure |
 | 10 | exit auction sells at a discount | the opening price asks the whole supply for a slice and falls by half every 6 hours. buyers take exitToken below its market value whenever they wait. it can go cheap only after a long unattended decay for each slice, because every restart is at least a quarter of the last start |
 | 11 | exit auction restart can sit above a fair price | a fill at a high price doubles the next start. the price then decays on the clock only, with no demand signal |
@@ -196,3 +201,6 @@ none of these is a code change in this repo. each is either a deliberate departu
 | 18 | review P-1: third party fee income | eth pushed by the hook from any open pool that names the core as bounty recipient is booked as fee income. it is a donation by the sender, so `FeesAdded` is not proof of organic volume |
 | 19 | review P-6: cost basis in `buyListing` | a hook push that lands inside the target call lowers the measured cost, so the stored basis and the statement floor are understated by it. the books stay exact and no profitable path was found |
 | 20 | review P-7: venue tax bypass | the venue tax can be bypassed with a flash liquidity add and remove in the canonical pool (an artcoins hook issue found in the artcoins audit), so the tax is a weak deterrent against a purpose built router. model fee income on canonical pool volume only, about 9.5 percent of net new money entering through that pool |
+| 21 | stack is a deploy input | the Core stores the stack it launched on and cannot be repointed. a launch on a new artcoins version is a new Core. the token creation code file (`launch.tokenCodeFile`) is also an input of the coin prediction and must match the token implementation of the stack |
+| 22 | `rateStart` is a deploy input | bounded to [1e11, 1e15] wei per whole point and immutable. the default 4e12 is a placeholder until the simulation sets it |
+| 23 | `FEE_BPS` and `CREATOR_BPS` are informational | no logic reads them. the skim is configured at the hook. `SUPPLY` is read by the exit auction and must equal the launch supply, which preflight and postflight check |

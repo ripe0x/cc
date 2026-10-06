@@ -9,6 +9,7 @@ import {ControllerV1} from "../../src/ControllerV1.sol";
 import {Lane, ICredits, IStatements, Mainnet} from "../../src/interfaces/Interfaces.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
+import {LaunchConfig} from "../../script/LaunchConfig.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {CreditIds} from "./CreditIds.sol";
@@ -62,6 +63,8 @@ abstract contract Fixture is Test, SystemDeployer {
 
     // ------------------------------------------------------------------ the system
 
+    /// @dev the launch config of the fixture: the default (live artcoins stack) with the placeholders filled
+    LaunchConfig internal lc;
     Core internal core;
     IArtCoinsToken internal coin;
     ControllerV1 internal ctl;
@@ -125,7 +128,13 @@ abstract contract Fixture is Test, SystemDeployer {
         vm.deal(deployer, 1 ether);
 
         vm.startPrank(deployer);
-        Deployed memory d = deploySystem(deployer, owner, creator, "Fixture Coin", "FIXT", FIXTURE_SALT);
+        lc = defaultConfig();
+        lc.owner = owner;
+        lc.creator = creator;
+        lc.name = "Fixture Coin";
+        lc.symbol = "FIXT";
+        lc.salt = FIXTURE_SALT;
+        Deployed memory d = deploySystem(deployer, lc);
         vm.stopPrank();
 
         core = Core(payable(d.core));
@@ -134,6 +143,44 @@ abstract contract Fixture is Test, SystemDeployer {
         launchKey = d.launchKey;
         poolId = d.poolId;
         launchTime = block.timestamp;
+    }
+
+    // ------------------------------------------------------------------ builders on the fixture config
+
+    function _cfg(string memory name, string memory symbol, bytes32 salt) private view returns (LaunchConfig memory l) {
+        l = lc;
+        l.name = name;
+        l.symbol = symbol;
+        l.salt = salt;
+    }
+
+    function predictCoin(address tokenAdmin, address core_, string memory name, string memory symbol, bytes32 salt)
+        internal
+        view
+        returns (address)
+    {
+        return predictCoin(_cfg(name, symbol, salt), tokenAdmin, core_);
+    }
+
+    function buildConfig(
+        address tokenAdmin,
+        address core_,
+        address creator_,
+        string memory name,
+        string memory symbol,
+        bytes32 salt
+    ) internal view returns (IArtCoinsFactory.DeploymentConfig memory) {
+        LaunchConfig memory l = _cfg(name, symbol, salt);
+        l.creator = creator_;
+        return buildConfig(l, tokenAdmin, core_);
+    }
+
+    function buildTaxConfig(address core_) internal view returns (IArtCoinsFactory.TaxConfig memory) {
+        return buildTaxConfig(lc, core_);
+    }
+
+    function poolKeyOf(address coin_) internal view returns (PoolKey memory) {
+        return poolKeyOf(coin_, lc.stack);
     }
 
     /// @notice a namespaced account with no code

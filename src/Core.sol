@@ -22,6 +22,7 @@ import {
     ICredits,
     ICreditScore,
     IStatements,
+    Stack,
     Mainnet
 } from "./interfaces/Interfaces.sol";
 
@@ -110,6 +111,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error NothingBought();
     error TooSoon();
     error DailyCap();
+    error BadRate();
+    error BadStack();
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -148,8 +151,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public constant FEE_BPS = 1000;
     uint256 public constant CREATOR_BPS = 50;
     uint256 public constant AVG_SCORE = 4_330_000;
-    /// wei per whole point
-    uint256 public constant RATE_START = 4e12;
+    /// bounds of the opening bid, wei per whole point. the right opening depends on the market on launch day
+    uint256 public constant RATE_START_MIN = 1e11;
+    uint256 public constant RATE_START_MAX = 1e15;
     uint256 public constant CLIMB_BASE_BPS_PER_HOUR = 100;
     uint256 public constant CLIMB_DOUBLE_EVERY = 24 hours;
     uint256 public constant CLIMB_MAX_BPS_PER_HOUR = 800;
@@ -198,12 +202,19 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     ICredits private constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements private constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
-    IPoolManager private constant MANAGER = IPoolManager(Mainnet.POOL_MANAGER);
-
-    address public constant HOOK = Mainnet.SKIM_HOOK;
 
     address public immutable OWNER;
     address public immutable COIN;
+    /// opening bid, wei per whole point, fixed at deploy
+    uint256 public immutable RATE_START;
+    /// the artcoins stack this core launched on, fixed at deploy. HOOK is the only sender whose eth is booked as fees
+    IPoolManager public immutable MANAGER;
+    address public immutable HOOK;
+    int24 public immutable TICK_SPACING;
+    uint24 public immutable POOL_FEE;
+    address public immutable FACTORY;
+    address public immutable LOCKER;
+    address public immutable ESCROW;
 
     /*//////////////////////////////////////////////////////////////
                                 STATE
@@ -256,14 +267,28 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         _;
     }
 
-    constructor(address owner_, address coin_, address controller_) {
+    constructor(address owner_, address coin_, address controller_, Stack memory stack_, uint256 rateStart_) {
         if (owner_ == address(0) || coin_ == address(0) || controller_ == address(0)) revert ZeroAddress();
+        if (
+            stack_.poolManager == address(0) || stack_.hook == address(0) || stack_.factory == address(0)
+                || stack_.locker == address(0) || stack_.escrow == address(0)
+        ) revert ZeroAddress();
+        if (stack_.tickSpacing <= 0) revert BadStack();
+        if (rateStart_ < RATE_START_MIN || rateStart_ > RATE_START_MAX) revert BadRate();
         OWNER = owner_;
         COIN = coin_;
+        RATE_START = rateStart_;
+        MANAGER = IPoolManager(stack_.poolManager);
+        HOOK = stack_.hook;
+        TICK_SPACING = stack_.tickSpacing;
+        POOL_FEE = stack_.poolFee;
+        FACTORY = stack_.factory;
+        LOCKER = stack_.locker;
+        ESCROW = stack_.escrow;
         controller = controller_;
         allowedTarget[Mainnet.SEAPORT] = true;
         allowedTarget[Mainnet.CREDIT_STRATEGY] = true;
-        rateAtCheckpoint = RATE_START;
+        rateAtCheckpoint = rateStart_;
         checkpointTime = uint64(block.timestamp);
         lastFillTime = uint64(block.timestamp);
         xRateAtCheckpoint = XRATE_START;
@@ -325,11 +350,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                ETH RATE
     //////////////////////////////////////////////////////////////*/
 
-    /// wei per whole point right now, climbed lazily from the checkpoint and clamped at the funded threshold.
+    /// wei per whole point right now, climbed lazily from the checkpoint. it stops climbing where the hourly cap (20
+    /// percent of the pot) no longer buys one average credit: `ethPot * 20% = AVG_SCORE * rate / 1e4`.
     function ethRate() public view returns (uint256 r) {
         r = rateAtCheckpoint;
         if (!funded) return r;
-        uint256 cap = ethPot * BPS / AVG_SCORE;
+        uint256 cap = ethPot * SPEND_CAP_BPS_PER_HOUR / AVG_SCORE;
         if (cap <= r) return r;
         uint256 last = lastFillTime;
         uint256 t = checkpointTime;
@@ -356,8 +382,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         checkpointTime = uint64(block.timestamp);
     }
 
+    /// funded means the hourly cap can afford one average credit at the stored rate. the same threshold clamps the climb
     function _syncFunded() private {
-        funded = ethPot * BPS >= AVG_SCORE * rateAtCheckpoint;
+        funded = ethPot * SPEND_CAP_BPS_PER_HOUR >= AVG_SCORE * rateAtCheckpoint;
     }
 
     function _ceiling(uint256 id, uint256 rate) private view returns (uint256) {
@@ -588,9 +615,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     function _forbidden(address t) private view returns (bool) {
         return t == address(CREDITS) || t == address(STATEMENTS) || t == address(this) || t == COIN || t == HOOK
-            || t == address(MANAGER) || t == Mainnet.ARTCOINS_FACTORY || t == Mainnet.LP_LOCKER
-            || t == Mainnet.FEE_ESCROW || t == Mainnet.PERMIT2 || t == Mainnet.POSITION_MANAGER
-            || t == Mainnet.UNIVERSAL_ROUTER || t == exitModule || t == exitToken;
+            || t == address(MANAGER) || t == FACTORY || t == LOCKER || t == ESCROW || t == Mainnet.PERMIT2
+            || t == Mainnet.POSITION_MANAGER || t == Mainnet.UNIVERSAL_ROUTER || t == exitModule || t == exitToken;
     }
 
     function _measuring() private pure returns (LibTransient.TBool storage) {
@@ -785,8 +811,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(address(0)),
             currency1: Currency.wrap(COIN),
-            fee: Mainnet.POOL_FEE,
-            tickSpacing: Mainnet.TICK_SPACING,
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
             hooks: IHooks(HOOK)
         });
         // forge-lint: disable-next-line(unsafe-typecast)

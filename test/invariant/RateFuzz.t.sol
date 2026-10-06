@@ -56,7 +56,7 @@ contract RateFuzzTest is Fixture {
         _fund(pot);
         assertTrue(core.funded());
         _warp(hrs * 1 hours);
-        uint256 cap = pot * 1e4 / AVG;
+        uint256 cap = pot * 2000 / AVG;
         uint256 want = _model(START, 0, hrs, cap);
         assertApproxEqRel(core.ethRate(), want, 1e-9 ether, "tiers 1, 2, 4 then 8 percent per hour, clamped");
         assertLe(core.ethRate(), cap < START ? START : cap);
@@ -69,8 +69,9 @@ contract RateFuzzTest is Fixture {
     /// no climb while the pot cannot afford one average credit, and no retroactive climb once it can.
     /// forge-config: default.fuzz.runs = 40
     function testFuzz_pauseWhenUnfunded(uint256 potSeed, uint256 idleSeed, uint256 topSeed, uint256 waitSeed) public {
-        // one average credit costs AVG * rate / 1e4 = 1.732e15 wei at the start rate
-        uint256 pot = bound(potSeed, 0, 1.73e15);
+        // one average credit costs AVG * rate / 1e4 = 1.732e15 wei at the start rate, and funded needs the hourly cap
+        // (20 percent of the pot) to afford it, so a pot of 8.66e15. everything below it is unfunded
+        uint256 pot = bound(potSeed, 0, 8.659e15);
         uint256 idle = bound(idleSeed, 0, 3000);
         if (pot != 0) _fund(pot);
         assertFalse(core.funded());
@@ -85,7 +86,7 @@ contract RateFuzzTest is Fixture {
         // the tier clock runs from the last fill, so the idle time counts toward the tier but not toward the rate
         uint256 hrs = bound(waitSeed, 0, 200);
         _warp(hrs * 1 hours);
-        uint256 cap = (pot + top) * 1e4 / AVG;
+        uint256 cap = (pot + top) * 2000 / AVG;
         assertApproxEqRel(core.ethRate(), _model(START, idle, hrs, cap), 1e-9 ether);
     }
 
@@ -99,7 +100,7 @@ contract RateFuzzTest is Fixture {
         _warp(hrs * 1 hours);
         uint256[] memory ids = _creditsTo(alice, n);
         uint256 r = core.ethRate();
-        assertApproxEqRel(r, _model(START, 0, hrs, pot * 1e4 / AVG), 1e-9 ether);
+        assertApproxEqRel(r, _model(START, 0, hrs, pot * 2000 / AVG), 1e-9 ether);
         uint256 p = pot;
         uint256 paid;
         for (uint256 i; i < n; ++i) {
@@ -167,40 +168,38 @@ contract RateFuzzTest is Fixture {
         }
     }
 
-    /// documents behaviour worth a design look: the funded clamp lets the rate climb to the level where one average
-    /// credit costs the whole pot, but the hourly cap allows only a fifth of the pot an hour. an average credit then
-    /// cannot be bought at all, so the rate never drops and stays pinned. only credits scoring under a fifth of
-    /// the average can still be sold, and each of those drops the rate a little.
+    /// the funded clamp keeps an average credit sellable: at the clamp 20 percent of the pot buys one average credit,
+    /// so in a fresh window every credit scoring at most the average sells in the same block, and one that costs more
+    /// than the hourly cap is refused by it.
     /// forge-config: default.fuzz.runs = 20
-    function testFuzz_documented_clampOutrunsHourlyCap(uint256 potSeed, uint256 waitSeed) public {
+    function testFuzz_clampKeepsAnAverageCreditSellable(uint256 potSeed, uint256 waitSeed) public {
         uint256 pot = bound(potSeed, 0.01 ether, 100 ether);
         _fund(pot);
         _warp(bound(waitSeed, 2000, 20_000) * 1 hours);
-        uint256 cap = pot * 1e4 / AVG;
+        uint256 cap = pot * 2000 / AVG;
         assertEq(core.ethRate(), cap, "pinned at the funded clamp");
         assertTrue(core.funded());
-        // an average credit costs the whole pot (up to rounding), five times what an hour allows
+        // one average credit costs what the hourly cap allows, up to rounding down of the rate
         uint256 avgPrice = AVG * cap / 1e4;
-        assertGe(avgPrice * 1e4, pot * 9_999);
-        assertGt(avgPrice, pot * 2000 / 10_000);
+        assertLe(avgPrice, pot * 2000 / 10_000);
+        assertGe(avgPrice * 1e4 + AVG, pot * 2000);
 
         uint256[] memory ids = _creditsTo(alice, 12);
-        uint256 blocked;
+        uint256 sold;
         for (uint256 i; i < ids.length; ++i) {
             uint256 price = core.ceilingOf(ids[i]);
-            uint256 rateBefore = core.rateAtCheckpoint();
+            uint256 snap = vm.snapshotState();
             vm.prank(alice);
             try core.sellForEth(_one(ids[i])) {
                 assertLe(price, pot * 2000 / 10_000);
+                ++sold;
             } catch (bytes memory why) {
-                // above the whole pot it is PotTooSmall, otherwise the cap
-                assertEq(bytes4(why), price > pot ? Core.PotTooSmall.selector : Core.HourlyCap.selector);
-                assertEq(core.rateAtCheckpoint(), rateBefore, "a blocked sell leaves the rate alone");
-                ++blocked;
+                assertGt(core.scoreOf(ids[i]), AVG, "an average or smaller credit was refused at the clamp");
+                assertEq(bytes4(why), Core.HourlyCap.selector);
             }
+            vm.revertToState(snap);
         }
-        // no assertion on how many were blocked: it depends on the scores of the credits picked
-        emit log_named_uint("blocked of 12", blocked);
+        emit log_named_uint("sold at the clamp of 12", sold);
     }
 
     /// documents deviation 4: the window is fixed, not rolling, so just across a boundary the core can spend about

@@ -40,7 +40,8 @@ contract LifecycleSwapsTest is Fixture {
     function test_swaps_rateClimbsOnlyOnceFunded() public {
         assertEq(core.ethRate(), core.RATE_START());
 
-        // one average credit costs 1.732e15 wei at the start rate. a small buy leaves less than that in the pot
+        // one average credit costs 1.732e15 wei at the start rate and funded needs the hourly cap (20 percent of the
+        // pot) to afford it, so a pot of 8.66e15. a small buy leaves less than one average credit in the pot
         _buyCoin(trader, 0.01 ether);
         assertLt(core.ethPot(), 1.7e15);
         assertFalse(core.funded());
@@ -54,9 +55,9 @@ contract LifecycleSwapsTest is Fixture {
         _warp(10 hours);
         assertGt(core.ethRate(), core.RATE_START());
 
-        // the climb stops where the pot buys one average credit
+        // the climb stops where the hourly cap (20 percent of the pot) no longer buys one average credit
         _warp(2000 hours);
-        assertEq(core.ethRate(), core.ethPot() * 1e4 / core.AVG_SCORE());
+        assertEq(core.ethRate(), core.ethPot() * 2000 / core.AVG_SCORE());
     }
 
     /// phase 2 doors are shut while the exit module slot is empty

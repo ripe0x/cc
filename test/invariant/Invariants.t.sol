@@ -137,7 +137,7 @@ abstract contract InvariantsBase is InvariantFixture {
     /// every warp, with the funded flag recomputed independently from the pot and the rate.
     function invariant_06_rateNeverRisesWhileUnfunded() public view {
         _zero(g6);
-        assertEq(core.funded(), core.ethPot() * 10_000 >= core.AVG_SCORE() * core.ethRate(), "funded flag stale");
+        assertEq(core.funded(), core.ethPot() * 2000 >= core.AVG_SCORE() * core.ethRate(), "funded flag stale");
     }
 
     /// 7. hourly eth spend never exceeds the cap. the window is read from core storage and checked against the

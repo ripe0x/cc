@@ -92,6 +92,9 @@ interface IArtCoinsFactory {
     function deployFee() external view returns (uint256);
     function owner() external view returns (address);
     function admins(address who) external view returns (bool);
+    function enabledHooks(address hook) external view returns (bool);
+    function enabledLockers(address locker, address hook) external view returns (bool);
+    function enabledMevModules(address mevModule) external view returns (bool);
     function setAdmin(address admin, bool isAdmin) external;
 
     function deployTokenWithProtocolBpsAndTax(DeploymentConfig memory cfg, uint16 protocolBps, TaxConfig memory tax)
