@@ -32,7 +32,7 @@ contract ReviewCoreTest is Fixture {
     function test_FIXED_loweredUnitCannotTakeStatementForDust() public {
         _enterPhase2();
         Composed memory c = _composeOnce();
-        vm.warp(c.at + 72 hours);
+        vm.warp(c.at + 105 hours);
 
         mod.setUnitPerPoint(1);
         vm.expectRevert(Core.Underpaid.selector);
@@ -48,7 +48,7 @@ contract ReviewCoreTest is Fixture {
     function test_FIXED_raisedUnitCannotDrainBidPot() public {
         _enterPhase2();
         Composed memory c = _composeOnce();
-        vm.warp(c.at + 72 hours);
+        vm.warp(c.at + 105 hours);
         core.exitStatement(c.sid);
         uint256 pot = core.xPot();
         assertGt(pot, 0);

@@ -25,7 +25,7 @@ import {HandlerOwner} from "./HandlerOwner.sol";
 /// factory, the live skim hook, locker, mev module and pool manager, and the live Credits, CreditScore, Statements
 /// and CreditStrategy. the only stand ins are the exit module and exit token of phase 2. the attack contracts are
 /// the fuzz controller and the hostile listing target. the owner adds the hostile target, the fuzz controller and,
-/// in phase 2, the exit module through the real timelock. the eth pot is funded by real swap fees, the piles are
+/// in phase 2, the exit module at once. the eth pot is funded by real swap fees, the piles are
 /// pre filled with real credits so that composes happen, and the clock is moved so that the rate has climbed far
 /// enough for the real CreditStrategy listings to fit under the ceiling.
 ///
@@ -33,9 +33,8 @@ import {HandlerOwner} from "./HandlerOwner.sol";
 /// before the run (outside the sniper window variant, where an auction cannot finish in time): one collected and
 /// one not, neither synced, so the run starts with a stale record and with proceeds owed by the house.
 ///
-/// two start states: after the sniper window (the owner setup needs the seven day timelock, so everything that
-/// needs the owner has run) and inside it (the run starts a few seconds after launch, the owner actions are only
-/// queued and the handler executes them once the timelock has run, the skim is 90 percent).
+/// two start states: after the sniper window (a week passes before the owner setup) and inside it (the run starts a
+/// few seconds after launch, the skim is 90 percent).
 abstract contract InvariantFixture is Fixture {
     /// eth the whale spends on coin. in steady state 9.5 percent of it becomes pot
     uint256 internal constant FUND_ETH = 40 ether;
@@ -69,13 +68,7 @@ abstract contract InvariantFixture is Fixture {
             xt = new MockExitToken("Exit Token", "XT");
             mod = new MockExitModule(address(xt), UNIT);
         }
-        uint256 targetEta;
-        uint256 controllerEta;
-        if (inWindow) {
-            (targetEta, controllerEta) = _queueOnly();
-        } else {
-            controllerEta = _ownerSetup(phase2, hostile, canSwapController);
-        }
+        _ownerSetup(phase2, hostile, inWindow);
         _fundWhale();
         _sidePool();
 
@@ -97,12 +90,6 @@ abstract contract InvariantFixture is Fixture {
             tag: tag
         });
         handler = new Handler(w);
-        if (inWindow) {
-            handler.seedPendingTarget(targetEta);
-            handler.seedPendingController(address(fuzz), controllerEta);
-        } else if (canSwapController) {
-            handler.seedPendingController(address(fuzz), controllerEta);
-        }
         _actors();
         _prefill(phase2, inWindow);
         _holders();
@@ -128,29 +115,15 @@ abstract contract InvariantFixture is Fixture {
                                   STEPS
     //////////////////////////////////////////////////////////////*/
 
-    /// the owner queues the hostile target and the fuzz controller and waits for nothing. returns their etas
-    function _queueOnly() internal returns (uint256 targetEta, uint256 controllerEta) {
+    /// the owner allows the hostile target, and in the suites that need it sets the fuzz controller and the exit module.
+    /// everything is at once. outside the sniper window variant a week passes first, so the run starts past the
+    /// window; inside it the run starts a few seconds after launch
+    function _ownerSetup(bool phase2, bool hostile, bool inWindow) internal {
+        if (!inWindow) vm.warp(block.timestamp + 7 days + 1);
         vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(probeTarget)));
-        core.queue(Core.Action.SetController, abi.encode(address(fuzz)));
-        vm.stopPrank();
-        targetEta = block.timestamp + core.TIMELOCK();
-        controllerEta = targetEta;
-    }
-
-    /// everything that needs the seven day timelock is queued together and executed after one wait. in the swap
-    /// suites the fuzz controller is queued as well and left ripe, so the handler can switch to it at any time.
-    /// returns the eta of that queued controller
-    function _ownerSetup(bool phase2, bool hostile, bool canSwapController) internal returns (uint256 eta) {
-        vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(probeTarget)));
-        if (hostile || canSwapController) core.queue(Core.Action.SetController, abi.encode(address(fuzz)));
-        if (phase2) core.queue(Core.Action.SetExitModule, abi.encode(address(mod)));
-        eta = block.timestamp + core.TIMELOCK();
-        vm.warp(eta + 1);
-        core.execute(Core.Action.AddTarget, abi.encode(address(probeTarget)));
-        if (hostile) core.execute(Core.Action.SetController, abi.encode(address(fuzz)));
-        if (phase2) core.execute(Core.Action.SetExitModule, abi.encode(address(mod)));
+        core.addTarget(address(probeTarget));
+        if (hostile) core.setController(address(fuzz));
+        if (phase2) core.setExitModule(address(mod));
         vm.stopPrank();
         inPhase2 = phase2;
         assertTrue(core.allowedTarget(address(probeTarget)));
@@ -310,17 +283,17 @@ abstract contract InvariantFixture is Fixture {
     }
 
     // the hourly window slots of the core, from `forge inspect Core storage-layout`: windowStart is the uint64 at
-    // byte 17 of slot 10, windowPot is slot 11 and windowSpent is slot 12
+    // byte 17 of slot 11, windowPot is slot 12 and windowSpent is slot 13
     function _windowStart() internal view returns (uint256) {
-        return (uint256(vm.load(address(core), bytes32(uint256(10)))) >> 136) & type(uint64).max;
+        return (uint256(vm.load(address(core), bytes32(uint256(11)))) >> 136) & type(uint64).max;
     }
 
     function _windowPot() internal view returns (uint256) {
-        return uint256(vm.load(address(core), bytes32(uint256(11))));
+        return uint256(vm.load(address(core), bytes32(uint256(12))));
     }
 
     function _windowSpent() internal view returns (uint256) {
-        return uint256(vm.load(address(core), bytes32(uint256(12))));
+        return uint256(vm.load(address(core), bytes32(uint256(13))));
     }
 
     /// how many times each owner action appears in the fuzzer's list. the hostile owner suite raises it

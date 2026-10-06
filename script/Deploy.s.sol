@@ -40,8 +40,8 @@ abstract contract SystemDeployer is LaunchChecks {
 
     /// @notice creates the controller and the core. a test base overrides these two with `deployCode`, so the test
     /// contracts do not embed the creation code of the whole system (solc fails with "Tag too large" on them)
-    function _newController(address core) internal virtual returns (address) {
-        return address(new ControllerV1(core));
+    function _newController(address core, LaunchConfig memory c) internal virtual returns (address) {
+        return address(new ControllerV1(core, c.sale));
     }
 
     function _newCore(address owner, address coin, address controller, LaunchConfig memory c)
@@ -63,7 +63,7 @@ abstract contract SystemDeployer is LaunchChecks {
         address coinAt = predictCoin(c, deployer, coreAt);
 
         uint256 g = gasleft();
-        d.controller = _newController(coreAt);
+        d.controller = _newController(coreAt, c);
         stepGas[0] = g - gasleft();
         g = gasleft();
         d.core = _newCore(c.owner, coinAt, d.controller, c);
@@ -129,6 +129,7 @@ abstract contract SystemDeployer is LaunchChecks {
         if (unset.length != 0) revert ConfigUnset(unset[0]);
         if (!rateInBounds(c)) revert ConfigUnset("rateStart");
         if (settingsViolation(c) != 0) revert ConfigUnset("settings");
+        if (saleViolation(c) != 0) revert ConfigUnset("sale");
     }
 }
 

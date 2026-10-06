@@ -54,7 +54,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.tipCapBps = uint16(_f(_r(seed, 9), 0, 500, c.tipCapBps));
         s.reimburseBps = uint16(_f(_r(seed, 10), 0, 15_000, c.reimburseBps));
         s.reimburseCapBps = uint16(_f(_r(seed, 11), 0, 1_000, c.reimburseCapBps));
-        s.reserveBps = uint16(_f(_r(seed, 12), 3_000, 40_000, c.reserveBps));
+        s.saleFloorBps = uint16(_f(_r(seed, 12), 1_000, 40_000, c.saleFloorBps));
         s.auctionDuration = uint32(_f(_r(seed, 13), 6 hours, 30 days, c.auctionDuration));
         s.exitAfter = uint32(_f(_r(seed, 14), 1 hours, 365 days, c.exitAfter));
         s.saleToBuybackBps = uint16(_f(_r(seed, 15), 0, 10_000, c.saleToBuybackBps));
@@ -70,6 +70,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.exitSliceCredits = uint16(_f(_r(seed, 25), 1, 1_000, c.exitSliceCredits));
         s.rateCap = uint64(_f(_r(seed, 26), 1e11, 1e15, c.rateCap));
         s.exitLaneToBuybackBps = uint16(_f(_r(seed, 27), 0, 10_000, c.exitLaneToBuybackBps));
+        s.feeToBuybackBps = uint16(_f(_r(seed, 28), 0, 10_000, c.feeToBuybackBps));
         _corner(s, corner);
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -85,9 +86,9 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 3) {
             s.spendCapBps = 5_000;
         } else if (k == 4) {
-            s.reserveBps = 3_000;
+            s.saleFloorBps = 1_000;
         } else if (k == 5) {
-            s.reserveBps = 40_000;
+            s.saleFloorBps = 40_000;
         } else if (k == 6) {
             s.saleToBuybackBps = 0;
         } else if (k == 7) {
@@ -252,7 +253,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.tipCapBps > 500) return "tipCapBps";
         if (s.reimburseBps > 15_000) return "reimburseBps";
         if (s.reimburseCapBps > 1_000) return "reimburseCapBps";
-        if (s.reserveBps < 3_000 || s.reserveBps > 40_000) return "reserveBps";
+        if (s.saleFloorBps < 1_000 || s.saleFloorBps > 40_000) return "saleFloorBps";
         if (s.auctionDuration < 6 hours || s.auctionDuration > 30 days) return "auctionDuration";
         if (s.exitAfter < 1 hours || s.exitAfter > 365 days) return "exitAfter";
         if (s.saleToBuybackBps > 10_000) return "saleToBuybackBps";
@@ -268,6 +269,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1_000) return "exitSliceCredits";
         if (s.rateCap < 1e11 || s.rateCap > 1e15) return "rateCap";
         if (s.exitLaneToBuybackBps > 10_000) return "exitLaneToBuybackBps";
+        if (s.feeToBuybackBps > 10_000) return "feeToBuybackBps";
         return bytes32(0);
     }
 
@@ -278,7 +280,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// breaks exactly one field of valid settings, `which` picks it. returns the name the library must report
     function _break(Settings memory s, uint256 which) internal pure returns (bytes32 name) {
         // forge-lint: disable-start(unsafe-typecast)
-        which = which % 41;
+        which = which % 42;
         if (which == 0) {
             (s.flatBps, name) = (10_001, "flatBps");
         } else if (which == 1) {
@@ -312,9 +314,9 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 15) {
             (s.reimburseCapBps, name) = (1_001, "reimburseCapBps");
         } else if (which == 16) {
-            (s.reserveBps, name) = (2_999, "reserveBps");
+            (s.saleFloorBps, name) = (999, "saleFloorBps");
         } else if (which == 17) {
-            (s.reserveBps, name) = (40_001, "reserveBps");
+            (s.saleFloorBps, name) = (40_001, "saleFloorBps");
         } else if (which == 18) {
             (s.auctionDuration, name) = (6 hours - 1, "auctionDuration");
         } else if (which == 19) {
@@ -359,8 +361,10 @@ abstract contract HandlerOwner is HandlerHouse {
             (s.rateCap, name) = (1e11 - 1, "rateCap");
         } else if (which == 39) {
             (s.rateCap, name) = (1e15 + 1, "rateCap");
-        } else {
+        } else if (which == 40) {
             (s.exitLaneToBuybackBps, name) = (10_001, "exitLaneToBuybackBps");
+        } else {
+            (s.feeToBuybackBps, name) = (10_001, "feeToBuybackBps");
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -485,44 +489,55 @@ abstract contract HandlerOwner is HandlerHouse {
                               THE REST OF THE OWNER
     //////////////////////////////////////////////////////////////*/
 
-    /// the owner's other doors, which only ever touch the allow list and the timelock queue: remove a target, queue an
-    /// action and try to execute it early (TooEarly), cancel one that was never queued (NotQueued), queue twice
-    /// (AlreadyQueued). none of it moves an asset
+    /// the owner's other doors, which only ever touch the allow list and the owner slot, all at once: remove a target,
+    /// add one (live at once, and removed again), start a handover and clear it, and a stranger who tries the owner
+    /// doors (OnlyOwner). the locks are one way and never fuzzed here. none of it moves an asset
     function ownerMisc(uint256 seed, uint256 mode) external checked {
         uint8 a = A_OWNER_MISC;
         OPre memory p = _opre();
         address t = address(uint160(uint256(keccak256(abi.encode("misc", seed)))));
-        bytes memory data = abi.encode(t);
         uint256 m = mode % 4;
         _att(a);
-        vm.startPrank(owner);
         if (m == 0) {
+            vm.prank(owner);
             core.removeTarget(t);
         } else if (m == 1) {
-            core.queue(Core.Action.AddTarget, data);
-            try core.execute(Core.Action.AddTarget, data) {
-                _flag(V_OWNER, "a queued action executed before its timelock");
+            vm.startPrank(owner);
+            try core.addTarget(t) {
+                if (!core.allowedTarget(t)) _flag(V_OWNER, "addTarget did not allow the target at once");
+                core.removeTarget(t);
             } catch (bytes memory why) {
-                if (bytes4(why) != Core.TooEarly.selector) _unexpected(a, why);
+                // the stack contracts and the exit side are refused, nothing else is
+                if (bytes4(why) != Core.ForbiddenTarget.selector) _unexpected(a, why);
             }
-            core.cancel(Core.Action.AddTarget, data);
+            vm.stopPrank();
         } else if (m == 2) {
-            try core.cancel(Core.Action.AddTarget, data) {
-                _flag(V_OWNER, "cancelled an action that was never queued");
-            } catch (bytes memory why) {
-                if (bytes4(why) != Core.NotQueued.selector) _unexpected(a, why);
-            }
+            vm.startPrank(owner);
+            core.transferOwnership(t);
+            if (core.pendingOwner() != t || core.owner() != owner) _flag(V_OWNER, "a handover moved the owner early");
+            core.transferOwnership(address(0));
+            vm.stopPrank();
+            if (core.pendingOwner() != address(0)) _flag(V_OWNER, "the handover was not cleared");
         } else {
-            core.queue(Core.Action.AddTarget, data);
-            try core.queue(Core.Action.AddTarget, data) {
-                _flag(V_OWNER, "queued the same action twice");
+            vm.startPrank(t);
+            try core.addTarget(t) {
+                _flag(V_OWNER, "a stranger added a target");
             } catch (bytes memory why) {
-                if (bytes4(why) != Core.AlreadyQueued.selector) _unexpected(a, why);
+                if (bytes4(why) != Core.OnlyOwner.selector) _unexpected(a, why);
             }
-            core.cancel(Core.Action.AddTarget, data);
+            try core.lockTargets() {
+                _flag(V_OWNER, "a stranger locked the targets");
+            } catch (bytes memory why) {
+                if (bytes4(why) != Core.OnlyOwner.selector) _unexpected(a, why);
+            }
+            try core.acceptOwnership() {
+                _flag(V_OWNER, "a stranger accepted a handover that was not offered");
+            } catch (bytes memory why) {
+                if (bytes4(why) != Core.OnlyPendingOwner.selector) _unexpected(a, why);
+            }
+            vm.stopPrank();
         }
-        vm.stopPrank();
-        if (core.allowedTarget(t)) _flag(V_OWNER, "an owner door allowed a target at once");
+        if (core.owner() != owner) _flag(V_OWNER, "the owner changed");
         _opost(p, "ownerMisc");
         _ok(a);
     }
@@ -531,10 +546,9 @@ abstract contract HandlerOwner is HandlerHouse {
                               REPLACE THE EXIT MODULE
     //////////////////////////////////////////////////////////////*/
 
-    /// the owner replaces the exit module through the timelock (docs/FLOW.md section 8): a new module with the same
+    /// the owner replaces the exit module at once (docs/FLOW.md section 8): a new module with the same
     /// exit token and a new unit, the same address again after its unit changed, the same address and unit, and the
-    /// refused ones (another exit token, no unit, a unit the opening price floor refuses, no code). the action queues,
-    /// tries to run early (TooEarly), waits the 7 days and executes. a good set keeps the pots, the balances and the
+    /// refused ones (another exit token, no unit, a unit the opening price floor refuses, no code). a good set keeps the pots, the balances and the
     /// exit auction price and clock, credits the exit rate under the old unit, resyncs the funded flag, reads the unit again and
     /// switches the handler to the new module. a refused one changes nothing
     function replaceModule(uint256 seed, uint256 mode) external checked {
@@ -544,22 +558,12 @@ abstract contract HandlerOwner is HandlerHouse {
         address oldModule = core.exitModule();
         uint256 oldUnit = core.unitPerPoint();
         (MockExitModule next, bytes4 want) = _nextModule(seed, mode % 8, token);
-        bytes memory data = abi.encode(address(next));
         _att(a);
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetExitModule, data);
-        try core.execute(Core.Action.SetExitModule, data) {
-            _flag(V_OWNER, "a module set executed before its timelock");
-        } catch (bytes memory why) {
-            if (bytes4(why) != Core.TooEarly.selector) _unexpected(a, why);
-        }
-        vm.stopPrank();
-        _advance(core.TIMELOCK(), 0);
         OPre memory p = _opre();
         uint256 start0 = core.xStartPrice();
         uint64 at0 = core.xStartTime();
         vm.prank(owner);
-        try core.execute(Core.Action.SetExitModule, data) {
+        try core.setExitModule(address(next)) {
             if (want != 0) _flag(V_OWNER, "a refused module set was accepted");
             _afterModuleSet(p, next, token, start0, at0);
             module = next;
@@ -572,8 +576,6 @@ abstract contract HandlerOwner is HandlerHouse {
             if (core.exitModule() != oldModule || core.unitPerPoint() != oldUnit || core.exitToken() != token) {
                 _flag(V_OWNER, "a refused module set changed the module, the unit or the token");
             }
-            vm.prank(owner);
-            core.cancel(Core.Action.SetExitModule, data);
         }
     }
 

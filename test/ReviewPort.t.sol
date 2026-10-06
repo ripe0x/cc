@@ -237,7 +237,7 @@ contract ReviewPort is Fixture {
         uint256 sid2 = _composeNext();
         address taker = _user("taker");
         _buyCoin(taker, 5 ether);
-        vm.warp(block.timestamp + 72 hours);
+        vm.warp(block.timestamp + 105 hours);
         core.exitStatement(c1.sid);
         uint256 full = uint256(core.settings().exitSliceCredits) * core.settings().avgScore * core.unitPerPoint();
         emit log_named_uint("xToBuyback after first exit, in slices x1000", core.xToBuyback() * 1000 / full);
@@ -280,19 +280,15 @@ contract ReviewPort is Fixture {
     function _phase2With(uint256 unit) internal {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), unit);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(mod)));
+        _setExitModule(address(mod));
     }
 
     function _setExitModuleReverts(uint256 unit) internal {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), unit);
-        bytes memory data = abi.encode(address(mod));
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetExitModule, data);
-        vm.warp(block.timestamp + 7 days);
+        vm.prank(owner);
         vm.expectRevert(Core.BadModule.selector);
-        core.execute(Core.Action.SetExitModule, data);
-        vm.stopPrank();
+        core.setExitModule(address(mod));
     }
 
     /// regressions for P-3. the opening price is `SUPPLY * 1e18 / (20 * AVG_SCORE * unit)`. it was zero above unit
@@ -331,13 +327,9 @@ contract ReviewPort is Fixture {
     function test_FIXED_permit2AndRoutersAreForbiddenTargets() public {
         address[3] memory banned = [Mainnet.PERMIT2, Mainnet.POSITION_MANAGER, Mainnet.UNIVERSAL_ROUTER];
         for (uint256 i; i < banned.length; ++i) {
-            bytes memory data = abi.encode(banned[i]);
-            vm.startPrank(owner);
-            core.queue(Core.Action.AddTarget, data);
-            vm.warp(block.timestamp + 7 days);
+            vm.prank(owner);
             vm.expectRevert(Core.ForbiddenTarget.selector);
-            core.execute(Core.Action.AddTarget, data);
-            vm.stopPrank();
+            core.addTarget(banned[i]);
             assertFalse(core.allowedTarget(banned[i]));
         }
     }
@@ -356,7 +348,7 @@ contract ReviewPort is Fixture {
         address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coinAt = predictCoin(deployer, coreAt, "Victim", "VIC", salt);
         vm.startPrank(deployer);
-        ControllerV1 c2 = new ControllerV1(coreAt);
+        ControllerV1 c2 = new ControllerV1(coreAt, lc.sale);
         Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart, lc.settings);
         vm.stopPrank();
         assertEq(address(core2), coreAt);

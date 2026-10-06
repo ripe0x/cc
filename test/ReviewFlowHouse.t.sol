@@ -111,16 +111,16 @@ contract ReviewFlowHouseTest is Fixture {
 
     // ------------------------------------------------------------------ FH-2 a raised reserve does not reach old listings
 
-    /// @dev DOCUMENTED (operating rule in docs/DEPLOY.md: reprice open listings in the same batch). raising `reserveBps` changes nothing on the house. every listing stays biddable at its old reserve until
+    /// @dev DOCUMENTED (operating rule in docs/DEPLOY.md: reprice open listings in the same batch). raising `saleFloorBps` changes nothing on the house. every listing stays biddable at its old reserve until
     /// somebody reprices it, and a bidder who sees the settings change can buy at the old price in the same block
     function test_DOCUMENTED_FH2_raisedReserveDoesNotProtectOldListings() public {
         Composed memory c = _composeOnce();
         (,, uint256 cost,) = core.statementInfo(c.sid);
         uint256 oldReserve = _live(c.sid).reserve;
         Settings memory st = core.settings();
-        st.reserveBps = 20_000;
+        st.saleFloorBps = 30_000;
         _setSettings(st);
-        assertGt(_reserveFor(cost), oldReserve * 2 - 1, "the owner now wants twice the reserve");
+        assertGt(_reserveFor(cost), oldReserve * 2 - 1, "the floor now sits far above the old reserve");
         assertEq(_live(c.sid).reserve, oldReserve, "the listing did not move");
 
         _bid(alice, c.sid, oldReserve);
@@ -175,15 +175,12 @@ contract ReviewFlowHouseTest is Fixture {
         vm.expectRevert();
         house.createAuction(sid, address(STATEMENTS), 1 hours, 1, 0);
         vm.stopPrank();
-        // the allowlist refuses the house and its factory even through the timelock
+        // the allowlist refuses the house and its factory even for the owner
         address[2] memory t = [address(house), Mainnet.AUCTION_FACTORY];
         for (uint256 i; i < 2; ++i) {
-            vm.startPrank(owner);
-            core.queue(Core.Action.AddTarget, abi.encode(t[i]));
-            vm.warp(block.timestamp + 7 days);
+            vm.prank(owner);
             vm.expectRevert(Core.ForbiddenTarget.selector);
-            core.execute(Core.Action.AddTarget, abi.encode(t[i]));
-            vm.stopPrank();
+            core.addTarget(t[i]);
         }
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(
@@ -196,7 +193,7 @@ contract ReviewFlowHouseTest is Fixture {
         Composed memory c = _composeOnce();
         Settings memory st = core.settings();
         st.auctionDuration = 7 days;
-        st.reserveBps = 12_000;
+        st.saleFloorBps = 12_000;
         _setSettings(st);
         _warp(1 days);
         core.repriceStatement(c.sid);

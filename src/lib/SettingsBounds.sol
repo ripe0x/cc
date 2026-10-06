@@ -21,7 +21,7 @@ library SettingsBounds {
         if (s.tipCapBps > 500) return "tipCapBps";
         if (s.reimburseBps > 15_000) return "reimburseBps";
         if (s.reimburseCapBps > 1_000) return "reimburseCapBps";
-        if (s.reserveBps < 3_000 || s.reserveBps > 40_000) return "reserveBps";
+        if (s.saleFloorBps < 1_000 || s.saleFloorBps > 40_000) return "saleFloorBps";
         if (s.auctionDuration < 6 hours || s.auctionDuration > 30 days) return "auctionDuration";
         if (s.exitAfter < 1 hours || s.exitAfter > 365 days) return "exitAfter";
         if (s.saleToBuybackBps > 10_000) return "saleToBuybackBps";
@@ -37,6 +37,7 @@ library SettingsBounds {
         if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1_000) return "exitSliceCredits";
         if (!rateInBounds(s.rateCap)) return "rateCap";
         if (s.exitLaneToBuybackBps > 10_000) return "exitLaneToBuybackBps";
+        if (s.feeToBuybackBps > 10_000) return "feeToBuybackBps";
         return bytes32(0);
     }
 

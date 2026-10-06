@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {CommonBase} from "forge-std/Base.sol";
-import {Stack, Settings, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
+import {Stack, Settings, Sale, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
@@ -23,6 +23,8 @@ struct LaunchConfig {
     uint256 rateStart;
     /// every economic setting at launch. owner adjustable afterwards, so the launch rules only check bounds
     Settings settings;
+    /// the sale settings of the controller at launch (its constructor argument). owner adjustable afterwards
+    Sale sale;
     // launch parameters
     uint256 supply;
     int24 startTick;
@@ -60,13 +62,15 @@ abstract contract ConfigReader is CommonBase {
     uint256 internal constant RATE_START_MAX = RATE_START_MAX_WEI;
 
     /// @notice the default config in memory: the live artcoins stack and the launch parameters of
-    /// docs/ARCHITECTURE.md section 2, with owner, creator, name, symbol and salt left unset. tests fill them
+    /// docs/ARCHITECTURE.md section 2, with owner, creator, name and salt left unset (the symbol is CC). tests fill them
     function defaultConfig() internal pure returns (LaunchConfig memory c) {
         c.stack = Mainnet.defaultStack();
         c.mevModule = Mainnet.MEV_LINEAR_SKIM;
         c.factoryOwner = Mainnet.ARTCOINS_FACTORY_OWNER;
+        c.symbol = "CC";
         c.rateStart = 15_400_000_000_000;
         c.settings = Mainnet.defaultSettings();
+        c.sale = Mainnet.defaultSale();
         c.supply = 1_000_000_000e18;
         c.startTick = -175_000;
         c.positionLower = -175_000;
@@ -111,6 +115,7 @@ abstract contract ConfigReader is CommonBase {
         c.salt = vm.parseJsonBytes32(j, ".salt");
         c.rateStart = vm.parseJsonUint(j, ".rateStart");
         _loadSettings(c, j);
+        _loadSale(c, j);
         _loadLaunch(c, j);
         // the overrides are optional, a missing key means false
         c.allowBounty = _flag(j, ".overrides.bounty");
@@ -132,7 +137,7 @@ abstract contract ConfigReader is CommonBase {
         s.tipCapBps = _u16(j, ".settings.tipCapBps");
         s.reimburseBps = _u16(j, ".settings.reimburseBps");
         s.reimburseCapBps = _u16(j, ".settings.reimburseCapBps");
-        s.reserveBps = _u16(j, ".settings.reserveBps");
+        s.saleFloorBps = _u16(j, ".settings.saleFloorBps");
         s.auctionDuration = _u32(j, ".settings.auctionDuration");
         s.exitAfter = _u32(j, ".settings.exitAfter");
         s.saleToBuybackBps = _u16(j, ".settings.saleToBuybackBps");
@@ -150,6 +155,17 @@ abstract contract ConfigReader is CommonBase {
         // forge-lint: disable-next-line(unsafe-typecast)
         s.rateCap = uint64(_uint(j, ".settings.rateCap", type(uint64).max));
         s.exitLaneToBuybackBps = _u16(j, ".settings.exitLaneToBuybackBps");
+        s.feeToBuybackBps = _u16(j, ".settings.feeToBuybackBps");
+    }
+
+    function _loadSale(LaunchConfig memory c, string memory j) private pure {
+        c.sale = Sale({
+            buyOnly: vm.parseJsonBool(j, ".sale.buyOnly"),
+            startBps: _u16(j, ".sale.startBps"),
+            stepBps: _u16(j, ".sale.stepBps"),
+            stepEvery: _u32(j, ".sale.stepEvery"),
+            floorBps: _u16(j, ".sale.floorBps")
+        });
     }
 
     function _loadLaunch(LaunchConfig memory c, string memory j) private pure {
@@ -220,6 +236,16 @@ abstract contract ConfigReader is CommonBase {
 
     function rateInBounds(LaunchConfig memory c) internal pure returns (bool) {
         return c.rateStart >= RATE_START_MIN && c.rateStart <= RATE_START_MAX && c.rateStart <= c.settings.rateCap;
+    }
+
+    /// @notice the name of the first launch sale setting outside the bounds the controller enforces, zero when all are inside
+    function saleViolation(LaunchConfig memory c) internal pure returns (bytes32) {
+        Sale memory k = c.sale;
+        if (k.startBps < 1_000 || k.startBps > 40_000) return "startBps";
+        if (k.stepBps > 5_000) return "stepBps";
+        if (k.stepEvery < 1 minutes || k.stepEvery > 30 days) return "stepEvery";
+        if (k.floorBps < 1_000 || k.floorBps > k.startBps) return "floorBps";
+        return bytes32(0);
     }
 
     /// @notice the name of the first launch setting outside the bounds the Core enforces, zero when all are inside

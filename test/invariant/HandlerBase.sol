@@ -137,12 +137,12 @@ abstract contract HandlerBase is Test {
     bytes32 internal constant SKIM_SPLIT = keccak256("SkimSplit(bytes32,uint256,uint256,uint256,uint256)");
     bytes32 internal constant TRANSFER = keccak256("Transfer(address,address,uint256)");
 
-    // core storage slots of windowStart (offset 17 in slot 10), windowPot and windowSpent.
+    // core storage slots of windowStart (offset 17 in slot 11), windowPot and windowSpent.
     // from `forge inspect Core storage-layout`. the fixture proves them against public getters.
-    uint256 internal constant SLOT_WINDOW_START = 10;
+    uint256 internal constant SLOT_WINDOW_START = 11;
     uint256 internal constant WINDOW_START_SHIFT = 136;
-    uint256 internal constant SLOT_WINDOW_POT = 11;
-    uint256 internal constant SLOT_WINDOW_SPENT = 12;
+    uint256 internal constant SLOT_WINDOW_POT = 12;
+    uint256 internal constant SLOT_WINDOW_SPENT = 13;
 
     /*//////////////////////////////////////////////////////////////
                                   STATE
@@ -281,11 +281,6 @@ abstract contract HandlerBase is Test {
     uint256 internal gOpDay;
     uint256 internal gOpCount;
 
-    // controller swap queue
-    address internal pendingController;
-    uint256 internal pendingEta;
-    uint256 internal pendingTargetEta;
-
     // ghost totals for the summary
     uint256 public totalSpentEth;
     uint256 public biggestSpendBps;
@@ -407,7 +402,7 @@ abstract contract HandlerBase is Test {
         g.auctionId = aid;
         if (price != 0) {
             g.status = S_SOLD;
-            g.reserve = cost * core.settings().reserveBps / 10_000;
+            g.reserve = cost * core.settings().saleFloorBps / 10_000;
             g.price = price;
             g.winner = winner;
             g.synced = !held;
@@ -427,17 +422,6 @@ abstract contract HandlerBase is Test {
         gWinPot = pot;
         gWinSpent = spent;
         gWinCap = core.settings().spendCapBps;
-    }
-
-    function seedPendingController(address c, uint256 eta) external {
-        pendingController = c;
-        pendingEta = eta;
-    }
-
-    /// the hostile target is queued for the allow list at the start of a run that begins inside the sniper
-    /// window, and the handler executes it once the timelock has run
-    function seedPendingTarget(uint256 eta) external {
-        pendingTargetEta = eta;
     }
 
     function numActors() external view returns (uint256) {
@@ -699,12 +683,12 @@ abstract contract HandlerBase is Test {
         _fundedCheck();
     }
 
-    /// the exit side of the same rule, read from the core's storage (slots 13 and 14, `forge inspect Core
+    /// the exit side of the same rule, read from the core's storage (slots 14 and 15, `forge inspect Core
     /// storage-layout`): the stored flag is what the stored rate, the exit pot and the unit say
     function _xFundedCheck() internal {
         Settings memory st = core.settings();
-        uint256 rate = uint256(vm.load(address(core), bytes32(uint256(13))));
-        bool stored = (uint256(vm.load(address(core), bytes32(uint256(14)))) >> 64) & 0xff != 0;
+        uint256 rate = uint256(vm.load(address(core), bytes32(uint256(14))));
+        bool stored = (uint256(vm.load(address(core), bytes32(uint256(15)))) >> 64) & 0xff != 0;
         bool want = core.xPot() * 10_000 >= uint256(st.avgScore) * rate * core.unitPerPoint();
         if (stored != want) _flag(V_FUNDED_STALE, "exit funded flag disagrees with pot, stored rate and unit");
     }
@@ -891,6 +875,7 @@ abstract contract HandlerBase is Test {
     struct SwapPre {
         uint256 bal;
         uint256 pot;
+        uint256 tb;
         uint256 rate;
         uint256 bps;
         bool exactIn;
@@ -911,6 +896,7 @@ abstract contract HandlerBase is Test {
         int256 spec = p.exactIn ? -int256(eth) : int256(_coinFor(eth * 8 / 10));
         p.bal = address(core).balance;
         p.pot = core.ethPot();
+        p.tb = core.ethToBuyback();
         p.rate = core.ethRate();
         RS memory rs = _rs();
         vm.deal(who, who.balance + value);
@@ -977,6 +963,7 @@ abstract contract HandlerBase is Test {
         if (spec == 0) return _skip(a);
         p.bal = address(core).balance;
         p.pot = core.ethPot();
+        p.tb = core.ethToBuyback();
         p.rate = core.ethRate();
         RS memory rs = _rs();
         vm.recordLogs();
@@ -999,7 +986,11 @@ abstract contract HandlerBase is Test {
         (uint256 volume, uint256 bounty, uint256 protocol) = _skimOf(logs);
         if (p.bps > 10_000) windowSwaps++;
         _eth(p.bal, 0, bounty, what);
-        if (core.ethPot() != p.pot + bounty) _flag(V_POT, "swap skim not booked to the pot");
+        // the hook's eth is split by feeToBuybackBps: that share to the coin buyback, the rest to the pot
+        uint256 fee = bounty * core.settings().feeToBuybackBps / 10_000;
+        if (core.ethPot() != p.pot + bounty - fee || core.ethToBuyback() != p.tb + fee) {
+            _flag(V_POT, "swap skim not booked by the fee split");
+        }
         if (volume != 0) {
             (uint256 eb, uint256 ep) = _expectSkim(volume, p.exactIn, p.bps);
             if (bounty != eb) _flag(V_POT, "skim bounty differs from the hook rules at the live rate");
@@ -1392,7 +1383,8 @@ abstract contract HandlerBase is Test {
 
     function _composeFailed(uint8 a, CPre memory p, bytes memory why) internal {
         _failed(p.bal, p.pot, p.rate, "compose");
-        if (p.valid) _unexpected(a, why);
+        // a hostile controller may fail to price the listing, and then the whole compose reverts
+        if (p.valid && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) _unexpected(a, why);
     }
 
     function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
@@ -1432,13 +1424,37 @@ abstract contract HandlerBase is Test {
             g.status = S_HELD;
         } else {
             // the statement sits on the house at the reserve of the settings in force, listed now
-            _ghostListed(sid, cost, p.st.reserveBps, logs);
+            _ghostListed(sid, cost, p.st.saleFloorBps, logs);
         }
     }
 
+    /// the controller in force is the hostile fuzz controller, which may fail or answer short when asked a price
+    function _mayNotPrice() internal view returns (bool) {
+        return core.controller() == address(fuzz) && fuzz.hostile();
+    }
+
+    /// the reserve the core must give a listing of `sid` priced at `listedAt`: the answer of the controller in force,
+    /// asked as the core asks (static, 200_000 gas, one word), never below the hard floor. `ok` is false when the
+    /// controller cannot answer, and then the core reverts
+    function _wantReserve(uint256 sid, uint256 cost, uint64 listedAt, uint256 floorBps)
+        internal
+        view
+        returns (bool ok, uint256 want)
+    {
+        bytes memory out;
+        (ok, out) = core.controller().staticcall{gas: 200_000}(
+            abi.encodeWithSignature("statementPrice(uint256,uint256,uint64)", sid, cost, listedAt)
+        );
+        if (!ok || out.length < 32) return (false, 0);
+        want = abi.decode(out, (uint256));
+        uint256 floor = cost * floorBps / 10_000;
+        if (want < floor) want = floor;
+    }
+
     /// the statement was listed on the house: the core's own event gives the auction id and the reserve, which must
-    /// be the cost times reserveBps, and the house must hold the statement under that auction at that reserve
-    function _ghostListed(uint256 sid, uint256 cost, uint256 reserveBps, Vm.Log[] memory logs) internal {
+    /// be what the controller in force asks (floored at the hard floor), and the house must hold the statement under
+    /// that auction at that reserve
+    function _ghostListed(uint256 sid, uint256 cost, uint256 saleFloorBps, Vm.Log[] memory logs) internal {
         SG storage g = _sg[sid];
         uint256 id;
         uint256 reserve;
@@ -1451,8 +1467,8 @@ abstract contract HandlerBase is Test {
             seen++;
         }
         if (seen != 1) _flag(V_MODEL, "a listing did not emit exactly one StatementListed");
-        uint256 want = cost * reserveBps / 10_000;
-        if (reserve != want) _flag(V_SALE_FLOOR, "the listing reserve is not cost * reserveBps");
+        (bool priced, uint256 want) = _wantReserve(sid, cost, uint64(block.timestamp), saleFloorBps);
+        if (!priced || reserve != want) _flag(V_SALE_FLOOR, "the listing reserve is not the controller price, floored");
         IAuctionHouse.Auction memory au = house.getAuction(id);
         if (au.reservePrice != reserve || au.tokenOwner != address(core) || au.tokenId != sid || au.amount != 0) {
             _flag(V_SALE_FLOOR, "the house record differs from what the core listed");
@@ -1510,7 +1526,7 @@ abstract contract HandlerBase is Test {
             _sg[top].ratingSum = rb + rt;
             // the eth lane base is listed again at the summed cost, its clock restarts. the exit lane is never listed
             bool eth = _sg[base].lane == uint8(Lane.Eth);
-            if (eth) _ghostListed(base, _sg[base].cost, rs.st.reserveBps, logs);
+            if (eth) _ghostListed(base, _sg[base].cost, rs.st.saleFloorBps, logs);
             (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(base);
             if (
                 !held || uint8(lane) != _sg[base].lane || cost != _sg[base].cost
@@ -1523,7 +1539,7 @@ abstract contract HandlerBase is Test {
             _eth(b0, 0, 0, "overprint");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "overprint");
-            if (valid && !capped) _unexpected(a, why);
+            if (valid && !capped && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
     }
@@ -1616,13 +1632,18 @@ abstract contract HandlerBase is Test {
         // the sale proceeds the house owed were collected first, once, by the amount it owed
         if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
         gCollected += collected;
-        if (core.ethToBuyback() != p.pool - spent - tip) {
-            _flag(V_BUYBACK, "buyback pot is not the pot less what was spent and tipped");
+        // the skim of the swap comes back through receive() and is split by feeToBuybackBps
+        uint256 feeShare = bounty * core.settings().feeToBuybackBps / 10_000;
+        if (core.ethToBuyback() != p.pool - spent - tip + feeShare) {
+            _flag(V_BUYBACK, "buyback pot is not the pot less what was spent and tipped, plus the fee share");
         }
         // eth leaves as the swap input plus the tip. the skim of the swap comes back as an inflow
         _eth(p.bal, spent + tip, bounty + p.owed, "buyback");
-        if (core.ethPot() != p.pot + bounty) _flag(V_POT, "buyback skim not booked to the pot");
-        if (volume != spent) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
+        if (core.ethPot() != p.pot + bounty - feeShare) _flag(V_POT, "buyback skim not booked to the pot");
+        // a dust swap (the skim of it rounds to nothing) emits no skim event at all, and the fee share can now leave
+        // one wei in the buyback pot, so a volume of zero is right when the whole skim rounds to zero
+        bool dust = volume == 0 && spent * p.bps / 100_000 == 0;
+        if (volume != spent && !dust) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
         (uint256 eb, uint256 ep) = _expectSkim(volume, true, p.bps);
         if (bounty != eb || protocol != ep) _flag(V_BUYBACK, "buyback skim differs from the hook rules");
         if (coin.balanceOf(DEAD) != p.dead) _flag(V_BUYBACK, "the exempt buyback take was taxed to the burn address");
@@ -1675,6 +1696,7 @@ abstract contract HandlerBase is Test {
         address sender = fromHook ? HOOK : who;
         uint256 b0 = address(core).balance;
         uint256 pot0 = core.ethPot();
+        uint256 tb0 = core.ethToBuyback();
         uint256 rate0 = core.ethRate();
         RS memory rs = _rs();
         vm.deal(sender, sender.balance + amt);
@@ -1685,7 +1707,10 @@ abstract contract HandlerBase is Test {
         if (ok) {
             _ok(a);
             _eth(b0, 0, amt, "donate");
-            if (core.ethPot() != pot0 + (fromHook ? amt : 0)) _flag(V_POT, "a donation was booked wrongly");
+            uint256 fee = fromHook ? amt * core.settings().feeToBuybackBps / 10_000 : 0;
+            if (core.ethPot() != pot0 + (fromHook ? amt - fee : 0) || core.ethToBuyback() != tb0 + fee) {
+                _flag(V_POT, "a donation was booked wrongly");
+            }
         } else {
             receiveFails++;
             _flag(V_RECEIVE, "a direct send to the core receive() reverted");
@@ -1706,40 +1731,16 @@ abstract contract HandlerBase is Test {
         _ok(A_CONTROLLER_SEED);
     }
 
-    /// queues a controller change through the owner timelock, and executes a queued one once it is ripe.
+    /// the owner swaps the controller at once, between the v1 controller and the fuzz controller
     function controllerSwap(uint256 which) external checked {
         uint8 a = A_CONTROLLER_SWAP;
-        // a run that began inside the sniper window could not wait a week for the owner, so the hostile target
-        // sits in the timelock queue and is allowed here once it is ripe
-        if (pendingTargetEta != 0 && block.timestamp >= pendingTargetEta) {
-            pendingTargetEta = 0;
-            _att(a);
-            vm.prank(owner);
-            try core.execute(Core.Action.AddTarget, abi.encode(address(probe))) {
-                _ok(a);
-            } catch {}
-            return;
-        }
         if (!canSwapController) return _skip(a);
-        if (pendingController != address(0)) {
-            if (block.timestamp < pendingEta) return _skip(a);
-            _att(a);
-            address next = pendingController;
-            pendingController = address(0);
-            vm.prank(owner);
-            try core.execute(Core.Action.SetController, abi.encode(next)) {
-                if (core.controller() != next) _flag(V_MODEL, "controller not set by execute");
-                _ok(a);
-            } catch {}
-            return;
-        }
         address target = which % 2 == 0 ? v1 : address(fuzz);
         if (target == core.controller()) return _skip(a);
         _att(a);
         vm.prank(owner);
-        try core.queue(Core.Action.SetController, abi.encode(target)) {
-            pendingController = target;
-            pendingEta = block.timestamp + 7 days;
+        try core.setController(target) {
+            if (core.controller() != target) _flag(V_MODEL, "controller not set at once");
             _ok(a);
         } catch {}
     }
@@ -1870,6 +1871,9 @@ abstract contract HandlerBase is Test {
         uint256 startPrice;
         uint256 startTime;
         uint256 priceNow;
+        uint256 callerBal;
+        uint256 gasUsed;
+        uint256 cost;
         uint8 lane;
         bool ripe;
         /// the statement is listed with no bid on it (eth lane), or held and never listed (exit lane)
@@ -1913,10 +1917,14 @@ abstract contract HandlerBase is Test {
         p.rating = STATEMENTS.creditScoreOf(sid);
         p.unit = _unitOf();
         p.required = p.rating * p.unit;
+        p.callerBal = keeper.balance;
+        p.cost = g.cost;
         RS memory rs = _rs();
         _att(a);
+        uint256 g0 = gasleft();
         vm.prank(keeper);
         try core.exitStatement(sid) {
+            p.gasUsed = g0 - gasleft();
             _ok(a);
             _afterExit(sid, p);
         } catch (bytes memory why) {
@@ -1945,7 +1953,18 @@ abstract contract HandlerBase is Test {
         if (core.xToBuyback() != p.xto + toBuyback) _flag(V_POT, "exit buyback share wrong");
         if (core.xPot() != p.xpot + received - toBuyback) _flag(V_POT, "exit pot share wrong");
         _x(p.xbal, 0, received, "exitStatement");
-        _eth(p.b0, 0, 0, "exitStatement");
+        // the caller's gas is repaid from the eth pot: at most reimburseBps of the gas (counted with the fixed overhead
+        // and cut at 1.5m gas), reimburseCapBps of the cost (the exit lane: 80 average credits at the opening rate), and
+        // the pot. nothing else moves
+        uint256 reimb = keeper.balance - p.callerBal;
+        uint256 gasCap = ((p.gasUsed + 50_000) < 1_500_000 ? (p.gasUsed + 50_000) : 1_500_000) * block.basefee
+            * p.st.reimburseBps / 10_000;
+        uint256 base = p.lane == uint8(Lane.Eth) ? p.cost : 80 * uint256(p.st.avgScore) * core.RATE_START() / 1e4;
+        uint256 costCap = base * p.st.reimburseCapBps / 10_000;
+        if (reimb > gasCap || reimb > costCap) _flag(V_EXIT_SHORT, "the redeem reimbursement is above its caps");
+        if (reimb > p.pot0) _flag(V_EXIT_SHORT, "the redeem reimbursement is above the pot");
+        if (core.ethPot() != p.pot0 - reimb) _flag(V_POT, "the eth pot did not fall by the redeem reimbursement");
+        _eth(p.b0, reimb, 0, "exitStatement");
         // every injection into the buyback pot re anchors the curve at max(price now, start / 4) and restarts the
         // clock. an exit that adds nothing to the pot changes neither
         uint256 wantPrice = p.startPrice;
@@ -1991,6 +2010,7 @@ abstract contract HandlerBase is Test {
         p.bps = _skimBps();
         p.bal = address(core).balance;
         p.pot = core.ethPot();
+        p.tb = core.ethToBuyback();
         p.rate = core.ethRate();
         uint256 value = _ethFor(coinOut) * 3 * 100_000 / (100_000 - p.bps) + 1e12;
         vm.deal(who, who.balance + value);

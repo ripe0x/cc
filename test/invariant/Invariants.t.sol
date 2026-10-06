@@ -75,7 +75,7 @@ abstract contract InvariantsBase is InvariantFixture {
     /// 3. a statement leaves the core's control only through a house auction whose winning bid was at or above the
     /// reserve the core set for it (tracked at the listing and at every reprice), an exit that returned at least
     /// rating * unitPerPoint, or as the top of an overprint. here the first part: every sold statement sold at or above
-    /// its reserve, and the reserve was the one the core's rule gives (cost * reserveBps of the settings in force when
+    /// its reserve, and the reserve was the one the core's rule gives (cost * saleFloorBps of the settings in force when
     /// it was listed or repriced).
     function invariant_03_noStatementSoldBelowItsReserve() public view {
         _zero(g3);
@@ -490,11 +490,14 @@ abstract contract InvariantsBase is InvariantFixture {
     }
 
     function _smoke() internal virtual {
-        // the fuzz controller is queued and ripe in the swap suites. switch to it, so overprints can answer. a run
-        // that began inside the sniper window needs one more call, the first one allows the hostile target
+        // the owner may swap to the fuzz controller at once in the swap suites. switch to it, so overprints can answer
         if (handler.canSwapController()) {
             assertTrue(_try(13, 20), "no controller swap executed");
-            if (core.controller() != address(fuzz)) assertTrue(_try(13, 20), "no controller swap executed");
+            // the swap action may have ended on the plain controller: put the fuzz controller in force by hand
+            if (core.controller() != address(fuzz)) {
+                vm.prank(handler.owner());
+                core.setController(address(fuzz));
+            }
         }
         // plain actions
         _try(0, 20);
@@ -505,7 +508,6 @@ abstract contract InvariantsBase is InvariantFixture {
         _try(10, 5);
         _try(11, 5);
         _try(12, 5);
-        _try(13, 5);
         _try(15, 5);
         // credits in, so the eth pile reaches 80
         _try(2, 40);
@@ -550,9 +552,9 @@ abstract contract InvariantsBase is InvariantFixture {
     }
 
     function _phase2Smoke() internal {
-        // the statements composed so far are new or just overprinted, and an eth lane statement exits only after
-        // its auction ran its length
-        vm.warp(block.timestamp + 73 hours);
+        // the statements composed so far are new or just overprinted, and an eth lane statement exits only after it
+        // was listed without a bid for exitAfter (105 hours at launch)
+        vm.warp(block.timestamp + 106 hours);
         assertTrue(_try(18, 80), "no exit");
         assertTrue(_try(16, 60), "no exit token sale");
         _try(16, 60);
@@ -600,7 +602,7 @@ abstract contract InvariantsBase is InvariantFixture {
 }
 
 /// phase 1 after the sniper window: the exit module slot is empty, the controller is ControllerV1 and may be swapped
-/// for the fuzz controller in benign mode through the owner timelock. the owner setup took a week, so the skim is
+/// for the fuzz controller in benign mode at once. the owner setup came a week, so the skim is
 /// the 10 point baseline.
 /// forge-config: default.invariant.runs = 24
 /// forge-config: default.invariant.depth = 80
@@ -612,9 +614,9 @@ contract InvariantsPhase1 is InvariantsBase {
 
     /// the storage slots used by the handler and by invariant 7 match the public getters.
     function test_storageLayoutMatchesWindowSlots() public view {
-        assertEq(uint256(vm.load(address(core), bytes32(uint256(5)))), core.ethPot());
-        assertEq(uint256(vm.load(address(core), bytes32(uint256(9)))), core.rateAtCheckpoint());
-        assertEq((uint256(vm.load(address(core), bytes32(uint256(10)))) >> 64) & type(uint64).max, core.lastFillTime());
+        assertEq(uint256(vm.load(address(core), bytes32(uint256(6)))), core.ethPot());
+        assertEq(uint256(vm.load(address(core), bytes32(uint256(10)))), core.rateAtCheckpoint());
+        assertEq((uint256(vm.load(address(core), bytes32(uint256(11)))) >> 64) & type(uint64).max, core.lastFillTime());
         // the prefill opened a window, so the slots hold real values
         assertGt(_windowStart(), 0);
         assertGt(_windowPot(), 0);
@@ -635,9 +637,8 @@ contract InvariantsPhase1Deep is InvariantsPhase1 {
 }
 
 /// phase 1 starting inside the sniper window: setUp ends a few seconds after launch, the pot, the piles and the
-/// statements were all built under a 90 percent skim, and the owner's hostile target and fuzz controller are only
-/// queued. the run begins with the skim near its maximum and the handler allows the target and switches the
-/// controller once the timelock has run.
+/// statements were all built under a 90 percent skim, and the owner has allowed the hostile target. the run begins
+/// with the skim near its maximum and the handler may switch the controller at any time.
 /// forge-config: default.invariant.runs = 24
 /// forge-config: default.invariant.depth = 80
 /// forge-config: default.invariant.fail-on-revert = false
@@ -656,8 +657,7 @@ contract InvariantsPhase1Window is InvariantsBase {
         return IArtCoinsMevSkim(Mainnet.MEV_LINEAR_SKIM).currentSkimBps(poolId);
     }
 
-    /// everything the money side does inside the window first, then the standard smoke after the week the owner
-    /// actions need
+    /// everything the money side does inside the window first, then the standard smoke after a week
     function _smoke() internal override {
         assertGt(_skimBpsNow(), 10_000);
         _try(0, 20);

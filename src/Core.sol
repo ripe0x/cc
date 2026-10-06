@@ -31,8 +31,8 @@ import {CoreLib} from "./lib/CoreLib.sol";
 import {SettingsBounds} from "./lib/SettingsBounds.sol";
 import {SettingsStore} from "./lib/SettingsStore.sol";
 
-/// custody and every rule of the credits engine. the only mutable slots are the ones the owner can
-/// reach through the timelock: the controller, the exit module and the target list.
+/// custody and every rule of the credits engine. the owner sets the controller, the exit module and the target list at
+/// once, and can lock each of the three for good (docs/ARCHITECTURE.md).
 /// credits and statements sent to the core outside its doors are not tracked and stay in the core.
 /// the core is the bounty recipient of the live skim hook: its `receive()` books the hook's eth into the pot.
 contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
@@ -42,13 +42,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /*//////////////////////////////////////////////////////////////
                                  TYPES
     //////////////////////////////////////////////////////////////*/
-
-    enum Action {
-        SetController,
-        SetExitModule,
-        AddTarget,
-        Freeze
-    }
 
     /// the live state of a statement the core has a record of. `Sold` and `Returned` are stale records that
     /// `syncStatement` settles. `Ended` is a finished auction with a bid that anyone may settle on the house
@@ -121,11 +114,16 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error Slippage();
     error Underpaid();
     error NoExitModule();
-    error Frozen();
     error ExitTokenChanged();
-    error AlreadyQueued();
-    error NotQueued();
     error TooEarly();
+    /// the door `what` ("controller", "exitModule" or "targets") was locked for good by the owner
+    error Locked(bytes32 what);
+    error OnlyController();
+    error OnlyPendingOwner();
+    /// a sale paid less than the hard floor of the statement
+    error BelowFloor();
+    /// the controller did not answer `statementPrice` with a word
+    error BadPrice();
     error NothingToBuy();
     error NothingBought();
     error TooSoon();
@@ -175,14 +173,17 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event Overprinted(uint256 indexed baseId, uint256 indexed topId, uint256 cost);
     event Buyback(address indexed caller, uint256 amountIn, uint256 tip);
     event ExitBuyback(address indexed caller, uint256 slice, uint256 coinIn);
-    event Queued(bytes32 indexed id, Action action, bytes data, uint256 eta);
-    event Executed(bytes32 indexed id, Action action);
-    event Cancelled(bytes32 indexed id, Action action);
+    /// the controller sold a statement at once: the buyer and the price paid (booked as sale proceeds)
+    event StatementSoldTo(uint256 indexed sid, address indexed buyer, uint256 price);
+    event OwnershipTransferStarted(address indexed owner, address indexed pending);
+    event OwnershipTransferred(address indexed from, address indexed to);
+    event ControllerLocked();
+    event ExitModuleLocked();
+    event TargetsLocked();
     event ControllerSet(address controller);
     event ExitModuleSet(address exitModule, address exitToken, uint256 unitPerPoint);
     event TargetAdded(address target);
     event TargetRemoved(address target);
-    event FrozenSet();
 
     /*//////////////////////////////////////////////////////////////
                               PARAMETERS
@@ -192,7 +193,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public constant SUPPLY = 1_000_000_000e18;
     /// the exit rate the state starts at, bps of score. `setXRate` moves it, it is not a setting
     uint256 public constant XRATE_START = 6000;
-    uint256 public constant TIMELOCK = 7 days;
     uint256 public constant OVERPRINT_CAP_PER_DAY = 8;
 
     uint256 private constant BPS = 10_000;
@@ -203,6 +203,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 private constant COMPOSE_OVERHEAD_GAS = 50_000;
     uint256 private constant LIST_GAS = 350_000;
     uint256 private constant READ_GAS = 200_000;
+    /// the most gas of an exit the redeem reimbursement counts, so a gas burning module cannot inflate it
+    uint256 private constant EXIT_GAS = 1_500_000;
     /// gas the controller's `nextPage` may use, in both lanes. a full page of ControllerV1 costs about 73,000 (measured
     /// in test/ReviewFlowCore.t.sol), so this is about 7 times that. a gas burning controller cannot inflate the
     /// compose reimbursement past it
@@ -219,7 +221,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     ICredits private constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements private constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
 
-    address public immutable OWNER;
     address public immutable COIN;
     /// opening bid, wei per whole point, fixed at deploy
     uint256 public immutable RATE_START;
@@ -240,11 +241,16 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     address public controller;
-    bool public frozen;
+    /// one way locks of the owner (docs/ARCHITECTURE.md): once set, the door never opens again
+    bool public controllerLocked;
+    bool public exitModuleLocked;
+    bool public targetsLocked;
     address public exitModule;
     address public exitToken;
     mapping(address => bool) public allowedTarget;
-    mapping(bytes32 => uint256) public queuedEta;
+    /// the owner and the pending owner of the two step handover
+    address public owner;
+    address public pendingOwner;
 
     uint256 public ethPot;
     uint256 public ethToBuyback;
@@ -282,7 +288,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint64 public xStartTime;
 
     modifier onlyOwner() {
-        if (msg.sender != OWNER) revert OnlyOwner();
+        if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
@@ -310,7 +316,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (stack_.escrow.code.length == 0) revert NoCode(stack_.escrow);
         if (stack_.auctionFactory.code.length == 0) revert NoCode(stack_.auctionFactory);
         if (!SettingsBounds.rateInBounds(rateStart_) || rateStart_ > settings_.rateCap) revert BadRate();
-        OWNER = owner_;
+        owner = owner_;
         COIN = coin_;
         RATE_START = rateStart_;
         MANAGER = IPoolManager(stack_.poolManager);
@@ -333,6 +339,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         lastFillTime = uint64(block.timestamp);
         xRateAtCheckpoint = uint256(XRATE_START).min(settings_.xRateCap).max(settings_.xRateFloor);
         CREDITS.setApprovalForAll(address(STATEMENTS), true);
+        emit OwnershipTransferred(address(0), owner_);
         emit ControllerSet(controller_);
         emit TargetAdded(Mainnet.SEAPORT);
         emit TargetAdded(Mainnet.CREDIT_STRATEGY);
@@ -341,14 +348,17 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// accepts eth and never reverts, because the hook pushes its bounty here with all gas and a revert would
-    /// brick every swap in the pool. eth from the hook is booked into the pot unless a measurement is in flight.
+    /// brick every swap in the pool. eth from the hook is booked unless a measurement is in flight: `feeToBuybackBps`
+    /// of it to the coin buyback, the rest to the pot.
     /// anything else, refunds from a purchase included, is booked later by `skim`. a measurement in flight books
     /// nothing, so eth arriving then just lowers the measured cost. there is no fallback on purpose: the hook
     /// calls `streamForward` here once the balance reaches 0.01 eth and relies on that call reverting.
     receive() external payable {
         if (msg.sender != HOOK || _measuring().get()) return;
         _checkpoint();
-        ethPot += msg.value;
+        uint256 toBuyback = msg.value * _st().feeToBuybackBps / BPS;
+        if (toBuyback != 0) ethToBuyback += toBuyback;
+        ethPot += msg.value - toBuyback;
         _syncFunded();
         emit FeesAdded(msg.value);
     }
@@ -717,17 +727,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             revert BadStatement();
         }
 
-        Settings storage s = _st();
-        uint256 cap = lane == Lane.Eth ? cost : PAGE * s.avgScore * RATE_START / 1e4;
-        uint256 gasUsed = gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0);
-        uint256 reimbursement =
-            (gasUsed * block.basefee * s.reimburseBps / BPS).min(cap * s.reimburseCapBps / BPS).min(ethPot);
-        if (reimbursement != 0) {
-            _checkpoint();
-            ethPot -= reimbursement;
-            _syncFunded();
-            if (lane == Lane.Eth) cost += reimbursement;
-        }
+        uint256 reimbursement = _repay(
+            gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0),
+            lane == Lane.Eth ? cost : _notionalCap()
+        );
+        if (lane == Lane.Eth) cost += reimbursement;
         _heldIds.push(sid);
         _statements[sid] = Statement({
             cost: cost,
@@ -744,14 +748,47 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (reimbursement != 0) SafeTransferLib.safeTransferETH(msg.sender, reimbursement);
     }
 
-    /// lists a held statement on the house at the reserve of the current settings, from its cost. the house takes the
+    /// the gas reimbursement of a compose or an exit: `reimburseBps` of the gas cost, at most `reimburseCapBps` of `cap`
+    /// and of the pot. the pot is debited here, the caller pays it out last
+    function _repay(uint256 gasUsed, uint256 cap) private returns (uint256 r) {
+        Settings storage s = _st();
+        r = (gasUsed * block.basefee * s.reimburseBps / BPS).min(cap * s.reimburseCapBps / BPS).min(ethPot);
+        if (r != 0) {
+            _checkpoint();
+            ethPot -= r;
+            _syncFunded();
+        }
+    }
+
+    /// the cap of an exit lane statement, which has no eth cost basis: a page at the opening rate and the average score
+    function _notionalCap() private view returns (uint256) {
+        return PAGE * _st().avgScore * RATE_START / 1e4;
+    }
+
+    /// the hard floor of a statement sale
+    function _floor(uint256 cost) private view returns (uint256) {
+        return cost * _st().saleFloorBps / BPS;
+    }
+
+    /// the reserve of a listing: the controller's asking price now (from the age of the listing), never below the hard
+    /// floor. a controller that fails or answers short makes the caller revert, so a listing is never priced blind
+    function _reserveFor(uint256 sid) private view returns (uint256) {
+        Statement storage st = _statements[sid];
+        uint256 cost = st.cost;
+        (bool ok, bytes memory out) =
+            _ask(controller, abi.encodeCall(IController.statementPrice, (sid, cost, st.listedAt)), READ_GAS, 32);
+        if (!ok) revert BadPrice();
+        return abi.decode(out, (uint256)).max(_floor(cost));
+    }
+
+    /// lists a held statement on the house at the controller's price at age zero (floored). the house takes the
     /// statement with transferFrom, so there is no callback. an auction id must come back and the house must own it
     function _list(uint256 sid) private {
         Statement storage st = _statements[sid];
-        uint256 reserve = st.cost * _st().reserveBps / BPS;
+        st.listedAt = uint64(block.timestamp);
+        uint256 reserve = _reserveFor(sid);
         uint256 id = HOUSE.createAuction(sid, address(STATEMENTS), _st().auctionDuration, reserve, 0);
         st.auctionId = id;
-        st.listedAt = uint64(block.timestamp);
         st.listed = true;
         emit StatementListed(sid, id, reserve);
     }
@@ -792,12 +829,31 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             if (strict) revert CallFailed();
             return;
         }
-        uint256 toBuyback = owed * _st().saleToBuybackBps / BPS;
+        _book(owed);
+    }
+
+    /// books sale proceeds: `saleToBuybackBps` to the coin buyback, the rest to the pot
+    function _book(uint256 amount) private {
+        uint256 toBuyback = amount * _st().saleToBuybackBps / BPS;
         ethToBuyback += toBuyback;
         _checkpoint();
-        ethPot += owed - toBuyback;
+        ethPot += amount - toBuyback;
         _syncFunded();
-        emit SalesCollected(owed, toBuyback);
+        emit SalesCollected(amount, toBuyback);
+    }
+
+    /// the controller sells a listed eth lane statement at once, for `msg.value` at least the hard floor. a live
+    /// auction always wins: the listing is cancelled, which reverts while a bid exists. the payment is booked as sale
+    /// proceeds and the statement goes to `buyer`. no refund logic here, the controller refunds its caller
+    function sellTo(uint256 sid, address buyer) external payable nonReentrant {
+        if (msg.sender != controller) revert OnlyController();
+        Statement storage st = _statements[sid];
+        if (msg.value < _floor(st.cost)) revert BelowFloor();
+        _cancel(st);
+        STATEMENTS.transferFrom(address(this), buyer, sid);
+        _book(msg.value);
+        emit StatementSoldTo(sid, buyer, msg.value);
+        _unhold(sid);
     }
 
     /// settles the record of a listed statement against the house, lazily and permissionlessly. if the auction is gone
@@ -816,12 +872,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         }
     }
 
-    /// sets the reserve of a listing that has no bid to the reserve of the current settings. permissionless, so a
-    /// change of `reserveBps` reaches old listings
+    /// sets the reserve of a listing that has no bid to the controller's asking price now (floored), from the age of
+    /// the listing. permissionless: a first bidder calls it before bidding, and a change of the controller or of its
+    /// settings or of `saleFloorBps` reaches old listings
     function repriceStatement(uint256 sid) external nonReentrant {
         Statement storage st = _statements[sid];
         _requireOpen(st);
-        uint256 reserve = st.cost * _st().reserveBps / BPS;
+        uint256 reserve = _reserveFor(sid);
         HOUSE.setAuctionReservePrice(st.auctionId, reserve);
         emit StatementRepriced(sid, reserve);
     }
@@ -862,6 +919,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// `exitAfter`, and its listing is cancelled first (this reverts while a bid is live). an exit lane statement
     /// goes at once, it was never listed.
     function exitStatement(uint256 sid) external nonReentrant {
+        uint256 gasStart = gasleft();
         address module = exitModule;
         if (module == address(0)) revert NoExitModule();
         Statement memory s = _statements[sid];
@@ -895,6 +953,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         xPot += received - toBuyback;
         _syncXFunded();
         emit StatementExited(sid, s.lane, received);
+        // the caller's gas is repaid from the eth pot like a compose, after all state is final. nothing is added to a
+        // cost basis. the gas counted is bounded, so a gas burning module cannot push it past the cap
+        uint256 repay = _repay(
+            (gasStart - gasleft() + COMPOSE_OVERHEAD_GAS).min(EXIT_GAS), s.lane == Lane.Eth ? s.cost : _notionalCap()
+        );
+        if (repay != 0) SafeTransferLib.safeTransferETH(msg.sender, repay);
     }
 
     /// merges two statements the controller names, within the daily cap. the base keeps its id and restarts its clock.
@@ -1013,49 +1077,60 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                 OWNER
     //////////////////////////////////////////////////////////////*/
 
-    /// queues an owner action. it can execute after the timelock.
-    function queue(Action action, bytes calldata data) external onlyOwner {
-        if (action == Action.SetController && frozen) revert Frozen();
-        bytes32 id = keccak256(abi.encode(action, data));
-        if (queuedEta[id] != 0) revert AlreadyQueued();
-        uint256 eta = block.timestamp + TIMELOCK;
-        queuedEta[id] = eta;
-        emit Queued(id, action, data, eta);
+    /// starts the handover of the owner role: `to` becomes the owner when it calls `acceptOwnership`. the zero address
+    /// clears a pending handover. there is no renounce
+    function transferOwnership(address to) external onlyOwner {
+        pendingOwner = to;
+        emit OwnershipTransferStarted(msg.sender, to);
     }
 
-    /// cancels a queued owner action.
-    function cancel(Action action, bytes calldata data) external onlyOwner {
-        bytes32 id = keccak256(abi.encode(action, data));
-        if (queuedEta[id] == 0) revert NotQueued();
-        delete queuedEta[id];
-        emit Cancelled(id, action);
+    /// completes the handover, called by the pending owner
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        delete pendingOwner;
     }
 
-    /// executes a queued owner action once its timelock has passed.
-    function execute(Action action, bytes calldata data) external onlyOwner nonReentrant {
-        bytes32 id = keccak256(abi.encode(action, data));
-        uint256 eta = queuedEta[id];
-        if (eta == 0) revert NotQueued();
-        if (block.timestamp < eta) revert TooEarly();
-        delete queuedEta[id];
-        if (action == Action.SetController) {
-            if (frozen) revert Frozen();
-            address c = abi.decode(data, (address));
-            if (c == address(0)) revert ZeroAddress();
-            controller = c;
-            emit ControllerSet(c);
-        } else if (action == Action.SetExitModule) {
-            _setExitModule(abi.decode(data, (address)));
-        } else if (action == Action.AddTarget) {
-            address t = abi.decode(data, (address));
-            if (_forbidden(t)) revert ForbiddenTarget();
-            allowedTarget[t] = true;
-            emit TargetAdded(t);
-        } else {
-            frozen = true;
-            emit FrozenSet();
-        }
-        emit Executed(id, action);
+    /// sets the controller at once. never zero. reverts after `lockController`
+    function setController(address c) external onlyOwner {
+        if (controllerLocked) revert Locked("controller");
+        if (c == address(0)) revert ZeroAddress();
+        controller = c;
+        emit ControllerSet(c);
+    }
+
+    /// sets or replaces the exit module at once (any number of times until `lockExitModule`)
+    function setExitModule(address module) external onlyOwner nonReentrant {
+        if (exitModuleLocked) revert Locked("exitModule");
+        _setExitModule(module);
+    }
+
+    /// allows a target of `buyListing` at once. forbidden targets are refused. reverts after `lockTargets`
+    function addTarget(address t) external onlyOwner {
+        if (targetsLocked) revert Locked("targets");
+        if (_forbidden(t)) revert ForbiddenTarget();
+        allowedTarget[t] = true;
+        emit TargetAdded(t);
+    }
+
+    /// the three one way locks. each is irreversible. the settings and the controller's own sale settings stay open
+    function lockController() external onlyOwner {
+        controllerLocked = true;
+        emit ControllerLocked();
+    }
+
+    /// reverts while no exit module is set, so phase 2 cannot be locked out by accident
+    function lockExitModule() external onlyOwner {
+        if (exitModule == address(0)) revert NoExitModule();
+        exitModuleLocked = true;
+        emit ExitModuleLocked();
+    }
+
+    /// after this no target can be added. removing one still works
+    function lockTargets() external onlyOwner {
+        targetsLocked = true;
+        emit TargetsLocked();
     }
 
     /// removes an allowed target at once.
@@ -1118,7 +1193,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         emit XRateSet(rate);
     }
 
-    /// sets or replaces the exit module (7 day timelock, any number of times). the exit token never changes once set.
+    /// sets or replaces the exit module. the exit token never changes once set.
     /// the unit is read again every time, so naming the same module again is how the unit is updated. the exit rate is
     /// checkpointed under the old unit first and the funded flag resynced after. a later set never touches the exit
     /// auction price or clock: the price is coin per exit token, the unit only changes the slice. a dormant allowed

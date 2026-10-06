@@ -43,7 +43,7 @@ library CoreLib {
         s.tipCapBps = ns.tipCapBps;
         s.reimburseBps = ns.reimburseBps;
         s.reimburseCapBps = ns.reimburseCapBps;
-        s.reserveBps = ns.reserveBps;
+        s.saleFloorBps = ns.saleFloorBps;
         s.auctionDuration = ns.auctionDuration;
         s.exitAfter = ns.exitAfter;
         s.saleToBuybackBps = ns.saleToBuybackBps;
@@ -59,6 +59,7 @@ library CoreLib {
         s.exitSliceCredits = ns.exitSliceCredits;
         s.rateCap = ns.rateCap;
         s.exitLaneToBuybackBps = ns.exitLaneToBuybackBps;
+        s.feeToBuybackBps = ns.feeToBuybackBps;
         emit SettingsSet(ns);
     }
 
@@ -79,7 +80,7 @@ library CoreLib {
         s.tipCapBps = uint16(a >> 176);
         s.reimburseBps = uint16(a >> 192);
         s.reimburseCapBps = uint16(a >> 208);
-        s.reserveBps = uint16(a >> 224);
+        s.saleFloorBps = uint16(a >> 224);
         s.auctionDuration = uint32(b);
         s.exitAfter = uint32(b >> 32);
         s.saleToBuybackBps = uint16(b >> 64);
@@ -95,6 +96,7 @@ library CoreLib {
         s.exitSliceCredits = uint16(c >> 96);
         s.rateCap = uint64(c >> 112);
         s.exitLaneToBuybackBps = uint16(c >> 176);
+        s.feeToBuybackBps = uint16(c >> 192);
         // forge-lint: disable-end(unsafe-typecast)
     }
 

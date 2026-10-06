@@ -22,24 +22,9 @@ contract Phase2FlexTest is Fixture {
         return new MockExitModule(address(xt), unit);
     }
 
-    /// @dev queues a module set, returns the data of the action and the time it can run
-    function _queue(address m) internal returns (bytes memory data, uint256 eta) {
-        data = abi.encode(m);
-        vm.prank(owner);
-        core.queue(Core.Action.SetExitModule, data);
-        eta = block.timestamp + 7 days;
-    }
-
-    function _exec(bytes memory data) internal {
-        vm.prank(owner);
-        core.execute(Core.Action.SetExitModule, data);
-    }
-
-    /// @dev queue, wait the whole timelock, execute
+    /// @dev the owner sets the module at once
     function _replace(address m) internal {
-        (bytes memory d, uint256 eta) = _queue(m);
-        vm.warp(eta);
-        _exec(d);
+        _setExitModule(m);
     }
 
     function _owner(Settings memory s) internal {
@@ -55,15 +40,15 @@ contract Phase2FlexTest is Fixture {
 
     /// @dev storage of the exit rate (Core slots 13 and 14, see `forge inspect Core storage-layout`)
     function _xRateAtCp() internal view returns (uint256) {
-        return uint256(vm.load(address(core), bytes32(uint256(13))));
+        return uint256(vm.load(address(core), bytes32(uint256(14))));
     }
 
     function _xCpTime() internal view returns (uint64) {
-        return uint64(uint256(vm.load(address(core), bytes32(uint256(14)))));
+        return uint64(uint256(vm.load(address(core), bytes32(uint256(15)))));
     }
 
     function _xFunded() internal view returns (bool) {
-        return (uint256(vm.load(address(core), bytes32(uint256(14)))) >> 64) & 0xff != 0;
+        return (uint256(vm.load(address(core), bytes32(uint256(15)))) >> 64) & 0xff != 0;
     }
 
     function _full(uint256 unit) internal view returns (uint256) {
@@ -90,24 +75,19 @@ contract Phase2FlexTest is Fixture {
 
     // ------------------------------------------------------------------ replace
 
-    function test_replace_newModuleSameTokenAfterTheTimelock() public {
+    function test_replace_newModuleSameTokenTakesEffectAtOnce() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
-        (bytes memory data, uint256 eta) = _queue(address(_mod(2e10)));
-        address fresh = abi.decode(data, (address));
-        // nothing changes while queued
-        assertEq(core.exitModule(), address(mod));
-        assertEq(core.unitPerPoint(), UNIT);
-        vm.warp(eta);
+        address fresh = address(_mod(2e10));
         vm.expectEmit(address(core));
         emit Core.ExitModuleSet(fresh, address(xt), 2e10);
-        _exec(data);
+        _replace(fresh);
         assertEq(core.exitModule(), fresh);
         assertEq(core.exitToken(), address(xt));
         assertEq(core.unitPerPoint(), 2e10);
 
         // the exit goes through the new module and pays by the new unit
-        _warp(72 hours);
+        _warp(105 hours);
         uint256 rating = STATEMENTS.creditScoreOf(sid);
         uint256 before = xt.balanceOf(address(core));
         core.exitStatement(sid);
@@ -117,18 +97,14 @@ contract Phase2FlexTest is Fixture {
         _solvent();
     }
 
-    function test_replace_pilesPotsHeldAndQueueAreUntouched() public {
+    function test_replace_pilesPotsHeldAndTargetsAreUntouched() public {
         _enterPhase2();
         _composeOnce();
         _potX(3e19);
         _fillEthPile(5);
         MockExitModule m2 = _mod(3e10);
-        // a second action queued before the set and unrelated to it
         address t = address(0xA11CE);
-        vm.prank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(t));
-        bytes32 qid = keccak256(abi.encode(Core.Action.AddTarget, abi.encode(t)));
-        uint256 qeta = core.queuedEta(qid);
+        _allow(t);
         uint256 xPot = core.xPot();
         uint256 xb = core.xToBuyback();
         uint256 ep = core.ethPot();
@@ -142,7 +118,7 @@ contract Phase2FlexTest is Fixture {
         assertEq(core.ethToBuyback(), eb);
         assertEq(core.pileSize(Lane.Eth), pile);
         assertEq(core.heldStatements().length, held);
-        assertEq(core.queuedEta(qid), qeta, "the pending queue is untouched");
+        assertTrue(core.allowedTarget(t), "the allowed targets are untouched");
         _solvent();
     }
 
@@ -151,17 +127,11 @@ contract Phase2FlexTest is Fixture {
         mod.setUnitPerPoint(3e10);
         // the module changed its answer, the core keeps the unit it read until the set runs
         assertEq(core.unitPerPoint(), UNIT);
-        (bytes memory data, uint256 eta) = _queue(address(mod));
-        vm.warp(eta - 1);
-        vm.expectRevert(Core.TooEarly.selector);
-        _exec(data);
-        assertEq(core.unitPerPoint(), UNIT, "a unit change waits the 7 days");
-        vm.warp(eta);
         vm.expectEmit(address(core));
         emit Core.ExitModuleSet(address(mod), address(xt), 3e10);
-        _exec(data);
+        _replace(address(mod));
         assertEq(core.exitModule(), address(mod));
-        assertEq(core.unitPerPoint(), 3e10);
+        assertEq(core.unitPerPoint(), 3e10, "a unit change takes effect at once");
         // and the same address can be set again, and again
         mod.setUnitPerPoint(4e9);
         _replace(address(mod));
@@ -171,15 +141,11 @@ contract Phase2FlexTest is Fixture {
     function test_replace_differentExitTokenReverts() public {
         _enterPhase2();
         MockExitModule alien = new MockExitModule(address(new MockExitToken("Other", "OTH")), UNIT);
-        (bytes memory data, uint256 eta) = _queue(address(alien));
-        vm.warp(eta);
+        vm.prank(owner);
         vm.expectRevert(Core.ExitTokenChanged.selector);
-        _exec(data);
+        core.setExitModule(address(alien));
         assertEq(core.exitModule(), address(mod));
         assertEq(core.exitToken(), address(xt));
-        // the queue entry was consumed by the revert's rollback: it can still be tried, and fails the same way
-        vm.expectRevert(Core.ExitTokenChanged.selector);
-        _exec(data);
     }
 
     function test_replace_firstSetStillTakesAnyTokenAndUnit() public {
@@ -196,50 +162,25 @@ contract Phase2FlexTest is Fixture {
         assertEq(core.xRate(), 6000);
     }
 
-    function test_replace_timelockAppliesEveryTime() public {
+    function test_replace_everyTimeAtOnceAndOnlyTheOwner() public {
         _enterPhase2();
-        // the second set cannot run early, not even by a second
-        (bytes memory d1, uint256 eta1) = _queue(address(_mod(2e10)));
-        vm.expectRevert(Core.TooEarly.selector);
-        _exec(d1);
-        vm.warp(eta1 - 1);
-        vm.expectRevert(Core.TooEarly.selector);
-        _exec(d1);
-        vm.warp(eta1);
-        _exec(d1);
-        // and neither can the third
+        _replace(address(_mod(2e10)));
         MockExitModule m3 = _mod(5e9);
-        (bytes memory d3, uint256 eta3) = _queue(address(m3));
-        vm.warp(eta3 - 1);
-        vm.expectRevert(Core.TooEarly.selector);
-        _exec(d3);
-        vm.warp(eta3);
-        _exec(d3);
+        _replace(address(m3));
         assertEq(core.exitModule(), address(m3));
         assertEq(core.unitPerPoint(), 5e9);
-        // only the owner queues or executes
-        vm.expectRevert();
-        core.queue(Core.Action.SetExitModule, d3);
-        // an executed action cannot run twice
-        vm.expectRevert(Core.NotQueued.selector);
-        _exec(d3);
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.setExitModule(address(mod));
     }
 
-    function test_replace_twoQueuedSetsBothRun() public {
+    function test_replace_twoSetsInARowBothApply() public {
         _enterPhase2();
         MockExitModule a = _mod(2e10);
         MockExitModule b = _mod(4e9);
-        (bytes memory da, uint256 etaA) = _queue(address(a));
-        _warp(1 hours);
-        (bytes memory db, uint256 etaB) = _queue(address(b));
-        vm.warp(etaA);
-        _exec(da);
+        _replace(address(a));
         assertEq(core.exitModule(), address(a));
         assertEq(core.unitPerPoint(), 2e10);
-        vm.expectRevert(Core.TooEarly.selector);
-        _exec(db);
-        vm.warp(etaB);
-        _exec(db);
+        _replace(address(b));
         assertEq(core.exitModule(), address(b));
         assertEq(core.unitPerPoint(), 4e9);
         assertEq(core.exitToken(), address(xt));
@@ -257,17 +198,12 @@ contract Phase2FlexTest is Fixture {
         gone.setRevertUnit(true); // the unit read fails
         vm.startPrank(owner);
         for (uint256 i; i < 4; ++i) {
-            core.queue(Core.Action.SetExitModule, abi.encode(bad[i]));
-        }
-        core.queue(Core.Action.SetExitModule, abi.encode(address(gone)));
-        vm.stopPrank();
-        _warp(7 days);
-        for (uint256 i; i < 4; ++i) {
             vm.expectRevert(Core.BadModule.selector);
-            _exec(abi.encode(bad[i]));
+            core.setExitModule(bad[i]);
         }
         vm.expectRevert(Core.BadModule.selector);
-        _exec(abi.encode(address(gone)));
+        core.setExitModule(address(gone));
+        vm.stopPrank();
         assertEq(core.exitModule(), address(mod), "every refusal left the state alone");
         assertEq(core.unitPerPoint(), UNIT);
     }
@@ -275,29 +211,21 @@ contract Phase2FlexTest is Fixture {
     function test_replace_oldModuleIsNoLongerForbiddenAndTheNewOneIs() public {
         _enterPhase2();
         // while it is the module it cannot be a target
-        vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(mod)));
-        vm.stopPrank();
+        vm.prank(owner);
+        vm.expectRevert(Core.ForbiddenTarget.selector);
+        core.addTarget(address(mod));
         MockExitModule m2 = _mod(2e10);
         _replace(address(m2));
-        // the old module may be named a target now (its queue entry from before is ripe), the new one may not
-        vm.prank(owner);
-        core.execute(Core.Action.AddTarget, abi.encode(address(mod)));
+        // the old module may be named a target now, the new one may not
+        _allow(address(mod));
         assertTrue(core.allowedTarget(address(mod)));
-        vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(m2)));
-        vm.stopPrank();
-        _warp(7 days);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
         vm.prank(owner);
-        core.execute(Core.Action.AddTarget, abi.encode(address(m2)));
+        vm.expectRevert(Core.ForbiddenTarget.selector);
+        core.addTarget(address(m2));
         // the exit token stays forbidden
         vm.prank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(xt)));
-        _warp(7 days);
         vm.expectRevert(Core.ForbiddenTarget.selector);
-        vm.prank(owner);
-        core.execute(Core.Action.AddTarget, abi.encode(address(xt)));
+        core.addTarget(address(xt));
     }
 
     // ------------------------------------------------------------------ the unit is the new one
@@ -310,7 +238,7 @@ contract Phase2FlexTest is Fixture {
         MockExitModule m2 = _mod(2e10);
         _replace(address(m2));
         m2.setShortfallBps(2_500);
-        _warp(72 hours);
+        _warp(105 hours);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(sid);
         // paying the new unit in full passes
@@ -325,6 +253,7 @@ contract Phase2FlexTest is Fixture {
         uint256 sid = _composeOnce().sid;
         MockExitModule m2 = _mod(4e9);
         _replace(address(m2));
+        _warp(core.settings().exitAfter);
         uint256 rating = STATEMENTS.creditScoreOf(sid);
         uint256 before = xt.balanceOf(address(core));
         core.exitStatement(sid);
@@ -349,7 +278,7 @@ contract Phase2FlexTest is Fixture {
 
     // ------------------------------------------------------------------ exit rate across a unit change
 
-    /// @dev xPot is 2e19. the exit rate is set to 3000 ten hours before the set runs, so it climbs 100 per hour. under
+    /// @dev xPot is 2e19. the exit rate is set to 3000 ten hours before the set, so it climbs 100 per hour. under
     /// the old unit 1e10 the cap is min(9700, 2e19 * 1e4 / (4_330_000 * 1e10)) = 4619 and the rate at the set is
     /// 3000 + 10 * 100 = 4000. under the new unit 1e14 the cap would be 2e23 / (4_330_000 * 1e14) = 461, below the
     /// rate: a checkpoint taken after the unit changed would freeze the rate at 3000 and lose the climb
@@ -358,14 +287,13 @@ contract Phase2FlexTest is Fixture {
         _potX(2e19);
         assertTrue(_xFunded());
         MockExitModule m2 = _mod(1e14);
-        (bytes memory data, uint256 eta) = _queue(address(m2));
-        vm.warp(eta - 10 hours);
         vm.prank(owner);
         core.setXRate(3_000);
         assertEq(_xRateAtCp(), 3_000);
+        uint256 eta = block.timestamp + 10 hours;
         vm.warp(eta);
         assertEq(core.xRate(), 4_000, "ten hours of climb under the old unit");
-        _exec(data);
+        _replace(address(m2));
         assertEq(_xRateAtCp(), 4_000, "credited at the old unit, none lost to the new cap");
         assertEq(uint256(_xCpTime()), eta, "the clock restarts at the set");
         assertEq(core.xRate(), 4_000);
@@ -392,12 +320,13 @@ contract Phase2FlexTest is Fixture {
     }
 
     /// @dev the same address set again with a changed unit is resynced the same way. the rate climbed to its cap
-    /// 9700 during the timelock under the old unit and that is what is credited
+    /// 9700 over a week under the old unit and that is what is credited
     function test_rate_sameAddressSetResyncs() public {
         _enterPhase2();
         _potX(1e20);
         assertTrue(_xFunded());
         mod.setUnitPerPoint(1e14);
+        _warp(7 days);
         _replace(address(mod));
         assertEq(_xRateAtCp(), 9_700, "7 days of climb credited under the old unit");
         // 1e24 < 4_330_000 * 9700 * 1e14 = 4.2e24
@@ -416,14 +345,12 @@ contract Phase2FlexTest is Fixture {
         _warp(3 hours);
         MockExitModule next = sameAddress ? mod : _mod(newUnit);
         if (sameAddress) mod.setUnitPerPoint(newUnit);
-        (bytes memory data, uint256 eta) = _queue(address(next));
-        vm.warp(eta);
         uint256 price = core.exitAuctionPrice();
         uint256 start = core.xStartPrice();
         uint64 at = core.xStartTime();
         uint256 xb = core.xToBuyback();
         assertLt(price, start, "the price has been running down");
-        _exec(data);
+        _replace(address(next));
         assertEq(core.unitPerPoint(), newUnit);
         assertGe(core.exitAuctionPrice(), price, "never cheaper right after a set");
         assertEq(core.exitAuctionPrice(), price, "the same price in the same block");
@@ -457,6 +384,8 @@ contract Phase2FlexTest is Fixture {
         _enterPhase2();
         _fillExitBuyback();
         _replace(address(_mod(1e9)));
+        // the exit auction price falls with time: let it run so one coin purchase covers the quote
+        _warp(7 days);
         uint256 xb = core.xToBuyback();
         (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
         assertEq(slice, xb.min(_full(1e9)));
@@ -558,7 +487,7 @@ contract Phase2FlexTest is Fixture {
         s.exitLaneToBuybackBps = 10_000;
         _owner(s);
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         uint256 got = STATEMENTS.creditScoreOf(sid) * UNIT;
         core.exitStatement(sid);
         assertEq(core.xToBuyback(), got * 2_000 / 10_000);
@@ -663,7 +592,7 @@ contract Phase2FlexTest is Fixture {
         MockExitModule m2 = _mod(3e10);
         _replace(address(m2));
         _solvent();
-        _warp(72 hours);
+        _warp(105 hours);
         core.exitStatement(sid);
         _solvent();
 

@@ -3,15 +3,15 @@ pragma solidity ^0.8.28;
 
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 
-/// @notice the 28 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
+/// @notice the 29 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
 /// docs/FLOW.md section 2, for the settings script and the config and deploy tests. the three fields bounded by another
 /// field (climbMaxBps, xRateCap, xRateFloor) have the bounds of the other field in the callers' hands
 library SettingsFields {
-    uint256 internal constant N = 28;
+    uint256 internal constant N = 29;
 
     /// @dev field i of the settings struct, in declaration order
     function get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[28] memory f = [
+        uint256[29] memory f = [
             uint256(s.flatBps),
             s.avgScore,
             s.climbBaseBps,
@@ -24,7 +24,7 @@ library SettingsFields {
             s.tipCapBps,
             s.reimburseBps,
             s.reimburseCapBps,
-            s.reserveBps,
+            s.saleFloorBps,
             s.auctionDuration,
             s.exitAfter,
             s.saleToBuybackBps,
@@ -39,7 +39,8 @@ library SettingsFields {
             s.xAuctionHalfLife,
             s.exitSliceCredits,
             s.rateCap,
-            s.exitLaneToBuybackBps
+            s.exitLaneToBuybackBps,
+            s.feeToBuybackBps
         ];
         return f[i];
     }
@@ -59,7 +60,7 @@ library SettingsFields {
         else if (i == 9) s.tipCapBps = uint16(v);
         else if (i == 10) s.reimburseBps = uint16(v);
         else if (i == 11) s.reimburseCapBps = uint16(v);
-        else if (i == 12) s.reserveBps = uint16(v);
+        else if (i == 12) s.saleFloorBps = uint16(v);
         else if (i == 13) s.auctionDuration = uint32(v);
         else if (i == 14) s.exitAfter = uint32(v);
         else if (i == 15) s.saleToBuybackBps = uint16(v);
@@ -74,13 +75,14 @@ library SettingsFields {
         else if (i == 24) s.xAuctionHalfLife = uint32(v);
         else if (i == 25) s.exitSliceCredits = uint16(v);
         else if (i == 26) s.rateCap = uint64(v);
-        else s.exitLaneToBuybackBps = uint16(v);
+        else if (i == 27) s.exitLaneToBuybackBps = uint16(v);
+        else s.feeToBuybackBps = uint16(v);
         // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// @dev the documented lower bound of every field. climbMaxBps is bounded below by climbBaseBps and xRateFloor and
     /// xRateCap by each other, those three are handled by the callers
-    function lo() internal pure returns (uint256[28] memory) {
+    function lo() internal pure returns (uint256[29] memory) {
         return [
             uint256(0),
             800_000,
@@ -94,7 +96,7 @@ library SettingsFields {
             0,
             0,
             0,
-            3_000,
+            1_000,
             6 hours,
             1 hours,
             0,
@@ -109,11 +111,12 @@ library SettingsFields {
             10 minutes,
             1,
             RATE_START_MIN_WEI,
+            0,
             0
         ];
     }
 
-    function hi() internal pure returns (uint256[28] memory) {
+    function hi() internal pure returns (uint256[29] memory) {
         return [
             uint256(10_000),
             6_000_000,
@@ -142,11 +145,12 @@ library SettingsFields {
             30 days,
             1_000,
             RATE_START_MAX_WEI,
+            10_000,
             10_000
         ];
     }
 
-    function names() internal pure returns (bytes32[28] memory) {
+    function names() internal pure returns (bytes32[29] memory) {
         return [
             bytes32("flatBps"),
             "avgScore",
@@ -160,7 +164,7 @@ library SettingsFields {
             "tipCapBps",
             "reimburseBps",
             "reimburseCapBps",
-            "reserveBps",
+            "saleFloorBps",
             "auctionDuration",
             "exitAfter",
             "saleToBuybackBps",
@@ -175,7 +179,8 @@ library SettingsFields {
             "xAuctionHalfLife",
             "exitSliceCredits",
             "rateCap",
-            "exitLaneToBuybackBps"
+            "exitLaneToBuybackBps",
+            "feeToBuybackBps"
         ];
     }
 }

@@ -10,6 +10,7 @@ import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {DeafBidder} from "./attackers/StatementBuyers.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
+import {SettingsFields} from "../script/SettingsFields.sol";
 
 /// @notice the flow rework (docs/FLOW.md) on the real stack: settings, the flat bid, statement sales on the live pnd
 /// auction house, collection of proceeds, sync and reprice, the phase 2 exit by cancel, overprint, forbidden targets,
@@ -17,7 +18,7 @@ import {MockExitToken} from "./standins/MockExitToken.sol";
 contract FlowTest is Fixture {
     using FixedPointMathLib for uint256;
 
-    uint256 internal constant N = 28;
+    uint256 internal constant N = 29;
 
     // ------------------------------------------------------------------ helpers
 
@@ -38,180 +39,31 @@ contract FlowTest is Fixture {
         return keccak256(abi.encode(s));
     }
 
-    /// @dev field i of the settings struct, in declaration order
+    /// @dev the field tables are the ones of the scripts (`SettingsFields`), 29 fields in declaration order
     function _get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[28] memory f = [
-            uint256(s.flatBps),
-            s.avgScore,
-            s.climbBaseBps,
-            s.climbDoubleEvery,
-            s.climbMaxBps,
-            s.dropBps,
-            s.spendCapBps,
-            s.bonusCapBps,
-            s.tipSavingsBps,
-            s.tipCapBps,
-            s.reimburseBps,
-            s.reimburseCapBps,
-            s.reserveBps,
-            s.auctionDuration,
-            s.exitAfter,
-            s.saleToBuybackBps,
-            s.exitToBuybackBps,
-            s.buybackSlice,
-            s.buybackDelay,
-            s.keeperTipBps,
-            s.xRateCap,
-            s.xRateFloor,
-            s.xRateClimbPerHour,
-            s.xRateDropPerCredit,
-            s.xAuctionHalfLife,
-            s.exitSliceCredits,
-            s.rateCap,
-            s.exitLaneToBuybackBps
-        ];
-        return f[i];
+        return SettingsFields.get(s, i);
     }
 
-    /// @dev sets field i, narrowing the value (callers stay inside the width of the field)
     function _set(Settings memory s, uint256 i, uint256 v) internal pure {
-        // forge-lint: disable-start(unsafe-typecast)
-        if (i == 0) s.flatBps = uint16(v);
-        else if (i == 1) s.avgScore = uint32(v);
-        else if (i == 2) s.climbBaseBps = uint16(v);
-        else if (i == 3) s.climbDoubleEvery = uint32(v);
-        else if (i == 4) s.climbMaxBps = uint16(v);
-        else if (i == 5) s.dropBps = uint16(v);
-        else if (i == 6) s.spendCapBps = uint16(v);
-        else if (i == 7) s.bonusCapBps = uint16(v);
-        else if (i == 8) s.tipSavingsBps = uint16(v);
-        else if (i == 9) s.tipCapBps = uint16(v);
-        else if (i == 10) s.reimburseBps = uint16(v);
-        else if (i == 11) s.reimburseCapBps = uint16(v);
-        else if (i == 12) s.reserveBps = uint16(v);
-        else if (i == 13) s.auctionDuration = uint32(v);
-        else if (i == 14) s.exitAfter = uint32(v);
-        else if (i == 15) s.saleToBuybackBps = uint16(v);
-        else if (i == 16) s.exitToBuybackBps = uint16(v);
-        else if (i == 17) s.buybackSlice = uint128(v);
-        else if (i == 18) s.buybackDelay = uint16(v);
-        else if (i == 19) s.keeperTipBps = uint16(v);
-        else if (i == 20) s.xRateCap = uint16(v);
-        else if (i == 21) s.xRateFloor = uint16(v);
-        else if (i == 22) s.xRateClimbPerHour = uint16(v);
-        else if (i == 23) s.xRateDropPerCredit = uint16(v);
-        else if (i == 24) s.xAuctionHalfLife = uint32(v);
-        else if (i == 25) s.exitSliceCredits = uint16(v);
-        else if (i == 26) s.rateCap = uint64(v);
-        else s.exitLaneToBuybackBps = uint16(v);
-        // forge-lint: disable-end(unsafe-typecast)
+        SettingsFields.set(s, i, v);
     }
 
-    /// @dev the documented lower bound of every field. climbMaxBps is bounded below by climbBaseBps and xRateFloor and
-    /// xRateCap by each other, those three are handled by the callers
-    function _lo() internal pure returns (uint256[28] memory) {
-        return [
-            uint256(0),
-            800_000,
-            0,
-            1 hours,
-            0,
-            500,
-            100,
-            0,
-            0,
-            0,
-            0,
-            0,
-            3_000,
-            6 hours,
-            1 hours,
-            0,
-            0,
-            0.01 ether,
-            1,
-            0,
-            0,
-            0,
-            0,
-            0,
-            10 minutes,
-            1,
-            1e11,
-            0
-        ];
+    function _lo() internal pure returns (uint256[29] memory) {
+        return SettingsFields.lo();
     }
 
-    function _hi() internal pure returns (uint256[28] memory) {
-        return [
-            uint256(10_000),
-            6_000_000,
-            1_000,
-            30 days,
-            2_000,
-            5_000,
-            5_000,
-            5_000,
-            2_500,
-            500,
-            15_000,
-            1_000,
-            40_000,
-            30 days,
-            365 days,
-            10_000,
-            10_000,
-            5 ether,
-            7_200,
-            500,
-            10_000,
-            10_000,
-            1_000,
-            1_000,
-            30 days,
-            1_000,
-            1e15,
-            10_000
-        ];
+    function _hi() internal pure returns (uint256[29] memory) {
+        return SettingsFields.hi();
     }
 
-    function _names() internal pure returns (bytes32[28] memory) {
-        return [
-            bytes32("flatBps"),
-            "avgScore",
-            "climbBaseBps",
-            "climbDoubleEvery",
-            "climbMaxBps",
-            "dropBps",
-            "spendCapBps",
-            "bonusCapBps",
-            "tipSavingsBps",
-            "tipCapBps",
-            "reimburseBps",
-            "reimburseCapBps",
-            "reserveBps",
-            "auctionDuration",
-            "exitAfter",
-            "saleToBuybackBps",
-            "exitToBuybackBps",
-            "buybackSlice",
-            "buybackDelay",
-            "keeperTipBps",
-            "xRateCap",
-            "xRateFloor",
-            "xRateClimbPerHour",
-            "xRateDropPerCredit",
-            "xAuctionHalfLife",
-            "exitSliceCredits",
-            "rateCap",
-            "exitLaneToBuybackBps"
-        ];
+    function _names() internal pure returns (bytes32[29] memory) {
+        return SettingsFields.names();
     }
 
     /// @dev a valid settings struct derived from a seed, inside every bound and the two orderings
     function _valid(uint256 seed) internal pure returns (Settings memory s) {
-        uint256[28] memory lo = _lo();
-        uint256[28] memory hi = _hi();
+        uint256[29] memory lo = _lo();
+        uint256[29] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             uint256 x = uint256(keccak256(abi.encode(seed, i)));
             uint256 a = lo[i];
@@ -239,9 +91,9 @@ contract FlowTest is Fixture {
         assertEq(s.tipCapBps, 200);
         assertEq(s.reimburseBps, 11_000);
         assertEq(s.reimburseCapBps, 500);
-        assertEq(s.reserveBps, 9_000);
+        assertEq(s.saleFloorBps, 7_500);
         assertEq(s.auctionDuration, 24 hours);
-        assertEq(s.exitAfter, 72 hours);
+        assertEq(s.exitAfter, 105 hours);
         assertEq(s.saleToBuybackBps, 5_000);
         assertEq(s.exitToBuybackBps, 5_000);
         assertEq(s.buybackSlice, 1 ether);
@@ -255,6 +107,7 @@ contract FlowTest is Fixture {
         assertEq(s.exitSliceCredits, 20);
         assertEq(s.rateCap, 123_200_000_000_000);
         assertEq(s.exitLaneToBuybackBps, 0);
+        assertEq(s.feeToBuybackBps, 0);
     }
 
     /// @dev write then read of random valid settings: the packed layout the library unpacks matches the compiler's
@@ -267,8 +120,8 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundEdgeIsAccepted() public {
-        uint256[28] memory lo = _lo();
-        uint256[28] memory hi = _hi();
+        uint256[29] memory lo = _lo();
+        uint256[29] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             for (uint256 k; k < 2; ++k) {
                 Settings memory s = Mainnet.defaultSettings();
@@ -286,9 +139,9 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundViolationReverts() public {
-        uint256[28] memory lo = _lo();
-        uint256[28] memory hi = _hi();
-        bytes32[28] memory names = _names();
+        uint256[29] memory lo = _lo();
+        uint256[29] memory hi = _hi();
+        bytes32[29] memory names = _names();
         for (uint256 i; i < N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top
@@ -318,7 +171,7 @@ contract FlowTest is Fixture {
     function test_settings_failedWriteChangesNothing() public {
         bytes32 before = _hash(core.settings());
         Settings memory s = Mainnet.defaultSettings();
-        s.reserveBps = 999;
+        s.saleFloorBps = 999;
         vm.prank(owner);
         vm.expectRevert();
         core.setSettings(s);
@@ -580,7 +433,7 @@ contract FlowTest is Fixture {
     function test_flat_controllerBonusStillApplies() public {
         _potTo(1 ether);
         ScriptedController sc = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(sc)));
+        _setController(address(sc));
         vm.prank(owner);
         core.setRate(4e12);
         uint256[] memory ids = _credits(seller, 3);
@@ -602,7 +455,7 @@ contract FlowTest is Fixture {
     function test_flat_bonusCapIsASetting() public {
         _potTo(1 ether);
         ScriptedController sc = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(sc)));
+        _setController(address(sc));
         vm.prank(owner);
         core.setRate(4e12);
         uint256[] memory ids = _credits(seller, 1);
@@ -638,7 +491,7 @@ contract FlowTest is Fixture {
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
         assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
-        assertEq(l.reserve, cost * 9_000 / 10_000, "ninety percent of cost");
+        assertEq(l.reserve, cost * 11_000 / 10_000, "110 percent of cost");
         IAuctionHouse.Auction memory a = _auctionOf(c.sid);
         assertEq(a.tokenId, c.sid);
         assertEq(a.tokenContract, address(STATEMENTS));
@@ -658,7 +511,7 @@ contract FlowTest is Fixture {
 
     function test_compose_readsTheSettingsAtListing() public {
         Settings memory s = core.settings();
-        s.reserveBps = 15_000;
+        s.saleFloorBps = 15_000;
         s.auctionDuration = 3 days;
         _owner(s);
         Composed memory c = _composeOnce();
@@ -1042,7 +895,7 @@ contract FlowTest is Fixture {
         assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
 
         Settings memory s = core.settings();
-        s.reserveBps = 12_000;
+        s.saleFloorBps = 12_000;
         _owner(s);
         (,, uint256 cost,) = core.statementInfo(sid);
         vm.expectEmit(address(core));
@@ -1086,7 +939,7 @@ contract FlowTest is Fixture {
         (,, uint256 cost,) = core.statementInfo(sid);
         uint256 old = _live(sid).reserve;
         Settings memory s = core.settings();
-        s.reserveBps = 12_000;
+        s.saleFloorBps = 12_000;
         _owner(s);
         assertEq(_live(sid).reserve, old, "a settings change does not touch the listing by itself");
         vm.expectEmit(address(core));
@@ -1101,10 +954,10 @@ contract FlowTest is Fixture {
         vm.prank(alice);
         vm.expectRevert(IAuctionHouse.BidBelowReserve.selector);
         house.createBid{value: old}(id);
-        s.reserveBps = 3_000;
+        s.saleFloorBps = 3_000;
         _owner(s);
         core.repriceStatement(sid);
-        assertEq(_live(sid).reserve, cost * 3_000 / 10_000, "and down again");
+        assertEq(_live(sid).reserve, cost * 11_000 / 10_000, "a lower floor leaves the controller ask in force");
     }
 
     function test_reprice_refusedWithABidOrWithoutAListing() public {
@@ -1129,10 +982,10 @@ contract FlowTest is Fixture {
         Composed memory c = _composeOnce();
         (,,, uint64 listedAt) = core.statementInfo(c.sid);
         uint256 aid = _live(c.sid).auctionId;
-        vm.warp(listedAt + 72 hours - 1);
+        vm.warp(listedAt + 105 hours - 1);
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
-        vm.warp(listedAt + 72 hours);
+        vm.warp(listedAt + 105 hours);
         uint256 rating = STATEMENTS.creditScoreOf(c.sid);
         uint256 before = xt.balanceOf(address(core));
         uint256 pot = core.xPot();
@@ -1169,7 +1022,7 @@ contract FlowTest is Fixture {
     function test_exit_refusedWhileABidIsLive() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         _bid(alice, sid, _live(sid).reserve);
         vm.expectRevert(Core.HasBid.selector);
         core.exitStatement(sid);
@@ -1200,7 +1053,7 @@ contract FlowTest is Fixture {
 
     function test_exit_needsTheModule() public {
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         vm.expectRevert(Core.NoExitModule.selector);
         core.exitStatement(sid);
     }
@@ -1208,7 +1061,7 @@ contract FlowTest is Fixture {
     function test_exit_staleRecordOfASoldStatementIsNotExited() public {
         _enterPhase2();
         (uint256 sid,) = _sellStatement(alice);
-        _warp(72 hours);
+        _warp(105 hours);
         vm.expectRevert(Core.NotListed.selector);
         core.exitStatement(sid);
     }
@@ -1222,7 +1075,7 @@ contract FlowTest is Fixture {
         core.exitStatement(sid);
         core.syncStatement(sid);
         (,,, uint64 listedAt) = core.statementInfo(sid);
-        vm.warp(listedAt + 72 hours);
+        vm.warp(listedAt + 105 hours);
         vm.clearMockedCalls();
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(mod));
@@ -1271,7 +1124,7 @@ contract FlowTest is Fixture {
         a = _composeFresh();
         b = _composeFresh();
         ovc = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(ovc)));
+        _setController(address(ovc));
         ovc.setOverprint(true, a, b);
     }
 
@@ -1297,7 +1150,7 @@ contract FlowTest is Fixture {
         Live memory l = _live(a);
         assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
         assertTrue(l.auctionId != aidA && l.auctionId != aidB, "a new auction");
-        assertEq(l.reserve, (costA + costB) * 9_000 / 10_000, "reserve on the summed cost");
+        assertEq(l.reserve, (costA + costB) * 11_000 / 10_000, "reserve on the summed cost");
         assertEq(_auctionOf(a).duration, 24 hours);
         assertEq(STATEMENTS.ownerOf(a), address(house));
         assertEq(core.heldStatements().length, 1);
@@ -1332,13 +1185,9 @@ contract FlowTest is Fixture {
     function test_forbidden_theHouseAndItsFactoryCannotBeTargets() public {
         address[2] memory t = [address(house), Mainnet.AUCTION_FACTORY];
         for (uint256 i; i < 2; ++i) {
-            bytes memory data = abi.encode(t[i]);
-            vm.startPrank(owner);
-            core.queue(Core.Action.AddTarget, data);
-            vm.warp(block.timestamp + 7 days);
+            vm.prank(owner);
             vm.expectRevert(Core.ForbiddenTarget.selector);
-            core.execute(Core.Action.AddTarget, data);
-            vm.stopPrank();
+            core.addTarget(t[i]);
             vm.expectRevert(Core.TargetNotAllowed.selector);
             core.buyListing(0, "", 1, t[i]);
             assertFalse(core.allowedTarget(t[i]));
@@ -1446,7 +1295,7 @@ contract FlowTest is Fixture {
         uint256 sid = _composeOnce().sid;
         _potTo(1 ether);
         ScriptedController hostile = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(hostile)));
+        _setController(address(hostile));
         uint256[] memory ids = _credits(seller, 6);
         for (uint256 i; i < 6; ++i) {
             hostile.setWants(ids[i], uint16(uint256(keccak256(abi.encode(seed, i)))));
@@ -1498,8 +1347,8 @@ contract FlowTest is Fixture {
             core.setXRate(bound(r >> 8, s.xRateFloor, s.xRateCap));
         } else if (kind == 3) {
             address t = address(uint160(r >> 8));
-            try core.queue(Core.Action.AddTarget, abi.encode(t)) {} catch {}
-            try core.cancel(Core.Action.AddTarget, abi.encode(t)) {} catch {}
+            try core.addTarget(t) {} catch {}
+            core.removeTarget(t);
         } else {
             core.removeTarget(Mainnet.SEAPORT);
         }

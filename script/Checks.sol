@@ -114,6 +114,17 @@ abstract contract LaunchChecks is PostflightChecks {
             bad == 0,
             bad == 0 ? "every field of the settings block" : string(abi.encodePacked("out of bounds: ", bad))
         );
+        bytes32 badSale = saleViolation(c);
+        _check(
+            "sale settings inside the bounds",
+            badSale == 0,
+            badSale == 0 ? "buyOnly startBps stepBps stepEvery floorBps" : string(abi.encodePacked("out of bounds: ", badSale))
+        );
+        _warn(
+            "warn: sale floor below the core hard floor",
+            c.sale.floorBps >= c.settings.saleFloorBps,
+            "the core floors every reserve and sale at saleFloorBps, so the lower asking price is never reached"
+        );
         _eq("supply equals the Core SUPPLY constant", c.supply, CORE_SUPPLY);
         _check("token code file exists", vm.exists(c.tokenCodeFile), c.tokenCodeFile);
     }
@@ -442,8 +453,8 @@ abstract contract LaunchChecks is PostflightChecks {
         _info(
             "signoff: statement auction",
             string.concat(
-                "reserveBps ",
-                vm.toString(c.settings.reserveBps),
+                "saleFloorBps ",
+                vm.toString(c.settings.saleFloorBps),
                 " duration ",
                 vm.toString(c.settings.auctionDuration),
                 "s exitAfter ",
@@ -460,8 +471,24 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.settings.exitToBuybackBps),
                 " exit lane to buyback ",
                 vm.toString(c.settings.exitLaneToBuybackBps),
+                " fee to buyback ",
+                vm.toString(c.settings.feeToBuybackBps),
                 " buyback slice ",
                 vm.toString(c.settings.buybackSlice)
+            )
+        );
+        _info(
+            "signoff: sale controller",
+            string.concat(
+                c.sale.buyOnly ? "buy only" : "auction mode",
+                " start ",
+                vm.toString(c.sale.startBps),
+                " step ",
+                vm.toString(c.sale.stepBps),
+                " every ",
+                vm.toString(c.sale.stepEvery),
+                "s floor ",
+                vm.toString(c.sale.floorBps)
             )
         );
         _info("signoff: settings are adjustable", "the owner can change every setting at once after launch");

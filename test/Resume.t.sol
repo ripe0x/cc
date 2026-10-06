@@ -63,7 +63,7 @@ contract ResumeTest is Test, SystemResumer {
         core = vm.computeCreateAddress(deployer, nonce + 1);
         address coinAt = predictCoin(base, deployer, core);
         vm.startPrank(deployer);
-        if (n >= 2) address(new ControllerV1(core));
+        if (n >= 2) address(new ControllerV1(core, base.sale));
         if (n >= 3) {
             new Core(owner, coinAt, vm.computeCreateAddress(deployer, nonce), base.stack, base.rateStart, base.settings);
         }
@@ -147,7 +147,7 @@ contract ResumeTest is Test, SystemResumer {
         // a core built from another config
         LaunchConfig memory c = base;
         c.owner = creator;
-        vm.expectRevert(abi.encodeWithSelector(CoreMismatch.selector, "owner"));
+        vm.expectRevert(abi.encodeWithSelector(CoreMismatch.selector, "owner (OWNER_CHANGED=1 after a handover)"));
         this.resume(deployer, c, core);
         c = base;
         c.rateStart = base.rateStart + 1;
@@ -249,7 +249,7 @@ contract ResumeTest is Test, SystemResumer {
     function test_resumeRefusesChangedSettings() public {
         (address core,) = _steps(4);
         Settings memory s = Core(payable(core)).settings();
-        s.reserveBps = 8_000;
+        s.saleFloorBps = 8_000;
         vm.prank(owner);
         Core(payable(core)).setSettings(s);
         vm.expectRevert(

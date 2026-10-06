@@ -294,7 +294,9 @@ abstract contract HandlerHouse is HandlerBase {
             _eth(b0, 0, 0, "syncStatement");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "syncStatement");
-            if (should || bytes4(why) != want) _unexpected(a, why);
+            if ((should || bytes4(why) != want) && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) {
+                _unexpected(a, why);
+            }
         }
         _rsCheck(rs, 0);
     }
@@ -319,7 +321,7 @@ abstract contract HandlerHouse is HandlerBase {
         g.synced = true;
     }
 
-    /// moves the reserve of a listing that has no bid to cost * reserveBps of the settings in force. a bid makes it
+    /// moves the reserve of a listing that has no bid to the controller's price now, floored at the hard floor. a bid makes it
     /// revert with HasBid, anything the core does not list with NotListed
     function repriceStatement(uint256 sIdx, uint256 mode) external checked {
         uint8 a = A_REPRICE;
@@ -338,13 +340,18 @@ abstract contract HandlerHouse is HandlerBase {
         try core.repriceStatement(sid) {
             _ok(a);
             if (!should) _flag(V_SALE_FLOOR, "a listing with a bid, or none, was repriced");
-            g.reserve = g.cost * st.reserveBps / 10_000;
+            (bool priced, uint256 want) = _wantReserve(sid, g.cost, g.listedAt, st.saleFloorBps);
             IAuctionHouse.Auction memory au = house.getAuction(g.auctionId);
-            if (au.reservePrice != g.reserve) _flag(V_SALE_FLOOR, "the repriced reserve is not cost * reserveBps");
+            g.reserve = au.reservePrice;
+            if (!priced || au.reservePrice != want) {
+                _flag(V_SALE_FLOOR, "the repriced reserve is not the controller price, floored");
+            }
             _eth(b0, 0, 0, "repriceStatement");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "repriceStatement");
-            if (should || bytes4(why) != want) _unexpected(a, why);
+            if ((should || bytes4(why) != want) && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) {
+                _unexpected(a, why);
+            }
         }
         _rsCheck(rs, 0);
     }

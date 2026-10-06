@@ -123,6 +123,9 @@ abstract contract Fixture is Test, SystemDeployer {
         return Mainnet.defaultSettings();
     }
 
+    /// @dev the test contract is a caller of the doors that repay gas (compose, exitStatement), so it takes eth
+    receive() external payable {}
+
     function setUp() public virtual {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
         deployer = _user("deployer");
@@ -161,8 +164,8 @@ abstract contract Fixture is Test, SystemDeployer {
     }
 
     /// @dev the system is created from its artifacts, so no test contract embeds the creation code of the Core
-    function _newController(address core_) internal override returns (address) {
-        return deployCode("ControllerV1.sol:ControllerV1", abi.encode(core_));
+    function _newController(address core_, LaunchConfig memory c) internal override returns (address) {
+        return deployCode("ControllerV1.sol:ControllerV1", abi.encode(core_, c.sale));
     }
 
     function _newCore(address owner_, address coin_, address controller_, LaunchConfig memory c)
@@ -392,9 +395,12 @@ abstract contract Fixture is Test, SystemDeployer {
         core.collectSales();
     }
 
-    /// @notice the reserve a statement of `cost` gets under the settings now
+    /// @notice the reserve a statement of `cost` gets when it is listed: the controller's start price, never below the
+    /// hard floor (the fixture controller is built from `lc.sale`)
     function _reserveFor(uint256 cost) internal view returns (uint256) {
-        return cost * core.settings().reserveBps / 10_000;
+        uint256 floor = cost * core.settings().saleFloorBps / 10_000;
+        uint256 ask = cost * lc.sale.startBps / 10_000;
+        return ask > floor ? ask : floor;
     }
 
     /// @notice the owner lifts `rateCap` to its upper bound, for suites that climb past the launch cap
@@ -423,27 +429,32 @@ abstract contract Fixture is Test, SystemDeployer {
 
     // ------------------------------------------------------------------ owner actions
 
-    function _timelock(Core.Action action, bytes memory data) internal {
-        vm.startPrank(owner);
-        core.queue(action, data);
-        vm.warp(block.timestamp + 7 days);
-        core.execute(action, data);
-        vm.stopPrank();
+    /// @notice the owner sets the controller at once
+    function _setController(address c) internal {
+        vm.prank(owner);
+        core.setController(c);
     }
 
-    /// @notice adds a target to the core allowlist through the timelock
+    /// @notice the owner sets the exit module at once
+    function _setExitModule(address m) internal {
+        vm.prank(owner);
+        core.setExitModule(m);
+    }
+
+    /// @notice adds a target to the core allowlist
     function _allow(address target) internal {
-        _timelock(Core.Action.AddTarget, abi.encode(target));
+        vm.prank(owner);
+        core.addTarget(target);
     }
 
     // ------------------------------------------------------------------ phase 2
 
-    /// @notice sets the stand in exit module and exit token through the timelock. there is no exit pool: the coin
+    /// @notice sets the stand in exit module and exit token at once. there is no exit pool: the coin
     /// buyback of the exit token is a dutch auction inside the core
     function _enterPhase2() internal {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), UNIT);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(mod)));
+        _setExitModule(address(mod));
         inPhase2 = true;
     }
 

@@ -15,6 +15,12 @@ contract ScriptedController is IController {
     mapping(Lane => uint8) public pageFormat;
     bool public revertPage;
 
+    /// the asking price in bps of cost the controller answers with, and how it can misbehave
+    uint256 public priceBps = 11_000;
+    bool public revertPrice;
+    bool public burnPrice;
+    bool public shortPrice;
+
     bool public overprintReady;
     uint256 public overprintBase;
     uint256 public overprintTop;
@@ -51,6 +57,26 @@ contract ScriptedController is IController {
         revertPage = on;
     }
 
+    /// sets the answer of `statementPrice`, in bps of the cost.
+    function setPriceBps(uint256 bps) external {
+        priceBps = bps;
+    }
+
+    /// makes statementPrice revert.
+    function setRevertPrice(bool on) external {
+        revertPrice = on;
+    }
+
+    /// makes statementPrice spin until it runs out of gas.
+    function setBurnPrice(bool on) external {
+        burnPrice = on;
+    }
+
+    /// makes statementPrice answer with fewer than 32 bytes.
+    function setShortPrice(bool on) external {
+        shortPrice = on;
+    }
+
     /// sets the overprint answer.
     function setOverprint(bool ready, uint256 baseId, uint256 topId) external {
         overprintReady = ready;
@@ -82,5 +108,22 @@ contract ScriptedController is IController {
 
     function nextOverprint() external view returns (bool ready, uint256 baseId, uint256 topId) {
         return (overprintReady, overprintBase, overprintTop);
+    }
+
+    function statementPrice(uint256, uint256 cost, uint64) external view returns (uint256) {
+        if (revertPrice) revert();
+        if (burnPrice) {
+            uint256 i;
+            while (true) {
+                ++i;
+            }
+        }
+        if (shortPrice) {
+            assembly {
+                mstore(0, 1)
+                return(0, 31)
+            }
+        }
+        return cost * priceBps / 10_000;
     }
 }

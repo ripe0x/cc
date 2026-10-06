@@ -269,7 +269,7 @@ contract FeeFlowTest is FeeBase {
             // forge-lint: disable-next-line(unsafe-typecast)
             s.saleToBuybackBps = uint16(share[i]);
             s.exitToBuybackBps = s.saleToBuybackBps;
-            s.reserveBps = 40_000;
+            s.saleFloorBps = 40_000;
             s.flatBps = 0;
             _setSettings(s);
             Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
@@ -478,12 +478,14 @@ contract ReceiveTest is FeeBase {
         MockExitToken token = new MockExitToken("Exit Token", "XT");
         SwapMidExit m = new SwapMidExit(token, UNIT, router, launchKey, 1 ether);
         vm.deal(address(m), 1 ether);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(m)));
+        _setExitModule(address(m));
         Composed memory c = _composeOnce();
         vm.warp(block.timestamp + core.settings().exitAfter);
         uint256 pot = core.ethPot();
+        uint256 gas0 = address(this).balance;
         core.exitStatement(c.sid);
-        assertEq(core.ethPot(), pot, "nothing booked mid exit");
+        // the swap mid exit booked nothing: the pot only fell by the gas repay the caller received
+        assertEq(core.ethPot(), pot - (address(this).balance - gas0), "nothing booked mid exit");
         assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), 0.095 ether);
         assertGt(core.xToBuyback(), 0);
         core.skim();
@@ -651,7 +653,7 @@ contract ReceiveSettingsTest is FeeBase {
         MockExitToken token = new MockExitToken("Exit Token", "XT");
         SwapMidExit m = new SwapMidExit(token, UNIT, router, launchKey, 1 ether);
         vm.deal(address(m), 1 ether);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(m)));
+        _setExitModule(address(m));
         Settings memory s = core.settings();
         s.exitAfter = 1 hours;
         s.exitToBuybackBps = 10_000;
@@ -662,8 +664,10 @@ contract ReceiveSettingsTest is FeeBase {
         core.exitStatement(c.sid);
         vm.warp(c.at + 1 hours);
         uint256 pot = core.ethPot();
+        uint256 gas0 = address(this).balance;
         core.exitStatement(c.sid);
-        assertEq(core.ethPot(), pot, "nothing booked mid exit");
+        // the swap mid exit booked nothing: the pot only fell by the gas repay the caller received
+        assertEq(core.ethPot(), pot - (address(this).balance - gas0), "nothing booked mid exit");
         assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), 0.095 ether);
         assertEq(core.xPot(), 0);
         assertEq(core.xToBuyback(), STATEMENTS.creditScoreOf(c.sid) * UNIT, "the whole exit went to the buyback");

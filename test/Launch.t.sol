@@ -31,7 +31,7 @@ contract LaunchTest is Fixture {
 
     function test_wiring() public view {
         assertEq(core.COIN(), address(coin));
-        assertEq(core.OWNER(), owner);
+        assertEq(core.owner(), owner);
         assertEq(core.controller(), address(ctl));
         assertEq(address(ctl.CORE()), address(core));
         assertEq(core.HOOK(), Mainnet.SKIM_HOOK);

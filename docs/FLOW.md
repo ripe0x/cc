@@ -11,10 +11,10 @@ naming rule: only `exitModule` and `exitToken`. never name or describe them.
 | 1 | buy credits at one limit per credit (flat), not per score point. a dial lets the owner blend score back in later |
 | 2 | never stop buying because statements are unsold. remove the inventory gate entirely |
 | 3 | every economic setting is adjustable by the owner after deploy, effective at once. nothing economic is a constant or an immutable |
-| 4 | statements are sold by english auction on the live pnd auction house, reserve 90% of the statement's cost |
+| 4 | statements are sold by english auction on the live pnd auction house, reserve 90% of the statement's cost. superseded by section 9: the controller prices the sale and the Core keeps a hard floor |
 | 5 | the opening limit is set on launch day at about 75% of the market price of a credit |
 | 6 | the split of sale proceeds between the pot and the buyback is an adjustable setting |
-| 7 | the controller, the exit module and the allowed targets keep the 7 day timelock |
+| 7 | REVOKED by section 9 (decision 15). there is no timelock: the owner sets the controller, the exit module and the allowed targets at once, with three one way locks (9.6) and a two step handover (9.7) |
 | 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key |
 
 ## 2. settings
@@ -35,9 +35,9 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | tipCapBps | 200 | 0 to 500 | |
 | reimburseBps | 11_000 | 0 to 15_000 | of gas cost |
 | reimburseCapBps | 500 | 0 to 1_000 | of statement cost |
-| reserveBps | 9_000 | 3_000 to 40_000 | auction reserve as bps of statement cost |
+| saleFloorBps | 7_500 | 1_000 to 40_000 | the hard floor of a statement sale, bps of statement cost. replaces reserveBps (section 9) |
 | auctionDuration | 24 hours | 6 hours to 30 days | runs from the first bid |
-| exitAfter | 72 hours | 1 hour to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
+| exitAfter | 105 hours | 1 hour to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
 | saleToBuybackBps | 5_000 | 0 to 10_000 | share of sale proceeds to the coin buyback, rest to the pot |
 | exitToBuybackBps | 5_000 | 0 to 10_000 | share of exit token from eth lane exits to the coin buyback |
 | buybackSlice | 1 ether | 0.01 to 5 ether | |
@@ -49,7 +49,8 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
 | exitSliceCredits | 20 | 1 to 1_000 | |
 | rateCap | 123_200_000_000_000 (8 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
-| exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot`. last field of the struct (section 8) |
+| exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot` (section 8) |
+| feeToBuybackBps | 0 | 0 to 10_000 | share of the eth booked from the hook in `receive()` that goes to the coin buyback, the rest to the pot. last field of the struct (section 9) |
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
@@ -100,8 +101,8 @@ the real exit module interface is still unknown. the adapter is written later. t
 
 | # | decision |
 |---|---|
-| 9 | the exit module is replaceable. `SetExitModule` under the 7 day timelock may run any number of times. the exitToken can never change once set: a later module must report the same `exitToken()` or the action reverts |
-| 10 | `unitPerPoint` is read again from the module every time a module is set. setting the same module address again is allowed and is how the unit is updated. so a unit change always waits 7 days |
+| 9 | the exit module is replaceable. `setExitModule` may run any number of times (at once since section 9, until `lockExitModule`). the exitToken can never change once set: a later module must report the same `exitToken()` or the action reverts |
+| 10 | `unitPerPoint` is read again from the module every time a module is set. setting the same module address again is allowed and is how the unit is updated. so a unit change is one transaction since section 9 |
 | 11 | new setting `exitLaneToBuybackBps`: share of the exit token from EXIT lane exits that goes to the coin buyback, the rest goes to `xPot`. launch value 0 (today's behavior), bounds 0 to 10_000. it joins the `Settings` struct, the bounds, the config, every script and check that lists settings, the simulator if it models exit lane proceeds |
 
 rules for a later set (the first set behaves as before):
@@ -109,11 +110,11 @@ rules for a later set (the first set behaves as before):
 * a set clears `allowedTarget` of the new module, so a flag set earlier cannot come back to life after the module is replaced.
 * checkpoint the exit rate under the OLD unit before the unit changes, resync the funded flag after. no climb is credited under the wrong numbers.
 * the exit auction price is coin per exit token and does not depend on the unit, only the slice size does. a set must never make `buybackExit` cheaper than it was the moment before: a later set never touches `xStartPrice` or `xStartTime`, whether `xToBuyback` is zero or not: the price is found by the market and the unit only changes the slice size, so no rescale is applied. the first set opens the auction as before.
-* pots, piles, held statements and the pending timelock queue are untouched. two queued sets may both run.
+* pots, piles, held statements are untouched.
 * `ExitModuleSet` is emitted every time.
 * the old module stops being a forbidden target, the new one is forbidden at call time as today.
 
-trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open behind the 7 day timelock for the life of the engine. a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
+trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open until the owner calls `lockExitModule` (section 9, no timelock). a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
 
 ## 9. sale controller, no timelock, fee share (owner confirmed. replaces every earlier text on buy now)
 

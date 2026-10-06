@@ -29,7 +29,7 @@ contract Postflight is Script, LaunchChecks {
             _check("deployer still factory admin", !admin || !gate, admin ? "yes, revoke it (step 10)" : "no");
         }
         _print("postflight");
-        if (core.code.length != 0) printVerifyInputs(Core(payable(core)));
+        if (core.code.length != 0) printVerifyInputs(Core(payable(core)), c);
         _require();
     }
 }

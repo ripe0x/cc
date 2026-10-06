@@ -14,7 +14,7 @@
   "owner": "0x0000000000000000000000000000000000000000",
   "creator": "0x0000000000000000000000000000000000000000",
   "name": "",
-  "symbol": "",
+  "symbol": "CC",
   "salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "rateStart": 15400000000000,
   "settings": {
@@ -30,9 +30,9 @@
     "tipCapBps": 200,
     "reimburseBps": 11000,
     "reimburseCapBps": 500,
-    "reserveBps": 9000,
+    "saleFloorBps": 7500,
     "auctionDuration": 86400,
-    "exitAfter": 259200,
+    "exitAfter": 378000,
     "saleToBuybackBps": 5000,
     "exitToBuybackBps": 5000,
     "buybackSlice": 1000000000000000000,
@@ -45,7 +45,15 @@
     "xAuctionHalfLife": 21600,
     "exitSliceCredits": 20,
     "rateCap": 123200000000000,
-    "exitLaneToBuybackBps": 0
+    "exitLaneToBuybackBps": 0,
+    "feeToBuybackBps": 0
+  },
+  "sale": {
+    "buyOnly": false,
+    "startBps": 11000,
+    "stepBps": 100,
+    "stepEvery": 10800,
+    "floorBps": 7500
   },
   "launch": {
     "supply": "1000000000000000000000000000",

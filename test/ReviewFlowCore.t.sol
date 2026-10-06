@@ -131,26 +131,31 @@ contract ReviewFlowCoreTest is Fixture {
         core.setSettings(s);
     }
 
-    /// FC-2 (fixed by bounds): reserveBps now starts at 3_000 and auctionDuration at 6 hours. at the floor an accomplice
-    /// that bids the reserve still buys at 30 percent of cost, but a stranger has six hours to bid over it
+    /// FC-2 (fixed by bounds): saleFloorBps now starts at 1_000 and auctionDuration at 6 hours. at the floor an accomplice
+    /// that bids the reserve still buys at 10 percent of cost, but a stranger has six hours to bid over it
     function test_FIXED_reserveAndAuctionDurationFloors() public {
         _skipSniperWindow();
         _fillEthPile(80);
         Settings memory s = core.settings();
-        s.reserveBps = 2_999;
-        _expectBad(s, "reserveBps");
-        s.reserveBps = 3_000;
+        s.saleFloorBps = 999;
+        _expectBad(s, "saleFloorBps");
+        s.saleFloorBps = 1_000;
         s.auctionDuration = 6 hours - 1;
         _expectBad(s, "auctionDuration");
         s.auctionDuration = 6 hours;
         _setSettings(s);
+        // the controller asks the floor too
+        vm.startPrank(owner);
+        ctl.setFloorBps(1_000);
+        ctl.setStartBps(1_000);
+        vm.stopPrank();
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.compose();
         uint256 sid = STATEMENTS.supply();
         (,, uint256 cost,) = core.statementInfo(sid);
         Live memory l = _live(sid);
-        assertEq(l.reserve, cost * 3_000 / 10_000, "reserve at the floor is 30 percent of cost");
+        assertEq(l.reserve, cost * 1_000 / 10_000, "reserve at the floor is 10 percent of cost");
         address accomplice = _user("accomplice");
         _bid(accomplice, sid, l.reserve);
         // a stranger has six hours: +5 percent takes the lot
@@ -202,7 +207,7 @@ contract ReviewFlowCoreTest is Fixture {
         m.climbDoubleEvery = 1 hours;
         m.dropBps = 500;
         m.spendCapBps = 100;
-        m.reserveBps = 3_000;
+        m.saleFloorBps = 1_000;
         m.auctionDuration = 6 hours;
         m.exitAfter = 1 hours;
         m.rateCap = uint64(RATE_START_MIN_WEI);
@@ -241,6 +246,7 @@ contract ReviewFlowCoreTest is Fixture {
             30 days,
             1_000,
             uint64(RATE_START_MAX_WEI),
+            10_000,
             10_000
         );
     }
@@ -266,7 +272,8 @@ contract ReviewFlowCoreTest is Fixture {
             uint256 w0 = uint256(vm.load(address(core), slot));
             assertEq(w0 >> 240, 0, "slot 0 top bits clear");
             uint256 w2 = uint256(vm.load(address(core), bytes32(uint256(slot) + 2)));
-            assertEq(w2 >> 192, 0, "slot 2 top bits clear");
+            assertEq(w2 >> 208, 0, "slot 2 top bits clear");
+            assertEq(uint16(w2 >> 192), two[i].feeToBuybackBps, "the fee share sits at bits 192 to 207");
             assertEq(uint64(w2 >> 112), two[i].rateCap, "the rate cap sits at bits 112 to 175");
             assertEq(uint16(w2 >> 176), two[i].exitLaneToBuybackBps, "the exit lane share sits at bits 176 to 191");
         }
@@ -279,7 +286,7 @@ contract ReviewFlowCoreTest is Fixture {
         m.xAuctionHalfLife = 10 minutes;
         m.xRateFloor = 0;
         m.xRateCap = 0;
-        m.reserveBps = 3_000;
+        m.saleFloorBps = 3_000;
     }
 
     /// no combination at either end of the bounds stops the hook from paying the core, whatever the gap
@@ -290,9 +297,9 @@ contract ReviewFlowCoreTest is Fixture {
             _setSettings(three[i]);
             for (uint256 g; g < 3; ++g) {
                 vm.warp(block.timestamp + (g == 0 ? 1 hours : (g == 1 ? 40 days : 3_650 days)));
-                uint256 pot = core.ethPot();
+                uint256 pot = core.ethPot() + core.ethToBuyback();
                 _buyCoin(funder, 2 ether);
-                assertGt(core.ethPot(), pot, "the hook's push was booked");
+                assertGt(core.ethPot() + core.ethToBuyback(), pot, "the hook's push was booked");
                 core.ethRate();
                 _solvent();
             }
@@ -413,7 +420,7 @@ contract ReviewFlowCoreTest is Fixture {
         for (uint256 i; i < 2; ++i) {
             uint256 snap = vm.snapshotState();
             vm.deal(address(core), address(core).balance + slices[i]);
-            vm.store(address(core), bytes32(uint256(6)), bytes32(slices[i]));
+            vm.store(address(core), bytes32(uint256(7)), bytes32(slices[i]));
             Settings memory s = core.settings();
             s.buybackSlice = uint128(slices[i]);
             s.buybackDelay = 1;
@@ -436,8 +443,8 @@ contract ReviewFlowCoreTest is Fixture {
     function test_dirtyCalldataWordsAreRefused() public {
         Settings memory base = core.settings();
         bytes memory good = abi.encodeCall(Core.setSettings, (base));
-        assertEq(good.length, 4 + 28 * 32);
-        for (uint256 i; i < 28; ++i) {
+        assertEq(good.length, 4 + 29 * 32);
+        for (uint256 i; i < 29; ++i) {
             bytes memory bad = bytes.concat(good);
             uint256 off = 32 + 4 + i * 32;
             uint256 w;
@@ -555,7 +562,7 @@ contract ReviewFlowCoreTest is Fixture {
 
         // 20M gas of burning is far past the cap (500,000): the read fails and the page is not ready
         BurnController bc = new BurnController(address(core), 20_000_000);
-        _timelock(Core.Action.SetController, abi.encode(address(bc)));
+        _setController(address(bc));
         vm.fee(20 gwei);
         vm.prank(keeper);
         vm.expectRevert(Core.NotReady.selector);
@@ -564,7 +571,7 @@ contract ReviewFlowCoreTest is Fixture {
         // burning 300,000 (under the cap with the page read) is answered, and the refund is held at the notional cap of the launch rate
         uint256 snap = vm.snapshotState();
         bc = new BurnController(address(core), 300_000);
-        _timelock(Core.Action.SetController, abi.encode(address(bc)));
+        _setController(address(bc));
         uint256 notional = 80 * uint256(s.avgScore) * core.RATE_START() / 1e4 * s.reimburseCapBps / 10_000;
         uint256 potBefore = core.ethPot();
         uint256 b = keeper.balance;
@@ -589,7 +596,9 @@ contract ReviewFlowCoreTest is Fixture {
         _setSettings(cs);
         _fundPot(2 ether);
         ScriptedController sc = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(sc)));
+        _setController(address(sc));
+        // the eth rate climbs lazily: a week at the climb settings reaches the clamp
+        _warp(7 days);
         uint256[] memory ids = _credits(seller, 2);
         sc.setWants(ids[0], 2_500);
         uint256 flat = core.ceilingOf(ids[1]);
@@ -664,5 +673,9 @@ contract BurnController {
 
     function nextOverprint() external pure returns (bool, uint256, uint256) {
         return (false, 0, 0);
+    }
+
+    function statementPrice(uint256, uint256 cost, uint64) external pure returns (uint256) {
+        return cost * 11_000 / 10_000;
     }
 }

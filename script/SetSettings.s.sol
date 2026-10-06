@@ -8,7 +8,7 @@ import {SettingsFields} from "./SettingsFields.sol";
 
 /// @notice the owner functions of the Core this script talks to
 interface ICoreOwner {
-    function OWNER() external view returns (address);
+    function owner() external view returns (address);
     function settings() external view returns (Settings memory);
     function setSettings(Settings calldata s) external;
     function ethRate() external view returns (uint256);
@@ -28,14 +28,14 @@ interface ICoreOwner {
 /// unless SEND=1 and the run has `--broadcast` and a signer that is the Core owner. docs/DEPLOY.md section 7.
 ///
 /// overrides, both may be used, the patch is applied first and the single variables win:
-/// * `SET_<field>=<value>`, one variable per field of `Settings`, for example `SET_reserveBps=8000`
-/// * `SETTINGS_PATCH`, a json object as text or the path of a json file, for example `{"reserveBps":8000}`
+/// * `SET_<field>=<value>`, one variable per field of `Settings`, for example `SET_saleFloorBps=8000`
+/// * `SETTINGS_PATCH`, a json object as text or the path of a json file, for example `{"saleFloorBps":8000}`
 /// `SET_RATE=<wei per point>` also prepares `setRate`, `SET_XRATE=<bps>` also prepares `setXRate`.
 /// `REPRICE=1` also prepares one `repriceStatement` per listed statement that has no bid, after the settings call.
-/// use it whenever `reserveBps` changes: a listing keeps its old reserve until it is repriced, and anyone may bid at
+/// use it whenever `saleFloorBps` changes: a listing keeps its old reserve until it is repriced, and anyone may bid at
 /// the old reserve first. send the whole set as one batch from the owner (a Safe batch): reprice is permissionless
 ///
-/// `CORE=0x... SET_reserveBps=8000 forge script script/SetSettings.s.sol --rpc-url $MAINNET_RPC_URL`
+/// `CORE=0x... SET_saleFloorBps=8000 forge script script/SetSettings.s.sol --rpc-url $MAINNET_RPC_URL`
 /// (add `SEND=1 --broadcast --ledger` or `--account <name>` to send, as the owner)
 contract SetSettings is Script {
     /// @dev a patch names a field that `Settings` does not have
@@ -48,7 +48,7 @@ contract SetSettings is Script {
     error NotOwner(address owner, address signer);
 
     string internal constant TUPLE =
-        "(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64,uint16)";
+        "(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64,uint16,uint16)";
 
     function run() external {
         ICoreOwner core = ICoreOwner(_core());
@@ -109,7 +109,7 @@ contract SetSettings is Script {
         }
         vm.startBroadcast();
         (, address signer,) = vm.readCallers();
-        if (signer != core.OWNER()) revert NotOwner(core.OWNER(), signer);
+        if (signer != core.owner()) revert NotOwner(core.owner(), signer);
         if (settingsChanged) core.setSettings(next);
         if (rate != 0) core.setRate(rate);
         if (xRate != 0) core.setXRate(xRate);
@@ -174,7 +174,7 @@ contract SetSettings is Script {
                 _set(s, keys[k], vm.parseJsonUint(json, string.concat(".", keys[k])));
             }
         }
-        bytes32[28] memory names = SettingsFields.names();
+        bytes32[29] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             string memory name = _name(names[i]);
             (bool has, uint256 v) = _single(name);
@@ -183,7 +183,7 @@ contract SetSettings is Script {
     }
 
     function _set(Settings memory s, string memory name, uint256 v) internal pure {
-        bytes32[28] memory names = SettingsFields.names();
+        bytes32[29] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             if (keccak256(bytes(_name(names[i]))) != keccak256(bytes(name))) continue;
             SettingsFields.set(s, i, v);
@@ -209,9 +209,9 @@ contract SetSettings is Script {
         console.log(
             "settings: field | live | new | bounds (a * marks a change; climbMaxBps >= climbBaseBps, xRateFloor <= xRateCap)"
         );
-        uint256[28] memory lo = SettingsFields.lo();
-        uint256[28] memory hi = SettingsFields.hi();
-        bytes32[28] memory names = SettingsFields.names();
+        uint256[29] memory lo = SettingsFields.lo();
+        uint256[29] memory hi = SettingsFields.hi();
+        bytes32[29] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             uint256 x = SettingsFields.get(a, i);
             uint256 y = SettingsFields.get(b, i);

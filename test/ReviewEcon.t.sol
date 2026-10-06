@@ -147,7 +147,7 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         uint256 pageCost = cost - reimb;
         assertEq(reimb, pageCost * 500 / 10_000, "capped at 5 percent of the page cost");
         uint256 reserve = _live(sid).reserve;
-        assertEq(reserve, cost * 9_000 / 10_000, "the reserve is 90 percent of the cost with the reimbursement in it");
+        assertEq(reserve, cost * 11_000 / 10_000, "the reserve is the 110 percent opening ask of the cost with the reimbursement in it");
 
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
@@ -157,8 +157,8 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         uint256 toBuyback = reserve * 5_000 / 10_000;
         assertEq(core.ethToBuyback() - bb, toBuyback);
         assertEq(core.ethPot() - pot, reserve - toBuyback);
-        assertLt(reserve, cost, "sold under cost");
-        // the engine paid pageCost + reimb for it and got back 0.9 of that, half of it to the buyback
+        assertGt(reserve, cost, "sold above cost at the opening ask");
+        // the engine paid pageCost + reimb for it and got back 1.1 of that, half of it to the buyback
         emit log_named_uint("reimbursement, bps of page cost", reimb * 10_000 / pageCost);
         emit log_named_uint("pot gets back, bps of cost", (core.ethPot() - pot) * 10_000 / cost);
         _solvent();
@@ -193,7 +193,7 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         vm.expectRevert(Core.NotHeld.selector);
         core.exitStatement(sid);
         ScriptedController sc = new ScriptedController();
-        _timelock(Core.Action.SetController, abi.encode(address(sc)));
+        _setController(address(sc));
         sc.setOverprint(true, sid + 1_000, sid);
         vm.expectRevert(Core.BadOverprint.selector);
         core.overprint();

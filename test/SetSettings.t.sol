@@ -86,26 +86,26 @@ contract SetSettingsTest is Fixture {
 
     function test_oneVariableChangesOneField() public {
         Settings memory live = core.settings();
-        probe.single("reserveBps", 8_000);
+        probe.single("saleFloorBps", 8_000);
         Settings memory out = probe.applyTo(live);
         (uint256 n, uint256 first) = _diff(live, out);
         assertEq(n, 1);
-        assertEq(first, 12, "reserveBps is the 13th field");
-        assertEq(out.reserveBps, 8_000);
+        assertEq(first, 12, "saleFloorBps is the 13th field");
+        assertEq(out.saleFloorBps, 8_000);
     }
 
     function test_theLiveStructIsNotChangedInPlace() public {
-        probe.single("reserveBps", 8_000);
+        probe.single("saleFloorBps", 8_000);
         assertTrue(probe.leavesTheInputAlone(core.settings()));
     }
 
     function test_patchTextAndPatchFile() public {
         Settings memory live = core.settings();
-        probe.configure(address(core), '{"reserveBps": 8000, "auctionDuration": 172800}');
+        probe.configure(address(core), '{"saleFloorBps": 8000, "auctionDuration": 172800}');
         Settings memory out = probe.applyTo(live);
         (uint256 n,) = _diff(live, out);
         assertEq(n, 2);
-        assertEq(out.reserveBps, 8_000);
+        assertEq(out.saleFloorBps, 8_000);
         assertEq(out.auctionDuration, 172_800);
         // the same patch from a file
         probe.configure(address(core), "test/data/SettingsPatch.json");
@@ -114,9 +114,9 @@ contract SetSettingsTest is Fixture {
     }
 
     function test_singleVariableWinsOverThePatch() public {
-        probe.configure(address(core), '{"reserveBps": 8000}');
-        probe.single("reserveBps", 7_000);
-        assertEq(probe.applyTo(core.settings()).reserveBps, 7_000);
+        probe.configure(address(core), '{"saleFloorBps": 8000}');
+        probe.single("saleFloorBps", 7_000);
+        assertEq(probe.applyTo(core.settings()).saleFloorBps, 7_000);
     }
 
     /// the fields you do not name keep the live value even after the owner changed them
@@ -136,8 +136,8 @@ contract SetSettingsTest is Fixture {
 
     function test_unknownFieldAndTooWideValue() public {
         Settings memory live = core.settings();
-        probe.configure(address(core), '{"reserveBpz": 8000}');
-        vm.expectRevert(abi.encodeWithSelector(SetSettings.UnknownField.selector, "reserveBpz"));
+        probe.configure(address(core), '{"saleFloorBpz": 8000}');
+        vm.expectRevert(abi.encodeWithSelector(SetSettings.UnknownField.selector, "saleFloorBpz"));
         probe.applyTo(live);
         probe.configure(address(core), "");
         probe.single("flatBps", 65_536);
@@ -147,26 +147,26 @@ contract SetSettingsTest is Fixture {
 
     /// run() refuses a value outside the bounds before it prints a calldata
     function test_runRefusesOutOfBounds() public {
-        probe.single("reserveBps", 999);
-        vm.expectRevert(abi.encodeWithSelector(SetSettings.OutOfBounds.selector, bytes32("reserveBps")));
+        probe.single("saleFloorBps", 999);
+        vm.expectRevert(abi.encodeWithSelector(SetSettings.OutOfBounds.selector, bytes32("saleFloorBps")));
         probe.run();
     }
 
     /// a dry run (no SEND) prints and changes nothing, the owner can send what it printed
     function test_dryRunSendsNothingAndTheCalldataWorks() public {
         Settings memory live = core.settings();
-        probe.single("reserveBps", 8_000);
+        probe.single("saleFloorBps", 8_000);
         probe.run();
         assertEq(abi.encode(core.settings()), abi.encode(live), "a dry run changes nothing");
         Settings memory next = probe.applyTo(live);
         vm.prank(owner);
         (bool ok,) = address(core).call(abi.encodeCall(core.setSettings, (next)));
         assertTrue(ok, "the printed calldata is accepted by the core");
-        assertEq(core.settings().reserveBps, 8_000);
+        assertEq(core.settings().saleFloorBps, 8_000);
     }
 
     /// REPRICE=1 lists the statements the Core holds that are listed with no bid, and only those. after a raised
-    /// `reserveBps` each of them takes the new reserve through `repriceStatement`, the one with a bid keeps its own
+    /// `saleFloorBps` each of them takes the new reserve through `repriceStatement`, the one with a bid keeps its own
     function test_repriceModeListsOnlyUnbidListings() public {
         uint256 a = _composeOnce().sid;
         _fillEthPile(80);
@@ -181,7 +181,7 @@ contract SetSettingsTest is Fixture {
         assertEq(open[0], a);
 
         probe.setReprice(true);
-        probe.single("reserveBps", 12_000);
+        probe.single("saleFloorBps", 12_000);
         probe.run();
         // the owner's batch: setSettings, then the repriceStatement calls the script printed
         Settings memory next = probe.applyTo(core.settings());

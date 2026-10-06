@@ -374,10 +374,10 @@ contract ReviewMatrixConfigTest is ReviewHarness {
 contract ReviewMatrixSettingsTest is ReviewHarness {
     // ------------------------------------------------------------------ group C: every settings field
 
-    uint256 internal constant N_SETTINGS = 140;
+    uint256 internal constant N_SETTINGS = 145;
 
     /// @dev a plausible value that is not the launch value, inside the bounds, for each field
-    function _wrong() internal pure returns (uint256[28] memory) {
+    function _wrong() internal pure returns (uint256[29] memory) {
         return [
             uint256(5000),
             3_000_000,
@@ -406,6 +406,7 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             12 hours,
             40,
             100_000_000_000_000,
+            5000,
             5000
         ];
     }
@@ -423,10 +424,10 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// @dev kinds: 0 above the top, 1 below the bottom, 2 a plausible wrong value, 3 the top edge, 4 the bottom edge.
     /// an empty label means the field has no such case
     function _mutSettings(uint256 k) internal view returns (Mut memory m) {
-        uint256 f = k % 28;
-        uint256 kind = k / 28;
-        uint256[28] memory lo = SettingsFields.lo();
-        uint256[28] memory hi = SettingsFields.hi();
+        uint256 f = k % 29;
+        uint256 kind = k / 29;
+        uint256[29] memory lo = SettingsFields.lo();
+        uint256[29] memory hi = SettingsFields.hi();
         string memory nm = _trim(SettingsFields.names()[f]);
         m = _m("", kind <= 1 ? Class.Pre : Class.Hash);
         Settings memory s = m.c.settings;
@@ -467,19 +468,19 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// the settings group in parts: every field above the top and below the bottom, a plausible wrong value for every
     /// field, then the edges that must still be accepted
     function test_matrix_settingsViolations() public {
-        _matrix(2, 0, 56);
+        _matrix(2, 0, 58);
     }
 
     function test_matrix_settingsWrongValues() public {
-        _matrix(2, 56, 84);
+        _matrix(2, 58, 87);
     }
 
     function test_matrix_settingsTopEdges() public {
-        _matrix(2, 84, 112);
+        _matrix(2, 87, 116);
     }
 
     function test_matrix_settingsBottomEdges() public {
-        _matrix(2, 112, N_SETTINGS);
+        _matrix(2, 116, N_SETTINGS);
     }
 }
 

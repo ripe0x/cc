@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {InvariantsBase} from "./Invariants.t.sol";
 
-/// phase 2: setUp has executed SetExitModule through the real timelock, with MockExitModule and MockExitToken. the
+/// phase 2: setUp has set the exit module, with MockExitModule and MockExitToken. the
 /// extra actions are sellForExitToken, composeExit, exitStatement, the dutch auction fill buybackExit (an actor buys
 /// coin in the real pool, approves the core and fills), and a module switch that makes it underpay, fail its unit
 /// read or change its unit. there is no exit pool. all invariants run again, with the exit token legs of 1, 4 and 5

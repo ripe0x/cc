@@ -30,7 +30,7 @@ contract ConfigTest is Fixture {
         assertEq(f.owner, address(0));
         assertEq(f.creator, address(0));
         assertEq(bytes(f.name).length, 0);
-        assertEq(bytes(f.symbol).length, 0);
+        assertEq(f.symbol, "CC");
         assertEq(f.rateStart, 1.54e13);
         assertEq(f.supply, 1_000_000_000e18);
         assertEq(f.stack.factory, Mainnet.ARTCOINS_FACTORY);
@@ -55,6 +55,7 @@ contract ConfigTest is Fixture {
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "name"));
         this.requireExt(c);
         c.name = "Name";
+        c.symbol = "";
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "symbol"));
         this.requireExt(c);
         c.symbol = "SYM";
@@ -134,7 +135,7 @@ contract ConfigTest is Fixture {
 
     function test_coreConstructorArgsReadBack() public view {
         assertEq(
-            coreConstructorArgs(core),
+            coreConstructorArgs(core, owner),
             abi.encode(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings),
             "etherscan constructor args"
         );
@@ -190,9 +191,9 @@ contract ConfigTest is Fixture {
 
     /// the bounds of the preflight rows and of the deploy guard are the Core's: every field, both edges
     function test_settingsBoundsEveryFieldBothEdges() public view {
-        uint256[28] memory lo = SettingsFields.lo();
-        uint256[28] memory hi = SettingsFields.hi();
-        bytes32[28] memory names = SettingsFields.names();
+        uint256[29] memory lo = SettingsFields.lo();
+        uint256[29] memory hi = SettingsFields.hi();
+        bytes32[29] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top, and the top itself (the three bound by another field start from a free partner)
@@ -223,7 +224,7 @@ contract ConfigTest is Fixture {
     function test_settingsRowsAndGuard() public {
         address d2 = _enabledDeployer();
         LaunchConfig memory c = lc;
-        c.settings.reserveBps = 999;
+        c.settings.saleFloorBps = 999;
         preflight(c, d2);
         assertEq(_failedNames(), "settings inside the bounds");
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "settings"));
@@ -251,7 +252,7 @@ contract ConfigTest is Fixture {
     /// after the owner changed the settings, postflight fails until the operator says so with SETTINGS_CHANGED=1
     function test_postflightAfterTheOwnerChangedTheSettings() public {
         Settings memory s = core.settings();
-        s.reserveBps = 8_000;
+        s.saleFloorBps = 8_000;
         _setSettings(s);
         postflight(lc, address(core));
         assertEq(_failedNames(), "core: settings equal the config");

@@ -142,7 +142,7 @@ contract ReviewDeployTest is ReviewHarness {
         address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coinAt = predictCoin(c, deployer, coreAt);
         vm.startPrank(deployer);
-        st.controller = address(new ControllerV1(coreAt));
+        st.controller = address(new ControllerV1(coreAt, c.sale));
         if (n >= 2) st.core = _newCore(c, coinAt, st.controller);
         if (n >= 3) {
             st.coin = _launchTx(c, coreAt);
@@ -527,7 +527,7 @@ contract ReviewFundedTest is Fixture {
 
     function _newCore(uint256 rate) internal returns (Core c) {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        ControllerV1 ctl2 = new ControllerV1(predicted);
+        ControllerV1 ctl2 = new ControllerV1(predicted, Mainnet.defaultSale());
         Settings memory s = Mainnet.defaultSettings();
         // any opening rate in the bounds needs a rate cap at or above it
         s.rateCap = uint64(1e15);

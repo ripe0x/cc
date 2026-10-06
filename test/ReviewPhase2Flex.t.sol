@@ -55,7 +55,11 @@ contract ReenteringModule is IExitModule {
         _try(abi.encodeWithSignature("repriceStatement(uint256)", 1));
         _try(abi.encodeWithSignature("buyListing(uint256,bytes,uint256,address)", 0, "", 1, address(this)));
         _try(abi.encodeWithSignature("setXRate(uint256)", 5_000));
-        _try(abi.encodeWithSignature("execute(uint8,bytes)", 1, abi.encode(address(this))));
+        _try(abi.encodeWithSignature("setExitModule(address)", address(this)));
+        _try(abi.encodeWithSignature("setController(address)", address(this)));
+        _try(abi.encodeWithSignature("addTarget(address)", address(this)));
+        _try(abi.encodeWithSignature("transferOwnership(address)", address(this)));
+        _try(abi.encodeWithSignature("sellTo(uint256,address)", 1, address(this)));
     }
 
     /// the same skim from outside any callback, the control
@@ -115,7 +119,7 @@ contract PackHarness {
         s.tipCapBps = type(uint16).max;
         s.reimburseBps = type(uint16).max;
         s.reimburseCapBps = type(uint16).max;
-        s.reserveBps = type(uint16).max;
+        s.saleFloorBps = type(uint16).max;
         s.auctionDuration = type(uint32).max;
         s.exitAfter = type(uint32).max;
         s.saleToBuybackBps = type(uint16).max;
@@ -131,10 +135,15 @@ contract PackHarness {
         s.exitSliceCredits = type(uint16).max;
         s.rateCap = type(uint64).max;
         s.exitLaneToBuybackBps = type(uint16).max;
+        s.feeToBuybackBps = type(uint16).max;
     }
 
     function onlyLane() external {
         SettingsStore.load().exitLaneToBuybackBps = type(uint16).max;
+    }
+
+    function onlyFee() external {
+        SettingsStore.load().feeToBuybackBps = type(uint16).max;
     }
 
     function words() external view returns (uint256 a, uint256 b, uint256 c) {
@@ -160,22 +169,20 @@ contract ReviewPhase2FlexTest is Fixture {
         return new MockExitModule(address(xt), unit);
     }
 
-    function _queue(address m) internal returns (bytes memory data, uint256 eta) {
+    /// @dev the owner sets the module at once. `_setCall` only builds the call data and `eta` is now, so a test can
+    /// keep the order of its steps (build the call, look at the state, send it)
+    function _setCall(address m) internal view returns (bytes memory data, uint256 eta) {
         data = abi.encode(m);
-        vm.prank(owner);
-        core.queue(Core.Action.SetExitModule, data);
-        eta = block.timestamp + 7 days;
+        eta = block.timestamp;
     }
 
-    function _exec(bytes memory data) internal {
+    function _runSet(bytes memory data) internal {
         vm.prank(owner);
-        core.execute(Core.Action.SetExitModule, data);
+        core.setExitModule(abi.decode(data, (address)));
     }
 
     function _replace(address m) internal {
-        (bytes memory d, uint256 eta) = _queue(m);
-        vm.warp(eta);
-        _exec(d);
+        _setExitModule(m);
     }
 
     function _full(uint256 unit) internal view returns (uint256) {
@@ -188,11 +195,11 @@ contract ReviewPhase2FlexTest is Fixture {
     }
 
     function _xFunded() internal view returns (bool) {
-        return (uint256(vm.load(address(core), bytes32(uint256(14)))) >> 64) & 0xff != 0;
+        return (uint256(vm.load(address(core), bytes32(uint256(15)))) >> 64) & 0xff != 0;
     }
 
     function _xRateAtCp() internal view returns (uint256) {
-        return uint256(vm.load(address(core), bytes32(uint256(13))));
+        return uint256(vm.load(address(core), bytes32(uint256(14))));
     }
 
     /// @dev owner edit of two settings in one call
@@ -222,7 +229,7 @@ contract ReviewPhase2FlexTest is Fixture {
     }
 
     /// @dev phase 2 with every exit proceed going to the buyback pot, a slow half life, one statement exited, and a
-    /// replacement to `unit` queued. returns the data to execute and leaves the clock at the end of the timelock
+    /// replacement to `unit` prepared. returns the call data of the set, which the test sends when it wants
     function _setupDrain(uint256 unit) internal returns (bytes memory data) {
         _enterPhase2();
         _edit(10_000, 0, 30 days);
@@ -230,7 +237,7 @@ contract ReviewPhase2FlexTest is Fixture {
         assertGt(core.xToBuyback(), 0);
         address next = address(_mod(unit));
         uint256 eta;
-        (data, eta) = _queue(next);
+        (data, eta) = _setCall(next);
         vm.warp(eta);
     }
 
@@ -242,13 +249,13 @@ contract ReviewPhase2FlexTest is Fixture {
 
     /// ACCEPTED RP-1 (see the runbook in docs/DEPLOY.md, changing the exit module or its unit): the price per exit token is kept across a set but the slice follows the unit, and the price
     /// doubles per fill. after a unit rise the whole pot goes in fewer, bigger fills, so draining it costs less per exit
-    /// token than the moment before. a buyer can queue behind the public timelock and take it in the block of the set
+    /// token than the moment before. a buyer who sees the owner's set in the mempool can take the pot in the block of the set
     function test_ACCEPTED_unitRiseDrainsThePotCheaperPerExitToken() public {
         bytes memory data = _setupDrain(1e12);
         uint256 snap = vm.snapshotState();
         (uint256 paid0, uint256 got0) = _drain();
         vm.revertToState(snap);
-        _exec(data);
+        _runSet(data);
         (uint256 paid1, uint256 got1) = _drain();
         assertEq(got0, got1, "the same exit token leaves the pot");
         uint256 avg0 = paid0 * 1e18 / got0;
@@ -266,7 +273,7 @@ contract ReviewPhase2FlexTest is Fixture {
         (, uint256 coinBefore) = core.exitAuctionQuote();
         (uint256 sliceBefore,) = core.exitAuctionQuote();
         assertEq(sliceBefore, _full(UNIT).min(core.xToBuyback()));
-        _exec(data);
+        _runSet(data);
         (uint256 sliceAfter, uint256 coinAfter) = core.exitAuctionQuote();
         emit log_named_uint("coin for a slice before", coinBefore);
         emit log_named_uint("coin for a slice after a 10x unit fall", coinAfter);
@@ -314,7 +321,7 @@ contract ReviewPhase2FlexTest is Fixture {
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
         _replace(address(_mod(UNIT)));
-        // no longer the module, and the stale approval is gone: it needs a new queue
+        // no longer the module, and the stale approval is gone: it needs a new `addTarget`
         assertFalse(core.allowedTarget(address(b)));
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
@@ -327,16 +334,13 @@ contract ReviewPhase2FlexTest is Fixture {
         MockExitModule b = _mod(UNIT);
         _replace(address(b));
         // the old module may be added again, the new module and the exit token may not
-        _timelock(Core.Action.AddTarget, abi.encode(address(a)));
+        _allow(address(a));
         assertTrue(core.allowedTarget(address(a)));
         vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(b)));
-        core.queue(Core.Action.AddTarget, abi.encode(address(xt)));
-        vm.warp(block.timestamp + 7 days);
         vm.expectRevert(Core.ForbiddenTarget.selector);
-        core.execute(Core.Action.AddTarget, abi.encode(address(b)));
+        core.addTarget(address(b));
         vm.expectRevert(Core.ForbiddenTarget.selector);
-        core.execute(Core.Action.AddTarget, abi.encode(address(xt)));
+        core.addTarget(address(xt));
         vm.stopPrank();
         // a as target pulls nothing: exit on it mints to the core in the stand in, then the credit check unwinds it
         uint256 id = _credits(seller, 1)[0];
@@ -351,14 +355,14 @@ contract ReviewPhase2FlexTest is Fixture {
     /// the module must not be a stack member, in a replacement as in the first set
     function test_OK_replacementStillRefusesStackMembersAndNonContracts() public {
         _enterPhase2();
-        (bytes memory d, uint256 eta) = _queue(address(coin));
+        (bytes memory d, uint256 eta) = _setCall(address(coin));
         vm.warp(eta);
         vm.expectRevert();
-        _exec(d);
-        (d, eta) = _queue(address(0xdead));
+        _runSet(d);
+        (d, eta) = _setCall(address(0xdead));
         vm.warp(eta);
         vm.expectRevert(Core.BadModule.selector);
-        _exec(d);
+        _runSet(d);
     }
 
     // ------------------------------------------------------------------ the bounds of the opening price on a set
@@ -371,10 +375,10 @@ contract ReviewPhase2FlexTest is Fixture {
         assertGt(core.xToBuyback(), 0);
         uint256 ceiling = core.SUPPLY() * 1e18 / 1e12 / _full(1);
         emit log_named_uint("highest unit the floor allows", ceiling);
-        (bytes memory d, uint256 eta) = _queue(address(_mod(ceiling + 1)));
+        (bytes memory d, uint256 eta) = _setCall(address(_mod(ceiling + 1)));
         vm.warp(eta);
         vm.expectRevert(Core.BadModule.selector);
-        _exec(d);
+        _runSet(d);
         // the same unit is fine as long as the floor holds
         _replace(address(_mod(ceiling)));
         assertEq(core.unitPerPoint(), ceiling);
@@ -391,7 +395,7 @@ contract ReviewPhase2FlexTest is Fixture {
         _replace(address(rm));
         assertTrue(rm.skimOutside(), "control: the same skim works outside a callback");
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         uint256 before = xt.balanceOf(address(core));
         core.exitStatement(sid);
         assertGt(rm.attempts(), 14, "tried every door");
@@ -411,13 +415,13 @@ contract ReviewPhase2FlexTest is Fixture {
         fm.setToken(address(other));
         assertEq(core.exitToken(), address(xt), "the core kept its own copy");
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(sid);
-        (bytes memory d, uint256 eta) = _queue(address(fm));
+        (bytes memory d, uint256 eta) = _setCall(address(fm));
         vm.warp(eta);
         vm.expectRevert(Core.ExitTokenChanged.selector);
-        _exec(d);
+        _runSet(d);
         // a unit change reported later is ignored until a set reads it
         fm.setToken(address(xt));
         fm.setUnit(5 * UNIT);
@@ -436,13 +440,13 @@ contract ReviewPhase2FlexTest is Fixture {
         _enterPhase2();
         _potX(5e19);
         uint256[] memory ids = _credits(seller, 3);
-        (bytes memory d, uint256 eta) = _queue(address(_mod(UNIT / 10)));
+        (bytes memory d, uint256 eta) = _setCall(address(_mod(UNIT / 10)));
         vm.warp(eta);
         uint256 rate = core.xRate();
         uint256 s0 = core.scoreOf(ids[0]);
         uint256 quoteOld = s0 * rate * UNIT / 10_000;
         // the sell that lands after the set with a floor from the old quote
-        _exec(d);
+        _runSet(d);
         assertEq(core.xRate(), rate, "same rate right after the set");
         vm.prank(seller);
         vm.expectRevert(Core.Slippage.selector);
@@ -475,10 +479,10 @@ contract ReviewPhase2FlexTest is Fixture {
                     _potX(pots[b]);
                     vm.prank(owner);
                     core.setXRate(rates[a]);
-                    (bytes memory d, uint256 eta) = _queue(address(_mod(units[c])));
+                    (bytes memory d, uint256 eta) = _setCall(address(_mod(units[c])));
                     vm.warp(eta);
                     uint256 before = core.xRate();
-                    _exec(d);
+                    _runSet(d);
                     assertEq(core.xRate(), before, "continuous in the block of the set");
                     assertEq(_xRateAtCp(), before);
                     bool want = core.xPot() * 1e4 >= AVG * before * units[c];
@@ -494,22 +498,22 @@ contract ReviewPhase2FlexTest is Fixture {
         }
     }
 
-    /// FINDING RP-5 (operational): the exit bid keeps paying the old unit for the whole 7 day window. after a unit fall
-    /// (each exit token now stands for more points) a seller who sells in the window is paid ten times what the new unit
-    /// pays, and the statement composed from those credits exits for a tenth: the pot loses the difference
+    /// FINDING RP-5 (operational): the exit bid pays the old unit until the set is mined. after a unit fall (each exit
+    /// token now stands for more points) a seller who sells in the blocks before the set (a mempool front run, there is
+    /// no delay any more) is paid ten times what the new unit pays, and the statement composed from those credits exits
+    /// for a tenth: the pot loses the difference. the runbook lowers `xRateCap` and the rate in the same batch
     function test_FINDING_bidPaysTheOldUnitUntilTheSetBlockSoAFallIsFrontRunnable() public {
         _enterPhase2();
         _potX(5e19);
-        (bytes memory d, uint256 eta) = _queue(address(_mod(UNIT / 10)));
-        // inside the window: 80 credits sold at the old unit
+        (bytes memory d,) = _setCall(address(_mod(UNIT / 10)));
+        // a week of climb, then before the set: 80 credits sold at the old unit at the cap of the bid
+        _warp(7 days);
         uint256[] memory ids = _credits(seller, 80);
-        vm.warp(eta - 1);
         uint256 b0 = xt.balanceOf(seller);
         vm.prank(seller);
         core.sellForExitToken(ids);
         uint256 paid = xt.balanceOf(seller) - b0;
-        vm.warp(eta);
-        _exec(d);
+        _runSet(d);
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.composeExit();
@@ -601,7 +605,7 @@ contract ReviewPhase2FlexTest is Fixture {
         xt = new MockExitToken("Exit Token", "XT");
         xt.mint(address(core), 1e18);
         mod = new MockExitModule(address(xt), UNIT);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(mod)));
+        _setExitModule(address(mod));
         assertEq(core.xPot(), 0);
         core.skim();
         assertEq(core.xPot(), 1e18, "the early gift is booked after the first set");
@@ -610,7 +614,7 @@ contract ReviewPhase2FlexTest is Fixture {
         core.skim();
         assertEq(core.xPot() + core.xToBuyback(), xt.balanceOf(address(core)));
         uint256 sid = _composeOnce().sid;
-        _warp(72 hours);
+        _warp(105 hours);
         xt.mint(address(core), 5);
         core.exitStatement(sid);
         core.skim();
@@ -647,7 +651,7 @@ contract ReviewPhase2FlexTest is Fixture {
         m.tipCapBps = type(uint16).max;
         m.reimburseBps = type(uint16).max;
         m.reimburseCapBps = type(uint16).max;
-        m.reserveBps = type(uint16).max;
+        m.saleFloorBps = type(uint16).max;
         m.auctionDuration = type(uint32).max;
         m.exitAfter = type(uint32).max;
         m.saleToBuybackBps = type(uint16).max;
@@ -663,6 +667,7 @@ contract ReviewPhase2FlexTest is Fixture {
         m.exitSliceCredits = type(uint16).max;
         m.rateCap = type(uint64).max;
         m.exitLaneToBuybackBps = type(uint16).max;
+        m.feeToBuybackBps = type(uint16).max;
     }
 
     /// OK: with every field at the max of its TYPE (past the bounds, so a stray bit would show) the compiler layout and
@@ -674,7 +679,7 @@ contract ReviewPhase2FlexTest is Fixture {
         (uint256 a, uint256 b, uint256 c) = h.words();
         assertEq(a, (1 << 240) - 1, "word 0");
         assertEq(b, type(uint256).max, "word 1");
-        assertEq(c, (1 << 192) - 1, "word 2: 176 bits of neighbors then the 16 bit share");
+        assertEq(c, (1 << 208) - 1, "word 2: 176 bits of neighbors then the two 16 bit shares");
         bytes32 slot = SettingsStore.SLOT;
         vm.store(address(core), slot, bytes32(a));
         vm.store(address(core), bytes32(uint256(slot) + 1), bytes32(b));
@@ -690,6 +695,15 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(u.exitLaneToBuybackBps, type(uint16).max);
         assertEq(u.rateCap, 0);
         assertEq(u.exitSliceCredits, 0);
+        PackHarness f = new PackHarness();
+        f.onlyFee();
+        (a, b, c) = f.words();
+        assertEq(a, 0);
+        assertEq(b, 0);
+        assertEq(c, uint256(type(uint16).max) << 192, "the fee share alone");
+        u = CoreLib.unpack(a, b, c);
+        assertEq(u.feeToBuybackBps, type(uint16).max);
+        assertEq(u.exitLaneToBuybackBps, 0);
     }
 
     function test_OK_exitLaneShareBounds() public {
@@ -716,11 +730,11 @@ contract ReviewPhase2FlexTest is Fixture {
     function test_FINDING_unitRiseLeavesTheRateAbovePotAndFlat() public {
         _enterPhase2();
         _potX(2e19);
-        (bytes memory d, uint256 eta) = _queue(address(_mod(UNIT * 1000)));
-        vm.warp(eta);
+        (bytes memory d,) = _setCall(address(_mod(UNIT * 1000)));
+        _warp(2 days);
         uint256 rate = core.xRate();
-        assertGt(rate, 6_000, "climbed during the timelock under the old unit");
-        _exec(d);
+        assertGt(rate, 6_000, "climbed under the old unit before the set");
+        _runSet(d);
         assertEq(core.xRate(), rate, "not clamped");
         assertFalse(_xFunded());
         _warp(30 days);

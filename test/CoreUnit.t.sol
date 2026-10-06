@@ -39,10 +39,6 @@ abstract contract CoreBase is Fixture {
         core.skim();
     }
 
-    function _setController(address c) internal {
-        _timelock(Core.Action.SetController, abi.encode(c));
-    }
-
     /// @dev the rate after a spend of `x` from a pot of `p`, at the drop of the settings now
     function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
         return r - r * core.settings().dropBps * x / (10_000 * p);
@@ -110,14 +106,14 @@ contract CoreUnitTest is CoreBase {
     function test_parameters() public view {
         assertEq(core.SUPPLY(), 1_000_000_000e18);
         assertEq(core.XRATE_START(), 6000);
-        assertEq(core.TIMELOCK(), 7 days);
         assertEq(core.OVERPRINT_CAP_PER_DAY(), 8);
         assertEq(core.settings().avgScore, 4_330_000);
         assertEq(core.settings().flatBps, 10_000);
     }
 
     function test_constructorState() public view {
-        assertEq(core.OWNER(), owner);
+        assertEq(core.owner(), owner);
+        assertEq(core.pendingOwner(), address(0));
         assertEq(core.COIN(), address(coin));
         assertEq(core.HOOK(), Mainnet.SKIM_HOOK);
         assertEq(core.controller(), address(ctl));
@@ -133,7 +129,9 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.exitToken(), address(0));
         assertEq(core.unitPerPoint(), 0);
         assertEq(core.xStartPrice(), 0);
-        assertFalse(core.frozen());
+        assertFalse(core.controllerLocked());
+        assertFalse(core.exitModuleLocked());
+        assertFalse(core.targetsLocked());
     }
 
     function _stack8(Stack memory st, uint256 which, address to) internal pure returns (Stack memory bad) {
@@ -1149,111 +1147,165 @@ contract CoreUnitTest is CoreBase {
     }
 
     /*//////////////////////////////////////////////////////////////
-                                timelock
+                                owner
     //////////////////////////////////////////////////////////////*/
 
-    function test_timelock_ownerOnly() public {
-        vm.prank(alice);
+    function test_owner_onlyOwner() public {
+        vm.startPrank(alice);
         vm.expectRevert(Core.OnlyOwner.selector);
-        core.queue(Core.Action.Freeze, "");
-        vm.prank(alice);
+        core.setController(address(ctl));
         vm.expectRevert(Core.OnlyOwner.selector);
-        core.execute(Core.Action.Freeze, "");
-        vm.prank(alice);
+        core.setExitModule(address(mod));
         vm.expectRevert(Core.OnlyOwner.selector);
-        core.cancel(Core.Action.Freeze, "");
-        vm.prank(alice);
+        core.addTarget(address(0x1234));
         vm.expectRevert(Core.OnlyOwner.selector);
         core.removeTarget(STRATEGY);
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.lockController();
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.lockExitModule();
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.lockTargets();
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.transferOwnership(alice);
+        vm.stopPrank();
     }
 
-    function test_timelock_queueExecuteCancel() public {
+    /// the controller changes at once, with an event, and never to zero
+    function test_owner_setControllerAtOnce() public {
         address newCtl = address(new ScriptedController());
-        bytes memory data = abi.encode(newCtl);
-        bytes32 id = keccak256(abi.encode(Core.Action.SetController, data));
-
         vm.startPrank(owner);
-        vm.expectRevert(Core.NotQueued.selector);
-        core.execute(Core.Action.SetController, data);
-
-        vm.expectEmit(true, false, false, true);
-        emit Core.Queued(id, Core.Action.SetController, data, block.timestamp + 7 days);
-        core.queue(Core.Action.SetController, data);
-        assertEq(core.queuedEta(id), block.timestamp + 7 days);
-
-        vm.expectRevert(Core.AlreadyQueued.selector);
-        core.queue(Core.Action.SetController, data);
-
-        _warp(7 days - 1);
-        vm.expectRevert(Core.TooEarly.selector);
-        core.execute(Core.Action.SetController, data);
-        _warp(1);
-        core.execute(Core.Action.SetController, data);
+        vm.expectEmit(false, false, false, true);
+        emit Core.ControllerSet(newCtl);
+        core.setController(newCtl);
         assertEq(core.controller(), newCtl);
-        assertEq(core.queuedEta(id), 0);
-
-        vm.expectRevert(Core.NotQueued.selector);
-        core.execute(Core.Action.SetController, data);
-
-        // cancel
-        core.queue(Core.Action.SetController, abi.encode(address(ctl)));
-        core.cancel(Core.Action.SetController, abi.encode(address(ctl)));
-        _warp(8 days);
-        vm.expectRevert(Core.NotQueued.selector);
-        core.execute(Core.Action.SetController, abi.encode(address(ctl)));
-        vm.expectRevert(Core.NotQueued.selector);
-        core.cancel(Core.Action.SetController, abi.encode(address(ctl)));
-        vm.stopPrank();
-    }
-
-    /// an action is keyed by its kind and its data: the same data under another kind is not queued
-    function test_timelock_idCoversTheActionKind() public {
-        bytes memory data = abi.encode(address(0x1234));
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetController, data);
-        _warp(7 days);
-        vm.expectRevert(Core.NotQueued.selector);
-        core.execute(Core.Action.AddTarget, data);
-        vm.expectRevert(Core.NotQueued.selector);
-        core.execute(Core.Action.SetExitModule, data);
-        vm.stopPrank();
-    }
-
-    function test_timelock_setControllerRejectsZero() public {
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetController, abi.encode(address(0)));
-        _warp(7 days);
         vm.expectRevert(Core.ZeroAddress.selector);
-        core.execute(Core.Action.SetController, abi.encode(address(0)));
+        core.setController(address(0));
         vm.stopPrank();
     }
 
-    function test_timelock_freezeRemovesControllerPowerForever() public {
+    function test_owner_lockControllerIsForever() public {
         _setController(address(new ScriptedController()));
-        bytes memory beforeFreeze = abi.encode(address(ctl));
-        // an action queued before the freeze cannot execute after it
+        vm.expectEmit(false, false, false, false);
+        emit Core.ControllerLocked();
         vm.prank(owner);
-        core.queue(Core.Action.SetController, beforeFreeze);
-        _timelock(Core.Action.Freeze, "");
-        assertTrue(core.frozen());
+        core.lockController();
+        assertTrue(core.controllerLocked());
 
-        vm.startPrank(owner);
-        vm.expectRevert(Core.Frozen.selector);
-        core.execute(Core.Action.SetController, beforeFreeze);
-        vm.expectRevert(Core.Frozen.selector);
-        core.queue(Core.Action.SetController, abi.encode(address(0xBEEF)));
-        vm.stopPrank();
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("controller")));
+        core.setController(address(ctl));
 
-        // the other powers survive the freeze.
+        // the other powers survive the lock
         HostileTarget t = new HostileTarget();
         _allow(address(t));
         assertTrue(core.allowedTarget(address(t)));
         vm.prank(owner);
         core.removeTarget(address(t));
         assertFalse(core.allowedTarget(address(t)));
+        assertFalse(core.exitModuleLocked());
+        assertFalse(core.targetsLocked());
     }
 
-    function test_timelock_exitModuleReplaceable() public {
+    function test_owner_lockExitModule() public {
+        // no module yet: phase 2 cannot be locked out by accident
+        vm.prank(owner);
+        vm.expectRevert(Core.NoExitModule.selector);
+        core.lockExitModule();
+        assertFalse(core.exitModuleLocked());
+
+        _enterPhase2();
+        vm.expectEmit(false, false, false, false);
+        emit Core.ExitModuleLocked();
+        vm.prank(owner);
+        core.lockExitModule();
+        assertTrue(core.exitModuleLocked());
+
+        MockExitModule other = new MockExitModule(address(xt), 1e10);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        core.setExitModule(address(other));
+        // naming the same module again to refresh the unit is blocked too
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        core.setExitModule(address(mod));
+        assertEq(core.exitModule(), address(mod));
+    }
+
+    function test_owner_lockTargets() public {
+        address t = address(new HostileTarget());
+        _allow(t);
+        vm.expectEmit(false, false, false, false);
+        emit Core.TargetsLocked();
+        vm.prank(owner);
+        core.lockTargets();
+        assertTrue(core.targetsLocked());
+
+        address t2 = address(new HostileTarget());
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("targets")));
+        core.addTarget(t2);
+        // removing still works
+        vm.prank(owner);
+        core.removeTarget(t);
+        assertFalse(core.allowedTarget(t));
+    }
+
+    function test_owner_twoStepHandover() public {
+        address bob = _user("bob");
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, false);
+        emit Core.OwnershipTransferStarted(owner, alice);
+        core.transferOwnership(alice);
+        assertEq(core.pendingOwner(), alice);
+        assertEq(core.owner(), owner, "nothing changes until the accept");
+
+        vm.prank(bob);
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        core.acceptOwnership();
+        vm.prank(owner);
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        core.acceptOwnership();
+
+        vm.prank(alice);
+        vm.expectEmit(true, true, false, false);
+        emit Core.OwnershipTransferred(owner, alice);
+        core.acceptOwnership();
+        assertEq(core.owner(), alice);
+        assertEq(core.pendingOwner(), address(0));
+
+        // the old owner lost every power, the new one has them
+        vm.prank(owner);
+        vm.expectRevert(Core.OnlyOwner.selector);
+        core.removeTarget(STRATEGY);
+        vm.prank(alice);
+        core.removeTarget(STRATEGY);
+        assertFalse(core.allowedTarget(STRATEGY));
+        // the accept cannot be replayed
+        vm.prank(alice);
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        core.acceptOwnership();
+    }
+
+    function test_owner_handoverCanBeClearedOrReplaced() public {
+        address bob = _user("bob");
+        vm.startPrank(owner);
+        core.transferOwnership(alice);
+        core.transferOwnership(bob);
+        assertEq(core.pendingOwner(), bob);
+        core.transferOwnership(address(0));
+        assertEq(core.pendingOwner(), address(0));
+        vm.stopPrank();
+        vm.prank(bob);
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        core.acceptOwnership();
+        // with nothing pending nobody can accept (the zero address cannot send a transaction)
+        vm.prank(alice);
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        core.acceptOwnership();
+    }
+
+    function test_owner_exitModuleReplaceable() public {
         _enterPhase2();
         assertEq(core.exitModule(), address(mod));
         assertEq(core.exitToken(), address(xt));
@@ -1264,23 +1316,20 @@ contract CoreUnitTest is CoreBase {
 
         // a second set with the same exit token goes through and reads the unit again
         MockExitModule other = new MockExitModule(address(xt), 1e10);
-        _timelock(Core.Action.SetExitModule, abi.encode(address(other)));
+        _setExitModule(address(other));
         assertEq(core.exitModule(), address(other));
         assertEq(core.exitToken(), address(xt));
         assertEq(core.unitPerPoint(), 1e10);
 
         // a module with another exit token reverts, and the state stays
         MockExitModule alien = new MockExitModule(address(new MockExitToken("x", "x")), 1e10);
-        vm.startPrank(owner);
-        core.queue(Core.Action.SetExitModule, abi.encode(address(alien)));
-        _warp(7 days);
+        vm.prank(owner);
         vm.expectRevert(Core.ExitTokenChanged.selector);
-        core.execute(Core.Action.SetExitModule, abi.encode(address(alien)));
-        vm.stopPrank();
+        core.setExitModule(address(alien));
         assertEq(core.exitModule(), address(other));
     }
 
-    function test_timelock_exitModuleValidation() public {
+    function test_owner_exitModuleValidation() public {
         MockExitModule coinModule = new MockExitModule(address(coin), 1e10);
         MockExitModule ghost = new MockExitModule(address(0x5678), 1e10);
         address[7] memory badTokens = [
@@ -1301,34 +1350,27 @@ contract CoreUnitTest is CoreBase {
         }
         vm.startPrank(owner);
         for (uint256 i; i < bad.length; ++i) {
-            core.queue(Core.Action.SetExitModule, abi.encode(bad[i]));
-        }
-        _warp(7 days);
-        for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(Core.BadModule.selector);
-            core.execute(Core.Action.SetExitModule, abi.encode(bad[i]));
+            core.setExitModule(bad[i]);
         }
         vm.stopPrank();
         assertEq(core.exitModule(), address(0));
     }
 
     /// a module whose unit is zero, above uint128, or unreadable is refused when it is set
-    function test_timelock_exitModuleRefusesBadUnits() public {
+    function test_owner_exitModuleRefusesBadUnits() public {
         uint256[4] memory units = [uint256(0), uint256(type(uint128).max) + 1, type(uint256).max, 1e10];
         for (uint256 i; i < units.length; ++i) {
             MockExitModule m = new MockExitModule(address(new MockExitToken("X", "X")), units[i]);
             if (i == 3) m.setRevertUnit(true);
-            vm.startPrank(owner);
-            core.queue(Core.Action.SetExitModule, abi.encode(address(m)));
-            _warp(7 days);
+            vm.prank(owner);
             vm.expectRevert(Core.BadModule.selector);
-            core.execute(Core.Action.SetExitModule, abi.encode(address(m)));
-            vm.stopPrank();
+            core.setExitModule(address(m));
             assertEq(core.exitModule(), address(0));
         }
     }
 
-    function test_timelock_targets() public {
+    function test_owner_targets() public {
         address[14] memory forbidden = [
             address(CREDITS),
             address(STATEMENTS),
@@ -1347,29 +1389,22 @@ contract CoreUnitTest is CoreBase {
         ];
         vm.startPrank(owner);
         for (uint256 i; i < forbidden.length; ++i) {
-            core.queue(Core.Action.AddTarget, abi.encode(forbidden[i]));
-        }
-        _warp(7 days);
-        for (uint256 i; i < forbidden.length; ++i) {
             vm.expectRevert(Core.ForbiddenTarget.selector);
-            core.execute(Core.Action.AddTarget, abi.encode(forbidden[i]));
+            core.addTarget(forbidden[i]);
         }
         vm.stopPrank();
 
         // the exit module and the exit token are forbidden once they exist.
         _enterPhase2();
         vm.startPrank(owner);
-        core.queue(Core.Action.AddTarget, abi.encode(address(mod)));
-        core.queue(Core.Action.AddTarget, abi.encode(address(xt)));
-        _warp(7 days);
         vm.expectRevert(Core.ForbiddenTarget.selector);
-        core.execute(Core.Action.AddTarget, abi.encode(address(mod)));
+        core.addTarget(address(mod));
         vm.expectRevert(Core.ForbiddenTarget.selector);
-        core.execute(Core.Action.AddTarget, abi.encode(address(xt)));
+        core.addTarget(address(xt));
         vm.stopPrank();
     }
 
-    function test_timelock_removeTargetIsImmediate() public {
+    function test_owner_removeTargetIsImmediate() public {
         assertTrue(core.allowedTarget(STRATEGY));
         vm.prank(owner);
         core.removeTarget(STRATEGY);
@@ -1384,7 +1419,7 @@ contract CoreUnitTest is CoreBase {
         mod = new MockExitModule(address(xt), UNIT);
         _allow(address(mod));
         assertTrue(core.allowedTarget(address(mod)));
-        _timelock(Core.Action.SetExitModule, abi.encode(address(mod)));
+        _setExitModule(address(mod));
         vm.prank(keeper);
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(1, "", LISTED_A, address(mod));
@@ -1392,7 +1427,7 @@ contract CoreUnitTest is CoreBase {
 
     /// the opening price of the exit auction asks the whole supply for one full slice, and a full slice is
     /// `exitSliceCredits` average credits of the settings at the moment the module is set
-    function test_timelock_exitModuleOpeningPriceFollowsTheSettings() public {
+    function test_exitModuleOpeningPriceFollowsTheSettings() public {
         Settings memory s = core.settings();
         s.exitSliceCredits = 100;
         s.avgScore = 2_000_000;
@@ -1837,7 +1872,7 @@ contract CoreComposedTest is CoreBase {
         core.exitStatement(c.sid + 100);
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
-        _warp(72 hours - 1);
+        _warp(105 hours - 1);
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(1);
@@ -1848,7 +1883,7 @@ contract CoreComposedTest is CoreBase {
 
     function test_exit_splitsEthLaneStatement() public {
         Composed memory c = _composeOnce();
-        _warp(72 hours);
+        _warp(105 hours);
         uint256 out = STATEMENTS.creditScoreOf(c.sid) * UNIT;
         core.exitStatement(c.sid);
 
@@ -1866,7 +1901,7 @@ contract CoreComposedTest is CoreBase {
 
     function test_exit_moduleThatUnderpaysReverts() public {
         Composed memory c = _composeOnce();
-        _warp(72 hours);
+        _warp(105 hours);
         mod.setShortfallBps(1);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);
@@ -1887,7 +1922,7 @@ contract CoreComposedTest is CoreBase {
     function test_exit_unitIsFixedAtSetTime() public {
         Composed memory c = _composeOnce();
         assertEq(core.unitPerPoint(), UNIT);
-        _warp(72 hours);
+        _warp(105 hours);
         mod.setUnitPerPoint(0);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);

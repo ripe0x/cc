@@ -133,6 +133,36 @@ contract FuzzController {
     }
 
     /*//////////////////////////////////////////////////////////////
+                             statementPrice
+    //////////////////////////////////////////////////////////////*/
+
+    /// benign: 50 to 200 percent of the cost. hostile: reverts, answers zero, the maximum, three times the cost,
+    /// short or long data, or burns more gas than the core allows. a pure function of the seed and the arguments
+    function statementPrice(uint256 sid, uint256 cost, uint64 listedAt) external returns (uint256) {
+        uint256 r = _r("price", uint256(keccak256(abi.encode(sid, cost, listedAt))));
+        uint256 fair = cost * (5_000 + r % 15_001) / 10_000;
+        if (!hostile) return fair;
+        _attack(r);
+        uint256 m = (r >> 24) % 9;
+        if (m == 0) revert("hostile price");
+        if (m == 1) return type(uint256).max;
+        if (m == 2) return 0;
+        if (m == 3) return cost * 3;
+        if (m == 4) {
+            assembly {
+                mstore(0, 1)
+                return(0, 31)
+            }
+        }
+        if (m == 5) {
+            _burn(250_000);
+            return fair;
+        }
+        if (m == 6) _short(2);
+        return fair;
+    }
+
+    /*//////////////////////////////////////////////////////////////
                               nextOverprint
     //////////////////////////////////////////////////////////////*/
 
@@ -226,9 +256,9 @@ contract FuzzController {
             target = _coin();
             data = abi.encodeWithSignature("setTaxBps(uint16)", uint16(0));
         } else if (which == 4) {
-            data = abi.encodeWithSignature("queue(uint8,bytes)", uint8(0), abi.encode(address(this)));
+            data = abi.encodeWithSignature("setController(address)", address(this));
         } else if (which == 5) {
-            data = abi.encodeWithSignature("execute(uint8,bytes)", uint8(0), abi.encode(address(this)));
+            data = abi.encodeWithSignature("sellTo(uint256,address)", sid, address(this));
         } else if (which == 6) {
             data = abi.encodeWithSignature("removeTarget(address)", Mainnet.CREDIT_STRATEGY);
         } else if (which == 7) {
@@ -287,6 +317,9 @@ contract FuzzController {
 
     /// two or three attempts per answer, picked from the seed.
     function _attack(uint256 r) internal {
+        // the handler asks the same question from outside (a static call) to learn the answer the core got. the
+        // attempts only mean something inside the core's frame, where its guard refuses them, so they are skipped here
+        if (msg.sender != core) return;
         for (uint256 i; i < 3; ++i) {
             _call(uint256(keccak256(abi.encode(r, i))) % ATTACKS, r >> i);
         }

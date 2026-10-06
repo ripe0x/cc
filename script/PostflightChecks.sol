@@ -62,8 +62,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
 
     /// @notice the constructor arguments of a deployed core, read back from its immutables, in the encoding etherscan
     /// wants for verification: `(owner, coin, controller, stack, rateStart, settings)`. the settings are the launch values, the owner may
-    /// have changed them since, so verify against the config's `settings` block
-    function coreConstructorArgs(Core core) internal view returns (bytes memory) {
+    /// have changed them since, so verify against the config's `settings` block. `firstOwner` is the launch config owner:
+    /// the live owner may have changed since by a handover
+    function coreConstructorArgs(Core core, address firstOwner) internal view returns (bytes memory) {
         Stack memory s = Stack({
             poolManager: address(core.MANAGER()),
             hook: core.HOOK(),
@@ -74,23 +75,25 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             escrow: core.ESCROW(),
             auctionFactory: core.AUCTION_FACTORY()
         });
-        return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START(), core.settings());
+        return abi.encode(firstOwner, core.COIN(), core.controller(), s, core.RATE_START(), core.settings());
     }
 
     /// @notice prints what etherscan verification needs: the library address and the exact `--libraries` flag, the
     /// constructor arguments of the Core (read back from the chain) and of the controller. docs/DEPLOY.md section 3
-    function printVerifyInputs(Core core) internal view {
+    function printVerifyInputs(Core core, LaunchConfig memory c) internal view {
         address lib = findLibrary(address(core).code);
         console.log("verify: library CoreLib at", lib);
         console.log(string.concat("verify: flag  --libraries src/lib/CoreLib.sol:CoreLib:", vm.toString(lib)));
         console.log("verify: core constructor args");
-        console.logBytes(coreConstructorArgs(core));
+        console.logBytes(coreConstructorArgs(core, c.owner));
         console.log("verify: controller constructor args");
-        console.logBytes(abi.encode(address(core)));
+        console.logBytes(abi.encode(address(core), c.sale));
     }
 
     function _postCore(LaunchConfig memory c, Core core) private {
-        _eq("core: owner", core.OWNER(), c.owner);
+        // after a handover the live owner is the new one: OWNER_CHANGED=1 turns the row into a warning
+        if (_ownerChanged()) _warn("warn: owner equals the config", core.owner() == c.owner, "OWNER_CHANGED=1, a handover ran");
+        else _eq("core: owner", core.owner(), c.owner);
         _eq("core: SUPPLY constant equals the config supply", core.SUPPLY(), c.supply);
         _eq("core: RATE_START", core.RATE_START(), c.rateStart);
         _eq("core: auction factory", core.AUCTION_FACTORY(), c.stack.auctionFactory);
@@ -124,10 +127,12 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             "seaport and CreditStrategy only"
         );
         _check(
-            "core: no controller freeze, no exit module",
-            !core.frozen() && core.exitModule() == address(0),
+            "core: no locks, no exit module",
+            !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
+                && core.exitModule() == address(0),
             "launch state"
         );
+        _postSale(c, ctl);
         _check(
             "core: pots covered by balance",
             core.ethPot() + core.ethToBuyback() <= address(core).balance,
@@ -139,6 +144,39 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             "warn: ethRate is rateStart",
             core.ethPot() != 0 || core.ethRate() == c.rateStart,
             string.concat("ethRate ", vm.toString(core.ethRate()), " rateStart ", vm.toString(c.rateStart))
+        );
+    }
+
+    /// @notice the operator says the owner role was handed over since launch (OWNER_CHANGED=1). a test overrides it
+    function _ownerChanged() internal view virtual returns (bool) {
+        return vm.envOr("OWNER_CHANGED", uint256(0)) == 1;
+    }
+
+    /// @dev the sale settings of the controller must equal the config, like the core settings (SETTINGS_CHANGED=1 turns
+    /// the row into a warning once the owner changed them)
+    function _postSale(LaunchConfig memory c, address ctl) private {
+        if (ctl.code.length == 0) return;
+        ControllerV1 k = ControllerV1(ctl);
+        bool same = k.buyOnly() == c.sale.buyOnly && k.startBps() == c.sale.startBps && k.stepBps() == c.sale.stepBps
+            && k.stepEvery() == c.sale.stepEvery && k.floorBps() == c.sale.floorBps;
+        if (_settingsChanged()) {
+            _warn("warn: sale settings equal the config", same, "SETTINGS_CHANGED=1, the owner changed them since launch");
+        } else {
+            _check("controller: sale settings equal the config", same, "buyOnly startBps stepBps stepEvery floorBps");
+        }
+        _info(
+            "controller: sale",
+            string.concat(
+                k.buyOnly() ? "buy only" : "auction mode",
+                " start ",
+                vm.toString(k.startBps()),
+                " step ",
+                vm.toString(k.stepBps()),
+                " every ",
+                vm.toString(k.stepEvery()),
+                "s floor ",
+                vm.toString(k.floorBps())
+            )
         );
     }
 
@@ -179,7 +217,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _info(
             "core: reserve and auction",
             string.concat(
-                "reserveBps ", vm.toString(live.reserveBps), " duration ", vm.toString(live.auctionDuration), "s"
+                "saleFloorBps ", vm.toString(live.saleFloorBps), " duration ", vm.toString(live.auctionDuration), "s"
             )
         );
         _info(
@@ -191,6 +229,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
                 vm.toString(live.exitToBuybackBps),
                 " exit lane to buyback ",
                 vm.toString(live.exitLaneToBuybackBps),
+                " fee to buyback ",
+                vm.toString(live.feeToBuybackBps),
                 " exitAfter ",
                 vm.toString(live.exitAfter),
                 "s"

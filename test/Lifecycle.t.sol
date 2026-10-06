@@ -326,7 +326,7 @@ contract LifecycleDoorsTest is Fixture {
         _assertUnchanged(s0);
     }
 
-    /// the system's own contracts can never become targets, even through the timelock.
+    /// the system's own contracts can never become targets, even by the owner.
     function test_buyListing_forbiddenTargetsCannotBeAdded() public {
         address[11] memory forbidden = [
             Mainnet.SKIM_HOOK,
@@ -342,12 +342,9 @@ contract LifecycleDoorsTest is Fixture {
             Mainnet.AUCTION_FACTORY
         ];
         for (uint256 i; i < forbidden.length; ++i) {
-            vm.startPrank(owner);
-            core.queue(Core.Action.AddTarget, abi.encode(forbidden[i]));
-            vm.warp(block.timestamp + 7 days);
+            vm.prank(owner);
             vm.expectRevert(Core.ForbiddenTarget.selector);
-            core.execute(Core.Action.AddTarget, abi.encode(forbidden[i]));
-            vm.stopPrank();
+            core.addTarget(forbidden[i]);
             assertFalse(core.allowedTarget(forbidden[i]));
         }
         vm.prank(keeper);
@@ -382,7 +379,7 @@ contract LifecycleComposeTest is Fixture {
     // ------------------------------------------------------------------ compose
 
     /// compose through ControllerV1: the 80 oldest credits, format 0, the id is the new supply, cost basis, refund,
-    /// and the statement is listed on the house at 90 percent of its cost
+    /// and the statement is listed on the house at 110 percent of its cost
     function test_compose_throughControllerV1() public {
         _prepare();
         uint256[] memory sold = _fillEthPile(85);
@@ -402,7 +399,7 @@ contract LifecycleComposeTest is Fixture {
         }
         assertEq(STATEMENTS.creditScoreOf(c.sid), _sumScores(page));
 
-        // cost basis is the credits plus the gas refund, and the reserve is 90 percent of it
+        // cost basis is the credits plus the gas refund, and the reserve is 110 percent of it (the opening ask)
         (bool held, Lane lane, uint256 basis, uint64 listedAt) = core.statementInfo(c.sid);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Eth));
@@ -410,7 +407,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
         assertEq(uint8(l.status), uint8(Core.StatementStatus.Listed));
-        assertEq(l.reserve, basis * 9_000 / 10_000, "90 percent of cost");
+        assertEq(l.reserve, basis * 11_000 / 10_000, "110 percent of cost");
         assertEq(_auctionOf(c.sid).duration, 24 hours);
         uint256[] memory heldIds = core.heldStatements();
         assertEq(heldIds.length, 1);
@@ -445,7 +442,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(capped.reimb, c.cost * 500 / 10_000, "the cap binds exactly");
         (,, uint256 basis2,) = core.statementInfo(capped.sid);
         assertEq(basis2, c.cost + capped.reimb);
-        assertEq(_live(capped.sid).reserve, basis2 * 9_000 / 10_000, "the reserve follows the basis");
+        assertEq(_live(capped.sid).reserve, basis2 * 11_000 / 10_000, "the reserve follows the basis");
 
         // the controller cannot be asked again, there is no full page left
         vm.expectRevert(Core.NotReady.selector);
@@ -522,7 +519,7 @@ contract LifecycleComposeTest is Fixture {
         Composed memory c = _composeOnce();
         (,, uint256 basis,) = core.statementInfo(c.sid);
         Live memory l = _live(c.sid);
-        assertEq(l.reserve, basis * 9_000 / 10_000);
+        assertEq(l.reserve, basis * 11_000 / 10_000);
 
         // alice bids the reserve, bob outbids by the five percent step. alice is refunded in the same call
         _bid(alice, c.sid, l.reserve);
@@ -555,7 +552,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(core.ethToBuyback() - back0, step / 2);
         assertEq(core.ethPot() - pot0, step - step / 2);
         assertEq(_owedByHouse(), 0);
-        assertGt(step, basis * 9_000 / 10_000, "sold above the reserve");
+        assertGt(step, basis * 11_000 / 10_000, "sold above the reserve");
         _solvent();
 
         // the buyback burns what the share buys: one slice of 1 eth, then the delay of 25 blocks, then the rest
@@ -650,10 +647,10 @@ contract LifecyclePhase2Test is Fixture {
         uint256 aid = _live(c.sid).auctionId;
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
-        vm.warp(c.at + 72 hours - 1);
+        vm.warp(c.at + 105 hours - 1);
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
-        vm.warp(c.at + 72 hours);
+        vm.warp(c.at + 105 hours);
 
         required = STATEMENTS.creditScoreOf(c.sid) * UNIT;
         assertEq(core.xPot() + core.xToBuyback(), 0);
@@ -720,7 +717,7 @@ contract LifecyclePhase2Test is Fixture {
     /// statement can never be exited
     function test_phase2_aBidBlocksTheExitAndTheSaleWins() public {
         Composed memory c = _composeOnce();
-        vm.warp(c.at + 72 hours);
+        vm.warp(c.at + 105 hours);
         _bid(alice, c.sid, _live(c.sid).reserve);
         vm.expectRevert(Core.HasBid.selector);
         core.exitStatement(c.sid);
@@ -827,7 +824,7 @@ contract LifecyclePhase2Test is Fixture {
     /// still listed on the house afterwards, as if nothing happened
     function test_phase2_hostileExitModuleUnderpaysReverts() public {
         Composed memory c = _composeOnce();
-        vm.warp(c.at + 72 hours);
+        vm.warp(c.at + 105 hours);
         uint256 aid = _live(c.sid).auctionId;
         bytes32 before = keccak256(abi.encode(core.xPot(), core.xToBuyback(), xt.balanceOf(address(core))));
 
@@ -930,7 +927,7 @@ contract LifecycleNarrativeTest is Fixture {
         assertEq(STATEMENTS.supply(), sid);
         assertEq(STATEMENTS.ownerOf(sid), address(house), "listed on the house");
         (,, uint256 cost,) = core.statementInfo(sid);
-        assertEq(_live(sid).reserve, cost * 9_000 / 10_000, "at 90 percent of cost");
+        assertEq(_live(sid).reserve, cost * 11_000 / 10_000, "at 110 percent of cost");
         at = uint64(block.timestamp);
         _check();
     }
@@ -1094,10 +1091,10 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         _fundPot(20 ether);
         _warp(90 hours);
 
-        // old numbers: a flat bid, a 90 percent reserve, an even split of the sale
+        // old numbers: a flat bid, a 75 percent floor and a 110 percent ask, an even split of the sale
         Settings memory old = core.settings();
         assertEq(old.flatBps, 10_000);
-        assertEq(old.reserveBps, 9_000);
+        assertEq(old.saleFloorBps, 7_500);
         assertEq(old.saleToBuybackBps, 5_000);
         uint256[] memory first = _credits(seller, 2);
         assertEq(core.ceilingOf(first[0]), core.ceilingOf(first[1]), "flat: both credits are worth the same");
@@ -1106,8 +1103,8 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         // two statements listed under the old numbers
         (uint256 s1, uint256 cost1) = _composeFresh();
         (uint256 s2, uint256 cost2) = _composeFresh();
-        assertEq(_live(s1).reserve, cost1 * 9_000 / 10_000);
-        assertEq(_live(s2).reserve, cost2 * 9_000 / 10_000);
+        assertEq(_live(s1).reserve, cost1 * 11_000 / 10_000);
+        assertEq(_live(s2).reserve, cost2 * 11_000 / 10_000);
         // s1 gets a bidder at the old reserve before the change, s2 gets none
         uint256 oldReserve1 = _live(s1).reserve;
         _bid(alice, s1, oldReserve1);
@@ -1115,7 +1112,7 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         // the owner changes three numbers in one call, effective at once
         Settings memory s = core.settings();
         s.flatBps = 5_000;
-        s.reserveBps = 6_000;
+        s.saleFloorBps = 12_000;
         s.saleToBuybackBps = 8_000;
         vm.expectEmit(address(core));
         emit Core.SettingsSet(s);
@@ -1135,17 +1132,17 @@ contract LifecycleOwnerAdaptsTest is Fixture {
 
         // the old listings are untouched until someone reprices them. a listing with a bid cannot be repriced at all
         assertEq(_live(s1).reserve, oldReserve1);
-        assertEq(_live(s2).reserve, cost2 * 9_000 / 10_000);
+        assertEq(_live(s2).reserve, cost2 * 11_000 / 10_000);
         vm.expectRevert(Core.HasBid.selector);
         core.repriceStatement(s1);
         vm.prank(carol);
         core.repriceStatement(s2);
-        assertEq(_live(s2).reserve, cost2 * 6_000 / 10_000, "the old listing now reserves 60 percent of its cost");
-        assertEq(_auctionOf(s2).reservePrice, cost2 * 6_000 / 10_000);
+        assertEq(_live(s2).reserve, cost2 * 12_000 / 10_000, "the old listing now reserves 120 percent of its cost");
+        assertEq(_auctionOf(s2).reservePrice, cost2 * 12_000 / 10_000);
 
         // a statement composed after the change is listed at the new reserve, from the credits bought on both numbers
         (uint256 s3, uint256 cost3) = _composeFresh();
-        assertEq(_live(s3).reserve, cost3 * 6_000 / 10_000);
+        assertEq(_live(s3).reserve, cost3 * 12_000 / 10_000);
         assertEq(core.heldStatements().length, 3);
 
         // sales: s1 clears at its old reserve, s2 at the new one, which a bid under the old reserve could not meet
@@ -1154,7 +1151,7 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         _endAuction(s1);
         assertEq(STATEMENTS.ownerOf(s1), alice);
         uint256 price2 = _live(s2).reserve;
-        assertLt(price2, cost2 * 9_000 / 10_000);
+        assertGt(price2, cost2 * 11_000 / 10_000);
         _bid(bob, s2, price2);
         _endAuction(s2);
         uint256 price3 = _live(s3).reserve;

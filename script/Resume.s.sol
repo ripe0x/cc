@@ -38,7 +38,7 @@ abstract contract SystemResumer is SystemDeployer {
     /// @dev the core must be the one this config would have built, and its coin the one the config predicts
     function _requireCoreMatches(LaunchConfig memory c, address deployer, address core_) private view {
         Core core = Core(payable(core_));
-        if (core.OWNER() != c.owner) revert CoreMismatch("owner");
+        if (!_ownerChanged() && core.owner() != c.owner) revert CoreMismatch("owner (OWNER_CHANGED=1 after a handover)");
         if (core.RATE_START() != c.rateStart) revert CoreMismatch("rateStart");
         // the owner can call `setSettings` as soon as the core exists. a core whose settings differ from the signed config
         // is finished only on purpose, with SETTINGS_CHANGED=1 (the postflight at the end warns and prints it)

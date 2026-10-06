@@ -12,6 +12,9 @@ interface IController {
     function wants(uint256 creditId) external view returns (uint16 bonusBps);
     function nextPage(Lane lane) external view returns (bool ready, uint256[80] memory ids, uint8 format);
     function nextOverprint() external view returns (bool ready, uint256 baseId, uint256 topId);
+    /// the asking price in wei of the eth lane statement `sid` (cost basis `cost`, listed at `listedAt`) right now. the
+    /// core calls it with a fixed gas cap and floors the answer at the hard floor `cost * saleFloorBps / 10_000`
+    function statementPrice(uint256 sid, uint256 cost, uint64 listedAt) external view returns (uint256 priceWei);
 }
 
 interface IExitModule {
@@ -32,6 +35,12 @@ interface ICoreViews {
     function scoreOf(uint256 id) external view returns (uint256); // 1e4 scale
     function statementInfo(uint256 sid) external view returns (bool held, Lane lane, uint256 cost, uint64 clockStart);
     function heldStatements() external view returns (uint256[] memory sids);
+}
+
+/// what the controller needs of the core beyond the views: the live owner and the one door that sells a statement
+interface ICoreSale {
+    function owner() external view returns (address);
+    function sellTo(uint256 sid, address buyer) external payable;
 }
 
 /// the coin calls the core makes. the live token burns from the caller or from an account that approved the caller
@@ -109,8 +118,9 @@ struct Settings {
     uint16 reimburseBps;
     /// cap of the reimbursement, bps of the statement cost
     uint16 reimburseCapBps;
-    /// auction reserve, bps of the statement cost
-    uint16 reserveBps;
+    /// the hard floor of a statement sale, bps of the statement cost. no sale clears below it. the controller prices
+    /// above it, the house reserve and `sellTo` are floored at it
+    uint16 saleFloorBps;
     /// seconds an auction runs from its first bid
     uint32 auctionDuration;
     /// seconds an eth lane statement must have been listed without a bid before phase 2 may redeem it
@@ -137,6 +147,24 @@ struct Settings {
     uint64 rateCap;
     /// share of exit token from EXIT lane exits that goes to the coin buyback, bps, the rest to the exit bid pot
     uint16 exitLaneToBuybackBps;
+    /// share of the swap fee eth that the hook pays to the core (booked in `receive()`) that goes to the coin buyback,
+    /// the rest to the pot, bps. eth booked later by `skim` goes to the pot whole
+    uint16 feeToBuybackBps;
+}
+
+/// the five sale settings of the controller, its constructor argument and the `sale` block of the launch config.
+/// bounds are enforced by the controller (docs/FLOW.md 9.3)
+struct Sale {
+    /// buy only mode: statements sell at once at the asking price. false is auction mode (the asking price is the house reserve)
+    bool buyOnly;
+    /// the asking price at listing, bps of the statement cost
+    uint16 startBps;
+    /// bps the asking price falls per step
+    uint16 stepBps;
+    /// seconds per step
+    uint32 stepEvery;
+    /// the asking price never falls below this, bps of the statement cost
+    uint16 floorBps;
 }
 
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
@@ -197,9 +225,9 @@ library Mainnet {
             tipCapBps: 200,
             reimburseBps: 11_000,
             reimburseCapBps: 500,
-            reserveBps: 9_000,
+            saleFloorBps: 7_500,
             auctionDuration: 24 hours,
-            exitAfter: 72 hours,
+            exitAfter: 105 hours,
             saleToBuybackBps: 5_000,
             exitToBuybackBps: 5_000,
             buybackSlice: 1 ether,
@@ -212,11 +240,17 @@ library Mainnet {
             xAuctionHalfLife: 6 hours,
             exitSliceCredits: 20,
             rateCap: 123_200_000_000_000,
-            exitLaneToBuybackBps: 0
+            exitLaneToBuybackBps: 0,
+            feeToBuybackBps: 0
         });
     }
 
     /// the default stack: the live artcoins deployment
+    /// the launch sale: start at 110 percent, one point every 3 hours, down to 75 percent at hour 105, auction mode
+    function defaultSale() internal pure returns (Sale memory) {
+        return Sale({buyOnly: false, startBps: 11_000, stepBps: 100, stepEvery: 3 hours, floorBps: 7_500});
+    }
+
     function defaultStack() internal pure returns (Stack memory) {
         return Stack({
             poolManager: POOL_MANAGER,
