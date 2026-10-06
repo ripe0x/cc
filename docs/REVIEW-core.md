@@ -1,19 +1,19 @@
 # independent review: Core.sol and ControllerV1.sol
 
-scope: src/Core.sol, src/ControllerV1.sol. law: SPEC.md, docs/ARCHITECTURE.md (section 9 deviations not re reported). all proofs of concept are in test/ReviewCore.t.sol, `test_POC_*`, run on the pinned fork and passing. tests named `test_held_*` in the same file are attacks that failed.
+scope: src/Core.sol, src/ControllerV1.sol. law: SPEC.md, docs/ARCHITECTURE.md (section 10 deviations not re reported). the line numbers and the exit pool scenarios below are those of the first design. all proofs of concept are in test/ReviewCore.t.sol, `test_POC_*`, run on the pinned fork and passing. tests named `test_held_*` in the same file are attacks that failed.
 
-## status after fixes
+## status after the artcoins port
 
-proof tests of fixed findings are now regression tests named `test_FIXED_*` in `test/ReviewCore.t.sol` and show that the attack fails. see docs/ARCHITECTURE.md sections 4, 5 and 9 for the changed behavior.
+this review was written against the first design, with the exit token bought back in a pool. the port to artcoins replaced the exit pool with a dutch auction inside the core (docs/ARCHITECTURE.md sections 8 and 10), so the exit pool findings no longer apply to the code. proof tests of fixed findings are regression tests named `test_FIXED_*` where they still make sense, and the auction attacks live in `test/ReviewCore.t.sol` as `test_attack_*`.
 
 | id | status | what |
 |---|---|---|
-| R1 | mitigated | mitigated by a fixed limit price, see ARCHITECTURE; a sturdier design is an open decision. a static limit is either loose or can stall the exit buyback |
-| R2 | fixed | the pool key must have fee 0 and tick spacing 60 |
-| R3 | fixed | `unitPerPoint` is read once when the exit module is set, stored, bounded to non zero and at most uint128, and never read again |
-| R4 | fixed | the callback returns what was spent, unspent input and tip go back to the counter, and a buyback that buys nothing reverts `NothingBought()` |
-| R5 | fixed | the callback requires the pool took no more than the amount it was given |
-| R6 | accepted | a fee on transfer or rebasing exit token is not supported (ARCHITECTURE section 9, item 14) |
+| R1 | obsolete | the exit pool, its limit price and `SetExitPoolKey` are gone. the exit token buyback is a dutch auction in coin that the core burns, and no pool price can be chosen by a counterparty. the auction has its own accepted properties (ARCHITECTURE section 10, items 10 and 11) |
+| R2 | obsolete | there is no pool key to validate. the owner timelock actions are now `SetController`, `SetExitModule`, `AddTarget`, `Freeze` |
+| R3 | fixed, stays fixed | `unitPerPoint` is read once when the exit module is set, stored, bounded to non zero and at most uint128, and never read again |
+| R4 | fixed for the eth buyback | the callback returns what was spent, unspent input and tip go back to the counter, and a buyback that buys nothing reverts `NothingBought()`. no longer applies to the exit side, which has no swap |
+| R5 | fixed for the eth buyback | the callback requires the pool took no more than the amount it was given |
+| R6 | accepted | a fee on transfer or rebasing exit token is not supported (ARCHITECTURE section 10, item 13). the auction pays out the exit token by a plain transfer |
 
 ## findings
 

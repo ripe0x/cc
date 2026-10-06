@@ -586,7 +586,7 @@ contract AuctionTest is FeeBase {
 
     /// @dev warps an hour at a time until a fill costs no more than what the taker holds
     function _waitUntilAffordable() internal returns (uint256 slice, uint256 coinIn) {
-        for (uint256 i; i < 400; ++i) {
+        for (uint256 i; i < 2000; ++i) {
             (slice, coinIn) = core.exitAuctionQuote();
             if (coinIn <= coin.balanceOf(taker)) return (slice, coinIn);
             vm.warp(block.timestamp + 1 hours);
@@ -610,18 +610,18 @@ contract AuctionTest is FeeBase {
         assertApproxEqRel(coinIn, 1_000_000_000e18 * slice / _fullSlice(), 1e9);
     }
 
-    function test_priceHalvesEveryHour() public {
+    function test_priceHalvesEverySixHours() public {
         _auction();
         uint256 p0 = core.exitAuctionPrice();
         assertEq(p0, core.xStartPrice(), "no time has passed since the pot filled");
-        vm.warp(block.timestamp + 1 hours);
-        assertEq(core.exitAuctionPrice(), p0 >> 1);
-        vm.warp(block.timestamp + 1 hours);
-        assertEq(core.exitAuctionPrice(), p0 >> 2);
         vm.warp(block.timestamp + 6 hours);
+        assertEq(core.exitAuctionPrice(), p0 >> 1);
+        vm.warp(block.timestamp + 6 hours);
+        assertEq(core.exitAuctionPrice(), p0 >> 2);
+        vm.warp(block.timestamp + 36 hours);
         assertEq(core.exitAuctionPrice(), p0 >> 8);
-        // continuous in between: half an hour is a factor of 2^-0.5
-        vm.warp(block.timestamp + 30 minutes);
+        // continuous in between: three hours is a factor of 2^-0.5
+        vm.warp(block.timestamp + 3 hours);
         assertApproxEqRel(core.exitAuctionPrice(), (p0 >> 8) * 707_106_781_186_547_524 / 1e18, 1e9);
         // strictly decreasing minute by minute
         uint256 last = core.exitAuctionPrice();
@@ -718,12 +718,14 @@ contract AuctionTest is FeeBase {
         _equipTaker(60 ether);
         _waitUntilAffordable();
         uint256 clearing = core.exitAuctionPrice();
+        uint256 prevStart = core.xStartPrice();
+        assertGt(2 * clearing, prevStart / 4, "a fill near a fair price, so the double wins over the quarter");
         (, uint256 coinIn) = core.exitAuctionQuote();
         _fill(coinIn);
         assertEq(core.xStartPrice(), 2 * clearing);
         assertEq(core.xStartTime(), block.timestamp);
         assertEq(core.exitAuctionPrice(), 2 * clearing, "restarts at twice the price it just cleared at");
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 6 hours);
         assertEq(core.exitAuctionPrice(), clearing, "and halves again from there");
     }
 
@@ -773,7 +775,7 @@ contract AuctionTest is FeeBase {
         assertEq(core.xStartTime(), block.timestamp);
         assertEq(core.xStartPrice(), stored, "the start price is kept");
         assertEq(core.exitAuctionPrice(), stored, "price restarts from the stored start price, not near zero");
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 6 hours);
         assertEq(core.exitAuctionPrice(), stored >> 1);
     }
 
@@ -792,6 +794,7 @@ contract AuctionTest is FeeBase {
     /// after decades the price is zero. a fill then costs nothing, and the auction restarts above zero
     function test_longGapsNeverRevertAndAZeroPriceFillRestartsAboveZero() public {
         _auction();
+        uint256 start0 = core.xStartPrice();
         vm.warp(block.timestamp + 20 * 365 days);
         assertEq(core.exitAuctionPrice(), 0);
         (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
@@ -802,8 +805,132 @@ contract AuctionTest is FeeBase {
         core.buybackExit(0);
         assertEq(coin.totalSupply(), supply, "nothing to burn at price zero");
         assertEq(xt.balanceOf(taker), slice);
-        assertEq(core.xStartPrice(), core.XAUCTION_MIN_START(), "the restart never stays at zero");
-        assertEq(core.exitAuctionPrice(), core.XAUCTION_MIN_START());
+        assertEq(core.xStartPrice(), start0 / 4, "the restart is a quarter of the last start, never dust");
+        assertEq(core.exitAuctionPrice(), start0 / 4);
+    }
+
+    // ------------------------------------------------------------------ the restart rule
+
+    uint256 private constant DUST = 1e15;
+
+    function _warpUntilDust() internal returns (uint256 waited) {
+        for (uint256 i; i < 3000; ++i) {
+            (, uint256 coinIn) = core.exitAuctionQuote();
+            if (coinIn <= DUST) return waited;
+            vm.warp(block.timestamp + 1 hours);
+            waited += 1 hours;
+        }
+        revert("never dust");
+    }
+
+    /// (a) a fill at a decayed dust price restarts the next auction at a quarter of the last start, not at dust
+    function test_restartAfterADustFillIsAQuarterOfThePreviousStart() public {
+        _auction();
+        _equipTaker(1 ether);
+        uint256 start0 = core.xStartPrice();
+        vm.warp(block.timestamp + 360 hours);
+        uint256 dust = core.exitAuctionPrice();
+        assertGt(dust, 0);
+        assertLt(dust, start0 >> 59, "sixty halvings: dust");
+        (, uint256 coinIn) = core.exitAuctionQuote();
+        _fill(coinIn);
+        assertEq(core.xStartPrice(), start0 / 4, "a quarter of the previous start, not twice the dust price");
+        assertEq(core.xStartTime(), block.timestamp);
+        assertEq(core.exitAuctionPrice(), start0 / 4);
+        (, uint256 next) = core.exitAuctionQuote();
+        assertGt(next, 1e24, "the next slice is not cheap");
+    }
+
+    /// (b) draining slices at dust needs a separate long decay for every slice
+    function test_drainingSlicesAtDustNeedsSeparateDecays() public {
+        _auction();
+        while (core.xToBuyback() < 3 * _fullSlice()) _refill();
+        _equipTaker(1 ether);
+        uint256 start0 = core.xStartPrice();
+        uint256 t0 = core.xStartTime();
+        uint256[3] memory decay;
+        for (uint256 i; i < 3; ++i) {
+            _warpUntilDust();
+            // time since this slice's auction started: a refill does not restart the clock
+            decay[i] = block.timestamp - core.xStartTime();
+            (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
+            assertEq(slice, _fullSlice(), "a full slice at dust");
+            _fill(coinIn);
+            assertEq(core.xStartPrice(), start0 >> (2 * (i + 1)), "each restart is a quarter of the last start");
+        }
+        // the first slice needs about 40 halvings, 240 hours. every later one starts 2 halvings (12 hours) lower
+        assertGe(decay[0], 235 hours);
+        assertLe(decay[0], 245 hours);
+        assertApproxEqAbs(decay[1], decay[0] - 12 hours, 1 hours);
+        assertApproxEqAbs(decay[2], decay[0] - 24 hours, 1 hours);
+        uint256 total = block.timestamp - t0;
+        assertApproxEqAbs(total, 3 * decay[0] - 36 hours, 2 hours);
+        assertGe(total, 680 hours, "three slices at dust take over 28 days, not one decay");
+    }
+
+    /// (c) fills near a fair price: restart at twice the clearing price, one slice per half life
+    function test_fairPriceTakersGetOneSlicePerHalfLife() public {
+        _auction();
+        while (core.xToBuyback() < 4 * _fullSlice()) _refill();
+        _equipTaker(2000 ether);
+        // the first fill takes whatever the long wait left and sets the baseline start price
+        (, uint256 first) = core.exitAuctionQuote();
+        _fill(first);
+        uint256 base = core.xStartPrice();
+        uint256 hl = core.XAUCTION_HALF_LIFE();
+        // three half lives later the price is an eighth of the baseline, the lowest price where twice the clearing price
+        // still equals the quarter floor: the fair price the taker now pays, with the least coin this can take
+        vm.warp(block.timestamp + 3 * hl);
+        uint256 clearing = base >> 3;
+        for (uint256 i; i < 3; ++i) {
+            if (i != 0) vm.warp(block.timestamp + hl);
+            // at the quarter floor the restart can sit a few wei above twice the clearing price, from the rounding
+            assertApproxEqAbs(core.exitAuctionPrice(), clearing, 8, "one half life after the restart the price is back");
+            (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
+            assertEq(slice, _fullSlice());
+            assertGt(coinIn, 1e24, "a real price, not dust");
+            _fill(coinIn);
+            assertApproxEqAbs(core.xStartPrice(), 2 * clearing, 8, "restart at twice the clearing price");
+            assertEq(core.xStartTime(), block.timestamp);
+        }
+        assertEq(xt.balanceOf(taker), 4 * _fullSlice(), "four slices: the first, then one per half life");
+    }
+
+    /// (d) gaps of any length never revert and never underflow
+    function test_longGapsNeverRevertOrUnderflow() public {
+        _auction();
+        uint256 start0 = core.xStartPrice();
+        uint256 t0 = block.timestamp;
+        uint256 hl = core.XAUCTION_HALF_LIFE();
+        uint256[9] memory gaps =
+            [uint256(0), 1, hl - 1, hl, 255 * hl, 256 * hl - 1, 256 * hl, 256 * hl + 1, uint256(1) << 60];
+        uint256 last = type(uint256).max;
+        for (uint256 i; i < gaps.length; ++i) {
+            vm.warp(t0 + gaps[i]);
+            uint256 p = core.exitAuctionPrice();
+            assertLe(p, last);
+            last = p;
+            (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
+            assertGt(slice, 0);
+            assertEq(coinIn, slice.mulDivUp(p, 1e18));
+        }
+        assertEq(last, 0, "gone after 256 halvings");
+        _fill(0);
+        assertEq(core.xStartPrice(), start0 / 4, "the fill did not revert and restarted at a quarter");
+    }
+
+    /// the restart price is never zero, even from a start of one or three wei
+    function test_restartNeverZero() public {
+        _auction();
+        vm.warp(block.timestamp + 300 * core.XAUCTION_HALF_LIFE());
+        assertEq(core.exitAuctionPrice(), 0);
+        vm.store(address(core), bytes32(uint256(23)), bytes32(uint256(3)));
+        _fill(0);
+        assertEq(core.xStartPrice(), 1, "3 / 4 is zero, the floor keeps one");
+        vm.warp(block.timestamp + 300 * core.XAUCTION_HALF_LIFE());
+        _fill(0);
+        assertEq(core.xStartPrice(), 1, "one stays one");
+        assertEq(core.exitAuctionPrice(), 1);
     }
 
     /// forge-config: default.fuzz.runs = 24

@@ -178,11 +178,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public constant XRATE_CLIMB_PER_HOUR = 100;
     /// bps of score per credit bought
     uint256 public constant XRATE_DROP_PER_CREDIT = 20;
-    /// the exit token auction price halves every hour
-    uint256 public constant XAUCTION_HALF_LIFE = 1 hours;
-    /// a fill restarts the auction at twice its clearing price, never below this, so a price that decayed to zero
-    /// cannot leave the auction giving the exit token away for ever
-    uint256 public constant XAUCTION_MIN_START = 1e18;
+    /// the exit token auction price halves every 6 hours. a fill restarts the auction at
+    /// `max(2 * clearing price, previous start / 4)`, so every slice needs its own long decay before it can go cheap
+    uint256 public constant XAUCTION_HALF_LIFE = 6 hours;
     uint256 public constant TIMELOCK = 7 days;
     uint256 public constant OVERPRINT_CAP_PER_DAY = 8;
 
@@ -813,14 +811,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (slice == 0) revert NothingToBuy();
         if (coinIn > maxCoinIn) revert Slippage();
         xToBuyback -= slice;
-        xStartPrice = (2 * price).max(XAUCTION_MIN_START);
+        // never below a quarter of the start just played, never zero
+        xStartPrice = (2 * price).max(xStartPrice / 4).max(1);
         xStartTime = uint64(block.timestamp);
         if (coinIn != 0) ICoin(COIN).burnFrom(msg.sender, coinIn);
         SafeTransferLib.safeTransfer(token, msg.sender, slice);
         emit ExitBuyback(msg.sender, slice, coinIn);
     }
 
-    /// the exit token auction price now, coin wei per exit token unit in wad. it halves every hour from the start
+    /// the exit token auction price now, coin wei per exit token unit in wad. it halves every 6 hours from the start
     /// price and may reach zero. while nothing is for sale the clock is stopped and this is the start price.
     function exitAuctionPrice() public view returns (uint256) {
         if (xToBuyback == 0) return xStartPrice;

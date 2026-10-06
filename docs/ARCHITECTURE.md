@@ -1,167 +1,182 @@
-# architecture and director decisions
+# architecture
 
-SPEC.md is the law. this file resolves what the spec leaves open and fixes the seams between contracts. where this file and the spec disagree, this file wins and the deviation is listed in section 9 for the owner to confirm.
+this file describes the system as it is on branch `artcoin`. SPEC.md is the original handoff spec and where the two differ this file wins. the last section lists what differs or is accepted, for the owner to confirm.
 
 naming rule: only `exitModule` and `exitToken`. never name or describe them anywhere.
 
-## 1. toolchain
+## 1. what we own and what is live
 
-solc 0.8.30, cancun, via_ir, optimizer 200. solady v0.1.25. v4-core 59d3ecf and v4-periphery ad04c9f (the versions tokenworks compiled against). imports: `v4-core/src/...`, `v4-periphery/src/...`, `solady/...`. reference code: `docs/reference/tokenworks-notes.md` and `docs/reference/tokenworks/`.
+we own two contracts. everything else is live on mainnet and is used as deployed.
 
-every runtime contract must be under 24,576 bytes. check with `forge build --sizes`. Core is the risk: use custom errors, no revert strings, and if needed move pure math into an external library (linked libraries are fine, proxies are not).
+| contract | role |
+|---|---|
+| `Core` | custody and every rule: pots, rate, cap, piles, doors, compose, statement auction, exit, overprint, both buybacks, timelock. also the bounty recipient of the skim hook |
+| `ControllerV1` | first policy module. holds only the core address. `nextPage(lane)` is ready when the pile holds 80 credits and returns the first 80 ids with format 0. `wants` returns 0, `nextOverprint` is never ready |
 
-shared interfaces and mainnet addresses live in `src/interfaces/Interfaces.sol`. do not change them without sign off. `ICoin` changed once by director decision: `noteDelta(int256)` and `pendingDelta()` replace `increaseTransferAllowance`.
+live artcoins stack (all pinned at block 26127622, verified in docs/reference/artcoins-notes.md):
 
-## 2. deploy graph and constructors (fixed)
+| piece | address |
+|---|---|
+| ArtCoinsFactory | 0x49596c375c139E79bb937bcf826068a8F78D4e0e |
+| factory owner | 0xCB43078C32423F5348Cab5885911C3B5faE217F9 |
+| skim hook (ArtCoinsHookSkimFee) | 0x636c050296B5Cc528D8785169Bf8923716FCa9cc |
+| lp locker | 0x866ea3Dc2bf7A3e77374619cf50EB697FA766aab |
+| fee escrow | 0x7559689765aE86cBB38e68CD1294830CccB125F2 |
+| anti sniper module (ArtCoinsMevLinearSkim) | 0xb038D597365FfD108D63C265Bb0621444a1D8B83 |
+| uniswap v4 pool manager | 0x000000000004444c5dc75cB358380D2e3dE08A90 |
+| universal router | 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af |
 
-```
-Launcher(address deployer)                                   tx 1, plain create
-Core(address owner, address coin, address hook, address controller)   plain create, addresses predicted by nonce
-Coin(string name, string symbol, address core, address hook, address supplyReceiver)   supply minted to supplyReceiver = launcher
-ControllerV1(address core)
-FeeHook(address coin, address core, address creator, address launcher)   create2 through 0x4e59b44847b379578588920cA78FbF26c0B4956C, salt mined for flags
-Launcher.launch(coin, hook)                                  one shot, deployer only
-```
+the coin is an `ArtCoinsToken` launched through the factory. it is not our code. the other live pieces the core touches are Credits 0x97630aA70AB14ed9883B41dAfccBc11349723043, Statements 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b, CreditScore 0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7, CreditStrategy 0x8e607209899b5d12Bd3167a6CD0E8E11FEB053d6 and Seaport 1.6 0x0000000000000068F116a894984e2DB1123eB395. constants live in `src/interfaces/Interfaces.sol`.
 
-core, coin and controller addresses are predicted from the deployer nonce (`vm.computeCreateAddress`), so the hook initcode is known before mining. pool manager, credits, statements etc are constants from `Mainnet`.
+toolchain: solc 0.8.30, cancun, via_ir, optimizer 200, solady, v4 core and periphery pinned in `lib/`. every runtime contract must stay under 24,576 bytes (`forge build --sizes`).
 
-`Launcher.launch` sets `launching = true`, approves permit2 and the position manager, then in one posm multicall initializes the coin/eth pool and mints one single sided position holding the whole supply to the dead address, mirroring tokenworks (notes section 5): currency0 eth, currency1 coin, fee 0, tickSpacing 60, sqrtPriceX96 501082896750095888663770159906816, range [minUsableTick, 175020], 2 wei of eth. compute liquidity with LiquidityAmounts rather than hardcoding, send any coin dust to dead, then `launching = false` and lock forever.
+## 2. launch config
 
-`script/Deploy.s.sol` exposes a library style function usable from tests (`deploySystem(owner, creator, name, symbol) returns (Deployed memory)`) that loads Core and ControllerV1 creation code with `vm.getCode` so it does not need their types at compile time.
+one call to `ArtCoinsFactory.deployTokenWithProtocolBpsAndTax(cfg, 0, tax)` with `msg.value` equal to the live `deployFee()` (0.069 eth at the pin). script and tests use the same builder (`script/Deploy.s.sol`, `SystemDeployer`).
 
-## 3. Coin
+| field | value |
+|---|---|
+| supply | 1,000,000,000e18, no extensions, all of it in the locker |
+| pool | native eth against the coin, hook = skim hook, dynamic fee flag 0x800000, tick spacing 200 |
+| start price | `tickIfToken0IsArtCoins = -175000`, about 40M coin per eth |
+| position | one position from -175000 to 887200 (highest multiple of 200), 10,000 bps |
+| skim | baseline 10 points of volume (`baselineSkimBps` 10_000 of 100_000), `bountyBps` 9500, so 9.5 points to the core and 0.5 to the creator |
+| skim recipients | `bountyRecipient` = Core, `protocolRecipient` = creator, `referralPayout` = Core, quote token eth |
+| referral and lp fee | `maxReferralBpsOfVolume` 0, `lpFee` 0 |
+| anti sniper | linear skim module with (90_000, 10_000, 1800): fee decays from 90 points to 10 over 30 minutes, the extra lands in the core's pot |
+| locker | one reward slot: recipient creator, admin 0xdEaD, 10,000 bps |
+| tax | enabled, `taxBps` 1500, `taxBpsMax` 2000, burn 0xdEaD, canonical pool = this pool, exempt = the Core, 44 venues (three v2 factories, uniswap v3 and pancake v3 tiers, each against WETH, USDC, USDT, DAI), the same list as the live 111 coin |
+| token admin | the deployer during launch. the script then calls `lockPoolExtension` and `updateAdmin(owner)` |
 
-* solady ERC20, `SUPPLY` minted once in the constructor, no mint or burn entry points.
-* immutables: `core`, `hook`. constant pool manager and dead.
-* `noteDelta(int256 coinDelta)` hook only. adds to a transient signed counter D, the net coin the pool manager owes the current locker (positive) or is owed by it (negative). `pendingDelta()` reads it. the hook notes the signed coin leg of every hooked action from the locker's side, so the counter is the net coin the pool manager must still move for hooked actions, and nothing more.
-* `_afterTokenTransfer` order (differs from tokenworks on purpose so a note is always consumed before the allowlist is looked at):
-  1. mint: return.
-  2. transfer from the pool manager of `a`: covered when `D >= a`. then `D -= a` and return.
-  3. transfer to the pool manager of `a`: covered when `D <= -a`. then `D += a` and return.
-  4. either side is `core` or dead: return.
-  5. revert `InvalidTransfer`.
-* a note is direction bound. coin can only leave the pool manager against coin the pool manager owes the locker, and only enter it against coin the locker owes. add then remove liquidity nets to zero (up to 1 to 2 wei of rounding, never positive), and a buy then sell round trip nets to zero, so nothing is ever covered beyond the net coin of hooked actions. the counter is transient and a note left over (for example a swap whose coin output was minted as claims) can only be spent by the same transaction in the direction it was noted.
-* there is no "second pool" allowlist entry. a v4 pool is not an address. the second pool is served by the same FeeHook (section 4).
+deploy order, no circularity:
 
-## 4. FeeHook
+| step | action |
+|---|---|
+| 1 | predict the Core and ControllerV1 addresses from the deployer nonce |
+| 2 | build the tax config with the Core in `exempt` and predict the coin with CREATE2 (factory as deployer, salt `keccak256(abi.encode(tokenAdmin, userSalt))`, initcode includes the tax config) |
+| 3 | deploy ControllerV1 with the predicted Core |
+| 4 | deploy Core at the predicted address with the predicted coin |
+| 5 | launch through the factory and assert the returned coin equals the prediction |
+| 6 | `lockPoolExtension`, then `updateAdmin(owner)`, then read back every configured value |
 
-serves exactly two pools: the launch pool (eth / coin) and, in phase 2, the one pool whose id equals `core.exitPoolId()` (coin / exitToken).
+the factory is `deprecated` at the pin, so only its owner or an address the owner marks admin can launch. the owner calls `setAdmin(deployer, true)` first. that is the only artcoins state the tests force, through a prank of the real owner.
 
-permissions: beforeInitialize, afterAddLiquidity, afterRemoveLiquidity, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta. mine the address with HookMiner.
+## 3. fee intake
 
-* beforeInitialize: allow the launch key only while `launcher.launching()`. allow another key only if its id equals `core.exitPoolId()` and that is non zero. everything else reverts.
-* afterAddLiquidity: launch pool only while `launching`. exit pool: anyone. notes the signed coin leg of the caller's delta (negative, the caller owes coin).
-* afterRemoveLiquidity: exit pool only (the launch position is owned by dead). notes the signed coin leg (positive, the pool manager owes the caller coin).
-* fee: exactly `FEE_BPS` of the trader's gross notional in the fee currency, where the fee currency is the non coin side (eth, or exitToken in the exit pool). always taken in the fee currency, never in coin, with no nested swap. the gross is what the trader pays (buys) or what the pool pays out before the fee (sells):
-  * buy exact in, trader pays E: `fee = E * FEE_BPS / 10_000`. the pool gets the rest.
-  * sell exact in, the pool pays out G: `fee = G * FEE_BPS / 10_000`. the trader nets the rest.
-  * buy exact out, the pool needs P: the trader pays `P / 0.9`, `fee = P * FEE_BPS / (10_000 - FEE_BPS)`.
-  * sell exact out, the trader wants net N: the pool pays `N / 0.9`, `fee = N * FEE_BPS / (10_000 - FEE_BPS)`.
-  * fees round down, so the fee is within one wei of the exact share of the gross.
-  * fee currency is the specified currency (exact in buy, exact out sell): take it in beforeSwap, return a positive specified delta and `poolManager.take` it. the fee is sized on the whole amount before the pool knows how much fills, so in afterSwap the specified leg of the swap delta must equal what the fee assumed (the offered amount less the fee for exact in, the wanted amount plus the fee for exact out). anything else reverts `PartialFill()`. a price limit or thin liquidity therefore reverts the swap instead of charging the fee on the unfilled amount.
-  * fee currency is the unspecified currency (exact in sell, exact out buy): take it in afterSwap from the swap delta, return the fee as the hook delta.
-  * both exact in and exact out are supported.
-* afterSwap also notes the signed coin leg of the swap delta on the coin (positive when the swapper is owed coin, negative when it owes coin). never more than the net coin of the hooked actions.
-* the core's exit buyback is the one exception to the partial fill rule. it swaps exact in with a price limit and so may fill partly. when `sender` is the core, the swap is exact in and the pool is the exit pool, the hook takes no fee in beforeSwap. in afterSwap it takes the fee on what was actually spent, `fee = spent * FEE_BPS / (BPS - FEE_BPS)`, the same gross rule, by pulling the exit token from the core with `transferFrom` into the pool manager and settling it (the afterSwap return value can only change the unspecified currency, so the fee cannot ride on the swap delta). the core approves the hook for exactly the room it left for the fee before the swap and revokes it after, so the hook can never pull more. the fee is booked as claims and split like any other. the eth buyback in the launch pool does not use this path: its fee is taken in beforeSwap and a partial fill reverts.
-* split: creator gets `fee * CREATOR_BPS / FEE_BPS`, the core gets the rest. eth: `forceSafeTransferETH(creator, cut, gas stipend)` so a hostile creator cannot brick swaps, then `core.addFees{value: rest}()`. exit token: creator cut accrues in the hook and is paid by a permissionless `claimCreator()`, the rest is transferred to the core followed by `core.addExitFees(rest)`.
-* the core's own buyback swaps pay the fee like anyone else (same as tokenworks), with the exit pool timing described above. the core share returns to the pots.
-* no owner, no setters.
+there is no hook of ours. the live skim hook takes its skim in eth on every swap and pushes the bounty to `Core.receive()` with all gas.
 
-## 5. Core
+* from the skim hook while no measurement is in flight: checkpoint the rate, add to `ethPot`, resync the funded flag, emit `FeesAdded`.
+* anything else (donations, refunds from a purchase, a measurement in flight): accept and book nothing. `skim()` books it later. during a `buyListing` or exit measurement the unbooked eth lowers the measured cost, which keeps pot and balance consistent.
+* `receive()` never reverts and stays cheap, because a revert would brick every swap in the pool. it has no reentrancy guard for the same reason (the hook calls it during a guarded buyback). a test proves it cannot revert unfunded, funded, years without a checkpoint, mid buyback, mid buyListing and mid exit.
+* there is no fallback function. the hook calls `streamForward()` on the recipient once its balance reaches 0.01 eth and relies on that call reverting and being caught. a fork test keeps swaps working with a large core balance.
+* `notify(address)` is a payable no op. it is the referral payout target. with the referral cap at 0 the hook never calls it.
+* `skim()` is permissionless and guarded. it moves `balance - ethPot - ethToBuyback` into `ethPot` and the same for the exit token into `xPot`.
+* `onERC721Received` accepts only Statements and Credits.
 
-`Core(address owner, address coin, address hook, address controller)`. owner is immutable. solady ReentrancyGuard on every external state changing function EXCEPT `addFees`, `addExitFees`, `receive`, `unlockCallback`, `onERC721Received` (the hook calls back into the core during a guarded buyback).
+## 4. rate, cap, piles
 
-### 5.1 accounting
+accounting: `ethPot` (buying), `ethToBuyback`, `xPot` (exit token bid), `xToBuyback`. invariant: pots never exceed what the core holds.
 
-`ethPot`, `ethToBuyback`, `xPot`, `xToBuyback`. `receive()` accepts eth and books nothing (seaport refunds land here mid buy). `skim()` is permissionless and guarded: moves `balance - ethPot - ethToBuyback` into `ethPot`, and the same for the exit token into `xPot`.
+rate (wei per point of score, `RATE_START` 4e12), lazy and checkpointed:
 
-`onERC721Received` accepts only calls from Statements or Credits.
+| since last fill | climb per hour |
+|---|---|
+| under 24h | 100 bps |
+| 24h to 48h | 200 bps |
+| 48h to 72h | 400 bps |
+| after 72h | 800 bps |
 
-### 5.2 eth rate
+* it climbs only while `funded`, and is clamped at `max(rateAtCheckpoint, ethPot * 1e4 / AVG_SCORE)`, the point where the pot can no longer pay one average credit (`AVG_SCORE` 4,330,000).
+* every pot change checkpoints first. a fill of `x` from pot `p` drops the rate by `rate * 10% * min(x, p) / p` and sets `lastFillTime`. for `buyListing`, `x = cost + tip`.
 
-state: `rateAtCheckpoint`, `checkpointTime`, `lastFillTime`, `funded`. `ethRate()` is a view that returns the lazily climbed value.
+hourly cap: a fixed window. the first spend after `windowStart + 1 hours` opens a new window with `windowPot = ethPot`. a spend needs `windowSpent + x <= windowPot * 20%`. tips count, gas reimbursements do not.
 
-* tiers by time since `lastFillTime`: under 24h 100 bps per hour, 24 to 48h 200, 48 to 72h 400, after that 800. walk the tiers between `checkpointTime` and now, in each `rate = rate * powWad(1e18 + bps * 1e14, dt * 1e18 / 3600) / 1e18`.
-* only if `funded` at the checkpoint. additionally clamp the climbed rate to `max(rateAtCheckpoint, ethPot * 1e4 / AVG_SCORE)`: the rate stops climbing at the exact point the pot can no longer afford one average credit. this makes invariant 6 hold between checkpoints.
-* `_checkpoint()` runs first in every function that changes `ethPot`, including `addFees`, then the pot changes, then `funded` is recomputed.
-* fill of `x` from pot `p` (before the spend): `rate -= rate * DROP_BPS * min(x, p) / (10_000 * p)`, `lastFillTime = now`. for buyListing `x = cost + tip`.
-* `lastFillTime` and `checkpointTime` start at deploy.
-
-### 5.3 hourly cap
-
-fixed window that reopens on the first buy after it expires: `windowStart`, `windowPot`, `windowSpent`. on a buy, if `now >= windowStart + 1 hours` open a new window with `windowPot = ethPot` (after checkpoint, before the spend). require `windowSpent + x <= windowPot * SPEND_CAP_BPS_PER_HOUR / 10_000`. tips count, gas reimbursements do not.
-
-### 5.4 credits and piles
-
-per lane an insertion ordered doubly linked list keyed by credit id (0 is the null sentinel, so id 0 is rejected at every door). per credit: lane, inPile, cost, acquiredAt. removing a credit from its pile clears `inPile`, which is also the duplicate check in compose. credits sent to the core outside the doors are not in any pile and are stuck: document, do not handle.
+piles: per lane (eth, exit) an insertion ordered doubly linked list keyed by credit id. id 0 is the null sentinel and is refused at every door. per credit: lane, inPile, cost, acquiredAt. credits sent to the core outside the doors are not in a pile and are stuck.
 
 `score(id) = CreditScore.scoreOf(Credits.seedOf(id), Credits.timestampOf(id))`.
 
-### 5.5 doors
+## 5. doors
 
-* `sellForEth(uint256[] ids)` and `sellForEth(uint256[] ids, uint256 minOut)`. per id: checkpoint, price = ceiling(id), require pot and cap, require `ownerOf(id) == msg.sender`, `transferFrom` in, record, push, drop. pay the total once at the end. `minOut` protects the seller from being front run.
-* `buyListing(value, data, id, target)` exactly as spec 5.4, with `x = cost + tip` checked again against pot and cap after the call. forbidden targets (enforced when a target is added and again at call time): Credits, Statements, the core, the coin, the hook, the pool manager, the exit module, the exit token.
+| door | what it does |
+|---|---|
+| `sellForEth(ids)` and `(ids, minOut)` | pays the ceiling `score * rate * (1 + bonus)` per credit from `ethPot`, one checkpoint and one cap check per credit. the credit goes to the eth pile. `minOut` protects the seller against a rate drop in the same block |
+| `buyListing(value, data, id, target)` | the caller builds the calldata, the core calls an allowed target (Seaport 1.6 and CreditStrategy at launch) with `value`. cost is measured as the eth balance fall. needs the credit to arrive, `cost <= value <= ceiling`, and pot and cap room. the keeper tip is `min(10% of savings, 2% of cost)`, and `cost + tip` is booked as the spend |
+| `sellForExitToken(ids)` and `(ids, minOut)` | phase 2. pays `score * xRate * unitPerPoint / 1e4` in exit token from `xPot` into the exit pile. `xRate` starts at 6000 bps of score, caps at 9700, floors at 3000, climbs 100 bps per hour and drops 20 bps per credit |
 
-### 5.6 compose
+forbidden targets, checked when a target is added and again at call time: Credits, Statements, the Core, the coin, the skim hook, the pool manager, the artcoins factory, locker and fee escrow, the exitModule and the exitToken.
 
-`compose()` for the eth lane (spec 6) and `composeExit()` for the exit lane (phase 2 only). measure gas from function entry plus a 50_000 overhead constant. reimbursement `min(gasUsed * basefee * 110 / 100, 5% of statementCost, ethPot)`. for the exit lane the cost basis is in exit token, so its reimbursement cap is `5% of 80 * AVG_SCORE * ethRate / 1e4` and nothing is added to the cost basis. verify the returned id equals `Statements.supply()` and is owned by the core.
+## 6. compose, auction, exit, overprint
 
-### 5.7 statements
+compose: `compose()` (eth lane) and `composeExit()` (exit lane, phase 2) ask the controller for a page, pull 80 credits and build a Statement through the live Statements contract. the returned id must equal `Statements.supply()` and be owned by the core. anyone may call and is repaid `min(gasUsed * basefee * 110%, 5% of cost, ethPot)`, gas measured from entry plus 50,000. the exit lane has no eth cost basis, so its cap is notional (`80 * AVG_SCORE * ethRate / 1e4`) and nothing is added to the statement cost.
 
-per statement: held, lane, cost, clockStart. `priceOf` reverts for exit lane or not held statements. `buyStatement`: half (rounded down) to `ethToBuyback`, the rest to `ethPot`, statement sent with `safeTransferFrom`, excess refunded.
+statement auction (eth lane): the price falls linearly from 4x to 1.2x of cost over 72 hours (`priceOf`). `buyStatement` splits the price 50 percent to `ethToBuyback` and 50 percent to `ethPot`, sends the statement and refunds the excess. exit lane statements are never for sale.
 
-`exitStatement(sid)`: module set, held, eth lane needs `now >= clockStart + AUCTION_LENGTH`, exit lane is immediate. `exitToken` and `unitPerPoint` are read once when the module is set and stored (the unit must be non zero and at most `type(uint128).max`, and is part of the `ExitModuleSet` event). the module is never asked for the unit again. required out is `rating * unitPerPoint` (the stored unit) measured as the core's exit token balance delta. a module that pays by a different unit later is simply held to the stored one. eth lane: half to `xToBuyback`, rest to `xPot`. exit lane: all to `xPot`. eth lane statements remain buyable at the floor until exited.
+exit (`exitStatement`): needs the exitModule. an eth lane statement is exitable once its 72 hours ran, an exit lane statement at once. the core hands the statement to the module and must end with at least `rating * unitPerPoint` more exitToken, measured as a balance delta. `unitPerPoint` and `exitToken` are read once when the module is set (unit non zero and at most uint128) and never again, so a module cannot change what it owes later. eth lane: half of the received amount to `xToBuyback`, half to `xPot`. exit lane: all to `xPot`. while the exit measurement runs `receive()` books nothing.
 
-`overprint()` is permissionless and guarded: asks `controller.nextOverprint()`, requires both held, different, same lane, at most `OVERPRINT_CAP_PER_DAY` per `block.timestamp / 1 days` bucket. cost bases sum onto the base, base clock restarts, top is no longer held.
+overprint: permissionless and guarded. asks `controller.nextOverprint()`, needs two different held statements of the same lane, at most 8 per day. costs add onto the base, the base clock restarts, the top is no longer held, and the combined score is checked against the sum.
 
-### 5.8 buybacks
+## 7. eth buyback with a real burn
 
-the core swaps directly against the pool manager through `unlock` and `unlockCallback` (no external router). exact in, no min out. coin output is taken straight to the dead address. the callback returns the input actually spent and the coin bought. it requires the pool took no more than the amount it was given, and the call reverts `NothingBought()` when the coin out is zero. the keeper tip is sized on the slice and scaled down in proportion when the fill is partial. input that was not spent (and the part of the tip that was not paid) is credited back to the counter it came from, so nothing is left unbooked.
+`buyback()`, guarded. slice `min(1 eth, ethToBuyback)`, at most once per 25 blocks, tip 0.5 percent of the slice to the caller. the core swaps exact in through `PoolManager.unlock` and `unlockCallback` on the canonical pool key `(0, coin, 0x800000, 200, skimHook)`, takes the coin to itself (the core is exempt from the tax) and calls `burn` on the token, so total supply falls. it reverts `NothingBought()` when no coin came out.
 
-* `buyback()`: spec 8.1. slice `min(BUYBACK_SLICE, ethToBuyback)`, tip `slice * KEEPER_TIP_BPS / 10_000` to the caller, the rest swapped. no price limit beyond the tick math bounds. its fee is taken in beforeSwap, so a partial fill reverts, which cannot happen at this pool depth.
-* `buybackExit()`: same with `xToBuyback` through the exit pool key, its own last block. slice is `20 * AVG_SCORE * unitPerPoint` (a quarter of an average statement), tip in exit token. the swap uses the exit pool's fixed price limit (below). it reverts `PriceBeyondLimit()` when the pool price is already beyond the limit. the swap amount is `(slice - tip) * (BPS - FEE_BPS) / BPS`, so that the swap plus the hook fee on what was spent (exactly 10 percent of the gross spent) never exceeds `slice - tip`. the spend is measured as the loss in the core's exit token balance around the swap, and the callback approves the hook for the fee room only for the duration of the swap. a partial fill spends proportionally less, and the unspent part of the slice goes back to `xToBuyback`.
+the callback returns what was spent and what was bought and requires the pool took no more than it was given. the tip scales down on a partial fill and unspent input goes back to `ethToBuyback`. the hook's skim on this swap returns to the core through `receive()` during the guarded call, which is expected and books into the pot. there is no min out (section 10).
 
-the limit price. `SetExitPoolKey` carries `(PoolKey key, uint160 sqrtPriceLimitX96)`. the limit is stored once with the key, validated to lie strictly inside the tick math bounds, and is the worst price the core will ever accept in `buybackExit`. the exit pool has no owned liquidity (anyone can initialize it and add liquidity), so without a limit the counterparty chooses the price. with the limit, hostile liquidity beyond it is never reached and the swap stops at the limit, so the exposure per call is bounded by what the pool can absorb inside the band and the rest returns to `xToBuyback`. the owner must choose the limit on the side that fits the swap direction (below the pool price when the exit token is currency0, above it when it is currency1). this cannot be checked when the key is set because the pool is not initialized, so it is checked at swap time.
+## 8. exit token dutch auction
 
-weakness, accepted for now: a static limit is either loose or can stall the exit buyback. a loose limit lets a counterparty take a larger band at a bad price. a tight limit is stalled by anyone who moves a thin or empty pool beyond it (the exact out swap of one wei is free in an empty pool), and the buyback then reverts `PriceBeyondLimit()` until the price returns. unspent input stays in `xToBuyback`, so a stall costs time and never funds. a sturdier design (a reference price that may drift) is an open decision.
+there is no exit pool. the buyback of the exitToken is an auction inside the core, paid in coin that the core burns. phase 2 only.
 
-### 5.9 exit token bid
+| item | rule |
+|---|---|
+| slice | `min(xToBuyback, 20 * AVG_SCORE * unitPerPoint)` |
+| price | coin wei per exitToken unit, wad scaled. `price(t) = startPrice * 2^(-(t - startTime) / XAUCTION_HALF_LIFE)`, solady wad math, continuous, never reverts, reaches zero for long gaps |
+| half life | `XAUCTION_HALF_LIFE` = 6 hours |
+| cost | `coinIn = ceil(slice * price / 1e18)`, must be at most the caller's `maxCoinIn`. zero only when the price truly decayed to zero |
+| fill | `burnFrom(msg.sender, coinIn)` on the coin, then the slice goes to the caller. no tip, no block delay, the caller approves the core first |
+| restart after a fill | `startPrice = max(2 * clearingPrice, previousStartPrice / 4)`, `startTime = now`. if that computes to zero it is 1 |
+| clock | runs only while `xToBuyback` is not zero. when it goes from zero to non zero, `startTime = now` and `startPrice` is kept |
+| first start price | set when the module is set: the price at which one full slice costs the whole coin supply (`SUPPLY * 1e18 / fullSlice`) |
+| views | `exitAuctionPrice()`, `exitAuctionQuote()` returning `(slice, coinIn)` |
 
-`xRate` is stored in bps of score: start 6000, cap 9700, floor 3000, climb 100 per hour linear, drop 20 per credit. funded means `xPot >= AVG_SCORE * xRate * unitPerPoint / 10_000` with the stored unit. lazy checkpoint like the eth rate, including the affordability clamp. the clock starts when the module is set. `sellForExitToken(ids)` and a `minOut` overload. payment `score * xRate * unitPerPoint / 10_000`.
+what the restart rule does. the next auction can never start more than 4x below the start of the previous one, so a price that decayed to dust does not carry over. every slice needs its own long decay before it can go cheap. measured in tests: the first slice reaches a price of 0.001 coin after about 240 hours (about 40 halvings from the opening price). the second starts a quarter lower and needs about 12 hours less, the third 12 hours less again, so three slices at dust take about 28 days, against one decay under a fixed floor. a taker who fills near a fair price restarts the auction at twice what they paid, the price is back to what they paid one half life later, and the cadence is one slice per half life.
 
-### 5.10 owner and timelock
+the price rounds to zero after about 90 half lives (about 22 days) from the opening start, and after 256 half lives at the latest. a fill at zero is free and the restart is a quarter of the start just played, so the rest of the queue is not cheap.
 
-`queue(Action action, bytes data)`, `execute(Action action, bytes data)`, `cancel(Action action, bytes data)`, all owner only, keyed by `keccak256(abi.encode(action, data))`, eta `now + TIMELOCK`. actions: `SetController(address)` (blocked after freeze), `SetExitModule(address)` (once), `SetExitPoolKey(PoolKey, uint160 sqrtPriceLimitX96)` (once, module must be set, hooks must equal the hook, fee must be 0, tick spacing must be 60, currencies must be coin and exitToken in sorted order, the limit must lie strictly between `TickMath.MIN_SQRT_PRICE` and `MAX_SQRT_PRICE`; sets `exitPoolId` and the stored limit), `AddTarget(address)`, `Freeze`. `removeTarget(address)` is immediate. launch targets Seaport 1.6 and CreditStrategy are set in the constructor. events for queue, execute, cancel and every state change in the system.
+## 9. timelock actions and tests
 
-## 6. ControllerV1
+timelock: `queue(action, data)`, `execute`, `cancel`, all owner only, 7 days, keyed by `keccak256(abi.encode(action, data))`. actions: `SetController` (blocked after `Freeze`), `SetExitModule` (once), `AddTarget`, `Freeze`. `removeTarget` is immediate. Seaport 1.6 and CreditStrategy are allowed from the constructor. the owner is immutable.
 
-holds only the core address. `wants` returns 0. `nextPage(lane)` returns ready when `pileSize(lane) >= 80`, with the first 80 ids from `pilePage` and format 0. `nextOverprint` not ready.
+tests policy: real contracts only. fork at block 26127622 (`FORK_BLOCK`), rpc from `MAINNET_RPC_URL` in `.env`.
 
-## 7. mocks (test/mocks)
+| group | rule |
+|---|---|
+| live, never faked | Credits, Statements, CreditScore, CreditStrategy, Seaport 1.6, the pool manager and the whole artcoins stack (factory, token, skim hook, locker, escrow, anti sniper module) |
+| the two stand ins | `MockExitModule` and `MockExitToken` in `test/standins/`. nothing is deployed for them yet |
+| attackers | hostile target, scripted and fuzz controllers, probes, statement buyers, mid swap callers, in `test/attackers/`. they attack the real system, they do not replace any of it |
+| swaps | a small unlock based test swapper (a caller, not a stand in) and one test that buys and sells through the real universal router |
+| owner action forced | one prank of the real factory owner: `setAdmin(deployer, true)` |
 
-`MockExitToken` (plain mintable erc20), `MockExitModule` (configurable `unitPerPoint`, mints `rating * unitPerPoint` on exit, with a switch to underpay), `HostileTarget` (takes eth, returns nothing), `MockCore` for hook and coin unit tests.
+suites: `CoreUnit`, `Fees`, `Launch`, `Lifecycle`, `ReviewCore`, `Seaport` and the invariant handlers in `test/invariant/` (the handler models the auction price with the 6 hour half life and the restart rule). listing tests must fund the pot and warp until the ceiling clears the listing price, because `RATE_START` is far below the CreditStrategy prices at the pin. the Seaport test builds genuine Seaport 1.6 orders on the fork and fulfills them through `buyListing`.
 
-## 8. tests
+## 10. deviations and accepted properties for the owner to confirm
 
-fork at block 26127622 (`FORK_BLOCK`), rpc from `MAINNET_RPC_URL` in `.env` (archive needed, alternates in `.env.example`). foundry caches fork state on disk, so reruns are fast. all fork tests inherit one fixture `test/utils/Fixture.sol` that deploys the full system through the deploy library.
+none of these is fixed in code. each is either a deliberate departure from SPEC.md or a property of the live stack we accept.
 
-RATE_START is far below the CreditStrategy listing prices at the pin (see notes section 11), so listing tests must fund the pot and warp until the ceiling clears the listing.
-
-a real opensea listing cannot be fetched from the sandbox. the Seaport test builds a genuine Seaport 1.6 order on the fork (a test key takes a credit from a real holder with prank, approves Seaport, signs with vm.sign) and fulfills it through `buyListing`.
-
-## 9. deviations and decisions for the owner to confirm
-
-1. second pool: handled by the hook, not by an allowlist entry. the fee is charged in exit token in that pool.
-2. buy side fee is taken in eth through a beforeSwap delta, not in coin with a nested swap as tokenworks does. exact out swaps are allowed.
-3. buybacks swap directly on the pool manager instead of the unverified z0r0z router. no min out, as upstream. the exit buyback is bound by a fixed price limit instead (5.8).
-4. the hourly cap is a fixed window that reopens on the first buy after expiry.
-5. the rate climb is clamped at the funded threshold between checkpoints.
-6. added: `skim()`, `minOut` overloads on both sell doors, `composeExit()`, `buybackExit()` slice size, `cancel` on the timelock.
-7. exit lane compose gas is reimbursed from the eth pot with a notional cap.
-8. `addFees` and `addExitFees` cannot carry the reentrancy guard.
-9. no launch snipe protection exists once the stepping fee is out of scope.
-10. `unitPerPoint` is read once when the exit module is set and the unit is fixed from then on. the module cannot change what the core pays or requires.
-11. the coin's transient allowance is a signed, netted counter bound to direction (section 3), not an unsigned additive allowance.
-12. a swap whose fee was taken in beforeSwap reverts when it fills partly. the core's exit buyback takes its fee in afterSwap on the actual spend instead, by a hook pull from the core through a one swap approval (section 4).
-13. the exit buyback has a fixed limit price chosen by the owner with the pool key. it is either loose or can stall the buyback (5.8). the owner picks the limit.
-14. a fee on transfer or rebasing exit token is not supported. pot accounting, the core balance checks and the fee pull assume the amount sent is the amount received.
+| # | item | what it means |
+|---|---|---|
+| 1 | tax is a deterrent, not a wall | wallet to wallet transfers and unlisted venues pay neither skim nor tax. sells are never taxed. the venue list is frozen at launch. the token admin can lower the rate |
+| 2 | anyone can LP the canonical pool | after the anti sniper window anyone may add liquidity to the pool. the launch position stays locked |
+| 3 | token admin powers | the owner, as token admin, can lower the tax, set metadata and renderer, lower the referral cap, and attach an allowlisted pool extension (none is enabled today, and `lockPoolExtension` at launch closes that path). the admin cannot change recipients, bounty split, skim, ticks, venues or the exempt list |
+| 4 | artcoins factory owner powers | 0xCB43 can deprecate the factory, set the deploy fee (up to 1 eth), set hooks, lockers and mev modules for new launches and mark admins. it cannot touch a launched pool, token, skim leg or locker position. launching needs it to mark our deployer admin |
+| 5 | `receive()` gas | `receive()` adds about 15.6k gas to every swap in the pool, and must never revert or the pool is bricked for everyone, sells included |
+| 6 | referral cap is 0, `notify` is a no op | the core implements `notify` and books nothing, so a raised cap can never revert a swap. eth it receives that way is booked later by `skim` |
+| 7 | hourly cap is a fixed window | the window reopens on the first spend after it expires, so two adjacent windows can spend 40 percent of the pot across a boundary. tips count against it, gas reimbursements do not |
+| 8 | funded clamp against the hourly cap | the rate stops climbing where one average credit costs the whole pot, but the cap lets only 20 percent of the pot out per hour. with a small pot the rate can therefore climb until an average credit cannot be sold, and it recovers only when the pot grows or the window allows more |
+| 9 | eth buyback has no min out | the swap is exact in with no price floor, as in the upstream pattern. the launch liquidity is locked and no third party position can sit in the way of the slice, and a sandwich pays the skim and tax round trip. the 1 eth slice and the 25 block delay bound the exposure |
+| 10 | exit auction sells at a discount | the opening price asks the whole supply for a slice and falls by half every 6 hours. buyers take exitToken below its market value whenever they wait. it can go cheap only after a long unattended decay for each slice, because every restart is at least a quarter of the last start |
+| 11 | exit auction restart can sit above a fair price | a fill at a high price doubles the next start. the price then decays on the clock only, with no demand signal |
+| 12 | `unitPerPoint` is fixed | read once when the exitModule is set. the module cannot change what the core pays or requires afterwards |
+| 13 | fee on transfer or rebasing exitToken unsupported | pot accounting and the balance delta checks assume the amount sent is the amount received |
+| 14 | exit lane compose is reimbursed from the eth pot | with a notional cap of 5 percent of `80 * AVG_SCORE * ethRate / 1e4` |
+| 15 | credits sent to the core outside the doors are stuck | they are in no pile. same for eth sent by a non hook sender, until `skim` books it |
+| 16 | added to the spec | `skim()`, `minOut` overloads on both sell doors, `composeExit()`, `buybackExit(maxCoinIn)`, `cancel` on the timelock |
+| 17 | SPEC.md sections on the Coin, FeeHook and Launcher do not apply | replaced by the live artcoins token, skim hook and factory. the transfer restriction is replaced by the token's venue scoped buy tax |

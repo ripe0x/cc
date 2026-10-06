@@ -26,7 +26,7 @@ struct Deployed {
 /// on the live factory (it is deprecated, so only its owner or an address it marks admin may launch) and must hold
 /// the factory deploy fee.
 abstract contract SystemDeployer is CommonBase {
-    // ------------------------------------------------------------------ launch parameters (docs/PORT.md section 2)
+    // ------------------------------------------------------------------ launch parameters (docs/ARCHITECTURE.md section 2)
 
     uint256 internal constant SUPPLY = 1_000_000_000e18;
     /// @dev tickIfToken0IsArtCoins. the coin is always currency1 against native eth, so the pool opens at the

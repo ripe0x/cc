@@ -103,8 +103,7 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.XRATE_FLOOR(), 3000);
         assertEq(core.XRATE_CLIMB_PER_HOUR(), 100);
         assertEq(core.XRATE_DROP_PER_CREDIT(), 20);
-        assertEq(core.XAUCTION_HALF_LIFE(), 1 hours);
-        assertEq(core.XAUCTION_MIN_START(), 1e18);
+        assertEq(core.XAUCTION_HALF_LIFE(), 6 hours);
         assertEq(core.TIMELOCK(), 7 days);
         assertEq(core.OVERPRINT_CAP_PER_DAY(), 8);
     }

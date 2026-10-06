@@ -1,3 +1,5 @@
+> **banner:** the reviewed FeeHook, Coin and Launcher were removed in the artcoins port. the file is kept for history. the live replacements are the artcoins token, skim hook and factory, see docs/ARCHITECTURE.md.
+
 # hook review (independent, round 2)
 
 scope: src/FeeHook.sol, src/Coin.sol, src/Launcher.sol, script/Deploy.s.sol, the buyback and unlock parts of src/Core.sol. spec 2, 3, 4, 8, 9 and docs/ARCHITECTURE.md. naming: only `exitModule` and `exitToken`.

@@ -593,7 +593,7 @@ contract LifecyclePhase2Test is Fixture {
         coin.approve(address(core), type(uint256).max);
         uint256 slice;
         uint256 coinIn;
-        for (uint256 i; i < 400; ++i) {
+        for (uint256 i; i < 2000; ++i) {
             (slice, coinIn) = core.exitAuctionQuote();
             if (coinIn <= coin.balanceOf(taker)) break;
             _warp(1 hours);
@@ -601,6 +601,7 @@ contract LifecyclePhase2Test is Fixture {
         assertEq(slice, fullSlice);
         assertGt(coinIn, 0);
         uint256 price = core.exitAuctionPrice();
+        uint256 startBefore = core.xStartPrice();
         assertEq(coinIn, slice.mulDivUp(price, 1e18));
 
         uint256 supply0 = coin.totalSupply();
@@ -612,7 +613,7 @@ contract LifecyclePhase2Test is Fixture {
         assertEq(xt.balanceOf(taker), slice, "the taker got the slice");
         assertEq(core.xToBuyback(), pool - slice);
         assertEq(core.xPot(), required - required / 2, "the bid share is untouched");
-        assertEq(core.xStartPrice(), 2 * price, "the auction restarts at twice the clearing price");
+        assertEq(core.xStartPrice(), (2 * price).max(startBefore / 4), "restart at max(2 * clearing, start / 4)");
         assertEq(core.xStartTime(), block.timestamp);
         assertEq(coin.balanceOf(address(core)), 0);
         _solvent();
@@ -862,7 +863,7 @@ contract LifecycleNarrativeTest is Fixture {
         coin.approve(address(core), type(uint256).max);
         uint256 slice;
         uint256 coinIn;
-        for (uint256 i; i < 400; ++i) {
+        for (uint256 i; i < 2000; ++i) {
             (slice, coinIn) = core.exitAuctionQuote();
             if (coinIn <= coin.balanceOf(taker)) break;
             _warp(1 hours);

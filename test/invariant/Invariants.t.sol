@@ -402,9 +402,9 @@ abstract contract InvariantsBase is InvariantFixture {
         _try(16, 60);
         assertTrue(_try(17, 80), "no exit lane compose");
         assertTrue(_try(20, 20), "no module mode");
-        // the auction opens at the whole coin supply for one slice and halves every hour. wait until a taker can
+        // the auction opens at the whole coin supply for one slice and halves every 6 hours. wait until a taker can
         // afford a fill with a little coin bought in the real pool
-        for (uint256 i; i < 40 && handler.successes(19) == 0; ++i) {
+        for (uint256 i; i < 120 && handler.successes(19) == 0; ++i) {
             _try(19, 4);
             vm.warp(block.timestamp + 1 hours);
         }

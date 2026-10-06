@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Core} from "../src/Core.sol";
 import {Lane} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 
 /// regressions and attack tests for docs/REVIEW-core.md, on the real stack. the exit token buyback is the dutch
 /// auction inside the core, so its attacks are written against that: nobody gets exit token for less coin than the
-/// quote, nothing but the clock lowers the price, a fill never takes more than `xToBuyback`, and every fill doubles
-/// the next price
+/// quote, nothing but the clock lowers the price, a fill never takes more than `xToBuyback`, and every fill restarts
+/// the price at max(2 * clearing, previous start / 4)
 contract ReviewCoreTest is Fixture {
+    using FixedPointMathLib for uint256;
+
     address internal rseller;
     address internal taker;
     address internal attacker;
@@ -91,7 +94,7 @@ contract ReviewCoreTest is Fixture {
 
     /// @dev lets the clock run until a fill costs at most `1 / share` of what `who` holds
     function _waitUntilCheap(address who, uint256 share) internal returns (uint256 slice, uint256 coinIn) {
-        for (uint256 i; i < 400; ++i) {
+        for (uint256 i; i < 2000; ++i) {
             (slice, coinIn) = core.exitAuctionQuote();
             if (coinIn * share <= coin.balanceOf(who)) return (slice, coinIn);
             vm.warp(block.timestamp + 1 hours);
@@ -194,10 +197,11 @@ contract ReviewCoreTest is Fixture {
         assertEq(core.exitAuctionPrice(), pricePlain, "and the same price");
         assertEq(core.xStartTime(), startTime);
 
-        // the price is the halving of the stored start price, to the wei on whole hours
-        uint256 hrs = (block.timestamp - startTime) / 1 hours;
-        vm.warp(startTime + hrs * 1 hours + 1 hours);
-        assertEq(core.exitAuctionPrice(), startPrice >> (hrs + 1));
+        // the price is the halving of the stored start price, to the wei on whole half lives
+        uint256 hl = core.XAUCTION_HALF_LIFE();
+        uint256 halvings = (block.timestamp - startTime) / hl;
+        vm.warp(startTime + (halvings + 1) * hl);
+        assertEq(core.exitAuctionPrice(), startPrice >> (halvings + 1));
     }
 
     /// R1 attack: fills cannot exceed `xToBuyback`. the buyers together take exactly what was queued, never a unit of
@@ -237,59 +241,61 @@ contract ReviewCoreTest is Fixture {
         _solvent();
     }
 
-    /// R1 attack: every fill doubles the price of the next one. three fills in one block cost p, 2p and 4p to the
-    /// rounding, and each leaves the start price at twice what it cleared at
-    function test_attack_repeatedFillsDoubleThePriceEachTime() public {
+    /// R1 attack: a fill restarts the price at max(2 * clearing, previous start / 4). two fills in one block: the
+    /// first restarts by that rule, the second clears at that restart and doubles it
+    function test_attack_repeatedFillsRestartByTheRule() public {
         _auction();
         _equip(attacker, 40 ether);
-        _waitUntilCheap(attacker, 8);
+        _waitUntilCheap(attacker, 4);
         uint256 p = core.exitAuctionPrice();
-        uint256[3] memory paid;
-        uint256[3] memory prices;
-        for (uint256 i; i < 3; ++i) {
+        uint256 startBefore = core.xStartPrice();
+        uint256[2] memory paid;
+        uint256[2] memory prices;
+        for (uint256 i; i < 2; ++i) {
             (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
             prices[i] = core.exitAuctionPrice();
             uint256 before = coin.balanceOf(attacker);
+            uint256 startNow = core.xStartPrice();
             vm.prank(attacker);
             core.buybackExit(coinIn);
             paid[i] = before - coin.balanceOf(attacker);
             assertEq(paid[i], _ceilCost(slice, prices[i]));
-            assertEq(core.xStartPrice(), 2 * prices[i], "restart at twice the clearing price");
+            assertEq(core.xStartPrice(), (2 * prices[i]).max(startNow / 4), "max(2 * clearing, start / 4)");
             assertEq(core.xStartTime(), block.timestamp);
         }
         assertEq(prices[0], p);
-        assertEq(prices[1], 2 * p);
-        assertEq(prices[2], 4 * p);
-        // equal slices, so the coin paid doubles to the rounding
-        assertApproxEqAbs(paid[1], 2 * paid[0], 2);
-        assertApproxEqAbs(paid[2], 4 * paid[0], 4);
-        // and the doubled price decays again at the same rate
-        vm.warp(block.timestamp + 1 hours);
-        assertEq(core.exitAuctionPrice(), 4 * p);
+        assertEq(prices[1], (2 * p).max(startBefore / 4));
+        // the restart never makes the next fill cheaper than a quarter of the last start
+        assertGe(prices[1], startBefore / 4);
+        // and the restarted price decays again at the same rate
+        vm.warp(block.timestamp + 6 hours);
+        assertEq(core.exitAuctionPrice(), prices[1]);
         _solvent();
     }
 
-    /// R1 documented decay: the price can reach zero, and only by waiting. the halvings run out after as many hours
-    /// as the start price has bits, one hour earlier it is still one wei per unit and the fill still costs coin. the
-    /// one who waits that long takes the slice for nothing, and the next price restarts above zero for everybody else
-    function test_attack_decayToZeroNeedsWaitingAndRestartsAboveZero() public {
+    /// R1 documented decay: the price can reach zero, and only by waiting. the halvings run out after as many half
+    /// lives as the start price has bits (about 540 hours), one half life earlier it is still one wei per unit and the
+    /// fill still costs coin. the one who waits that long takes the slice for nothing, but the next price restarts at a
+    /// quarter of the start just played, so the rest of the queue is not cheap
+    function test_attack_decayToZeroNeedsWaitingAndRestartsAtAQuarter() public {
         _auction();
         _equip(attacker, 40 ether);
         uint256 start = core.xStartPrice();
         uint64 t0 = core.xStartTime();
+        uint256 hl = core.XAUCTION_HALF_LIFE();
         uint256 bits;
         for (uint256 v = start; v != 0; v >>= 1) {
             ++bits;
         }
-        assertGt(bits, 80, "a start price of about 2^90, so about 90 hours of waiting");
+        assertGt(bits, 80, "a start price of about 2^90, so about 90 half lives of waiting");
         assertLt(bits, 128);
 
-        vm.warp(t0 + (bits - 1) * 1 hours);
-        assertEq(core.exitAuctionPrice(), 1, "one wei per unit an hour before the end");
+        vm.warp(t0 + (bits - 1) * hl);
+        assertEq(core.exitAuctionPrice(), 1, "one wei per unit a half life before the end");
         (, uint256 coinIn) = core.exitAuctionQuote();
         assertGt(coinIn, 0, "the rounding up keeps a fill from being free until the price is zero");
 
-        vm.warp(t0 + bits * 1 hours);
+        vm.warp(t0 + bits * hl);
         assertEq(core.exitAuctionPrice(), 0);
         uint256 supply = coin.totalSupply();
         (uint256 slice,) = core.exitAuctionQuote();
@@ -298,28 +304,18 @@ contract ReviewCoreTest is Fixture {
         assertEq(xt.balanceOf(attacker), slice, "the patient one got the slice for nothing");
         assertEq(coin.totalSupply(), supply);
 
-        // everybody else now faces the minimum start price at once, which is not free
-        assertEq(core.xStartPrice(), core.XAUCTION_MIN_START());
+        // the next slice is quoted from a quarter of the start just played: a quarter of the opening cost
+        assertEq(core.xStartPrice(), start / 4);
         (slice, coinIn) = core.exitAuctionQuote();
-        assertEq(coinIn, slice, "one coin wei per exit token wei");
+        assertEq(coinIn, slice.mulDivUp(start / 4, 1e18));
+        assertGt(coinIn, 1e26, "a quarter of the whole supply for a full slice, not dust");
         vm.prank(attacker);
         vm.expectRevert(Core.Slippage.selector);
         core.buybackExit(coinIn - 1);
-
-        // accepted property to know about: the minimum start price is dust next to the coin supply, so whoever waited
-        // out the whole decay can also take the remaining slices right away, each at double the last price, for a
-        // handful of coin in total. the opening price (the whole supply for a slice) is what makes waiting that
-        // long unattractive: any buyer who values the exit token pays far more long before this point
-        uint256 paid;
-        for (uint256 i; i < 10 && core.xToBuyback() != 0; ++i) {
-            (, coinIn) = core.exitAuctionQuote();
-            paid += coinIn;
-            vm.prank(attacker);
-            core.buybackExit(coinIn);
-        }
-        assertEq(core.xToBuyback(), 0, "the whole queue went");
-        assertLt(paid, 100e18, "for less than 100 coin of a supply of a billion");
-        emit log_named_uint("coin paid for the rest of the queue after a full decay", paid);
+        // the whole queue cannot be taken for dust: every further slice needs its own decay, see
+        // test_drainingSlicesAtDustNeedsSeparateDecays in Fees.t.sol
+        assertGt(core.xToBuyback(), 0);
+        _solvent();
     }
 
     // ------------------------------------------------------------------ attempts that held

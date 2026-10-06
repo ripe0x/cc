@@ -1,5 +1,7 @@
 # credits engine: build spec v1
 
+this is the original handoff spec. the branch `artcoin` implements it on the artcoins launcher; see docs/ARCHITECTURE.md for what differs.
+
 ## 0. what this is
 
 an erc20 on ethereum mainnet whose swap fees buy Credits nfts, compose them into Statements, and exit each statement one of two ways: sold at a falling price auction for eth, or handed to an exit module for an exit token. proceeds buy and burn the coin and refill the buying.

@@ -1790,14 +1790,15 @@ contract Handler is Test {
         }
     }
 
-    /// the auction price written out again: the start price halved once per whole hour elapsed, and the part of an
-    /// hour left over taken off with a plain exponential
+    /// the auction price written out again: the start price halved once per whole half life (6 hours) elapsed, and
+    /// the part of a half life left over taken off with a plain exponential
     function _modelPrice(uint256 startPrice, uint256 dt) internal pure returns (uint256 p) {
-        uint256 hrs = dt / 3600;
-        if (hrs >= 256) return 0;
-        p = startPrice >> hrs;
+        uint256 hl = 6 hours;
+        uint256 halvings = dt / hl;
+        if (halvings >= 256) return 0;
+        p = startPrice >> halvings;
         // forge-lint: disable-next-line(unsafe-typecast)
-        int256 e = -int256(693_147_180_559_945_309 * (dt % 3600) / 3600);
+        int256 e = -int256(693_147_180_559_945_309 * (dt % hl) / hl);
         // forge-lint: disable-next-line(unsafe-typecast)
         p = p * uint256(FixedPointMathLib.expWad(e)) / 1e18;
     }
@@ -1865,7 +1866,7 @@ contract Handler is Test {
         // the price: the quote read before, and the halving model written out again
         uint256 model = _modelPrice(p.startPrice, block.timestamp - p.startTime);
         uint256 dp = model > p.price ? model - p.price : p.price - model;
-        if (dp > p.price / 1e9 + 2) _flag(V_AUCTION, "auction price is not the start price halved every hour");
+        if (dp > p.price / 1e9 + 2) _flag(V_AUCTION, "auction price is not the start price halved every 6 hours");
         // the exit token left the core only as this slice, paid for in coin at or above the quoted price
         uint256 owed = slice.mulDivUp(p.price, 1e18);
         if (coinIn < owed || coinIn != p.coinIn) _flag(V_AUCTION, "auction fill below the quoted coin price");
@@ -1875,10 +1876,13 @@ contract Handler is Test {
         if (coin.balanceOf(who) != p.takerCoin - coinIn) _flag(V_SUPPLY, "the taker's coin did not fall by the fill");
         if (core.xToBuyback() != p.xto - slice) _flag(V_POT, "auction pot not reduced by the slice");
         if (core.xPot() != p.xpot) _flag(V_POT, "an auction fill touched the exit bid pot");
-        // after a fill the auction restarts at twice the clearing price, never below one coin per unit
-        uint256 restart = (2 * p.price).max(core.XAUCTION_MIN_START());
+        // after a fill the auction restarts at max(2 * clearing, previous start / 4), never zero
+        uint256 restart = (2 * p.price).max(p.startPrice / 4).max(1);
         if (core.xStartPrice() != restart || core.xStartTime() != block.timestamp) {
-            _flag(V_AUCTION, "auction did not restart at twice its clearing price");
+            _flag(V_AUCTION, "auction did not restart at max(2 * clearing, previous start / 4)");
+        }
+        if (core.xStartPrice() < p.startPrice / 4) {
+            _flag(V_AUCTION, "auction restarted below a quarter of the last start");
         }
         _eth(p.b0, 0, 0, "buybackExit");
         gSupply -= coinIn;
