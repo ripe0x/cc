@@ -6,7 +6,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Core} from "../../src/Core.sol";
-import {Lane, ICreditScore, ICreditStrategy, Mainnet} from "../../src/interfaces/Interfaces.sol";
+import {Lane, ICreditScore, ICreditStrategy, Mainnet, Econ} from "../../src/interfaces/Interfaces.sol";
 import {Fixture} from "../utils/Fixture.sol";
 import {CreditIds} from "../utils/CreditIds.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
@@ -36,6 +36,29 @@ abstract contract InvariantFixture is Fixture {
     /// real listings are read from this index of the strategy list, after the credits that move
     uint256 internal constant CANDIDATE_START = 600;
 
+    /// @dev the economic dials the suites run with, picked by the env var INVARIANT_ECON: `default` (the engine as
+    /// specified, the unset value), `recommended` (script/config/mainnet.recommended.json, gate 20) or `gate5` (the
+    /// defaults with the gate at its smallest value, 5, and four statements held at the start, so the fuzz reaches
+    /// the gate within a few actions). the handler's model reads every dial from the core, so all three are checked
+    /// against the same invariants
+    function _econ() internal view virtual override returns (Econ memory e) {
+        string memory which = vm.envOr("INVARIANT_ECON", string("default"));
+        bytes32 h = keccak256(bytes(which));
+        if (h == keccak256("recommended")) return loadConfig("script/config/mainnet.recommended.json").econ;
+        e = Mainnet.defaultEcon();
+        if (h == keccak256("gate5")) e.inventoryGate = 5;
+        else require(h == keccak256("default"), "INVARIANT_ECON is default, recommended or gate5");
+    }
+
+    /// @dev gate5 seeds four statements instead of three and keeps the first, so the next compose closes the gate. the
+    /// credit budget (the first 600 of the 640 ids) is kept in the phase 2 suites, which also sell 80 credits into
+    /// the exit lane, by giving the four actors 25 credits instead of 40
+    bool internal _phase2Build;
+
+    function _gateSeeded() internal view returns (bool) {
+        return core.INVENTORY_GATE() == 5;
+    }
+
     FuzzController internal fuzz;
     ProbeTarget internal probeTarget;
     Handler internal handler;
@@ -47,6 +70,7 @@ abstract contract InvariantFixture is Fixture {
     /// @dev the suites differ in the exit phase, the controller, the start state and the tag of their counters.
     function _build(bool phase2, bool hostile, bool canSwapController, bool inWindow, string memory tag) internal {
         Fixture.setUp();
+        _phase2Build = phase2;
         filler = _user("inv.filler");
         whale = _user("inv.whale");
         fuzz = new FuzzController(address(core));
@@ -173,7 +197,7 @@ abstract contract InvariantFixture is Fixture {
             coin.approve(address(router), type(uint256).max);
             _buyCoin(a, 2 ether);
             handler.addActor(a);
-            handler.giveCredits(a, _credits(a, 40));
+            handler.giveCredits(a, _credits(a, _gateSeeded() && _phase2Build ? 25 : 40));
         }
     }
 
@@ -181,7 +205,8 @@ abstract contract InvariantFixture is Fixture {
     /// overprint, and one statement bought, so the buyback pot is not empty when the run starts. in phase 2 the exit
     /// token bid is funded and 80 more credits are sold into it, so the exit lane has a full page
     function _prefill(bool phase2) internal {
-        uint256 ethN = 3 * 80 + LEFT_IN_PILE;
+        uint256 composes = _gateSeeded() ? 4 : 3;
+        uint256 ethN = composes * 80 + LEFT_IN_PILE;
         uint256[] memory ids = _credits(filler, ethN + (phase2 ? 80 : 0));
         vm.fee(1 gwei);
         uint256[] memory ethIds = new uint256[](ethN);
@@ -191,16 +216,20 @@ abstract contract InvariantFixture is Fixture {
         vm.prank(filler);
         core.sellForEth(ethIds);
         uint256 firstStatement = STATEMENTS.supply() + 1;
-        for (uint256 i; i < 3; ++i) {
+        for (uint256 i; i < composes; ++i) {
             vm.prank(keeper);
             core.compose();
         }
         assertEq(core.pileSize(Lane.Eth), LEFT_IN_PILE);
-        uint256 price = core.priceOf(firstStatement);
-        vm.deal(whale, whale.balance + price);
-        vm.prank(whale);
-        core.buyStatement{value: price}(firstStatement);
-        assertGt(core.ethToBuyback(), 0);
+        if (_gateSeeded()) {
+            assertEq(core.ethHeld(), 4, "one statement below the gate");
+        } else {
+            uint256 price = core.priceOf(firstStatement);
+            vm.deal(whale, whale.balance + price);
+            vm.prank(whale);
+            core.buyStatement{value: price}(firstStatement);
+            assertGt(core.ethToBuyback(), 0);
+        }
         if (phase2) {
             // the exit token bid is funded the way the module would: exit token arrives and skim books it
             xt.mint(address(core), 1e20);

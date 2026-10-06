@@ -6,7 +6,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Core} from "../../src/Core.sol";
 import {ControllerV1} from "../../src/ControllerV1.sol";
-import {Lane, ICredits, IStatements, Mainnet} from "../../src/interfaces/Interfaces.sol";
+import {Lane, ICredits, IStatements, Mainnet, Econ} from "../../src/interfaces/Interfaces.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
 import {LaunchConfig} from "../../script/LaunchConfig.sol";
@@ -112,6 +112,12 @@ abstract contract Fixture is Test, SystemDeployer {
     /// @notice state right before the compose, valid while `isComposed`. revert to it to compose again
     uint256 internal preComposeSnap;
 
+    /// @notice the economic dials the fixture core is deployed with. the default is the engine as specified. a suite
+    /// that tests another set overrides this
+    function _econ() internal view virtual returns (Econ memory) {
+        return Mainnet.defaultEcon();
+    }
+
     function setUp() public virtual {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
         deployer = _user("deployer");
@@ -131,6 +137,7 @@ abstract contract Fixture is Test, SystemDeployer {
         lc = defaultConfig();
         // the core tests are written against this opening bid, whatever the launch default is
         lc.rateStart = 4e12;
+        lc.econ = _econ();
         lc.owner = owner;
         lc.creator = creator;
         lc.name = "Fixture Coin";

@@ -42,7 +42,7 @@ contract ResumeTest is Test, SystemResumer {
         address coinAt = predictCoin(base, deployer, core);
         vm.startPrank(deployer);
         address ctl = address(new ControllerV1(core));
-        if (n >= 2) new Core(owner, coinAt, ctl, base.stack, base.rateStart);
+        if (n >= 2) new Core(owner, coinAt, ctl, base.stack, base.rateStart, base.econ);
         if (n >= 3) coin = _launch(base, deployer, coinAt, core);
         if (n >= 4) _lock(base, poolKeyOf(coin, base.stack));
         vm.stopPrank();

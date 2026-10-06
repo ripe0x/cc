@@ -73,6 +73,25 @@ abstract contract LaunchChecks is PostflightChecks {
             "placeholders filled", unset.length == 0, unset.length == 0 ? "owner creator name symbol salt set" : names
         );
         _check("rateStart in bounds", rateInBounds(c), string.concat("rateStart ", vm.toString(c.rateStart)));
+        _check(
+            "AUCTION_START_X and AUCTION_FLOOR_X in bounds, floor below start",
+            auctionInBounds(c),
+            string.concat(
+                "start ",
+                vm.toString(c.econ.auctionStartX),
+                " floor ",
+                vm.toString(c.econ.auctionFloorX),
+                " bps of cost"
+            )
+        );
+        _check("DROP_BPS in bounds", dropInBounds(c), string.concat("DROP_BPS ", vm.toString(c.econ.dropBps)));
+        _check(
+            "INVENTORY_GATE in bounds",
+            gateInBounds(c),
+            c.econ.inventoryGate == 0
+                ? "0, gate off"
+                : string.concat("gate on at ", vm.toString(c.econ.inventoryGate), " statements")
+        );
         _eq("supply equals the Core SUPPLY constant", c.supply, CORE_SUPPLY);
         _check("token code file exists", vm.exists(c.tokenCodeFile), c.tokenCodeFile);
     }
@@ -317,6 +336,30 @@ abstract contract LaunchChecks is PostflightChecks {
                 "/",
                 vm.toString(c.taxBpsMax)
             )
+        );
+        _info(
+            "signoff: auction",
+            string.concat(
+                "AUCTION_START_X ",
+                vm.toString(c.econ.auctionStartX),
+                " AUCTION_FLOOR_X ",
+                vm.toString(c.econ.auctionFloorX),
+                " bps of cost, no statement sells below the floor"
+            )
+        );
+        _info(
+            "signoff: rate drop",
+            string.concat("DROP_BPS ", vm.toString(c.econ.dropBps), " of the rate when a whole pot is spent")
+        );
+        _info(
+            "signoff: inventory gate",
+            c.econ.inventoryGate == 0
+                ? "INVENTORY_GATE 0, off: the eth bid never closes"
+                : string.concat(
+                    "INVENTORY_GATE ",
+                    vm.toString(c.econ.inventoryGate),
+                    ": the eth bid closes and the rate stops climbing while the core holds this many eth lane statements"
+                )
         );
         _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
     }

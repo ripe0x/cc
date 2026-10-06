@@ -414,8 +414,8 @@ combinations, comparable decay, 90 days (sustained 17 and credit price recovery 
 | constants | rule plus start 2x, floor 0.8x, DROP_BPS 2000 |
 | floor06 | constants with floor 0.6x |
 | flatBid | constants plus a flat per credit bid (design change) |
-| gate20 | rule plus an inventory gate: no buying or climbing while 20 statements are unsold (design change) |
-| gate20constants | gate plus constants |
+| gate20 | rule plus an inventory gate: no buying or climbing while 20 statements are unsold. implemented in the Core as the deploy input `INVENTORY_GATE` (eth lane statements held for sale, the simulator checks it once per step, the Core at every change) |
+| gate20constants | gate plus constants. the same four values are `script/config/mainnet.recommended.json`: `AUCTION_START_X` 20000, `AUCTION_FLOOR_X` 8000, `DROP_BPS` 2000, `INVENTORY_GATE` 20 |
 | gate20flat | gate plus constants plus flat bid |
 
 | config | composed | sold | stuck | eth locked | pot idle | eth to buyback | percent burned | cost over market |

@@ -39,7 +39,7 @@ abstract contract InvariantsBase is InvariantFixture {
     uint256[] internal g3 = [7];
     uint256[] internal g4 = [8, 9, 19, 10];
     uint256[] internal g5 = [22];
-    uint256[] internal g6 = [11, 12, 13];
+    uint256[] internal g6 = [11, 12, 13, 27];
     uint256[] internal g7 = [14];
     uint256[] internal g8 = [15, 16, 17];
     uint256[] internal g9 = [25];
@@ -67,7 +67,7 @@ abstract contract InvariantsBase is InvariantFixture {
         _zero(g2);
     }
 
-    /// 3. no statement is sold below 1.2 times its cost.
+    /// 3. no statement is sold below AUCTION_FLOOR_X of its cost (1.2 times at the default).
     function invariant_03_noStatementSoldBelowFloor() public view {
         _zero(g3);
         uint256 n = handler.everHeldCount();
@@ -75,7 +75,7 @@ abstract contract InvariantsBase is InvariantFixture {
             uint256 sid = handler.everHeld(i);
             Handler.SG memory s = handler.statementGhost(sid);
             if (s.status == 2) {
-                assertGe(s.price * 10_000, s.cost * 12_000, "sold below 1.2x cost");
+                assertGe(s.price * 10_000, s.cost * core.AUCTION_FLOOR_X(), "sold below AUCTION_FLOOR_X of cost");
                 assertGe(s.price, s.quote, "sold below the quoted price");
             }
         }
@@ -119,6 +119,13 @@ abstract contract InvariantsBase is InvariantFixture {
             }
         }
         assertEq(held, heldList.length, "held count differs from the core's list");
+        // the gate counter equals the eth lane statements the ghost model holds
+        uint256 heldEth;
+        for (uint256 i; i < n; ++i) {
+            Handler.SG memory s = handler.statementGhost(handler.everHeld(i));
+            if (s.status == 1 && s.lane == 0) heldEth++;
+        }
+        assertEq(core.ethHeld(), heldEth, "gate counter differs from the held eth lane statements");
     }
 
     /// 5. ethPot + ethToBuyback never exceeds the core's eth balance, and the same for the exit token pots.
@@ -133,7 +140,7 @@ abstract contract InvariantsBase is InvariantFixture {
         }
     }
 
-    /// 6. the rate does not rise in any interval where the pot was unfunded. checked around every action and
+    /// 6. the rate does not rise in any interval where the pot was unfunded or the core was gated. checked around every action and
     /// every warp, with the funded flag recomputed independently from the pot and the rate.
     function invariant_06_rateNeverRisesWhileUnfunded() public view {
         _zero(g6);
@@ -232,6 +239,12 @@ abstract contract InvariantsBase is InvariantFixture {
 
     function _summary() internal view {
         console.log("suite", handler.tag());
+        console.log("gate", core.INVENTORY_GATE(), "held eth lane statements", core.ethHeld());
+        console.log(
+            "buys refused while gated, this run and over all runs",
+            handler.gateRefusals(),
+            vm.envOr(string.concat("INV_", handler.tag(), "_gaterefusals"), uint256(0))
+        );
         console.log("action | attempts | ok | skipped | unexpected fail | totals over all runs: att ok skip unexp");
         uint256 n = handler.actionCount();
         for (uint256 a; a < n; ++a) {
@@ -506,6 +519,10 @@ contract InvariantsPhase1Window is InvariantsBase {
         _try(10, 5);
         _try(11, 5);
         assertTrue(_try(7, 80), "no compose inside the window");
+        // with the gate seeded (INVARIANT_ECON=gate5) that compose closed the bid: a statement sale reopens it
+        if (core.INVENTORY_GATE() != 0 && core.ethHeld() >= core.INVENTORY_GATE()) {
+            assertTrue(_try(8, 20), "no statement sale to reopen the gate");
+        }
         // the compose used the pile up, so fill it again for the compose of the standard smoke, still inside the window
         for (uint256 i; i < 30 && core.pileSize(Lane.Eth) < 80; ++i) {
             _try(2, 10);

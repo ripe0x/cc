@@ -23,9 +23,18 @@ import {
     ICreditScore,
     IStatements,
     Stack,
+    Econ,
     Mainnet,
     RATE_START_MIN_WEI,
-    RATE_START_MAX_WEI
+    RATE_START_MAX_WEI,
+    AUCTION_START_X_MIN,
+    AUCTION_START_X_MAX,
+    AUCTION_FLOOR_X_MIN,
+    AUCTION_FLOOR_X_MAX,
+    DROP_BPS_MIN,
+    DROP_BPS_MAX,
+    INVENTORY_GATE_MIN,
+    INVENTORY_GATE_MAX
 } from "./interfaces/Interfaces.sol";
 
 /// custody and every rule of the credits engine. the only mutable slots are the ones the owner can
@@ -115,6 +124,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error DailyCap();
     error BadRate();
     error BadStack();
+    /// the auction start or floor is out of bounds, or the floor is not below the start
+    error BadAuction();
+    error BadDrop();
+    error BadGate();
+    /// the eth bid is closed: the core holds `INVENTORY_GATE` or more eth lane statements for sale
+    error GateClosed();
     /// a stack member that must be a contract has no code
     error NoCode(address who);
 
@@ -152,24 +167,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     uint256 public constant SUPPLY = 1_000_000_000e18;
-    uint256 public constant FEE_BPS = 1000;
-    uint256 public constant CREATOR_BPS = 50;
     uint256 public constant AVG_SCORE = 4_330_000;
-    /// bounds of the opening bid, wei per whole point. the right opening depends on the market on launch day
-    uint256 public constant RATE_START_MIN = RATE_START_MIN_WEI;
-    uint256 public constant RATE_START_MAX = RATE_START_MAX_WEI;
     uint256 public constant CLIMB_BASE_BPS_PER_HOUR = 100;
     uint256 public constant CLIMB_DOUBLE_EVERY = 24 hours;
     uint256 public constant CLIMB_MAX_BPS_PER_HOUR = 800;
-    uint256 public constant DROP_BPS = 1000;
     uint256 public constant SPEND_CAP_BPS_PER_HOUR = 2000;
     uint256 public constant BONUS_CAP_BPS = 2500;
     uint256 public constant TIP_SAVINGS_BPS = 1000;
     uint256 public constant TIP_CAP_BPS = 200;
-    /// bps of cost, 4x
-    uint256 public constant AUCTION_START_X = 40_000;
-    /// bps of cost, 1.2x
-    uint256 public constant AUCTION_FLOOR_X = 12_000;
     uint256 public constant AUCTION_LENGTH = 72 hours;
     /// bps of sale proceeds that go to the coin buyback
     uint256 public constant SALE_SPLIT = 5000;
@@ -211,6 +216,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     address public immutable COIN;
     /// opening bid, wei per whole point, fixed at deploy
     uint256 public immutable RATE_START;
+    /// the economic dials, fixed at deploy (docs/ARCHITECTURE.md). auction opening and floor in bps of a statement's
+    /// cost, the fall of the eth rate when a whole pot is spent in bps, and the inventory gate: while the core holds
+    /// this many eth lane statements for sale (0 is off) the eth bid is closed and the eth rate does not climb
+    uint256 public immutable AUCTION_START_X;
+    uint256 public immutable AUCTION_FLOOR_X;
+    uint256 public immutable DROP_BPS;
+    uint256 public immutable INVENTORY_GATE;
     /// the artcoins stack this core launched on, fixed at deploy. HOOK is the only sender whose eth is booked as fees
     IPoolManager public immutable MANAGER;
     address public immutable HOOK;
@@ -266,13 +278,26 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public xStartPrice;
     uint64 public xStartTime;
 
+    /// eth lane statements the core holds for sale, kept as a counter. the gate reads it. last in the layout so that
+    /// no earlier slot moved
+    uint256 public ethHeld;
+
     modifier onlyOwner() {
         if (msg.sender != OWNER) revert OnlyOwner();
         _;
     }
 
-    constructor(address owner_, address coin_, address controller_, Stack memory stack_, uint256 rateStart_) {
-        if (owner_ == address(0) || coin_ == address(0) || controller_ == address(0)) revert ZeroAddress();
+    constructor(
+        address owner_,
+        address coin_,
+        address controller_,
+        Stack memory stack_,
+        uint256 rateStart_,
+        Econ memory econ_
+    ) {
+        if (owner_ == address(0) || coin_ == address(0) || controller_ == address(0)) {
+            revert ZeroAddress();
+        }
         if (
             stack_.poolManager == address(0) || stack_.hook == address(0) || stack_.factory == address(0)
                 || stack_.locker == address(0) || stack_.escrow == address(0)
@@ -284,10 +309,22 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (stack_.factory.code.length == 0) revert NoCode(stack_.factory);
         if (stack_.locker.code.length == 0) revert NoCode(stack_.locker);
         if (stack_.escrow.code.length == 0) revert NoCode(stack_.escrow);
-        if (rateStart_ < RATE_START_MIN || rateStart_ > RATE_START_MAX) revert BadRate();
+        if (rateStart_ < RATE_START_MIN_WEI || rateStart_ > RATE_START_MAX_WEI) revert BadRate();
+        if (
+            econ_.auctionStartX < AUCTION_START_X_MIN || econ_.auctionStartX > AUCTION_START_X_MAX
+                || econ_.auctionFloorX < AUCTION_FLOOR_X_MIN || econ_.auctionFloorX > AUCTION_FLOOR_X_MAX
+                || econ_.auctionFloorX >= econ_.auctionStartX
+        ) revert BadAuction();
+        if (econ_.dropBps < DROP_BPS_MIN || econ_.dropBps > DROP_BPS_MAX) revert BadDrop();
+        uint256 gate = econ_.inventoryGate;
+        if (gate != 0 && (gate < INVENTORY_GATE_MIN || gate > INVENTORY_GATE_MAX)) revert BadGate();
         OWNER = owner_;
         COIN = coin_;
         RATE_START = rateStart_;
+        AUCTION_START_X = econ_.auctionStartX;
+        AUCTION_FLOOR_X = econ_.auctionFloorX;
+        DROP_BPS = econ_.dropBps;
+        INVENTORY_GATE = gate;
         MANAGER = IPoolManager(stack_.poolManager);
         HOOK = stack_.hook;
         TICK_SPACING = stack_.tickSpacing;
@@ -364,7 +401,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// percent of the pot) no longer buys one average credit: `ethPot * 20% = AVG_SCORE * rate / 1e4`.
     function ethRate() public view returns (uint256 r) {
         r = rateAtCheckpoint;
-        if (!funded) return r;
+        if (!funded || _gated()) return r;
         uint256 cap = ethPot * SPEND_CAP_BPS_PER_HOUR / AVG_SCORE;
         if (cap <= r) return r;
         uint256 last = lastFillTime;
@@ -380,6 +417,21 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             t = end;
         }
         return r.min(cap);
+    }
+
+    /// the inventory gate is on and the core holds at least `INVENTORY_GATE` eth lane statements for sale. a gated
+    /// interval is treated exactly like an unfunded one: the bid is closed and the rate does not climb
+    function _gated() private view returns (bool) {
+        uint256 g = INVENTORY_GATE;
+        return g != 0 && ethHeld >= g;
+    }
+
+    /// moves the eth lane statement counter. when it crosses the gate in either direction the rate is checkpointed
+    /// first, so the time before the change climbs under the old state and the time after under the new one
+    function _setEthHeld(uint256 n) private {
+        uint256 g = INVENTORY_GATE;
+        if (g != 0 && (ethHeld >= g) != (n >= g)) _checkpoint();
+        ethHeld = n;
     }
 
     /// the most wei the core pays for credit id right now, bonus included.
@@ -532,6 +584,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     function _sellForEth(uint256[] calldata ids, uint256 minOut) private {
         if (ids.length == 0) revert Empty();
+        if (_gated()) revert GateClosed();
         uint256 total;
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = _owned(ids[i]);
@@ -550,6 +603,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function buyListing(uint256 value, bytes calldata data, uint256 id, address target) external nonReentrant {
         if (!allowedTarget[target] || _forbidden(target)) revert TargetNotAllowed();
         if (id == 0) revert ZeroId();
+        if (_gated()) revert GateClosed();
         if (CREDITS.ownerOf(id) == address(this)) revert AlreadyOwned();
         _checkpoint();
         uint256 ceiling = _ceiling(id, rateAtCheckpoint);
@@ -675,6 +729,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             _syncFunded();
             if (lane == Lane.Eth) cost += reimbursement;
         }
+        if (lane == Lane.Eth) _setEthHeld(ethHeld + 1);
         _heldIds.push(sid);
         _statements[sid] = Statement({
             cost: cost, clockStart: uint64(block.timestamp), slot: uint64(_heldIds.length - 1), lane: lane, held: true
@@ -686,7 +741,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// forgets a held statement and compacts the held list.
     function _unhold(uint256 sid) private {
-        uint256 slot = _statements[sid].slot;
+        Statement storage s = _statements[sid];
+        uint256 slot = s.slot;
+        if (s.lane == Lane.Eth) _setEthHeld(ethHeld - 1);
         uint256 last = _heldIds[_heldIds.length - 1];
         _heldIds[slot] = last;
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -699,7 +756,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                AUCTION
     //////////////////////////////////////////////////////////////*/
 
-    /// current auction price of an eth lane statement. falls linearly from 4x to 1.2x of cost over the auction length.
+    /// current auction price of an eth lane statement. falls linearly from `AUCTION_START_X` to `AUCTION_FLOOR_X` of
+    /// cost over the auction length.
     function priceOf(uint256 sid) public view returns (uint256) {
         Statement storage s = _statements[sid];
         if (!s.held || s.lane != Lane.Eth) revert NotForSale();
@@ -992,15 +1050,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// up to n credit ids of a lane pile, oldest first, after startAfter. zero starts at the head.
     function pilePage(Lane lane, uint256 startAfter, uint256 n) external view returns (uint256[] memory ids) {
         uint256 first = startAfter == 0 ? _piles[lane].head : _credits[startAfter].next;
+        // at most the pile size, so a huge n cannot blow up memory. the length is cut to the count found
+        ids = new uint256[](n.min(_piles[lane].size));
         uint256 count;
-        for (uint256 id = first; id != 0 && count < n; id = _credits[id].next) {
-            ++count;
+        for (uint256 id = first; id != 0 && count < ids.length; id = _credits[id].next) {
+            ids[count++] = id;
         }
-        ids = new uint256[](count);
-        uint256 cursor = first;
-        for (uint256 i; i < count; ++i) {
-            ids[i] = cursor;
-            cursor = _credits[cursor].next;
+        assembly ("memory-safe") {
+            mstore(ids, count)
         }
     }
 

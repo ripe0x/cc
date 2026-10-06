@@ -7,7 +7,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {Core} from "../src/Core.sol";
 import {ControllerV1} from "../src/ControllerV1.sol";
-import {Mainnet, Stack} from "../src/interfaces/Interfaces.sol";
+import {Mainnet, Stack, Econ} from "../src/interfaces/Interfaces.sol";
 import {
     IArtCoinsFactory,
     IArtCoinsToken,
@@ -57,7 +57,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     }
 
     /// @notice the constructor arguments of a deployed core, read back from its immutables, in the encoding etherscan
-    /// wants for verification: `(owner, coin, controller, stack, rateStart)`
+    /// wants for verification: `(owner, coin, controller, stack, rateStart, econ)`
     function coreConstructorArgs(Core core) internal view returns (bytes memory) {
         Stack memory s = Stack({
             poolManager: address(core.MANAGER()),
@@ -68,13 +68,23 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             locker: core.LOCKER(),
             escrow: core.ESCROW()
         });
-        return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START());
+        Econ memory e = Econ({
+            auctionStartX: core.AUCTION_START_X(),
+            auctionFloorX: core.AUCTION_FLOOR_X(),
+            dropBps: core.DROP_BPS(),
+            inventoryGate: core.INVENTORY_GATE()
+        });
+        return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START(), e);
     }
 
     function _postCore(LaunchConfig memory c, Core core) private {
         _eq("core: owner", core.OWNER(), c.owner);
         _eq("core: SUPPLY constant equals the config supply", core.SUPPLY(), c.supply);
         _eq("core: RATE_START", core.RATE_START(), c.rateStart);
+        _eq("core: AUCTION_START_X", core.AUCTION_START_X(), c.econ.auctionStartX);
+        _eq("core: AUCTION_FLOOR_X", core.AUCTION_FLOOR_X(), c.econ.auctionFloorX);
+        _eq("core: DROP_BPS", core.DROP_BPS(), c.econ.dropBps);
+        _eq("core: INVENTORY_GATE", core.INVENTORY_GATE(), c.econ.inventoryGate);
         _eq("core: pool manager", address(core.MANAGER()), c.stack.poolManager);
         _eq("core: hook", core.HOOK(), c.stack.hook);
         _eq("core: tick spacing", uint256(int256(core.TICK_SPACING())), uint256(int256(c.stack.tickSpacing)));

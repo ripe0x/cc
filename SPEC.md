@@ -109,20 +109,19 @@ all are immutable constants in the core unless marked.
 | name | default | meaning |
 |---|---|---|
 | `SUPPLY` | 1_000_000_000e18 | coin supply, minted once |
-| `FEE_BPS` | 1000 | swap fee, 10% |
-| `CREATOR_BPS` | 50 | of each swap's notional. the creator gets 0.5 points of the 10. the core gets 9.5 |
 | `AVG_SCORE` | 4_330_000 | 433 in 1e4 scale. used for "can the pot afford one credit" |
 | `RATE_START` | 5.6e12 wei per whole point (config default) | starting eth rate, a deploy input in [1e11, 1e15]. launch day rule: flat credit price in wei divided by 1600 |
 | `CLIMB_BASE_BPS_PER_HOUR` | 100 | 1% an hour |
 | `CLIMB_DOUBLE_EVERY` | 24 hours | climb speed doubles for each full period with no fill |
 | `CLIMB_MAX_BPS_PER_HOUR` | 800 | ceiling on climb speed |
-| `DROP_BPS` | 1000 | rate falls 10% if a whole pot is spent, scaled by share spent |
+| `DROP_BPS` | 1000 (config default) | rate falls 10% if a whole pot is spent, scaled by share spent. a deploy input in [1000, 4000] |
 | `SPEND_CAP_BPS_PER_HOUR` | 2000 | at most 20% of the eth pot may be spent in any rolling hour |
 | `BONUS_CAP_BPS` | 2500 | max extra the controller may add to the rate for a preferred credit |
 | `TIP_SAVINGS_BPS` | 1000 | caller of buyListing gets 10% of the savings |
 | `TIP_CAP_BPS` | 200 | tip never above 2% of the cost |
-| `AUCTION_START_X` | 4x cost | auction opening price |
-| `AUCTION_FLOOR_X` | 1.2x cost | auction floor |
+| `AUCTION_START_X` | 40_000 bps, 4x cost (config default) | auction opening price. a deploy input in [15_000, 40_000] |
+| `AUCTION_FLOOR_X` | 12_000 bps, 1.2x cost (config default) | auction floor. a deploy input in [6_000, 12_000], strictly below the start |
+| `INVENTORY_GATE` | 0, off (config default) | a count of eth lane statements held for sale. a deploy input, 0 or [5, 200]. while the core holds this many or more, the eth bid is closed and the rate does not climb |
 | `AUCTION_LENGTH` | 72 hours | linear fall from start to floor, then flat at floor |
 | `SALE_SPLIT` | 50 / 50 | eth sale proceeds: coin buyback / eth pot |
 | `EXIT_SPLIT` | 50 / 50 | exit token from an unsold statement: coin buyback / exit token bid pot |
@@ -162,6 +161,7 @@ rate dynamics, computed lazily from a checkpoint (`rateAtCheckpoint`, `checkpoin
 * every function that changes `ethPot` first calls `_checkpoint()`, which applies the climb earned under the old funded state and then recomputes `funded`.
 * on a fill that spends `x` from a pot of `p` (pot measured before the spend): `ethRate = ethRate * (1 - DROP_BPS/10_000 * min(1, x/p))`, and `lastFillTime = now`.
 * the rate never climbs while unfunded. this is the main lesson from CREDITSTR, whose cap outran the market.
+* the rate never climbs while gated either. gated means `INVENTORY_GATE != 0` and the core holds at least that many eth lane statements for sale (`ethHeld`). `sellForEth` and `buyListing` revert while gated. the counter changes on compose (+1), statement sale (-1), exit of an eth lane statement (-1) and overprint of eth lane statements (-1), and each change that crosses the gate checkpoints the rate first, like a change of the funded flag. nothing else is gated.
 
 ### 5.2 the hourly spend cap
 
@@ -309,10 +309,10 @@ write each as a fuzz or invariant test.
 
 1. eth leaves the core only as: a buy that returned a credit within its ceiling, a capped tip, a capped gas reimbursement, a buyback slice, or a refund of overpayment.
 2. no credit is bought above `score * ethRate * (1 + BONUS_CAP)`.
-3. no statement is sold below `1.2 * statementCost`.
+3. no statement is sold below `AUCTION_FLOOR_X` of its cost (`statementCost * AUCTION_FLOOR_X / 10_000`, 1.2x at the default).
 4. a statement leaves the core only by sale at or above price, by exit that returned at least `rating * unitPerPoint`, or by being the top of an overprint.
 5. `ethPot + ethToBuyback` never exceeds the core's eth balance. same for the exit token pots.
-6. the rate does not rise in any interval where the pot was unfunded.
+6. the rate does not rise in any interval where the pot was unfunded or the core was gated.
 7. hourly eth spend never exceeds the cap.
 8. the controller address has no path to move any asset.
 9. coin total supply never increases.

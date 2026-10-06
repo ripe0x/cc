@@ -120,7 +120,7 @@ contract ConfigTest is Fixture {
     function test_coreConstructorArgsReadBack() public view {
         assertEq(
             coreConstructorArgs(core),
-            abi.encode(owner, address(coin), address(ctl), lc.stack, lc.rateStart),
+            abi.encode(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.econ),
             "etherscan constructor args"
         );
     }
@@ -149,5 +149,122 @@ contract ConfigTest is Fixture {
 
         postflight(lc, address(0xBEEF));
         assertEq(_failedNames(), "code: core");
+    }
+
+    string internal constant RECOMMENDED_CONFIG_FILE = "script/config/mainnet.recommended.json";
+
+    /// the default json has the default dials, the recommended json is the gate20constants row of the simulation
+    function test_econInTheTwoConfigFiles() public view {
+        LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
+        assertEq(f.econ.auctionStartX, 40_000);
+        assertEq(f.econ.auctionFloorX, 12_000);
+        assertEq(f.econ.dropBps, 1000);
+        assertEq(f.econ.inventoryGate, 0);
+        LaunchConfig memory r = loadConfig(RECOMMENDED_CONFIG_FILE);
+        assertEq(r.econ.auctionStartX, 20_000);
+        assertEq(r.econ.auctionFloorX, 8_000);
+        assertEq(r.econ.dropBps, 2000);
+        assertEq(r.econ.inventoryGate, 20);
+        assertTrue(econInBounds(f) && econInBounds(r));
+    }
+
+    /// the two files differ in the four econ values and nothing else, and so do their hashes
+    function test_recommendedDiffersOnlyInTheEconKeys() public view {
+        LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
+        LaunchConfig memory r = loadConfig(RECOMMENDED_CONFIG_FILE);
+        assertTrue(configHash(f) != configHash(r), "the hash covers econ");
+        r.econ = f.econ;
+        assertTrue(_same(f, r), "the files differ outside econ");
+    }
+
+    function test_econBoundsInThePreflightRows() public {
+        LaunchConfig memory c = lc;
+        assertTrue(econInBounds(c));
+        c.econ.auctionStartX = 14_999;
+        assertFalse(auctionInBounds(c));
+        c = lc;
+        c.econ.auctionStartX = 40_001;
+        assertFalse(auctionInBounds(c));
+        c = lc;
+        c.econ.auctionFloorX = 5_999;
+        assertFalse(auctionInBounds(c));
+        c = lc;
+        c.econ.auctionFloorX = 12_001;
+        assertFalse(auctionInBounds(c));
+        c = lc;
+        c.econ.auctionStartX = 15_000;
+        c.econ.auctionFloorX = 12_000;
+        assertTrue(auctionInBounds(c));
+        c.econ.auctionFloorX = 15_000;
+        assertFalse(auctionInBounds(c), "floor must be strictly below the start");
+        c = lc;
+        c.econ.dropBps = 999;
+        assertFalse(dropInBounds(c));
+        c.econ.dropBps = 4_001;
+        assertFalse(dropInBounds(c));
+        c.econ.dropBps = 4_000;
+        assertTrue(dropInBounds(c));
+        c = lc;
+        for (uint256 g; g < 4; ++g) {
+            c.econ.inventoryGate = g;
+            assertEq(gateInBounds(c), g == 0, "0 is off, 1 to 4 are refused");
+        }
+        c.econ.inventoryGate = 5;
+        assertTrue(gateInBounds(c));
+        c.econ.inventoryGate = 200;
+        assertTrue(gateInBounds(c));
+        c.econ.inventoryGate = 201;
+        assertFalse(gateInBounds(c));
+        // the preflight names the failing row
+        address d2 = _enabledDeployer();
+        c = lc;
+        c.econ.dropBps = 5_000;
+        preflight(c, d2);
+        assertEq(_failedNames(), "DROP_BPS in bounds");
+        c = lc;
+        c.econ.inventoryGate = 3;
+        preflight(c, d2);
+        assertEq(_failedNames(), "INVENTORY_GATE in bounds");
+        c = lc;
+        c.econ.auctionFloorX = c.econ.auctionStartX;
+        preflight(c, d2);
+        assertEq(_failedNames(), "AUCTION_START_X and AUCTION_FLOOR_X in bounds, floor below start");
+    }
+
+    /// the deploy refuses an out of bounds dial, the same way as rateStart
+    function test_deployRefusesBadEcon() public {
+        LaunchConfig memory c = lc;
+        c.econ.auctionStartX = 14_000;
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "AUCTION_START_X, AUCTION_FLOOR_X"));
+        this.requireExt(c);
+        c = lc;
+        c.econ.dropBps = 0;
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "DROP_BPS"));
+        this.requireExt(c);
+        c = lc;
+        c.econ.inventoryGate = 4;
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "INVENTORY_GATE"));
+        this.requireExt(c);
+        this.requireExt(lc);
+    }
+
+    /// postflight reads the four dials back and names each one that differs
+    function test_postflightReadsBackTheEcon() public {
+        LaunchConfig memory c = lc;
+        c.econ.auctionStartX = 30_000;
+        postflight(c, address(core));
+        assertEq(_failedNames(), "core: AUCTION_START_X");
+        c = lc;
+        c.econ.auctionFloorX = 10_000;
+        postflight(c, address(core));
+        assertEq(_failedNames(), "core: AUCTION_FLOOR_X");
+        c = lc;
+        c.econ.dropBps = 2_000;
+        postflight(c, address(core));
+        assertEq(_failedNames(), "core: DROP_BPS");
+        c = lc;
+        c.econ.inventoryGate = 20;
+        postflight(c, address(core));
+        assertEq(_failedNames(), "core: INVENTORY_GATE");
     }
 }

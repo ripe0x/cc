@@ -53,8 +53,8 @@ all commands run from the repo root after `set -a; . ./.env; set +a` and the var
 
 | step | action | command or owner |
 |---|---|---|
-| 1 | local config | `cp script/config/mainnet.json script/config/local.json` (gitignored, never edit the tracked file). edit `local.json`: `owner`, `creator`, `name`, `symbol`, `salt`, and `rateStart` by the launch day rule below. `export LAUNCH_CONFIG=script/config/local.json`. review every row of the sign off tables in section 2 |
-| 2 | rehearse the exact file on the latest block | `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv`. it reads `LAUNCH_CONFIG`, fills only the placeholders the file leaves unset, and runs preflight, the whole deploy, postflight and a trading smoke |
+| 1 | local config | pick one of the two tracked files, `script/config/mainnet.json` (the engine as specified) or `script/config/mainnet.recommended.json` (the simulation's `gate20constants` economics, see the economic dials table in section 2), and `cp` it to `script/config/local.json` (gitignored, never edit the tracked files). edit `local.json`: `owner`, `creator`, `name`, `symbol`, `salt`, and `rateStart` by the launch day rule below. `export LAUNCH_CONFIG=script/config/local.json`. review every row of the sign off tables in section 2 |
+| 2 | rehearse the exact file on the latest block | `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv`. it reads `LAUNCH_CONFIG`, fills only the placeholders the file leaves unset, and runs preflight, the whole deploy, postflight and a trading smoke. both tracked config files pass it (`LAUNCH_CONFIG=script/config/mainnet.recommended.json REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv` for the second) |
 | 3 | preflight, first run, and the sign off | `DEPLOYER=$DEPLOYER forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL`. the only failure allowed is `factory: deployer may launch`, until the factory owner acts. read the `signoff:` rows, the owner signs them, then `export CONFIG_HASH=0x...` with the printed `CONFIG_HASH=` value. that one value stands for the whole config |
 | 4 | the factory owner enables the deployer | from the factory owner, `cast send $FACTORY "setAdmin(address,bool)" $DEPLOYER true --rpc-url $MAINNET_RPC_URL --ledger` (or `--account <name>`). keep the factory `deprecated`. confirm: `cast call $FACTORY "admins(address)(bool)" $DEPLOYER --rpc-url $MAINNET_RPC_URL` prints true |
 | 5 | preflight, second run | the same command as step 3. it must print every row ok and exit 0, and print the same `CONFIG_HASH` |
@@ -77,9 +77,9 @@ what the scripts do.
 
 | script | does |
 |---|---|
-| `Preflight.s.sol` | read only. chain id 1, the pinned rules of section 2 (ticks, skim, sniper, tax, owner and creator), code at every stack address, the stack cross checks (the hook reports the pool manager, factory and escrow, the locker reports the factory and position manager), hook, locker and mev module enabled on the factory, the factory deprecated, factory owner as configured, whether the deployer may launch, live `deployFee()` and the deployer balance against fee plus gas, predicted controller, core and coin addresses with no code at any of them, the coin prediction inputs, Credits, Statements and CreditScore sanity, code at CreditStrategy, Seaport, Permit2, position manager and universal router, placeholders filled, `rateStart` in bounds, supply equal to the Core constant. then the `signoff:` rows and the `CONFIG_HASH`. prints a table, reverts with the failed names. WARN rows (owner equals creator, owner or creator equals the deployer) never fail |
-| `Deploy.s.sol` | refuses to run while `owner`, `creator`, `name`, `symbol` or `salt` is unset, `rateStart` is out of bounds, or `CONFIG_HASH` is not the hash of the loaded config. runs preflight, then predicts, deploys ControllerV1 and Core (the Core constructor needs code at the hook, pool manager, factory, locker and escrow), launches through the factory and asserts the coin equals the prediction, locks the pool extension slot, hands the token admin role to `owner`, then runs postflight |
-| `Postflight.s.sol` | read only. reads the deployed system back and compares it with the config: core immutables, controller, allowed targets, coin name, symbol and supply and that it sits in the pool, pool key and id, start tick, the launch position ticks through the position manager, skim config on the hook (baseline, bounty, referral cap, lp fee, recipients), the sniper start, end and duration through the mev module, tax config on the token, core tax exempt, token admin equals owner, extension slot locked, locker reward slot, `ethRate` equals `rateStart`, code at the stack. prints the table, a row `not readable on chain` for what no getter exposes (the protocolBps argument, the sniper fee config, token image and metadata, locker data, the deploy fee paid, the salt itself which the coin address check binds), the config hash and the constructor args, reverts on any mismatch. supply, rate and start tick rows are exact only until the first trade or fill, afterwards they turn tolerant. the sniper start and duration are readable only inside the window (30 minutes by default), after it only the end value is |
+| `Preflight.s.sol` | read only. chain id 1, the pinned rules of section 2 (ticks, skim, sniper, tax, owner and creator), code at every stack address, the stack cross checks (the hook reports the pool manager, factory and escrow, the locker reports the factory and position manager), hook, locker and mev module enabled on the factory, the factory deprecated, factory owner as configured, whether the deployer may launch, live `deployFee()` and the deployer balance against fee plus gas, predicted controller, core and coin addresses with no code at any of them, the coin prediction inputs, Credits, Statements and CreditScore sanity, code at CreditStrategy, Seaport, Permit2, position manager and universal router, placeholders filled, `rateStart` and the four economic dials in bounds (a row each, the auction row also checks the floor below the start, the gate row prints whether the gate is on), supply equal to the Core constant. then the `signoff:` rows and the `CONFIG_HASH`. prints a table, reverts with the failed names. WARN rows (owner equals creator, owner or creator equals the deployer) never fail |
+| `Deploy.s.sol` | refuses to run while `owner`, `creator`, `name`, `symbol` or `salt` is unset, `rateStart` or an economic dial is out of bounds, or `CONFIG_HASH` is not the hash of the loaded config. runs preflight, then predicts, deploys ControllerV1 and Core (the Core constructor needs code at the hook, pool manager, factory, locker and escrow), launches through the factory and asserts the coin equals the prediction, locks the pool extension slot, hands the token admin role to `owner`, then runs postflight |
+| `Postflight.s.sol` | read only. reads the deployed system back and compares it with the config: core immutables (owner, `RATE_START`, `AUCTION_START_X`, `AUCTION_FLOOR_X`, `DROP_BPS`, `INVENTORY_GATE`, the stack), controller, allowed targets, coin name, symbol and supply and that it sits in the pool, pool key and id, start tick, the launch position ticks through the position manager, skim config on the hook (baseline, bounty, referral cap, lp fee, recipients), the sniper start, end and duration through the mev module, tax config on the token, core tax exempt, token admin equals owner, extension slot locked, locker reward slot, `ethRate` equals `rateStart`, code at the stack. prints the table, a row `not readable on chain` for what no getter exposes (the protocolBps argument, the sniper fee config, token image and metadata, locker data, the deploy fee paid, the salt itself which the coin address check binds), the config hash and the constructor args, reverts on any mismatch. supply, rate and start tick rows are exact only until the first trade or fill, afterwards they turn tolerant. the sniper start and duration are readable only inside the window (30 minutes by default), after it only the end value is |
 | `Resume.s.sol` | finishes a deploy that stopped half way. section 6 |
 
 the five transactions are controller, core, launch through the factory, `lockPoolExtension` and `updateAdmin`. `forge script` simulates all five on a fork first, so a failed check or a revert in the simulation stops the script before anything is sent. nothing of the checks runs on chain: a change between the simulation and the mining (the factory fee, the factory opened) is caught only by a transaction reverting or by step 9, which is why step 9 is not optional. while the factory is deprecated only its owner and marked admins can launch, so nobody can copy the launch to the predicted coin address. never rerun `Deploy` after it stopped: a rerun takes a new nonce, so it deploys a second Core. check `cast nonce $DEPLOYER --rpc-url $MAINNET_RPC_URL` and `cast tx` for any pending transaction first, a transaction pending in the relay can still land.
@@ -91,18 +91,15 @@ constants of the Core (compiled in, not configurable). the owner signs off each 
 | constant | value | meaning |
 |---|---|---|
 | `SUPPLY` | 1,000,000,000e18 | coin supply the exit auction is priced against. must equal the launch supply |
-| `FEE_BPS` | 1000 | the skim as bps of volume, 10 percent. informational, no logic reads it. the live value is `launch.baselineSkimBps` |
-| `CREATOR_BPS` | 50 | the creator share of volume in bps, 0.5 percent. informational, no logic reads it. the live value is `baselineSkimBps` and `bountyBps` |
 | `AVG_SCORE` | 4,330,000 | average credit score at 1e4 scale. one average credit costs `AVG_SCORE * rate / 1e4` wei |
-| `RATE_START_MIN`, `RATE_START_MAX` | 1e11, 1e15 | bounds of the constructor argument `rateStart`, wei per whole point |
+| `RATE_START_MIN_WEI`, `RATE_START_MAX_WEI` | 1e11, 1e15 | bounds of the constructor argument `rateStart`, wei per whole point. defined once in `src/interfaces/Interfaces.sol`, shared by the Core and the scripts, no getter on the Core |
 | `CLIMB_BASE_BPS_PER_HOUR` | 100 | rate climb per hour in the first 24 hours since the last fill |
 | `CLIMB_DOUBLE_EVERY` | 24 hours | the climb doubles every 24 hours without a fill |
 | `CLIMB_MAX_BPS_PER_HOUR` | 800 | top climb, reached after 72 hours without a fill |
-| `DROP_BPS` | 1000 | a fill of `x` from pot `p` drops the rate by `rate * 10% * min(x, p) / p` |
 | `SPEND_CAP_BPS_PER_HOUR` | 2000 | hourly spend cap, 20 percent of the pot at the window open. also the funded threshold and the climb clamp |
 | `BONUS_CAP_BPS` | 2500 | largest controller bonus on a ceiling |
 | `TIP_SAVINGS_BPS`, `TIP_CAP_BPS` | 1000, 200 | `buyListing` keeper tip, 10 percent of savings capped at 2 percent of cost |
-| `AUCTION_START_X`, `AUCTION_FLOOR_X`, `AUCTION_LENGTH` | 40,000, 12,000, 72 hours | statement auction from 4x to 1.2x of cost, linear |
+| `AUCTION_LENGTH` | 72 hours | statement auction length, linear fall from `AUCTION_START_X` to `AUCTION_FLOOR_X`, then flat |
 | `SALE_SPLIT` | 5000 | share of statement sale proceeds to the coin buyback pot |
 | `EXIT_SPLIT` | 5000 | share of exit token from an unsold statement to the buyback pot |
 | `BUYBACK_SLICE`, `BUYBACK_DELAY`, `KEEPER_TIP_BPS` | 1 eth, 25 blocks, 50 | coin buyback slice, minimum block gap, caller tip in bps of the slice |
@@ -113,6 +110,17 @@ constants of the Core (compiled in, not configurable). the owner signs off each 
 | `OVERPRINT_CAP_PER_DAY` | 8 | overprints per day |
 | allowed targets at deploy | Seaport 1.6, CreditStrategy | `buyListing` targets. more only by timelock |
 | forbidden targets | Credits, Statements, Core, coin, hook, pool manager, factory, locker, escrow, Permit2, position manager, universal router, exitModule, exitToken | checked on add and at call time. the stack members come from the config |
+
+economic dials. constructor arguments of the Core, stored as immutables, each with a public view of the same name, each read back by postflight, each in the config file under `econ` and inside `CONFIG_HASH`. the Core rejects a value outside the bounds at construction and preflight rejects it first. the defaults are the engine as specified, so a config that leaves them alone changes nothing. the owner signs off each row.
+
+| key in `econ` (and Core view) | default | bounds | meaning |
+|---|---|---|---|
+| `AUCTION_START_X` | 40000 | [15000, 40000] | opening price of a statement auction in bps of its cost, 40000 is 4x |
+| `AUCTION_FLOOR_X` | 12000 | [6000, 12000], strictly below `AUCTION_START_X` | the lowest price a statement is ever sold at, bps of cost, 12000 is 1.2x. SPEC invariant 3: no statement is sold below it. the auction falls linearly from the start to this over `AUCTION_LENGTH`, then stays flat |
+| `DROP_BPS` | 1000 | [1000, 4000] | a fill of `x` from pot `p` drops the eth rate by `rate * DROP_BPS / 10000 * min(x, p) / p` |
+| `INVENTORY_GATE` | 0 | 0 (off) or [5, 200] | a count of eth lane statements. while the Core holds this many or more eth lane statements for sale, `sellForEth` and `buyListing` revert `GateClosed` and the eth rate does not climb, exactly like unfunded time. buying resumes when a statement sale, an exit or an overprint brings the count below the gate. composing, statement sales, the buybacks, exits and the exit token lane are never gated. the live count is `ethHeld()` |
+
+there are two config files that differ only in these four values: `script/config/mainnet.json` (the engine as specified: 40000, 12000, 1000, 0) and `script/config/mainnet.recommended.json` (the `gate20constants` row of docs/SIMULATION.md section 9: 20000, 8000, 2000, gate 20). the operator picks one file in step 1 (`cp` it to `local.json`), nothing else in the two files differs. a test (`test_recommendedDiffersOnlyInTheEconKeys`) keeps it that way.
 
 config values (`script/config/mainnet.json`). the owner signs off each row.
 
@@ -162,26 +170,30 @@ pinned rules. preflight fails (and `Deploy` stops) on any value outside them. ea
 | `owner`, `creator` | not the dead address, a stack address, the mev module or the factory owner. WARN when they are equal or when one is the deployer | none |
 | `supply` | the Core `SUPPLY` constant | none |
 | `rateStart` | [1e11, 1e15], the Core limits | none |
+| `econ.AUCTION_START_X`, `econ.AUCTION_FLOOR_X` | [15000, 40000] and [6000, 12000], the floor strictly below the start | none |
+| `econ.DROP_BPS` | [1000, 4000] | none |
+| `econ.INVENTORY_GATE` | 0 or [5, 200] | none |
 
 a change of a pinned value means editing `script/Checks.sol` on purpose, in a reviewed commit. a pinned rule cannot know a value that is plausible but not the intended one (another start price, another opening bid, `owner` and `creator` swapped). those are covered by the sign off: preflight prints the `signoff:` rows, the owner signs them, and `CONFIG_HASH` (keccak256 of the canonical abi encoding of the whole config and the token creation code) is the one value `Deploy` needs in its env. any later edit of the file changes the hash and `Deploy` reverts with `ConfigHashMismatch`. the overrides are inside the hash too.
 
-what the sign off table covers: owner (Core owner and token admin), creator (0.5 point leg and lp rewards), the deployer, the skim bounty and referral payout that point to the Core, the protocol leg that points to the creator, the tax and burn address, the opening bid, and the economics line (skim, bounty, sniper, tax).
+what the sign off table covers: owner (Core owner and token admin), creator (0.5 point leg and lp rewards), the deployer, the skim bounty and referral payout that point to the Core, the protocol leg that points to the creator, the tax and burn address, the opening bid, the auction line (start and floor), the rate drop, the inventory gate line, and the economics line (skim, bounty, sniper, tax).
 
 ## 3. verify on etherscan
 
 the compiler settings are in `foundry.toml`: solc 0.8.30, evm cancun, via ir, optimizer 200 runs, `bytecode_hash = "none"`. the two contracts we own are ControllerV1 and Core. the coin, hook, factory and locker are artcoins contracts and verify on their own.
 
-the constructor arguments of the Core are `(owner, coin, controller, stack, rateStart)`, where `stack` is the tuple `(poolManager, hook, tickSpacing, poolFee, factory, locker, escrow)`. every member is a static type, so the tuple is encoded inline. postflight prints the exact hex read back from the deployed immutables, and a test (`test_coreConstructorArgsReadBack`) keeps that encoding equal to `abi.encode` of the inputs. the same bytes by hand:
+the constructor arguments of the Core are `(owner, coin, controller, stack, rateStart, econ)`, where `stack` is the tuple `(poolManager, hook, tickSpacing, poolFee, factory, locker, escrow)` and `econ` is the tuple `(AUCTION_START_X, AUCTION_FLOOR_X, DROP_BPS, INVENTORY_GATE)`. every member is a static type, so the tuples are encoded inline. postflight prints the exact hex read back from the deployed immutables, and a test (`test_coreConstructorArgsReadBack`) keeps that encoding equal to `abi.encode` of the inputs. the same bytes by hand:
 
 ```sh
 export POOL_MANAGER=$(jq -r .stack.poolManager $LAUNCH_CONFIG) HOOK=$(jq -r .stack.hook $LAUNCH_CONFIG)
 export LOCKER=$(jq -r .stack.locker $LAUNCH_CONFIG) ESCROW=$(jq -r .stack.escrow $LAUNCH_CONFIG)
 export RATE_START=$(jq -r .rateStart $LAUNCH_CONFIG)   # OWNER, FACTORY, CORE, COIN, CONTROLLER as in sections 0 and 1
+export ECON="($(jq -r '.econ | "\(.AUCTION_START_X),\(.AUCTION_FLOOR_X),\(.DROP_BPS),\(.INVENTORY_GATE)"' $LAUNCH_CONFIG))"
 ARGS=$(cast abi-encode \
-  "constructor(address,address,address,(address,address,int24,uint24,address,address,address),uint256)" \
+  "constructor(address,address,address,(address,address,int24,uint24,address,address,address),uint256,(uint256,uint256,uint256,uint256))" \
   $OWNER $COIN $CONTROLLER \
   "($POOL_MANAGER,$HOOK,200,8388608,$FACTORY,$LOCKER,$ESCROW)" \
-  $RATE_START)
+  $RATE_START "$ECON")
 
 forge verify-contract $CORE src/Core.sol:Core --chain 1 --watch \
   --compiler-version 0.8.30 --evm-version cancun --num-of-optimizations 200 --via-ir \

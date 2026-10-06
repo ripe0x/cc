@@ -305,7 +305,7 @@ contract ReviewDeployTest is Test, SystemDeployer {
         address coinAt = predictCoin(c, deployer, coreAt);
         vm.startPrank(deployer);
         st.controller = address(new ControllerV1(coreAt));
-        if (n >= 2) st.core = address(new Core(c.owner, coinAt, st.controller, c.stack, c.rateStart));
+        if (n >= 2) st.core = address(new Core(c.owner, coinAt, st.controller, c.stack, c.rateStart, c.econ));
         IArtCoinsFactory f = IArtCoinsFactory(c.stack.factory);
         if (n >= 3) {
             st.coin = f.deployTokenWithProtocolBpsAndTax{value: f.deployFee()}(
@@ -534,12 +534,12 @@ contract ReviewDeployTest is Test, SystemDeployer {
         Stack memory st = base.stack;
         st.hook = makeAddr("hook");
         vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, st.hook));
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12);
+        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, Mainnet.defaultEcon());
         st = base.stack;
         st.escrow = makeAddr("escrow");
         vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, st.escrow));
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12);
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), base.stack, 4e12);
+        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, Mainnet.defaultEcon());
+        new Core(owner, makeAddr("coin"), makeAddr("ctl"), base.stack, 4e12, Mainnet.defaultEcon());
     }
 
     function parse(string memory j) external view returns (LaunchConfig memory) {
@@ -723,7 +723,7 @@ contract ReviewFundedTest is Fixture {
     function _newCore(uint256 rate) internal returns (Core c) {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
         ControllerV1 ctl2 = new ControllerV1(predicted);
-        c = new Core(owner, address(coin), address(ctl2), Mainnet.defaultStack(), rate);
+        c = new Core(owner, address(coin), address(ctl2), Mainnet.defaultStack(), rate, Mainnet.defaultEcon());
         assertEq(address(c), predicted);
     }
 
@@ -793,11 +793,11 @@ contract ReviewFundedTest is Fixture {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         Stack memory st = Mainnet.defaultStack();
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), predicted, st, 1e11 - 1);
+        new Core(owner, address(coin), predicted, st, 1e11 - 1, Mainnet.defaultEcon());
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), predicted, st, 1e15 + 1);
-        Core lo = new Core(owner, address(coin), predicted, st, 1e11);
-        Core hi = new Core(owner, address(coin), address(1), st, 1e15);
+        new Core(owner, address(coin), predicted, st, 1e15 + 1, Mainnet.defaultEcon());
+        Core lo = new Core(owner, address(coin), predicted, st, 1e11, Mainnet.defaultEcon());
+        Core hi = new Core(owner, address(coin), address(1), st, 1e15, Mainnet.defaultEcon());
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.ethRate(), 1e15);
         // funded thresholds: five average credits at the rate

@@ -2,10 +2,25 @@
 pragma solidity ^0.8.28;
 
 import {CommonBase} from "forge-std/Base.sol";
-import {Stack, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
+import {
+    Stack,
+    Econ,
+    Mainnet,
+    RATE_START_MIN_WEI,
+    RATE_START_MAX_WEI,
+    AUCTION_START_X_MIN,
+    AUCTION_START_X_MAX,
+    AUCTION_FLOOR_X_MIN,
+    AUCTION_FLOOR_X_MAX,
+    DROP_BPS_MIN,
+    DROP_BPS_MAX,
+    INVENTORY_GATE_MIN,
+    INVENTORY_GATE_MAX
+} from "../src/interfaces/Interfaces.sol";
 
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
-/// memory by the tests. nothing here is read by `src/`: the Core takes `stack` and `rateStart` as constructor arguments
+/// memory by the tests. nothing here is read by `src/`: the Core takes `stack`, `rateStart` and `econ` as constructor
+/// arguments
 struct LaunchConfig {
     // the artcoins stack. the only block that changes when a new artcoins version ships
     Stack stack;
@@ -19,6 +34,8 @@ struct LaunchConfig {
     bytes32 salt;
     // core
     uint256 rateStart;
+    /// the four economic dials: auction start and floor, rate drop, inventory gate
+    Econ econ;
     // launch parameters
     uint256 supply;
     int24 startTick;
@@ -62,6 +79,7 @@ abstract contract ConfigReader is CommonBase {
         c.mevModule = Mainnet.MEV_LINEAR_SKIM;
         c.factoryOwner = Mainnet.ARTCOINS_FACTORY_OWNER;
         c.rateStart = 5_600_000_000_000;
+        c.econ = Mainnet.defaultEcon();
         c.supply = 1_000_000_000e18;
         c.startTick = -175_000;
         c.positionLower = -175_000;
@@ -104,6 +122,12 @@ abstract contract ConfigReader is CommonBase {
         c.symbol = vm.parseJsonString(j, ".symbol");
         c.salt = vm.parseJsonBytes32(j, ".salt");
         c.rateStart = vm.parseJsonUint(j, ".rateStart");
+        c.econ = Econ({
+            auctionStartX: vm.parseJsonUint(j, ".econ.AUCTION_START_X"),
+            auctionFloorX: vm.parseJsonUint(j, ".econ.AUCTION_FLOOR_X"),
+            dropBps: vm.parseJsonUint(j, ".econ.DROP_BPS"),
+            inventoryGate: vm.parseJsonUint(j, ".econ.INVENTORY_GATE")
+        });
         _loadLaunch(c, j);
         // the overrides are optional, a missing key means false
         c.allowBounty = _flag(j, ".overrides.bounty");
@@ -179,5 +203,27 @@ abstract contract ConfigReader is CommonBase {
 
     function rateInBounds(LaunchConfig memory c) internal pure returns (bool) {
         return c.rateStart >= RATE_START_MIN && c.rateStart <= RATE_START_MAX;
+    }
+
+    /// @notice the four economic dials sit inside the bounds the Core enforces, the floor strictly below the start
+    function auctionInBounds(LaunchConfig memory c) internal pure returns (bool) {
+        Econ memory e = c.econ;
+        return e.auctionStartX >= AUCTION_START_X_MIN && e.auctionStartX <= AUCTION_START_X_MAX
+            && e.auctionFloorX >= AUCTION_FLOOR_X_MIN && e.auctionFloorX <= AUCTION_FLOOR_X_MAX
+            && e.auctionFloorX < e.auctionStartX;
+    }
+
+    function dropInBounds(LaunchConfig memory c) internal pure returns (bool) {
+        return c.econ.dropBps >= DROP_BPS_MIN && c.econ.dropBps <= DROP_BPS_MAX;
+    }
+
+    /// @notice zero means the gate is off
+    function gateInBounds(LaunchConfig memory c) internal pure returns (bool) {
+        uint256 g = c.econ.inventoryGate;
+        return g == 0 || (g >= INVENTORY_GATE_MIN && g <= INVENTORY_GATE_MAX);
+    }
+
+    function econInBounds(LaunchConfig memory c) internal pure returns (bool) {
+        return auctionInBounds(c) && dropInBounds(c) && gateInBounds(c);
     }
 }

@@ -344,7 +344,7 @@ contract ReviewPort is Fixture {
         address coinAt = predictCoin(deployer, coreAt, "Victim", "VIC", salt);
         vm.startPrank(deployer);
         ControllerV1 c2 = new ControllerV1(coreAt);
-        Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart);
+        Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart, lc.econ);
         vm.stopPrank();
         assertEq(address(core2), coreAt);
 

@@ -82,6 +82,26 @@ interface ICreditStrategy {
 uint256 constant RATE_START_MIN_WEI = 1e11;
 uint256 constant RATE_START_MAX_WEI = 1e15;
 
+// bounds of the four economic constructor arguments of the Core (`Econ`). one definition for the Core and the scripts
+uint256 constant AUCTION_START_X_MIN = 15_000;
+uint256 constant AUCTION_START_X_MAX = 40_000;
+uint256 constant AUCTION_FLOOR_X_MIN = 6_000;
+uint256 constant AUCTION_FLOOR_X_MAX = 12_000;
+uint256 constant DROP_BPS_MIN = 1_000;
+uint256 constant DROP_BPS_MAX = 4_000;
+uint256 constant INVENTORY_GATE_MIN = 5;
+uint256 constant INVENTORY_GATE_MAX = 200;
+
+/// the economic dials of a launch, fixed at deploy. the defaults (40_000, 12_000, 1_000, 0) are the engine as specified.
+/// start and floor are bps of a statement's cost, the floor is strictly below the start. `inventoryGate` is a count of
+/// eth lane statements held for sale: 0 is off, otherwise [5, 200]
+struct Econ {
+    uint256 auctionStartX;
+    uint256 auctionFloorX;
+    uint256 dropBps;
+    uint256 inventoryGate;
+}
+
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
 /// `hook` is the only address whose eth the Core books as fees. the rest feed the pool key and the forbidden targets
 struct Stack {
@@ -119,6 +139,11 @@ library Mainnet {
     /// the dynamic fee flag every artcoins pool uses, and its tick spacing
     uint24 internal constant POOL_FEE = 0x800000;
     int24 internal constant TICK_SPACING = 200;
+
+    /// the default economics: the engine as specified, gate off
+    function defaultEcon() internal pure returns (Econ memory) {
+        return Econ({auctionStartX: 40_000, auctionFloorX: 12_000, dropBps: 1_000, inventoryGate: 0});
+    }
 
     /// the default stack: the live artcoins deployment
     function defaultStack() internal pure returns (Stack memory) {

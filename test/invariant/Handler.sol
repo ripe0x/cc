@@ -83,7 +83,7 @@ contract Handler is Test {
     uint256 internal constant V_X_IN = 4; // exit token arrived in the core beyond what the action explains
     uint256 internal constant V_ABOVE_CAP = 5; // a credit was bought above score * rate * (1 + bonus cap)
     uint256 internal constant V_TIP = 6; // a tip above min(10% of savings, 2% of cost)
-    uint256 internal constant V_SALE_FLOOR = 7; // a statement sold below 1.2x its cost
+    uint256 internal constant V_SALE_FLOOR = 7; // a statement sold below AUCTION_FLOOR_X of its cost
     uint256 internal constant V_DEPART = 8; // a statement left the core without a recorded legal exit
     uint256 internal constant V_EXIT_SHORT = 9; // an exit that returned less than rating * unit per point
     uint256 internal constant V_MODEL = 10; // the core disagrees with the handler's ghost model
@@ -103,7 +103,8 @@ contract Handler is Test {
     uint256 internal constant V_RECEIVE = 24; // the core's receive() reverted, or a swap failed for an unexplained reason
     uint256 internal constant V_SUPPLY = 25; // coin supply differs from the ghost, or rose
     uint256 internal constant V_AUCTION = 26; // the exit token auction broke its price, slice or restart rules
-    uint256 internal constant N_VIOL = 27;
+    uint256 internal constant V_GATE = 27; // the eth bid was open while gated, closed while not, or the gate counter drifted
+    uint256 internal constant N_VIOL = 28;
 
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
@@ -194,6 +195,9 @@ contract Handler is Test {
     mapping(uint256 => CG) public cg;
     uint256[] internal cgList;
     uint256[2] public pileCount;
+
+    /// buys the core refused with GateClosed while the gate was closed, in this run
+    uint256 public gateRefusals;
 
     // ghost statements
     struct SG {
@@ -540,6 +544,13 @@ contract Handler is Test {
         }
     }
 
+    /// the inventory gate is on and the core holds at least INVENTORY_GATE eth lane statements, from the immutables
+    /// and the counter, checked against the held list by the invariants
+    function _gatedNow() internal view returns (bool) {
+        uint256 g = core.INVENTORY_GATE();
+        return g != 0 && core.ethHeld() >= g;
+    }
+
     struct RS {
         uint256 rate;
         uint256 pot;
@@ -549,15 +560,18 @@ contract Handler is Test {
     function _rs() internal view returns (RS memory s) {
         s.rate = core.ethRate();
         s.pot = core.ethPot();
-        s.funded = s.pot * 2000 >= core.AVG_SCORE() * s.rate;
+        // an interval that begins gated is treated exactly like one that begins unfunded
+        s.funded = s.pot * 2000 >= core.AVG_SCORE() * s.rate && !_gatedNow();
     }
 
-    /// invariant 6 and its companions. the rate may not rise in an interval that began unfunded. across a
+    /// invariant 6 and its companions. the rate may not rise in an interval that began unfunded or gated. across a
     /// warp it may not climb faster than 8 percent an hour and, while funded and under the clamp, not slower
     /// than 1 percent an hour. the stored funded flag must agree with the pot and the rate.
     function _rsCheck(RS memory s, uint256 dt) internal {
         uint256 rate1 = core.ethRate();
-        if (!s.funded && rate1 > s.rate) _flag(V_RATE_UNFUNDED, "rate rose in an interval that began unfunded");
+        if (!s.funded && rate1 > s.rate) {
+            _flag(V_RATE_UNFUNDED, "rate rose in an interval that began unfunded or gated");
+        }
         if (dt == 0) {
             if (rate1 > s.rate) _flag(V_RATE_BOUND, "rate rose with no time passing");
         } else {
@@ -615,8 +629,8 @@ contract Handler is Test {
     }
 
     /// what the rate becomes after a spend of x from pot p.
-    function _dropped(uint256 r, uint256 x, uint256 p) internal pure returns (uint256) {
-        return r - r * 1000 * x / (10_000 * p);
+    function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
+        return r - r * core.DROP_BPS() * x / (10_000 * p);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -891,18 +905,36 @@ contract Handler is Test {
             p.score[i] = _score(ids[i]);
         }
         RS memory rs = _rs();
+        bool gated = _gatedNow();
         vm.recordLogs();
         _att(a);
         vm.prank(who);
         try core.sellForEth(ids) {
+            if (gated) _flag(V_GATE, "sellForEth went through while the gate was closed");
             _ok(a);
             _afterSell(who, ids, p);
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "sellForEth");
+            _gateReason(gated, why);
             // a hostile controller may answer differently each time it is asked, which moves the ceiling
-            if (!overshoot && !dup && !_hostileNow()) _unexpected(a, why);
+            if (!overshoot && !dup && !_hostileNow() && !gated) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
+    }
+
+    /// while the gate is closed a buy reverts with GateClosed (the other guards that run before it are not tripped by
+    /// the handler's calls), and while it is open it never does
+    function _gateReason(bool gated, bytes memory why) internal {
+        bool isGate = why.length >= 4 && bytes4(why) == Core.GateClosed.selector;
+        if (isGate && gated) {
+            gateRefusals++;
+            string memory key = string.concat("INV_", tag, "_gaterefusals");
+            vm.setEnv(key, vm.toString(vm.envOr(key, uint256(0)) + 1));
+        }
+        if (isGate && !gated) _flag(V_GATE, "GateClosed while the gate is open");
+        if (gated && !isGate && !_hostileNow()) {
+            _flag(V_GATE, "a closed bid reverted for another reason than GateClosed");
+        }
     }
 
     function _afterSell(address who, uint256[] memory ids, SellPre memory p) internal {
@@ -1041,14 +1073,17 @@ contract Handler is Test {
         p.ceiling = core.ceilingOf(id);
         p.score = _score(id);
         RS memory rs = _rs();
+        bool gated = _gatedNow();
         _att(a);
         vm.prank(keeper);
         try core.buyListing(value, data, id, target) {
+            if (gated) _flag(V_GATE, "buyListing went through while the gate was closed");
             _ok(a);
             _afterListing(a, id, value, expectCost, p);
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "buyListing");
-            if (expect) _unexpected(a, why);
+            _gateReason(gated, why);
+            if (expect && !gated) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
     }
@@ -1299,8 +1334,12 @@ contract Handler is Test {
         _eth(p.bal, 0, paid, "buyStatement");
         SG storage g = _sg[sid];
         // invariant 3: the price paid against the ghost cost basis
-        if (paid * 10_000 < g.cost * 12_000) _flag(V_SALE_FLOOR, "statement sold below 1.2x its cost");
-        if (paid * 10_000 > g.cost * 40_000 + 10_000) _flag(V_SALE_FLOOR, "statement sold above 4x its cost");
+        if (paid * 10_000 < g.cost * core.AUCTION_FLOOR_X()) {
+            _flag(V_SALE_FLOOR, "statement sold below AUCTION_FLOOR_X of its cost");
+        }
+        if (paid * 10_000 > g.cost * core.AUCTION_START_X() + 10_000) {
+            _flag(V_SALE_FLOOR, "statement sold above AUCTION_START_X of its cost");
+        }
         if (g.cost != p.cost) _flag(V_MODEL, "statement cost basis differs from the ghost");
         uint256 toBuyback = paid * 5000 / 10_000;
         if (core.ethToBuyback() != p.toBuyback + toBuyback) _flag(V_POT, "sale buyback share is not half");

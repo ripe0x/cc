@@ -77,7 +77,7 @@ see the header of `test/invariant/Invariants.t.sol` for how to run them.
 
 warning: open items in SPEC section 14 and the owner confirmations in docs/ARCHITECTURE.md section 10 must be settled first.
 
-the system launches on whichever artcoins version is current at deploy time. the artcoins stack (pool manager, hook, tick spacing, pool fee, factory, locker, escrow) and the opening bid `rateStart` are constructor arguments of the Core, so a new artcoins version changes only the stack block of `script/config/mainnet.json`. the live stack at the pin is the default config.
+the system launches on whichever artcoins version is current at deploy time. the artcoins stack (pool manager, hook, tick spacing, pool fee, factory, locker, escrow) and the opening bid `rateStart` are constructor arguments of the Core, so a new artcoins version changes only the stack block of `script/config/mainnet.json`. the live stack at the pin is the default config. four economic dials (`AUCTION_START_X`, `AUCTION_FLOOR_X`, `DROP_BPS`, `INVENTORY_GATE`) are constructor arguments too, under `econ` in the config. the defaults are the engine as specified, `script/config/mainnet.recommended.json` is the same file with the simulation's recommended values, see docs/DEPLOY.md section 2.
 
 everything a launch needs is in a config file: copy `script/config/mainnet.json` to the gitignored `script/config/local.json` and point `LAUNCH_CONFIG` at it. owner, creator, name, symbol and salt are placeholders that must be filled before a launch, the deploy refuses to run while any is unset, or unless `CONFIG_HASH` (printed by preflight) matches the file. secrets come from the environment only (`PRIVATE_KEY`, `ETHERSCAN_API_KEY`). the full runbook is docs/DEPLOY.md.
 

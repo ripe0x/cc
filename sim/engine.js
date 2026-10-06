@@ -45,7 +45,7 @@ export const SIM_DEFAULTS = {
   seed: 7,
   days: 90,
   rateStart: 4e12,
-  inventoryGate: 0, // design change under test: stop buying while this many statements are unsold, 0 is the Core
+  inventoryGate: 0, // INVENTORY_GATE of the Core: while this many eth lane statements are held for sale the bid is closed and the rate does not climb, 0 is off
   bidMode: 'perPoint', // 'perPoint' is the Core, 'flat' is a counterfactual that pays avg score for every credit
   fundedRule: 'new', // 'new' = 20 percent of the pot affords one average credit, 'old' = the pot affords one
   baselineSkimBps: 10000, // of 100000
@@ -761,7 +761,7 @@ export function simulate(userParams = {}) {
       if (book.length > 6000) book = book.slice(book.length - 6000); // keep the cheapest to clear
     }
     // the engine acts
-    if (p.inventoryGate > 0) core.setGate(stmts.length + ethPile.length / p.PAGE >= p.inventoryGate, t0);
+    if (p.inventoryGate > 0) core.setGate(stmts.length >= p.inventoryGate, t0); // INVENTORY_GATE in the Core: eth lane statements held for sale, nothing else counts
     const capBefore = core.capHits;
     peffNow = Pe;
     const spentEth = core.gated ? 0 : engineBuys(t1, Pe);

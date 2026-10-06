@@ -78,8 +78,6 @@ contract CoreUnitTest is CoreBase {
 
     function test_parameters() public view {
         assertEq(core.SUPPLY(), 1_000_000_000e18);
-        assertEq(core.FEE_BPS(), 1000);
-        assertEq(core.CREATOR_BPS(), 50);
         assertEq(core.AVG_SCORE(), 4_330_000);
         assertEq(core.RATE_START(), 4e12);
         assertEq(core.CLIMB_BASE_BPS_PER_HOUR(), 100);
@@ -131,11 +129,11 @@ contract CoreUnitTest is CoreBase {
         Stack memory st = lc.stack;
         uint256 r = lc.rateStart;
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(address(0), address(coin), address(ctl), st, r);
+        new Core(address(0), address(coin), address(ctl), st, r, Mainnet.defaultEcon());
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(owner, address(0), address(ctl), st, r);
+        new Core(owner, address(0), address(ctl), st, r, Mainnet.defaultEcon());
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(owner, address(coin), address(0), st, r);
+        new Core(owner, address(coin), address(0), st, r, Mainnet.defaultEcon());
         // every address of the stack is required
         for (uint256 i; i < 5; ++i) {
             Stack memory bad =
@@ -146,16 +144,16 @@ contract CoreUnitTest is CoreBase {
             if (i == 3) bad.locker = address(0);
             if (i == 4) bad.escrow = address(0);
             vm.expectRevert(Core.ZeroAddress.selector);
-            new Core(owner, address(coin), address(ctl), bad, r);
+            new Core(owner, address(coin), address(ctl), bad, r, Mainnet.defaultEcon());
         }
         Stack memory flat = Stack(st.poolManager, st.hook, 0, st.poolFee, st.factory, st.locker, st.escrow);
         vm.expectRevert(Core.BadStack.selector);
-        new Core(owner, address(coin), address(ctl), flat, r);
+        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
         flat.tickSpacing = 32_768;
         vm.expectRevert(Core.BadStack.selector);
-        new Core(owner, address(coin), address(ctl), flat, r);
+        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
         flat.tickSpacing = 32_767;
-        new Core(owner, address(coin), address(ctl), flat, r);
+        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
     }
 
     /// every stack member must be a contract, the coin is not checked (it does not exist yet)
@@ -172,24 +170,20 @@ contract CoreUnitTest is CoreBase {
             if (i == 3) bad.locker = nobody;
             if (i == 4) bad.escrow = nobody;
             vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, nobody));
-            new Core(owner, address(coin), address(ctl), bad, r);
+            new Core(owner, address(coin), address(ctl), bad, r, Mainnet.defaultEcon());
         }
         // the coin has no code at construction time and that is fine
-        new Core(owner, nobody, address(ctl), st, r);
+        new Core(owner, nobody, address(ctl), st, r, Mainnet.defaultEcon());
     }
 
     /// the opening bid is a deploy input bounded to [1e11, 1e15] wei per whole point
     function test_rateStartBounds() public {
-        assertEq(core.RATE_START_MIN(), 1e11);
-        assertEq(core.RATE_START_MAX(), 1e15);
-        assertEq(core.RATE_START_MIN(), RATE_START_MIN);
-        assertEq(core.RATE_START_MAX(), RATE_START_MAX);
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), address(ctl), lc.stack, 1e11 - 1);
+        new Core(owner, address(coin), address(ctl), lc.stack, 1e11 - 1, Mainnet.defaultEcon());
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), address(ctl), lc.stack, 1e15 + 1);
-        Core lo = new Core(owner, address(coin), address(ctl), lc.stack, 1e11);
-        Core hi = new Core(owner, address(coin), address(ctl), lc.stack, 1e15);
+        new Core(owner, address(coin), address(ctl), lc.stack, 1e15 + 1, Mainnet.defaultEcon());
+        Core lo = new Core(owner, address(coin), address(ctl), lc.stack, 1e11, Mainnet.defaultEcon());
+        Core hi = new Core(owner, address(coin), address(ctl), lc.stack, 1e15, Mainnet.defaultEcon());
         assertEq(lo.RATE_START(), 1e11);
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.RATE_START(), 1e15);
@@ -204,7 +198,7 @@ contract CoreUnitTest is CoreBase {
         for (uint160 a = 0x1111; a <= 0x5555; a += 0x1111) {
             vm.etch(address(a), hex"00");
         }
-        Core c2 = new Core(owner, address(coin), address(ctl), other, lc.rateStart);
+        Core c2 = new Core(owner, address(coin), address(ctl), other, lc.rateStart, lc.econ);
         assertEq(address(c2.MANAGER()), address(0x1111));
         assertEq(c2.HOOK(), address(0x2222));
         assertEq(c2.TICK_SPACING(), 60);
