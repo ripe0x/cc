@@ -474,21 +474,36 @@ contract Phase2FlexTest is Fixture {
         _solvent();
     }
 
-    /// @dev with nothing for sale the stored start may be reset from the new unit and is never lower than before
-    function test_auction_emptyPotStartResetsFromTheNewUnitButNeverLower() public {
+    /// @dev a later set never touches the stored start price or the clock, with or without something for sale: the
+    /// price is coin per exit token, the unit only changes the slice
+    function test_auction_laterSetNeverTouchesStartPriceOrClock() public {
         _enterPhase2();
         uint256 start0 = core.SUPPLY() * 1e18 / _full(UNIT);
+        uint64 at0 = core.xStartTime();
         assertEq(core.xStartPrice(), start0);
-        // a higher unit asks for a smaller price per exit token: the stored start stays
-        _replace(address(_mod(4e10)));
-        assertLe(core.SUPPLY() * 1e18 / _full(4e10), start0);
-        assertEq(core.xStartPrice(), start0, "never lower than it was");
-        assertEq(core.xStartTime(), block.timestamp);
-        // a lower unit asks for more per exit token: the start follows it up
-        _replace(address(_mod(1e9)));
-        assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / _full(1e9));
-        assertGt(core.xStartPrice(), start0);
-        assertEq(core.exitAuctionPrice(), core.xStartPrice(), "stopped clock, the start is the price");
+        uint256[3] memory units = [uint256(4e10), 1e9, UNIT];
+        for (uint256 i; i < 3; ++i) {
+            _replace(address(_mod(units[i])));
+            assertEq(core.xStartPrice(), start0, "start price untouched");
+            assertEq(core.xStartTime(), at0, "clock untouched");
+            assertEq(core.exitAuctionPrice(), start0, "stopped clock, the start is the price");
+        }
+    }
+
+    /// @dev the first set may be preceded by a dormant allowed target flag of the module: the set clears it
+    function test_replace_dormantTargetFlagIsClearedByTheSet() public {
+        xt = new MockExitToken("Exit Token", "XT");
+        mod = new MockExitModule(address(xt), UNIT);
+        _allow(address(mod));
+        assertTrue(core.allowedTarget(address(mod)));
+        _replace(address(mod));
+        assertFalse(core.allowedTarget(address(mod)), "cleared by the first set");
+        MockExitModule m2 = _mod(2e10);
+        _allow(address(m2));
+        _replace(address(m2));
+        assertFalse(core.allowedTarget(address(m2)), "cleared by a later set");
+        _replace(address(mod));
+        assertFalse(core.allowedTarget(address(m2)), "and it does not come back");
     }
 
     // ------------------------------------------------------------------ exit lane buyback share

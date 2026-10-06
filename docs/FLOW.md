@@ -106,8 +106,9 @@ the real exit module interface is still unknown. the adapter is written later. t
 
 rules for a later set (the first set behaves as before):
 * same validity checks as the first set on the module and on the unit (code, forbidden targets, unit range, the opening price floor of the exit auction computed with the new unit).
+* a set clears `allowedTarget` of the new module, so a flag set earlier cannot come back to life after the module is replaced.
 * checkpoint the exit rate under the OLD unit before the unit changes, resync the funded flag after. no climb is credited under the wrong numbers.
-* the exit auction price is coin per exit token and does not depend on the unit, only the slice size does. a set must never make `buybackExit` cheaper than it was the moment before: keep the running price and clock when `xToBuyback` is not zero. when it is zero, the stored start price may be reset from the new unit.
+* the exit auction price is coin per exit token and does not depend on the unit, only the slice size does. a set must never make `buybackExit` cheaper than it was the moment before: a later set never touches `xStartPrice` or `xStartTime`, whether `xToBuyback` is zero or not: the price is found by the market and the unit only changes the slice size, so no rescale is applied. the first set opens the auction as before.
 * pots, piles, held statements and the pending timelock queue are untouched. two queued sets may both run.
 * `ExitModuleSet` is emitted every time.
 * the old module stops being a forbidden target, the new one is forbidden at call time as today.

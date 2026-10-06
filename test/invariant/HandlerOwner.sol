@@ -535,7 +535,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// exit token and a new unit, the same address again after its unit changed, the same address and unit, and the
     /// refused ones (another exit token, no unit, a unit the opening price floor refuses, no code). the action queues,
     /// tries to run early (TooEarly), waits the 7 days and executes. a good set keeps the pots, the balances and the
-    /// exit auction price, credits the exit rate under the old unit, resyncs the funded flag, reads the unit again and
+    /// exit auction price and clock, credits the exit rate under the old unit, resyncs the funded flag, reads the unit again and
     /// switches the handler to the new module. a refused one changes nothing
     function replaceModule(uint256 seed, uint256 mode) external checked {
         uint8 a = A_REPLACE_MODULE;
@@ -613,12 +613,10 @@ abstract contract HandlerOwner is HandlerHouse {
         _xFundedCheck();
         // the price is coin per exit token: kept whatever the unit, and the clock too while there is something to sell
         if (core.exitAuctionPrice() < p.xPrice) _flag(V_AUCTION, "a module set made the exit auction cheaper");
-        if (p.xToBuyback != 0) {
-            if (core.exitAuctionPrice() != p.xPrice || core.xStartPrice() != start0 || core.xStartTime() != at0) {
-                _flag(V_AUCTION, "a module set moved the running exit auction");
-            }
-        } else if (core.xStartPrice() < start0) {
-            _flag(V_AUCTION, "a module set lowered the stored start of an empty exit auction");
+        // a later set never touches the start price or the clock, with or without something for sale
+        if (core.exitAuctionPrice() != p.xPrice || core.xStartPrice() != start0 || core.xStartTime() != at0) {
+            _flag(V_AUCTION, "a module set moved the exit auction");
         }
+        if (core.allowedTarget(address(next))) _flag(V_OWNER, "a module set left the allowed target flag of the module");
     }
 }

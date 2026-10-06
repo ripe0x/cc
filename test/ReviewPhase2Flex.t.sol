@@ -240,10 +240,10 @@ contract ReviewPhase2FlexTest is Fixture {
 
     // ------------------------------------------------------------------ slice size against the price
 
-    /// FINDING RP-1: the price per exit token is kept across a set but the slice follows the unit, and the price
+    /// ACCEPTED RP-1 (see the runbook in docs/DEPLOY.md, changing the exit module or its unit): the price per exit token is kept across a set but the slice follows the unit, and the price
     /// doubles per fill. after a unit rise the whole pot goes in fewer, bigger fills, so draining it costs less per exit
     /// token than the moment before. a buyer can queue behind the public timelock and take it in the block of the set
-    function test_FINDING_unitRiseDrainsThePotCheaperPerExitToken() public {
+    function test_ACCEPTED_unitRiseDrainsThePotCheaperPerExitToken() public {
         bytes memory data = _setupDrain(1e12);
         uint256 snap = vm.snapshotState();
         (uint256 paid0, uint256 got0) = _drain();
@@ -259,9 +259,9 @@ contract ReviewPhase2FlexTest is Fixture {
         assertLt(avg1, avg0, "cheaper per exit token for the same pot");
     }
 
-    /// FINDING RP-1b: a unit fall shrinks the slice at the same price per exit token, so one full slice costs less coin
+    /// ACCEPTED RP-1b (runbook in docs/DEPLOY.md): a unit fall shrinks the slice at the same price per exit token, so one full slice costs less coin
     /// by the same factor as the unit fell, while each exit token now stands for more points
-    function test_FINDING_unitFallCutsTheCoinCostOfAFullSlice() public {
+    function test_ACCEPTED_unitFallCutsTheCoinCostOfAFullSlice() public {
         bytes memory data = _setupDrain(1e9);
         (, uint256 coinBefore) = core.exitAuctionQuote();
         (uint256 sliceBefore,) = core.exitAuctionQuote();
@@ -274,51 +274,49 @@ contract ReviewPhase2FlexTest is Fixture {
         assertApproxEqRel(coinAfter * 10, coinBefore, 1e15, "a slice costs a tenth of the coin");
     }
 
-    // ------------------------------------------------------------------ the stored start price only ratchets up
+    // ------------------------------------------------------------------ a later set never touches the start price
 
-    /// FINDING RP-2: with nothing for sale the start price is max(new, stored). a mistaken low unit raises it and a later
-    /// repair to the right unit cannot bring it back. the next injection anchors at the poisoned price
-    function test_FINDING_startPriceRatchetKeepsAMistakenLowUnit() public {
+    /// FIXED RP-2: a later set never touches the stored start price or the clock, so a mistaken low unit leaves no
+    /// poison behind and the repair to the right unit is exact. the first injection anchors at the price the first set
+    /// opened with, and a full slice never asks more than the whole coin supply
+    function test_FIXED_startPriceIsNeverTouchedByALaterSet() public {
         _enterPhase2();
         uint256 good = core.xStartPrice();
+        uint64 at = core.xStartTime();
+        _warp(1 days);
         _replace(address(_mod(1)));
-        uint256 poisoned = core.xStartPrice();
+        assertEq(core.xStartPrice(), good, "a mistaken low unit does not move the start");
+        assertEq(core.xStartTime(), at, "nor the clock");
         _replace(address(_mod(UNIT)));
         assertEq(core.unitPerPoint(), UNIT, "repaired");
-        assertEq(core.xStartPrice(), poisoned, "start price still the poisoned one");
-        assertEq(core.xStartPrice() / good, 1e10, "ten orders too high");
-        emit log_named_uint("halvings to come back (x100)", FixedPointMathLib.log2(core.xStartPrice() / good) * 100);
-        // the first injection anchors at the poisoned price, a full slice asks 1e10 times the coin supply
+        assertEq(core.xStartPrice(), good, "start price is the one of the first set");
+        assertEq(core.xStartTime(), at);
         _fillExitBuyback();
-        assertEq(core.xStartPrice(), poisoned, "anchored at the poisoned price");
+        assertEq(core.xStartPrice(), good, "anchored at the first price");
         (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
         assertEq(slice, _full(UNIT).min(core.xToBuyback()));
-        assertGt(coinIn, core.SUPPLY() * 1e9, "a slice costs billions of times the whole coin supply");
-        // 33 halvings: 7 days at the 6 hour half life is not enough, 9 days is
-        _warp(7 days);
-        assertGt(_coin(), core.SUPPLY(), "after 7 days still above the supply");
-        emit log_named_uint("7 days: slice cost as multiple of the coin supply", _coin() / core.SUPPLY());
-        _warp(2 days);
-        assertLt(_coin(), core.SUPPLY(), "after 9 days it is inside the supply, not yet sane");
+        assertLe(coinIn, core.SUPPLY(), "a slice never asks more than the whole coin supply");
     }
 
     // ------------------------------------------------------------------ targets after a replacement
 
-    /// FINDING RP-3: an allowed target flag set while an address was not yet the module stays set while it is the module
-    /// (blocked at call time) and is live again the moment a later set replaces it
-    function test_FINDING_dormantAllowedTargetRevivesWhenTheModuleIsReplaced() public {
+    /// FIXED RP-3: an allowed target flag set while an address was not yet the module is cleared when it becomes the
+    /// module, so it does not come back to life when a later set replaces it
+    function test_FIXED_dormantAllowedTargetIsClearedWhenItBecomesTheModule() public {
         _enterPhase2();
         MockExitModule b = _mod(UNIT);
         _allow(address(b));
         assertTrue(core.allowedTarget(address(b)), "added while it was not the module");
         _replace(address(b));
+        assertFalse(core.allowedTarget(address(b)), "cleared by the set");
         uint256 id = _credits(seller, 1)[0];
         bytes memory data = abi.encodeCall(MockExitModule.setUnitPerPoint, (7));
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
         _replace(address(_mod(UNIT)));
-        // no longer the module: the stale flag is back in force, the call reaches b and only the credit check stops it
-        vm.expectRevert(Core.NoCredit.selector);
+        // no longer the module, and the stale approval is gone: it needs a new queue
+        assertFalse(core.allowedTarget(address(b)));
+        vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
         assertEq(b.currentUnit(), UNIT, "reverted, so nothing changed");
     }
@@ -621,15 +619,15 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(core.xPot() + core.xToBuyback(), xt.balanceOf(address(core)), "a set moves nothing");
     }
 
-    /// OK: with nothing for sale the price after a set is never below the price before, for a rise, a fall and the
-    /// same unit, and the stored start is the price while the clock is stopped
+    /// OK: with nothing for sale the price after a set is the price before, for a rise, a fall and the same unit, and
+    /// the stored start is the price while the clock is stopped
     function test_OK_emptyBuybackPotPriceNeverFallsAcrossASet() public {
         _enterPhase2();
         uint256[3] memory units = [UNIT * 7, UNIT / 7, UNIT];
         for (uint256 i; i < 3; ++i) {
             uint256 p = core.exitAuctionPrice();
             _replace(address(_mod(units[i])));
-            assertGe(core.exitAuctionPrice(), p);
+            assertEq(core.exitAuctionPrice(), p, "a set never moves the price");
             assertEq(core.exitAuctionPrice(), core.xStartPrice());
         }
     }
@@ -738,16 +736,12 @@ contract ReviewPhase2FlexTest is Fixture {
         _solvent();
     }
 
-    /// OK: the way out of RP-2 exists and is instant: with something for sale, a short half life re-anchors at the price
-    /// now and brings the poisoned price down 36 halvings in 6 hours
-    function test_OK_poisonedStartCanBeWorkedOffWithAShortHalfLife() public {
+    /// OK: a repaired mistaken unit leaves a price that is usable at once (RP-2 is fixed, there is nothing to work off)
+    function test_OK_repairedMistakenUnitLeavesAUsablePrice() public {
         _enterPhase2();
         _replace(address(_mod(1)));
         _replace(address(_mod(UNIT)));
         _fillExitBuyback();
-        assertGt(_coin(), core.SUPPLY() * 1e9);
-        _edit(5_000, 0, 10 minutes);
-        _warp(6 hours);
-        assertLt(_coin(), core.SUPPLY(), "usable again after 6 hours");
+        assertLe(_coin(), core.SUPPLY());
     }
 }

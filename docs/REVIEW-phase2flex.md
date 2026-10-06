@@ -93,3 +93,17 @@ all 28 fields are covered everywhere the other 27 are. `SettingsFields` (N, `get
 * a fee on transfer or rebasing exitToken: the pots assume plain balance deltas.
 * the economic meaning of a unit change for the real exitToken: RP-1 and RP-5 assume a unit change changes what one exitToken is worth in points, which only the real adapter can settle.
 * a compromised owner (out of scope), solc behavior on other versions, the sim and docs beyond the scripts, gas griefing of `execute` with a module that burns gas in `exitToken()` (owner only).
+
+## status after the review fixes
+
+| id | status | note |
+|---|---|---|
+| RP-1 | accepted | the price per exitToken is found by the market and the unit only changes the slice size, a rescale by `oldUnit / newUnit` assumes a value relation that is not known and is rejected. residual (larger slice after a rise) documented in ARCHITECTURE accepted item 30 and the DEPLOY runbook: lower `exitSliceCredits` in the batch that raises the unit. tests renamed `test_ACCEPTED_` |
+| RP-2 | fixed | a later set never touches `xStartPrice` or `xStartTime`. `test_FIXED_startPriceIsNeverTouchedByALaterSet` |
+| RP-3 | fixed | `_setExitModule` deletes `allowedTarget[module]`. `test_FIXED_dormantAllowedTargetIsClearedWhenItBecomesTheModule` |
+| RP-4 | documented | ARCHITECTURE accepted item 33 and the DEPLOY runbook |
+| RP-5 | documented | ARCHITECTURE accepted item 31 and the DEPLOY runbook: lower `xRateCap` and the rate for the wait of a unit fall |
+| RP-6 | documented | ARCHITECTURE accepted item 32 and the DEPLOY runbook: `setXRate` after a rise |
+| RP-7 | noted | see the size margin in the commit report |
+| RP-8 | documented | ARCHITECTURE accepted item 34 and the DEPLOY section: eth lane share and exit lane share |
+| RP-9 | fixed | the dodge assertion is removed from `test/Fixture` users: `Fixture` creates the controller and the core with `deployCode` through two virtual hooks of `SystemDeployer`, so test contracts no longer embed their creation code |

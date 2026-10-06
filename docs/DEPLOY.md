@@ -315,6 +315,18 @@ cast call $CORE "settings()($T)" --rpc-url $MAINNET_RPC_URL; cast call $CORE "et
 
 `setRate` checkpoints the rate first, keeps the last fill time and resets the limit to the new value. `setXRate(uint256)` sets the exit bid inside the settings floor and cap. read back with `settings()` and `ethRate()`, and the `SettingsSet` event. both flows were run on the anvil fork as the impersonated owner.
 
+### changing the exit module or its unit
+
+`SetExitModule` may run any number of times, each under the 7 day timelock. a later module must report the same `exitToken()` (else `ExitTokenChanged`). `unitPerPoint` is read again on every set, so naming the same address again is how a changed unit is taken over. a later set never touches the exit auction price or clock, clears the allowed target flag of the module, checkpoints the exit rate under the old unit and resyncs the funded flag. pots, piles and held statements are untouched. `exitToBuybackBps` is the eth lane share and `exitLaneToBuybackBps` is the exit lane share.
+
+runbook:
+
+1. queue `SetExitModule` with the new module (or the same address after its unit changed). it is public for 7 days (`Queued` event).
+2. a unit FALL: the exit token bid keeps paying the old unit during the wait, so credits sold into it before the set cost the pot more than the exits return. at queue time lower `xRateCap` and the rate (`setSettings`, `setXRate`) for the wait, and restore them after the set runs.
+3. a unit RISE: the slice gets larger (`exitSliceCredits * avgScore * unit`), so fewer fills sell more exit token at one price. lower `exitSliceCredits` in the same batch as the execute. the exit rate is not clamped by a rise, so the funded flag turns false and sales revert `PotTooSmall` until `setXRate` lowers the rate.
+4. the opening price check (the price computed from the new unit must be at least 1e12) also bounds how high a later unit may go, about 1.15e25 at launch settings, and moves with `exitSliceCredits` and `avgScore`. a unit above it reverts `BadModule`.
+5. after the execute read back `exitModule()`, `unitPerPoint()`, `xRate()`, `exitAuctionQuote()` and the `ExitModuleSet` event.
+
 ## 5. when artcoins v2 ships
 
 only the `stack` block of the config changes, plus anything the checks below flag. the Core is deployed with the new stack as constructor arguments, so there is no code change in `src/`.

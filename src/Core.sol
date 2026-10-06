@@ -1120,8 +1120,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// sets or replaces the exit module (7 day timelock, any number of times). the exit token never changes once set.
     /// the unit is read again every time, so naming the same module again is how the unit is updated. the exit rate is
-    /// checkpointed under the old unit first and the funded flag resynced after. the exit auction keeps its price and
-    /// clock while it has something to sell, and never opens below the price it stored
+    /// checkpointed under the old unit first and the funded flag resynced after. a later set never touches the exit
+    /// auction price or clock: the price is coin per exit token, the unit only changes the slice. a dormant allowed
+    /// target flag of the new module is cleared, so it cannot come back to life when the module is replaced
     function _setExitModule(address module) private {
         address old = exitModule;
         if (module.code.length == 0) revert BadModule();
@@ -1140,12 +1141,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 start = SUPPLY * 1e18 / _fullSlice(unit);
         // below 1e12 the integer halves to zero within days, and zero hands the slice away
         if (start < 1e12) revert BadModule();
-        if (xToBuyback == 0) {
-            // nothing for sale: the start may be reset from the new unit, never below what was stored
-            xStartPrice = start.max(xStartPrice);
+        if (allowedTarget[module]) delete allowedTarget[module];
+        if (old == address(0)) {
+            xStartPrice = start;
             xStartTime = uint64(block.timestamp);
+        } else {
+            _syncXFunded();
         }
-        if (old != address(0)) _syncXFunded();
         emit ExitModuleSet(module, token, unit);
     }
 
