@@ -114,3 +114,26 @@ rules for a later set (the first set behaves as before):
 * the old module stops being a forbidden target, the new one is forbidden at call time as today.
 
 trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open behind the 7 day timelock for the life of the engine. a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
+
+## 9. buy now and fee share (owner confirmed)
+
+| # | decision |
+|---|---|
+| 12 | the coin symbol is `CC` (script/config/mainnet.json). the name is still a placeholder |
+| 13 | launch keeps `exitToBuybackBps` 5_000. the owner may set it to 0 later, no code needed |
+| 14 | new setting `feeToBuybackBps`: share of swap fee eth booked from the hook that goes to `ethToBuyback`, the rest to `ethPot`. launch 0, bounds 0 to 10_000 |
+| 15 | buy now. a statement keeps its english auction at the reserve. once it has been listed for `buyNowAfter` with no bid, anyone may also buy it at once from the Core at a price that steps down |
+
+buy now rules:
+* settings: `buyNowAfter` (launch 48 hours, bounds 1 hour to 365 days; a long value is how the owner switches buy now off), `buyNowStepBps` (launch 500, bounds 0 to 5_000), `buyNowStepEvery` (launch 24 hours, bounds 1 hour to 30 days), `buyNowFloorBps` (launch 5_000, bounds 1_000 to 40_000).
+* price view `buyNowPrice(sid)`: with `age = now - listedAt`, reverts or returns 0 (pick one, document it) before `buyNowAfter`. after it: `steps = (age - buyNowAfter) / buyNowStepEvery`, `bps = max(reserveBps - steps * buyNowStepBps, min(buyNowFloorBps, reserveBps))`, `price = cost * bps / 10_000`. so with launch values: 90 percent of cost for the first 48 hours (auction only), buy now opens at 90 percent at hour 48, 85 at hour 72, 80 at hour 96, down to 50. points of cost, not compounding. it reads the live settings, not the reserve stored in the house.
+* `buyStatement(sid)` payable, guarded, eth lane statements only, must be held and listed. the Core cancels the house listing first (this reverts if a bid exists, so a live auction always wins over buy now), requires `msg.value >= price`, sends the statement to the caller with `transferFrom`, books the price exactly like collected sale proceeds (checkpoint, split by `saleToBuybackBps` into `ethToBuyback` and `ethPot`, resync funded), refunds any excess to the caller, clears the statement record, emits `StatementSold` (or a sibling event with the price). the refund must not be booked as fees and must not open reentrancy. 
+* the house reserve is NOT lowered by time. `repriceStatement` keeps its meaning (apply the current `reserveBps`). a relist after an unwound sale or an overprint restarts `listedAt`, so the 48 hours restart too.
+* phase 2 exit keeps its own clock (`exitAfter`). the two clocks are independent settings.
+* SPEC invariant 3 gains: or by a buy now that paid at least the stepped price.
+
+fee share rules:
+* applied only where the Core books hook eth as fees in `receive()` (including the skim that returns during the Core's own buyback swap). eth booked later by `skim()` goes to the pot as today.
+* an injection into `ethToBuyback` needs no re anchor (the eth buyback has no auction).
+
+size: the Core has about 450 bytes of room. put the price math and anything else movable into `CoreLib`. the new settings may use a fourth storage word if three do not fit, keep the hot path (the two sell doors) at the loads it has today. margin after the change at least 100 bytes.
