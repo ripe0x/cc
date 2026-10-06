@@ -155,3 +155,15 @@ with no delay the owner key controls everything at once: it can point the exitMo
 ### 9.5 size
 
 deleting the timelock machinery frees room. price math and anything movable go to `CoreLib`. final margin at least 150 bytes.
+
+### 9.6 locks (owner confirmed)
+
+the owner keeps full control for now (no extra hard limits were added, see 9.4). to be able to close doors later, three one way locks, each `onlyOwner`, irreversible, each with its own event and public flag:
+* `lockController()`: after it the controller can never be changed.
+* `lockExitModule()`: after it the exitModule (and so the unit) can never be changed. reverts while no exitModule is set, so phase 2 cannot be locked out by accident.
+* `lockTargets()`: after it no target can be added (removing, if it exists, still works).
+these replace the old `frozen` flag and the Freeze action. the setters revert with a clear error once locked. the Core settings and the controller's own sale settings stay adjustable after a lock.
+
+### 9.7 transferable owner (owner confirmed)
+
+`OWNER` is no longer immutable. two step handover: `transferOwnership(address)` by the owner sets a pending owner (zero clears it), `acceptOwnership()` by the pending owner completes it, events on both. no renounce. every `onlyOwner` check and the controller's `core.owner()` read use the live owner. scripts and postflight read `owner()`; the launch config owner is the first owner.
