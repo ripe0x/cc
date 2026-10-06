@@ -1680,6 +1680,7 @@ contract Handler is Test {
         uint256 required;
         uint256 startPrice;
         uint256 startTime;
+        uint256 priceNow;
         uint8 lane;
         bool ripe;
     }
@@ -1706,6 +1707,7 @@ contract Handler is Test {
         p.rate0 = core.ethRate();
         p.startPrice = core.xStartPrice();
         p.startTime = core.xStartTime();
+        p.priceNow = core.exitAuctionPrice();
         p.rating = STATEMENTS.creditScoreOf(sid);
         p.unit = _unitOf();
         p.required = p.rating * p.unit;
@@ -1736,13 +1738,17 @@ contract Handler is Test {
         if (core.xPot() != p.xpot + received - toBuyback) _flag(V_POT, "exit pot share wrong");
         _x(p.xbal, 0, received, "exitStatement");
         _eth(p.b0, 0, 0, "exitStatement");
-        // the auction clock only runs while something is for sale: it restarts when the pot goes from empty to
-        // not empty, keeping the price, and an exit changes neither otherwise
-        if (core.xStartPrice() != p.startPrice) _flag(V_AUCTION, "an exit changed the auction start price");
-        uint256 wantStart = toBuyback != 0 && p.xto == 0 ? block.timestamp : p.startTime;
-        if (core.xStartTime() != wantStart) {
-            _flag(V_AUCTION, "an exit did not restart the auction clock only on refill");
+        // every injection into the buyback pot re anchors the curve at max(price now, start / 4) and restarts the
+        // clock. an exit that adds nothing to the pot changes neither
+        uint256 wantPrice = p.startPrice;
+        uint256 wantStart = p.startTime;
+        if (toBuyback != 0) {
+            wantPrice = p.priceNow > p.startPrice / 4 ? p.priceNow : p.startPrice / 4;
+            if (wantPrice == 0) wantPrice = 1;
+            wantStart = block.timestamp;
         }
+        if (core.xStartPrice() != wantPrice) _flag(V_AUCTION, "an exit did not re anchor the auction start price");
+        if (core.xStartTime() != wantStart) _flag(V_AUCTION, "an exit did not restart the auction clock on injection");
         if (_ownerOf(sid) != address(module)) _flag(V_DEPART, "exited statement is not with the module");
         SG storage g = _sg[sid];
         g.status = 3;

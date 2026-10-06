@@ -589,7 +589,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function _forbidden(address t) private view returns (bool) {
         return t == address(CREDITS) || t == address(STATEMENTS) || t == address(this) || t == COIN || t == HOOK
             || t == address(MANAGER) || t == Mainnet.ARTCOINS_FACTORY || t == Mainnet.LP_LOCKER
-            || t == Mainnet.FEE_ESCROW || t == exitModule || t == exitToken;
+            || t == Mainnet.FEE_ESCROW || t == Mainnet.PERMIT2 || t == Mainnet.POSITION_MANAGER
+            || t == Mainnet.UNIVERSAL_ROUTER || t == exitModule || t == exitToken;
     }
 
     function _measuring() private pure returns (LibTransient.TBool storage) {
@@ -712,8 +713,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
         uint256 toBuyback = s.lane == Lane.Eth ? received * EXIT_SPLIT / BPS : 0;
         _xCheckpoint();
-        // the auction clock only runs while something is for sale, so it restarts when the pot goes from empty
-        if (toBuyback != 0 && xToBuyback == 0) xStartTime = uint64(block.timestamp);
+        if (toBuyback != 0) {
+            // new funds never inherit a decayed clock: the curve re anchors at the price now, floored at a quarter
+            // of the start, and the clock restarts. with an empty pot the price now is the stored start price
+            xStartPrice = exitAuctionPrice().max(xStartPrice / 4).max(1);
+            xStartTime = uint64(block.timestamp);
+        }
         xToBuyback += toBuyback;
         xPot += received - toBuyback;
         _syncXFunded();
@@ -916,7 +921,10 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         unitPerPoint = unit;
         xCheckpointTime = uint64(block.timestamp);
         // the opening price asks the whole coin supply for one full slice
-        xStartPrice = SUPPLY * 1e18 / (EXIT_SLICE_CREDITS * AVG_SCORE * unit);
+        uint256 start = SUPPLY * 1e18 / (EXIT_SLICE_CREDITS * AVG_SCORE * unit);
+        // below 1e12 the integer halves to zero within days, and zero hands the slice away
+        if (start < 1e12) revert BadModule();
+        xStartPrice = start;
         xStartTime = uint64(block.timestamp);
         emit ExitModuleSet(module, token, unit);
     }

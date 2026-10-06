@@ -86,6 +86,14 @@ the artcoins factory is deprecated at the pin. before the deploy, the factory ow
 | 4 | launch the coin through the factory with the launch config |
 | 5 | lock the pool extension slot and hand the token admin role to the owner |
 
+launch runbook. the predicted coin address ignores the pool config, so a copy of the launch made first by anyone else would leave the Core bound to a pool that never pays it. the script refuses to start if code already exists at the predicted coin address.
+
+1. keep the artcoins factory deprecated until the launch is mined.
+2. the factory owner enables only the deployer address, `setAdmin(deployer, true)`.
+3. broadcast through a private relay, never a public mempool.
+4. verify the returned coin equals the prediction (the script reverts on a mismatch).
+5. the factory owner revokes the deployer, `setAdmin(deployer, false)`.
+
 env vars read by the script: OWNER, CREATOR, COIN_NAME, COIN_SYMBOL, COIN_SALT and MAINNET_RPC_URL.
 
 ```sh

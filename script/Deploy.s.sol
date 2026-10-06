@@ -299,7 +299,19 @@ abstract contract SystemDeployer is CommonBase {
 /// @notice `forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --broadcast` with OWNER, CREATOR,
 /// COIN_NAME, COIN_SYMBOL and COIN_SALT in the environment. the broadcaster must be allowed to launch on the
 /// artcoins factory and hold its deploy fee
+///
+/// launch runbook (the predicted coin address ignores the pool config, so a copy of the launch made first by
+/// anyone else would leave the Core bound to a pool that never pays it):
+/// 1. keep the artcoins factory deprecated. a stranger cannot launch while it is.
+/// 2. the factory owner enables only the deployer address with `setAdmin(deployer, true)`.
+/// 3. broadcast through a private relay, never a public mempool.
+/// 4. verify the returned coin equals the prediction (the script reverts on a mismatch) and read back the config.
+/// 5. the factory owner revokes the deployer with `setAdmin(deployer, false)`, because an admin can also change
+///    hooks, lockers and mev modules and claim team fees.
 contract Deploy is Script, SystemDeployer {
+    /// @dev the predicted coin address already has code, so someone launched first or the salt was reused
+    error CoinAlreadyDeployed(address coin);
+
     /// @notice runs the deploy as the broadcaster
     function run() external returns (Deployed memory d) {
         address owner = vm.envAddress("OWNER");
@@ -310,6 +322,10 @@ contract Deploy is Script, SystemDeployer {
 
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
+        // preflight: refuse to deploy a Core against a coin address that is already taken
+        address coreAt = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        address coinAt = predictCoin(deployer, coreAt, name, symbol, userSalt);
+        if (coinAt.code.length != 0) revert CoinAlreadyDeployed(coinAt);
         d = deploySystem(deployer, owner, creator, name, symbol, userSalt);
         vm.stopBroadcast();
 

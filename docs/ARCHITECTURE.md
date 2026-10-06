@@ -61,6 +61,16 @@ deploy order, no circularity:
 
 the factory is `deprecated` at the pin, so only its owner or an address the owner marks admin can launch. the owner calls `setAdmin(deployer, true)` first. that is the only artcoins state the tests force, through a prank of the real owner.
 
+launch runbook. the predicted coin address ignores the pool config, so a copy of the launch made first by anyone else would leave the already deployed Core bound to a pool that never pays it. the script refuses to start if code already exists at the predicted coin address.
+
+| step | action |
+|---|---|
+| 1 | keep the artcoins factory deprecated until the launch is mined |
+| 2 | the factory owner enables only the deployer address, `setAdmin(deployer, true)` |
+| 3 | broadcast through a private relay, never a public mempool |
+| 4 | verify the returned coin equals the prediction (the script reverts on a mismatch) |
+| 5 | the factory owner revokes the deployer, `setAdmin(deployer, false)`, since an admin can also set hooks, lockers and mev modules and claim team fees |
+
 ## 3. fee intake
 
 there is no hook of ours. the live skim hook takes its skim in eth on every swap and pushes the bounty to `Core.receive()` with all gas.
@@ -133,11 +143,14 @@ there is no exit pool. the buyback of the exitToken is an auction inside the cor
 | cost | `coinIn = ceil(slice * price / 1e18)`, must be at most the caller's `maxCoinIn`. zero only when the price truly decayed to zero |
 | fill | `burnFrom(msg.sender, coinIn)` on the coin, then the slice goes to the caller. no tip, no block delay, the caller approves the core first |
 | restart after a fill | `startPrice = max(2 * clearingPrice, previousStartPrice / 4)`, `startTime = now`. if that computes to zero it is 1 |
-| clock | runs only while `xToBuyback` is not zero. when it goes from zero to non zero, `startTime = now` and `startPrice` is kept |
-| first start price | set when the module is set: the price at which one full slice costs the whole coin supply (`SUPPLY * 1e18 / fullSlice`) |
+| clock | runs only while `xToBuyback` is not zero |
+| injection | every time exit token is added to `xToBuyback` (not only from empty): `startPrice = max(price now, startPrice / 4)` (at least 1) and `startTime = now`. with an empty pot the price now is the stored start price, so it is kept. injected funds never inherit a decayed clock |
+| first start price | set when the module is set: the price at which one full slice costs the whole coin supply (`SUPPLY * 1e18 / fullSlice`). setting the module reverts `BadModule` if this is below 1e12, which rejects units above about 1e25 and keeps at least 40 half lives before the integer reaches zero |
 | views | `exitAuctionPrice()`, `exitAuctionQuote()` returning `(slice, coinIn)` |
 
 what the restart rule does. the next auction can never start more than 4x below the start of the previous one, so a price that decayed to dust does not carry over. every slice needs its own long decay before it can go cheap. measured in tests: the first slice reaches a price of 0.001 coin after about 240 hours (about 40 halvings from the opening price). the second starts a quarter lower and needs about 12 hours less, the third 12 hours less again, so three slices at dust take about 28 days, against one decay under a fixed floor. a taker who fills near a fair price restarts the auction at twice what they paid, the price is back to what they paid one half life later, and the cadence is one slice per half life.
+
+the same quarter floor applies to every injection of new exit token, so a refill after a long quiet spell restarts the curve at a quarter of the last start at the least, and the decay figures above are for a pot that is not refilled in between (each refill pulls the next dust date a little closer, never below the quarter floor).
 
 the price rounds to zero after about 90 half lives (about 22 days) from the opening start, and after 256 half lives at the latest. a fill at zero is free and the restart is a quarter of the start just played, so the rest of the queue is not cheap.
 
@@ -159,7 +172,7 @@ suites: `CoreUnit`, `Fees`, `Launch`, `Lifecycle`, `ReviewCore`, `Seaport` and t
 
 ## 10. deviations and accepted properties for the owner to confirm
 
-none of these is fixed in code. each is either a deliberate departure from SPEC.md or a property of the live stack we accept.
+none of these is a code change in this repo. each is either a deliberate departure from SPEC.md or a property of the live stack we accept.
 
 | # | item | what it means |
 |---|---|---|
@@ -180,3 +193,6 @@ none of these is fixed in code. each is either a deliberate departure from SPEC.
 | 15 | credits sent to the core outside the doors are stuck | they are in no pile. same for eth sent by a non hook sender, until `skim` books it |
 | 16 | added to the spec | `skim()`, `minOut` overloads on both sell doors, `composeExit()`, `buybackExit(maxCoinIn)`, `cancel` on the timelock |
 | 17 | SPEC.md sections on the Coin, FeeHook and Launcher do not apply | replaced by the live artcoins token, skim hook and factory. the transfer restriction is replaced by the token's venue scoped buy tax |
+| 18 | review P-1: third party fee income | eth pushed by the hook from any open pool that names the core as bounty recipient is booked as fee income. it is a donation by the sender, so `FeesAdded` is not proof of organic volume |
+| 19 | review P-6: cost basis in `buyListing` | a hook push that lands inside the target call lowers the measured cost, so the stored basis and the statement floor are understated by it. the books stay exact and no profitable path was found |
+| 20 | review P-7: venue tax bypass | the venue tax can be bypassed with a flash liquidity add and remove in the canonical pool (an artcoins hook issue found in the artcoins audit), so the tax is a weak deterrent against a purpose built router. model fee income on canonical pool volume only, about 9.5 percent of net new money entering through that pool |

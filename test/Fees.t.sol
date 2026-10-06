@@ -779,16 +779,26 @@ contract AuctionTest is FeeBase {
         assertEq(core.exitAuctionPrice(), stored >> 1);
     }
 
-    /// a refill while the pot is not empty does not touch the clock
-    function test_refillOnANonEmptyPotKeepsTheClock() public {
+    /// a refill while the pot is not empty re anchors the curve at max(price now, start / 4) and restarts the clock,
+    /// so the new funds never inherit a decayed clock
+    function test_refillOnANonEmptyPotReanchorsTheCurve() public {
         _auction();
-        uint256 startedAt = core.xStartTime();
         uint256 price = core.xStartPrice();
         vm.warp(block.timestamp + 3 hours);
-        _refill();
-        assertEq(core.xStartTime(), startedAt);
-        assertEq(core.xStartPrice(), price);
-        assertLt(core.exitAuctionPrice(), price >> 3, "it kept decaying");
+        uint256 now0 = core.exitAuctionPrice();
+        assertLt(now0, price);
+        // a statement exit adds exit token after its own 72 hour auction wait
+        _fillEthPile(80);
+        vm.prank(keeper);
+        core.compose();
+        uint256 sid = STATEMENTS.supply();
+        vm.warp(block.timestamp + core.AUCTION_LENGTH());
+        uint256 priceBefore = core.exitAuctionPrice();
+        assertLt(priceBefore, price / 4, "the clock ran far enough to pass the quarter floor");
+        core.exitStatement(sid);
+        assertEq(core.xStartTime(), block.timestamp);
+        assertEq(core.xStartPrice(), price / 4, "floored at a quarter");
+        assertEq(core.exitAuctionPrice(), price / 4);
     }
 
     /// after decades the price is zero. a fill then costs nothing, and the auction restarts above zero
@@ -851,21 +861,22 @@ contract AuctionTest is FeeBase {
         uint256[3] memory decay;
         for (uint256 i; i < 3; ++i) {
             _warpUntilDust();
-            // time since this slice's auction started: a refill does not restart the clock
             decay[i] = block.timestamp - core.xStartTime();
             (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
             assertEq(slice, _fullSlice(), "a full slice at dust");
             _fill(coinIn);
             assertEq(core.xStartPrice(), start0 >> (2 * (i + 1)), "each restart is a quarter of the last start");
         }
-        // the first slice needs about 40 halvings, 240 hours. every later one starts 2 halvings (12 hours) lower
-        assertGe(decay[0], 235 hours);
+        // the first slice needs about 40 halvings (240 hours) from the opening price. the refills above each pulled the
+        // start down toward a quarter, so from there it needs a little less. every later one starts 2 halvings
+        // (12 hours) lower
+        assertGe(decay[0], 200 hours);
         assertLe(decay[0], 245 hours);
         assertApproxEqAbs(decay[1], decay[0] - 12 hours, 1 hours);
         assertApproxEqAbs(decay[2], decay[0] - 24 hours, 1 hours);
         uint256 total = block.timestamp - t0;
         assertApproxEqAbs(total, 3 * decay[0] - 36 hours, 2 hours);
-        assertGe(total, 680 hours, "three slices at dust take over 28 days, not one decay");
+        assertGe(total, 600 hours, "three slices at dust take about 25 days, not one decay");
     }
 
     /// (c) fills near a fair price: restart at twice the clearing price, one slice per half life
@@ -874,6 +885,7 @@ contract AuctionTest is FeeBase {
         while (core.xToBuyback() < 4 * _fullSlice()) _refill();
         _equipTaker(2000 ether);
         // the first fill takes whatever the long wait left and sets the baseline start price
+        _warpUntilDust();
         (, uint256 first) = core.exitAuctionQuote();
         _fill(first);
         uint256 base = core.xStartPrice();

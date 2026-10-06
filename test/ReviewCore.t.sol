@@ -157,7 +157,7 @@ contract ReviewCoreTest is Fixture {
     }
 
     /// R1 attack: nothing but the clock lowers the price. a hostile actor runs every other door in the same block,
-    /// the price and its start stay put, and later the price equals the plain halving of the stored start price
+    /// the price and its start stay put, and later the price equals the plain halving of the stored start price. an exit into a non empty pot re anchors
     function test_attack_nothingButTheClockLowersThePrice() public {
         (, uint256 sid2) = _auction();
         _fillEthPile(80);
@@ -188,16 +188,21 @@ contract ReviewCoreTest is Fixture {
         assertEq(core.xStartTime(), startTime, "the clock was not restarted by the doors");
         _solvent();
 
-        // exiting another statement while the pot is not empty adds supply and leaves the price alone
+        // exiting another statement while the pot is not empty adds supply and re anchors the curve at
+        // max(price now, start / 4), restarting the clock
         vm.warp(core.AUCTION_LENGTH() + block.timestamp);
         uint256 pricePlain = core.exitAuctionPrice();
         uint256 slices = core.xToBuyback();
         core.exitStatement(sid3);
         assertGt(core.xToBuyback(), slices, "more for sale");
-        assertEq(core.exitAuctionPrice(), pricePlain, "and the same price");
-        assertEq(core.xStartTime(), startTime);
+        uint256 anchored = pricePlain.max(startPrice / 4);
+        assertEq(core.xStartPrice(), anchored, "re anchored at the price now, floored at a quarter");
+        assertEq(core.exitAuctionPrice(), anchored, "and the new funds start a fresh clock");
+        assertEq(core.xStartTime(), block.timestamp);
 
         // the price is the halving of the stored start price, to the wei on whole half lives
+        startPrice = anchored;
+        startTime = core.xStartTime();
         uint256 hl = core.XAUCTION_HALF_LIFE();
         uint256 halvings = (block.timestamp - startTime) / hl;
         vm.warp(startTime + (halvings + 1) * hl);
