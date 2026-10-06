@@ -90,7 +90,7 @@ there is no hook of ours. the skim hook of the configured stack takes its skim i
 
 accounting: `ethPot` (buying), `ethToBuyback`, `xPot` (exit token bid), `xToBuyback`. invariant: pots never exceed what the core holds.
 
-rate (wei per whole point of score). it opens at `RATE_START`, an immutable constructor argument bounded to [`RATE_START_MIN` 1e11, `RATE_START_MAX` 1e15] because the right opening bid depends on the market on launch day (the default in the config is 4e12). lazy and checkpointed:
+rate (wei per whole point of score). it opens at `RATE_START`, an immutable constructor argument bounded to [`RATE_START_MIN` 1e11, `RATE_START_MAX` 1e15] because the right opening bid depends on the market on launch day (the default in the config is 5.6e12, the launch day rule is in docs/DEPLOY.md section 1). lazy and checkpointed:
 
 | since last fill | climb per hour |
 |---|---|
@@ -202,5 +202,5 @@ none of these is a code change in this repo. each is either a deliberate departu
 | 19 | review P-6: cost basis in `buyListing` | a hook push that lands inside the target call lowers the measured cost, so the stored basis and the statement floor are understated by it. the books stay exact and no profitable path was found |
 | 20 | review P-7: venue tax bypass | the venue tax can be bypassed with a flash liquidity add and remove in the canonical pool (an artcoins hook issue found in the artcoins audit), so the tax is a weak deterrent against a purpose built router. model fee income on canonical pool volume only, about 9.5 percent of net new money entering through that pool |
 | 21 | stack is a deploy input | the Core stores the stack it launched on and cannot be repointed. a launch on a new artcoins version is a new Core. the token creation code file (`launch.tokenCodeFile`) is also an input of the coin prediction and must match the token implementation of the stack |
-| 22 | `rateStart` is a deploy input | bounded to [1e11, 1e15] wei per whole point and immutable. the default 4e12 is a placeholder until the simulation sets it |
+| 22 | `rateStart` is a deploy input | bounded to [1e11, 1e15] wei per whole point and immutable. the default 5.6e12 comes from the simulation (flat price divided by 1600), the launch day rule is in docs/DEPLOY.md section 1 |
 | 23 | `FEE_BPS` and `CREATOR_BPS` are informational | no logic reads them. the skim is configured at the hook. `SUPPLY` is read by the exit auction and must equal the launch supply, which preflight and postflight check |

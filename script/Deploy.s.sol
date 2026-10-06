@@ -28,6 +28,8 @@ abstract contract SystemDeployer is LaunchChecks {
     error AddressMismatch(string what);
     /// @notice a placeholder of the config is unset, or rateStart is out of bounds
     error ConfigUnset(string what);
+    /// @notice CONFIG_HASH is not the hash of the config the script loaded. `want` is the hash of this config
+    error ConfigHashMismatch(bytes32 got, bytes32 want);
 
     /// @notice execution gas of the five steps of the last `deploySystem`: controller, core, launch through the factory,
     /// lock the extension slot, hand over the token admin. intrinsic transaction gas comes on top of each
@@ -52,27 +54,51 @@ abstract contract SystemDeployer is LaunchChecks {
         if (d.controller != controllerAt) revert AddressMismatch("controller");
         if (d.core != coreAt) revert AddressMismatch("core");
 
-        IArtCoinsFactory factory = IArtCoinsFactory(c.stack.factory);
-        uint256 fee = factory.deployFee();
-        g = gasleft();
-        d.coin = factory.deployTokenWithProtocolBpsAndTax{value: fee}(
-            buildConfig(c, deployer, coreAt), 0, buildTaxConfig(c, coreAt)
-        );
-        stepGas[2] = g - gasleft();
-        if (d.coin != coinAt) revert AddressMismatch("coin");
-
+        d.coin = _launch(c, deployer, coinAt, coreAt);
         d.launchKey = poolKeyOf(d.coin, c.stack);
         d.poolId = keccak256(abi.encode(d.launchKey));
 
         // the extension slot is empty and locked for good, then the owner takes the token admin role
         g = gasleft();
-        IArtCoinsSkimHook(c.stack.hook).lockPoolExtension(d.launchKey);
+        _lock(c, d.launchKey);
         stepGas[3] = g - gasleft();
         g = gasleft();
-        IArtCoinsToken(d.coin).updateAdmin(c.owner);
+        _handover(c, d.coin);
         stepGas[4] = g - gasleft();
         postflight(c, d.core);
         _require();
+    }
+
+    /// @notice step 3, the launch through the factory, paying the live deploy fee. checks the coin address against the
+    /// prediction the core was built with. the caller must be the deployer the prediction used
+    function _launch(LaunchConfig memory c, address deployer, address coinAt, address core)
+        internal
+        returns (address coin)
+    {
+        IArtCoinsFactory factory = IArtCoinsFactory(c.stack.factory);
+        uint256 fee = factory.deployFee();
+        uint256 g = gasleft();
+        coin = factory.deployTokenWithProtocolBpsAndTax{value: fee}(
+            buildConfig(c, deployer, core), 0, buildTaxConfig(c, core)
+        );
+        stepGas[2] = g - gasleft();
+        if (coin != coinAt) revert AddressMismatch("coin");
+    }
+
+    /// @notice step 4, close the extension slot for good. caller is the token admin (the deployer)
+    function _lock(LaunchConfig memory c, PoolKey memory key) internal {
+        IArtCoinsSkimHook(c.stack.hook).lockPoolExtension(key);
+    }
+
+    /// @notice step 5, hand the token admin role to the owner. caller is the token admin (the deployer)
+    function _handover(LaunchConfig memory c, address coin) internal {
+        IArtCoinsToken(coin).updateAdmin(c.owner);
+    }
+
+    /// @notice the sign off value: reverts unless `given` is the hash of this config
+    function _requireConfigHash(LaunchConfig memory c, bytes32 given) internal view {
+        bytes32 want = configHash(c);
+        if (given != want) revert ConfigHashMismatch(given, want);
     }
 
     /// @notice reverts when a placeholder is unset or rateStart is out of bounds
@@ -83,10 +109,11 @@ abstract contract SystemDeployer is LaunchChecks {
     }
 }
 
-/// @notice `forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --private-key $PRIVATE_KEY`
-/// (or `--account` or `--ledger`). reads script/config/mainnet.json, or the file named by LAUNCH_CONFIG. the only
-/// environment override is PRIVATE_KEY (a secret), used when no signer flag is given. refuses to run while owner,
-/// creator, name, symbol or salt is unset. the full runbook is docs/DEPLOY.md
+/// @notice `CONFIG_HASH=0x... forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --private-key $KEY`
+/// (or `--account` or `--ledger`). the signer comes from the flags only, no environment variable picks one. reads
+/// script/config/mainnet.json, or the file named by LAUNCH_CONFIG. refuses to run while owner, creator, name, symbol or
+/// salt is unset, and unless CONFIG_HASH is the hash that preflight printed for this config. the full runbook is
+/// docs/DEPLOY.md
 contract Deploy is Script, SystemDeployer {
     /// @dev the predicted coin address already has code, so someone launched first or the salt was reused
     error CoinAlreadyDeployed(address coin);
@@ -95,9 +122,9 @@ contract Deploy is Script, SystemDeployer {
     function run() external returns (Deployed memory d) {
         LaunchConfig memory c = loadConfig(vm.envOr("LAUNCH_CONFIG", DEFAULT_CONFIG_FILE));
         _requireConfig(c);
-        uint256 key = vm.envOr("PRIVATE_KEY", uint256(0));
-        if (key != 0) vm.startBroadcast(key);
-        else vm.startBroadcast();
+        // nothing is signed or sent until the operator's sign off value equals the hash of this config
+        _requireConfigHash(c, vm.envOr("CONFIG_HASH", bytes32(0)));
+        vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
         // every preflight check runs first. a failed check reverts here, before anything is sent
         preflight(c, deployer);

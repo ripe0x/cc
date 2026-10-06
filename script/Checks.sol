@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Stack, Mainnet, ICredits, ICreditScore, IStatements} from "../src/interfaces/Interfaces.sol";
-import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
+import {IArtCoinsFactory, IArtCoinsLocker, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {PostflightChecks} from "./PostflightChecks.sol";
 
@@ -20,6 +20,19 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev credit 1 exists and its score is a pure function of its seed and timestamp
     uint256 internal constant KNOWN_CREDIT = 1;
     uint256 internal constant KNOWN_SCORE = 1_324_012;
+    // the pinned launch rules (docs/DEPLOY.md section 2). a value outside them fails preflight. the three overrides in
+    // the config file open exactly the rules that say so, and are part of the config hash
+    uint24 internal constant PIN_BASELINE_SKIM = 10_000;
+    uint16 internal constant PIN_BOUNTY_BPS = 9500;
+    uint16 internal constant PIN_TAX_BPS_MAX = 2000;
+    uint24 internal constant SNIPER_START_MIN = 50_000;
+    uint24 internal constant SNIPER_START_MAX = 90_000;
+    uint32 internal constant SNIPER_SECONDS_MIN = 600;
+    uint32 internal constant SNIPER_SECONDS_MAX = 3600;
+    uint24 internal constant DYNAMIC_FEE_FLAG = 0x800000;
+    int24 internal constant MAX_TICK = 887_272;
+    /// @dev v4 limit of the tick spacing
+    int24 internal constant MAX_TICK_SPACING = 32_767;
     /// @dev supplies at block 26127622. both only grow
     uint256 internal constant CREDITS_SUPPLY_MIN = 122_154;
     uint256 internal constant STATEMENTS_SUPPLY_MIN = 148;
@@ -28,9 +41,24 @@ abstract contract LaunchChecks is PostflightChecks {
     function preflight(LaunchConfig memory c, address deployer) internal {
         _reset();
         _preConfig(c);
+        _preRules(c, deployer);
         _preCode(c);
         _preFactory(c, deployer);
+        _preStack(c);
         _prePredictions(c, deployer);
+        _preLive();
+        _preSignoff(c, deployer);
+    }
+
+    /// @notice the checks that still make sense after the core exists, for `Resume.s.sol`. the prediction rows are left
+    /// out (the addresses are taken by now) and the factory rows only run when the launch is still to be sent
+    function preflightResume(LaunchConfig memory c, address deployer, bool launching) internal {
+        _reset();
+        _preConfig(c);
+        _preRules(c, deployer);
+        _preCode(c);
+        if (launching) _preFactory(c, deployer);
+        _preStack(c);
         _preLive();
     }
 
@@ -45,15 +73,104 @@ abstract contract LaunchChecks is PostflightChecks {
             "placeholders filled", unset.length == 0, unset.length == 0 ? "owner creator name symbol salt set" : names
         );
         _check("rateStart in bounds", rateInBounds(c), string.concat("rateStart ", vm.toString(c.rateStart)));
-        _check(
-            "launch parameters sane",
-            c.bountyBps <= 9999 && c.taxBps <= c.taxBpsMax && c.supply >= 1e18
-                && c.positionLower % c.stack.tickSpacing == 0 && c.positionUpper % c.stack.tickSpacing == 0
-                && c.positionLower < c.positionUpper && c.sniperSeconds != 0,
-            "bounty, tax, supply, ticks, sniper window"
-        );
         _eq("supply equals the Core SUPPLY constant", c.supply, CORE_SUPPLY);
         _check("token code file exists", vm.exists(c.tokenCodeFile), c.tokenCodeFile);
+    }
+
+    /// @dev the pinned rules. each is one row, so a failure names the rule
+    function _preRules(LaunchConfig memory c, address deployer) private {
+        _ruleTicks(c);
+        _ruleEconomics(c);
+        _ruleSniper(c);
+        _ruleTax(c);
+        _rulePeople(c, deployer);
+    }
+
+    function _ruleTicks(LaunchConfig memory c) private {
+        int24 sp = c.stack.tickSpacing;
+        bool spOk = sp > 0 && sp <= MAX_TICK_SPACING;
+        _check("rule: tick spacing in 1 to 32767", spOk, vm.toString(int256(sp)));
+        _check("rule: pool fee is the dynamic fee flag", c.stack.poolFee == DYNAMIC_FEE_FLAG, "0x800000");
+        _check(
+            "rule: position lower equals the start tick",
+            c.positionLower == c.startTick,
+            string.concat("start ", vm.toString(int256(c.startTick)), " lower ", vm.toString(int256(c.positionLower)))
+        );
+        // the highest multiple of the spacing at or below the max usable tick
+        int24 top = spOk ? (MAX_TICK / sp) * sp : int24(0);
+        _check(
+            "rule: position upper is the highest usable tick",
+            spOk && c.positionUpper == top,
+            string.concat("upper ", vm.toString(int256(c.positionUpper)), " want ", vm.toString(int256(top)))
+        );
+        _check(
+            "rule: ticks are multiples of the spacing",
+            spOk && c.startTick % sp == 0 && c.positionLower % sp == 0 && c.positionUpper % sp == 0,
+            "start tick, position lower, position upper"
+        );
+        _check("rule: position lower below upper", c.positionLower < c.positionUpper, "range is not empty");
+    }
+
+    function _ruleEconomics(LaunchConfig memory c) private {
+        _eq("rule: baseline skim bps is 10000", uint256(c.baselineSkimBps), PIN_BASELINE_SKIM);
+        bool bountyOk = c.bountyBps == PIN_BOUNTY_BPS || (c.allowBounty && c.bountyBps <= 9999);
+        _check(
+            "rule: bounty bps is 9500",
+            bountyOk,
+            string.concat("bounty ", vm.toString(c.bountyBps), c.allowBounty ? " (override on)" : "")
+        );
+        _check(
+            "rule: referral cap and lp fee are zero",
+            c.maxReferralBps == 0 && c.lpFee == 0,
+            string.concat("referral ", vm.toString(c.maxReferralBps), " lp fee ", vm.toString(c.lpFee))
+        );
+    }
+
+    function _ruleSniper(LaunchConfig memory c) private {
+        _eq("rule: sniper end bps equals the baseline skim", uint256(c.sniperEndBps), uint256(c.baselineSkimBps));
+        _check(
+            "rule: sniper start bps in 50000 to 90000",
+            c.sniperStartBps >= SNIPER_START_MIN && c.sniperStartBps <= SNIPER_START_MAX
+                && c.sniperStartBps > c.sniperEndBps,
+            vm.toString(c.sniperStartBps)
+        );
+        _check(
+            "rule: sniper seconds in 600 to 3600",
+            c.sniperSeconds >= SNIPER_SECONDS_MIN && c.sniperSeconds <= SNIPER_SECONDS_MAX,
+            vm.toString(c.sniperSeconds)
+        );
+    }
+
+    function _ruleTax(LaunchConfig memory c) private {
+        _check(
+            "rule: tax bps within 0 and a 2000 cap",
+            c.taxBpsMax == PIN_TAX_BPS_MAX && c.taxBps <= c.taxBpsMax,
+            string.concat("tax ", vm.toString(c.taxBps), " max ", vm.toString(c.taxBpsMax))
+        );
+        bool burnOk = c.taxBurn == Mainnet.DEAD || (c.allowTaxBurn && c.taxBurn != address(0));
+        _check(
+            "rule: tax burn is the dead address",
+            burnOk,
+            string.concat(vm.toString(c.taxBurn), c.allowTaxBurn ? " (override on)" : "")
+        );
+    }
+
+    function _rulePeople(LaunchConfig memory c, address deployer) private {
+        address[2] memory who = [c.owner, c.creator];
+        bool bad;
+        for (uint256 i; i < 2; ++i) {
+            address a = who[i];
+            if (a == address(0)) continue; // the placeholder row reports it
+            bad = bad || a == Mainnet.DEAD || a == c.stack.poolManager || a == c.stack.hook || a == c.stack.factory
+                || a == c.stack.locker || a == c.stack.escrow || a == c.mevModule || a == c.factoryOwner;
+        }
+        _check(
+            "rule: owner and creator are not dead or stack addresses", !bad, "dead, stack, mev module, factory owner"
+        );
+        bool set = c.owner != address(0) && c.creator != address(0);
+        _warn("warn: owner differs from creator", !set || c.owner != c.creator, "one party takes both roles");
+        _warn("warn: owner differs from the deployer", c.owner != deployer, "the throwaway key would own the Core");
+        _warn("warn: creator differs from the deployer", c.creator != deployer, "the throwaway key would earn");
     }
 
     function _preCode(LaunchConfig memory c) private {
@@ -73,14 +190,6 @@ abstract contract LaunchChecks is PostflightChecks {
         _code("code: universal router", Mainnet.UNIVERSAL_ROUTER);
     }
 
-    /// @dev a staticcall that never reverts. ok is false when the call failed or returned less than a word
-    function _word(address target, bytes memory data) internal view returns (bool ok, uint256 w) {
-        bytes memory out;
-        (ok, out) = target.staticcall(data);
-        if (ok && out.length >= 32) w = abi.decode(out, (uint256));
-        else ok = false;
-    }
-
     function _preFactory(LaunchConfig memory c, address deployer) private {
         address f = c.stack.factory;
         (bool ok1, uint256 hookOn) = _word(f, abi.encodeCall(IArtCoinsFactory.enabledHooks, (c.stack.hook)));
@@ -92,6 +201,11 @@ abstract contract LaunchChecks is PostflightChecks {
         _check("factory: mev module enabled", ok3 && mevOn == 1, "enabledMevModules(module)");
         (bool ok4, uint256 dep) = _word(f, abi.encodeCall(IArtCoinsFactory.deprecated, ()));
         _check("factory: deprecated readable", ok4, dep == 1 ? "deprecated true" : "deprecated false");
+        _check(
+            "factory: deprecated, only the owner and admins can launch",
+            ok4 && (dep == 1 || c.allowOpenFactory),
+            dep == 1 ? "deprecated" : (c.allowOpenFactory ? "OPEN, override on" : "OPEN, anyone could launch")
+        );
         (bool ok5, uint256 own) = _word(f, abi.encodeCall(IArtCoinsFactory.owner, ()));
         _check(
             "factory: owner matches config",
@@ -110,6 +224,23 @@ abstract contract LaunchChecks is PostflightChecks {
                 "fee ", vm.toString(fee), " need ", vm.toString(need), " have ", vm.toString(deployer.balance)
             )
         );
+    }
+
+    /// @dev the stack members must agree with what the hook and the locker report about themselves, and the locker and
+    /// the mev module must be the ones the factory enabled. a wrong value in the config file fails here
+    function _preStack(LaunchConfig memory c) private {
+        address hook = c.stack.hook;
+        _addrView("hook reports pool manager", hook, "poolManager()", c.stack.poolManager);
+        _addrView("hook reports factory", hook, "factory()", c.stack.factory);
+        _addrView("hook reports fee escrow", hook, "feeEscrow()", c.stack.escrow);
+        _addrView("locker reports factory", c.stack.locker, "factory()", c.stack.factory);
+        _addrView("locker reports position manager", c.stack.locker, "positionManager()", Mainnet.POSITION_MANAGER);
+    }
+
+    function _addrView(string memory name, address target, string memory sig, address want) private {
+        (bool ok, uint256 w) = _word(target, abi.encodeWithSignature(sig));
+        address got = address(uint160(w));
+        _check(name, ok && got == want, string.concat("got ", vm.toString(got), " want ", vm.toString(want)));
     }
 
     function _prePredictions(LaunchConfig memory c, address deployer) private {
@@ -146,5 +277,47 @@ abstract contract LaunchChecks is PostflightChecks {
         uint256 score =
             ICreditScore(Mainnet.CREDIT_SCORE).scoreOf(credits.seedOf(KNOWN_CREDIT), credits.timestampOf(KNOWN_CREDIT));
         _eq("CreditScore of credit 1", score, KNOWN_SCORE);
+    }
+
+    /// @dev the table the owner signs. every row restates one launch input in the words of what it does, then the hash
+    /// of the whole config is the single value the deploy needs back in CONFIG_HASH
+    function _preSignoff(LaunchConfig memory c, address deployer) private {
+        address core = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        _info("signoff: owner (core owner and token admin)", vm.toString(c.owner));
+        _info("signoff: creator (0.5 point leg and lp rewards)", vm.toString(c.creator));
+        _info("signoff: deployer (sends the five transactions)", vm.toString(deployer));
+        _info("signoff: skim bounty and referral payout point to the core", vm.toString(core));
+        _info("signoff: skim protocol leg and locker rewards point to the creator", vm.toString(c.creator));
+        _info("signoff: tax and burn address", vm.toString(c.taxBurn));
+        _info(
+            "signoff: opening bid",
+            string.concat(
+                "rateStart ",
+                vm.toString(c.rateStart),
+                " wei per point, flat price about ",
+                vm.toString(c.rateStart * 1600),
+                " wei"
+            )
+        );
+        _info(
+            "signoff: economics",
+            string.concat(
+                "skim ",
+                vm.toString(c.baselineSkimBps),
+                " bounty ",
+                vm.toString(c.bountyBps),
+                " sniper ",
+                vm.toString(c.sniperStartBps),
+                "->",
+                vm.toString(c.sniperEndBps),
+                " over ",
+                vm.toString(c.sniperSeconds),
+                "s tax ",
+                vm.toString(c.taxBps),
+                "/",
+                vm.toString(c.taxBpsMax)
+            )
+        );
+        _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
     }
 }

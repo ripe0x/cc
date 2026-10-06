@@ -79,15 +79,15 @@ warning: open items in SPEC section 14 and the owner confirmations in docs/ARCHI
 
 the system launches on whichever artcoins version is current at deploy time. the artcoins stack (pool manager, hook, tick spacing, pool fee, factory, locker, escrow) and the opening bid `rateStart` are constructor arguments of the Core, so a new artcoins version changes only the stack block of `script/config/mainnet.json`. the live stack at the pin is the default config.
 
-everything a launch needs is in `script/config/mainnet.json`. owner, creator, name, symbol and salt are placeholders that must be filled before a launch, the deploy refuses to run while any is unset. secrets come from the environment only (`PRIVATE_KEY`, `ETHERSCAN_API_KEY`).
+everything a launch needs is in a config file: copy `script/config/mainnet.json` to the gitignored `script/config/local.json` and point `LAUNCH_CONFIG` at it. owner, creator, name, symbol and salt are placeholders that must be filled before a launch, the deploy refuses to run while any is unset, or unless `CONFIG_HASH` (printed by preflight) matches the file. secrets come from the environment only (`PRIVATE_KEY`, `ETHERSCAN_API_KEY`). the full runbook is docs/DEPLOY.md.
 
 | step | action |
 |---|---|
-| 1 | fill the config, set `rateStart` (bounded to 1e11 to 1e15 wei per whole point, default 4e12) |
+| 1 | fill the config, set `rateStart` (bounded to 1e11 to 1e15 wei per whole point, default 5.6e12, the launch day rule is in docs/DEPLOY.md) |
 | 2 | rehearse: `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv` forks the latest block and runs preflight, the deploy, postflight and a smoke |
 | 3 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
 | 4 | the factory owner enables the deployer, `setAdmin(deployer, true)` |
-| 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow` through a private relay |
+| 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow` through a private relay that serves state reads (`https://rpc.mevblocker.io`), with `CONFIG_HASH` set. a half finished deploy is finished with `script/Resume.s.sol` |
 | 6 | verify Core and ControllerV1 on etherscan, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
 | 7 | the factory owner revokes the deployer, `setAdmin(deployer, false)` |
 

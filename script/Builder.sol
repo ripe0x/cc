@@ -169,6 +169,17 @@ abstract contract SystemBuilder is ConfigReader {
         return 10_000;
     }
 
+    // ------------------------------------------------------------------ the config hash
+
+    /// @notice keccak256 of the canonical abi encoding of the whole launch config plus the hash of the token creation
+    /// code file. it covers every value the launch depends on (the overrides included) and none of the machine (not the
+    /// path of the file, not the deployer). the operator signs off this one value: preflight prints it, `Deploy` needs
+    /// it in CONFIG_HASH and postflight prints it again
+    function configHash(LaunchConfig memory l) internal view returns (bytes32) {
+        bytes32 code = vm.exists(l.tokenCodeFile) ? keccak256(tokenCreationCode(l.tokenCodeFile)) : bytes32(0);
+        return keccak256(abi.encode(l, code));
+    }
+
     // ------------------------------------------------------------------ prediction
 
     /// @notice the exact creation bytecode of the live `ArtCoinsToken` implementation, without constructor

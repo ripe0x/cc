@@ -22,7 +22,7 @@ contract ConfigTest is Fixture {
         assertEq(f.creator, address(0));
         assertEq(bytes(f.name).length, 0);
         assertEq(bytes(f.symbol).length, 0);
-        assertEq(f.rateStart, 4e12);
+        assertEq(f.rateStart, 5.6e12);
         assertEq(f.supply, 1_000_000_000e18);
         assertEq(f.stack.factory, Mainnet.ARTCOINS_FACTORY);
         assertEq(f.factoryOwner, Mainnet.ARTCOINS_FACTORY_OWNER);

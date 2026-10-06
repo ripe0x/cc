@@ -112,7 +112,7 @@ all are immutable constants in the core unless marked.
 | `FEE_BPS` | 1000 | swap fee, 10% |
 | `CREATOR_BPS` | 50 | of each swap's notional. the creator gets 0.5 points of the 10. the core gets 9.5 |
 | `AVG_SCORE` | 4_330_000 | 433 in 1e4 scale. used for "can the pot afford one credit" |
-| `RATE_START` | 4e12 wei per whole point | starting eth rate, about a quarter of market on the spec date |
+| `RATE_START` | 5.6e12 wei per whole point (config default) | starting eth rate, a deploy input in [1e11, 1e15]. launch day rule: flat credit price in wei divided by 1600 |
 | `CLIMB_BASE_BPS_PER_HOUR` | 100 | 1% an hour |
 | `CLIMB_DOUBLE_EVERY` | 24 hours | climb speed doubles for each full period with no fill |
 | `CLIMB_MAX_BPS_PER_HOUR` | 800 | ceiling on climb speed |
@@ -157,7 +157,7 @@ ceiling(id) = score(id) * ethRate * (10_000 + bonusBps(id)) / 10_000 / 1e4
 
 rate dynamics, computed lazily from a checkpoint (`rateAtCheckpoint`, `checkpointTime`, `lastFillTime`, `funded`):
 
-* climbing happens only while `funded`, where funded means `ethPot >= AVG_SCORE * ethRate / 1e4`.
+* climbing happens only while `funded`, where funded means the hourly cap affords one average credit: `ethPot * 2000 >= AVG_SCORE * ethRate`, that is `AVG_SCORE * ethRate / 1e4 <= 20 percent of ethPot`. the climb is clamped to `ethPot * 2000 / AVG_SCORE`.
 * hourly climb speed is `CLIMB_BASE_BPS_PER_HOUR * 2^(floor((now - lastFillTime) / CLIMB_DOUBLE_EVERY))`, capped at `CLIMB_MAX_BPS_PER_HOUR`. compound continuously within each segment using a wad pow.
 * every function that changes `ethPot` first calls `_checkpoint()`, which applies the climb earned under the old funded state and then recomputes `funded`.
 * on a fill that spends `x` from a pot of `p` (pot measured before the spend): `ethRate = ethRate * (1 - DROP_BPS/10_000 * min(1, x/p))`, and `lastFillTime = now`.

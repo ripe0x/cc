@@ -2,3 +2,5 @@ out/
 cache/
 broadcast/
 .env
+script/config/local.json
+script/config/*.local.json

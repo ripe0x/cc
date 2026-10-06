@@ -78,6 +78,10 @@ interface ICreditStrategy {
     function sellTargetNFT(uint256 tokenId) external payable;
 }
 
+// bounds of the Core constructor argument `rateStart`, wei per whole point. one definition for the Core and the scripts
+uint256 constant RATE_START_MIN_WEI = 1e11;
+uint256 constant RATE_START_MAX_WEI = 1e15;
+
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
 /// `hook` is the only address whose eth the Core books as fees. the rest feed the pool key and the forbidden targets
 struct Stack {

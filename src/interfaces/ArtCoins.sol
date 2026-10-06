@@ -105,6 +105,8 @@ interface IArtCoinsFactory {
 
 /// @notice the part of the token the core and the deploy use
 interface IArtCoinsToken {
+    function name() external view returns (string memory);
+    function symbol() external view returns (string memory);
     function totalSupply() external view returns (uint256);
     function balanceOf(address who) external view returns (uint256);
     function allowance(address owner, address spender) external view returns (uint256);
@@ -150,6 +152,10 @@ interface IArtCoinsSkimHook {
     function poolExtension(bytes32 poolId) external view returns (address);
     function mevModuleEnabled(bytes32 poolId) external view returns (bool);
     function poolCreationTimestamp(bytes32 poolId) external view returns (uint256);
+    /// the stack members the hook itself was built with, read by the preflight cross check
+    function poolManager() external view returns (address);
+    function factory() external view returns (address);
+    function feeEscrow() external view returns (address);
     function lockPoolExtension(PoolKey calldata key) external;
     function setMaxReferralBpsOfVolume(PoolKey calldata key, uint24 newCap) external;
 }
@@ -176,6 +182,8 @@ interface IArtCoinsLocker {
         address[] rewardRecipients;
     }
 
+    function factory() external view returns (address);
+    function positionManager() external view returns (address);
     function collectRewards(address token) external;
     function tokenRewards(address token) external view returns (TokenRewardInfo memory);
 }

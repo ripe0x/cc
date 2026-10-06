@@ -1,0 +1,667 @@
+{
+ "base": {
+  "fees30": 291.7,
+  "bought30": 17520,
+  "composed30": 218.6,
+  "sold30": 30.2,
+  "held30": 188.4,
+  "floor30": 187.2,
+  "locked30": 283.5,
+  "toPot30": 12.8,
+  "toBB30": 12.8,
+  "burnM30": 40.59,
+  "burnPct30": 4.059,
+  "pot30": 0.03518,
+  "exited30": 0,
+  "fees60": 293.4,
+  "bought60": 18270,
+  "composed60": 227.8,
+  "sold60": 39.6,
+  "held60": 188.2,
+  "floor60": 187.2,
+  "locked60": 283.3,
+  "toPot60": 15.73,
+  "toBB60": 15.73,
+  "burnM60": 49.08,
+  "burnPct60": 4.908,
+  "pot60": 0.08224,
+  "exited60": 0,
+  "fees90": 295.1,
+  "bought90": 19080,
+  "composed90": 238,
+  "sold90": 49.6,
+  "held90": 188.4,
+  "floor90": 187.4,
+  "locked90": 283.4,
+  "toPot90": 18.88,
+  "toBB90": 18.88,
+  "burnM90": 57.93,
+  "burnPct90": 5.793,
+  "pot90": 0.06752,
+  "exited90": 0,
+  "potGoneDay": 11.63,
+  "lastBuyDay": 89.98,
+  "stallHours": 833.6,
+  "maxStallHours": 11.2,
+  "hoursBidOver15x": 0,
+  "firstFillHour": 24.8,
+  "costVsMarket": 1.426,
+  "costPerPointVsMarket": 1.057,
+  "costVsAsk": 1.502,
+  "avgScoreBought": 593.6,
+  "capSteps": 1775,
+  "capStepsRich": 4.2,
+  "potBlockedSteps": 0.2,
+  "clampSteps": 1,
+  "rateMaxBidRatio": 1.297,
+  "rateSignChanges": 954.8,
+  "rateMeanAbsMove": 0.008639,
+  "saleOverCost": 1.248,
+  "stmtArrivals": 270.8,
+  "stmtMiss": 221.2,
+  "xFills": 0,
+  "xMedianIntervalH": 0,
+  "xMeanDiscount": 0,
+  "boughtX": 0,
+  "exitedX": 0,
+  "burnEthM": 57.93,
+  "burnXM": 0,
+  "tips": 0.002026,
+  "reimb": 3.279,
+  "spent": 310.6,
+  "stCost": 1.318,
+  "stRating": 47470,
+  "xPotEnd": 0,
+  "xToBuybackEnd": 0,
+  "potEnd": 0.06752,
+  "toBuybackEnd": 0,
+  "recycled": 0.1215,
+  "buybackEth": 18.88,
+  "f80hours": 73.6,
+  "f80cost": 0.4332,
+  "f80ratio": 0.608,
+  "f80score": 701.9,
+  "sumM": 0.8829,
+  "stratBought": 258,
+  "listBought": 258,
+  "xValue": 0,
+  "xCoinM": 0
+ },
+ "rows": [
+  {
+   "key": "volScale",
+   "lo": 0.25,
+   "hi": 4,
+   "loRes": {
+    "burnPct90": 19.62,
+    "burnM90": 196.2,
+    "locked90": 63.63,
+    "sold90": 50.33,
+    "floor90": 64.33,
+    "composed90": 115.3,
+    "toBB90": 17.99,
+    "costVsMarket": 1.044
+   },
+   "hiRes": {
+    "burnPct90": 1.47,
+    "burnM90": 14.7,
+    "locked90": 1151,
+    "sold90": 103,
+    "floor90": 426,
+    "composed90": 531.7,
+    "toBB90": 40.34,
+    "costVsMarket": 1.6
+   }
+  },
+  {
+   "key": "priceP0",
+   "lo": 0.0045,
+   "hi": 0.018,
+   "loRes": {
+    "burnPct90": 4.238,
+    "burnM90": 42.38,
+    "locked90": 286.8,
+    "sold90": 72,
+    "floor90": 326.3,
+    "composed90": 400.7,
+    "toBB90": 13.07,
+    "costVsMarket": 1.659
+   },
+   "hiRes": {
+    "burnPct90": 9.082,
+    "burnM90": 90.82,
+    "locked90": 274.9,
+    "sold90": 43.33,
+    "floor90": 106.7,
+    "composed90": 150.7,
+    "toBB90": 34.1,
+    "costVsMarket": 1.142
+   }
+  },
+  {
+   "key": "pricePath",
+   "lo": "decline",
+   "hi": "recovery",
+   "loRes": {
+    "burnPct90": 3.733,
+    "burnM90": 37.33,
+    "locked90": 287.4,
+    "sold90": 54.33,
+    "floor90": 229.7,
+    "composed90": 286.3,
+    "toBB90": 11.23,
+    "costVsMarket": 1.53
+   },
+   "hiRes": {
+    "burnPct90": 14.12,
+    "burnM90": 141.2,
+    "locked90": 256.6,
+    "sold90": 101.7,
+    "floor90": 119,
+    "composed90": 221.7,
+    "toBB90": 65.34,
+    "costVsMarket": 1.175
+   }
+  },
+  {
+   "key": "askSigma",
+   "lo": 0.15,
+   "hi": 0.4,
+   "loRes": {
+    "burnPct90": 3.243,
+    "burnM90": 32.43,
+    "locked90": 286.7,
+    "sold90": 22,
+    "floor90": 190.7,
+    "composed90": 212.7,
+    "toBB90": 9.958,
+    "costVsMarket": 1.514
+   },
+   "hiRes": {
+    "burnPct90": 7.848,
+    "burnM90": 78.48,
+    "locked90": 282.8,
+    "sold90": 82.33,
+    "floor90": 188.7,
+    "composed90": 273,
+    "toBB90": 27.6,
+    "costVsMarket": 1.316
+   }
+  },
+  {
+   "key": "impactElast",
+   "lo": 0,
+   "hi": 0.3,
+   "loRes": {
+    "burnPct90": 6.546,
+    "burnM90": 65.46,
+    "locked90": 282,
+    "sold90": 62.67,
+    "floor90": 224.7,
+    "composed90": 289,
+    "toBB90": 21.32,
+    "costVsMarket": 1.517
+   },
+   "hiRes": {
+    "burnPct90": 6.649,
+    "burnM90": 66.49,
+    "locked90": 281,
+    "sold90": 54,
+    "floor90": 144.3,
+    "composed90": 199.3,
+    "toBB90": 22.69,
+    "costVsMarket": 1.251
+   }
+  },
+  {
+   "key": "offersPerHour",
+   "lo": 60,
+   "hi": 400,
+   "loRes": {
+    "burnPct90": 4.392,
+    "burnM90": 43.92,
+    "locked90": 285.7,
+    "sold90": 33,
+    "floor90": 150.3,
+    "composed90": 184,
+    "toBB90": 13.43,
+    "costVsMarket": 1.801
+   },
+   "hiRes": {
+    "burnPct90": 9.164,
+    "burnM90": 91.64,
+    "locked90": 276.9,
+    "sold90": 100.3,
+    "floor90": 230.3,
+    "composed90": 331.7,
+    "toBB90": 33.86,
+    "costVsMarket": 1.088
+   }
+  },
+  {
+   "key": "supplyElast",
+   "lo": 0.5,
+   "hi": 3,
+   "loRes": {
+    "burnPct90": 5.437,
+    "burnM90": 54.37,
+    "locked90": 284.5,
+    "sold90": 47,
+    "floor90": 185.7,
+    "composed90": 233.7,
+    "toBB90": 17.38,
+    "costVsMarket": 1.467
+   },
+   "hiRes": {
+    "burnPct90": 5.682,
+    "burnM90": 56.82,
+    "locked90": 283.8,
+    "sold90": 49.33,
+    "floor90": 193.7,
+    "composed90": 244,
+    "toBB90": 18.45,
+    "costVsMarket": 1.376
+   }
+  },
+  {
+   "key": "bookChurn",
+   "lo": 0.02,
+   "hi": 0.15,
+   "loRes": {
+    "burnPct90": 7.212,
+    "burnM90": 72.12,
+    "locked90": 280.8,
+    "sold90": 68.67,
+    "floor90": 198,
+    "composed90": 268.3,
+    "toBB90": 24.8,
+    "costVsMarket": 1.319
+   },
+   "hiRes": {
+    "burnPct90": 5.297,
+    "burnM90": 52.97,
+    "locked90": 284.2,
+    "sold90": 43.33,
+    "floor90": 182.3,
+    "composed90": 226.3,
+    "toBB90": 16.97,
+    "costVsMarket": 1.475
+   }
+  },
+  {
+   "key": "stmtPerDay",
+   "lo": 3,
+   "hi": 20,
+   "loRes": {
+    "burnPct90": 5.919,
+    "burnM90": 59.19,
+    "locked90": 283.4,
+    "sold90": 54,
+    "floor90": 192,
+    "composed90": 247.3,
+    "toBB90": 18.62,
+    "costVsMarket": 1.392
+   },
+   "hiRes": {
+    "burnPct90": 7.678,
+    "burnM90": 76.78,
+    "locked90": 278.9,
+    "sold90": 64.67,
+    "floor90": 177,
+    "composed90": 242.7,
+    "toBB90": 27.42,
+    "costVsMarket": 1.431
+   }
+  },
+  {
+   "key": "wtpMult",
+   "lo": 0.7,
+   "hi": 1.3,
+   "loRes": {
+    "burnPct90": 2.716,
+    "burnM90": 27.16,
+    "locked90": 288.6,
+    "sold90": 24.33,
+    "floor90": 201.3,
+    "composed90": 226.3,
+    "toBB90": 7.766,
+    "costVsMarket": 1.44
+   },
+   "hiRes": {
+    "burnPct90": 11.48,
+    "burnM90": 114.8,
+    "locked90": 273.5,
+    "sold90": 113.3,
+    "floor90": 173,
+    "composed90": 288.3,
+    "toBB90": 47.23,
+    "costVsMarket": 1.333
+   }
+  },
+  {
+   "key": "buyShareLate",
+   "lo": 0.42,
+   "hi": 0.52,
+   "loRes": {
+    "burnPct90": 13.1,
+    "burnM90": 131,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   },
+   "hiRes": {
+    "burnPct90": 2.674,
+    "burnM90": 26.74,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   }
+  },
+  {
+   "key": "rateStart",
+   "lo": 1000000000000,
+   "hi": 20000000000000,
+   "loRes": {
+    "burnPct90": 6.064,
+    "burnM90": 60.64,
+    "locked90": 283.2,
+    "sold90": 51,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.39,
+    "costVsMarket": 1.424
+   },
+   "hiRes": {
+    "burnPct90": 5.859,
+    "burnM90": 58.59,
+    "locked90": 283.4,
+    "sold90": 54,
+    "floor90": 184.7,
+    "composed90": 239.7,
+    "toBB90": 19.75,
+    "costVsMarket": 1.426
+   }
+  },
+  {
+   "key": "AUCTION_START_X",
+   "lo": 20000,
+   "hi": 40000,
+   "loRes": {
+    "burnPct90": 6.687,
+    "burnM90": 66.87,
+    "locked90": 284.7,
+    "sold90": 57.67,
+    "floor90": 190.3,
+    "composed90": 249,
+    "toBB90": 22.35,
+    "costVsMarket": 1.395
+   },
+   "hiRes": {
+    "burnPct90": 5.926,
+    "burnM90": 59.26,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   }
+  },
+  {
+   "key": "AUCTION_FLOOR_X",
+   "lo": 8000,
+   "hi": 12000,
+   "loRes": {
+    "burnPct90": 8.9,
+    "burnM90": 89,
+    "locked90": 256.6,
+    "sold90": 104.7,
+    "floor90": 158,
+    "composed90": 264.3,
+    "toBB90": 32.59,
+    "costVsMarket": 1.371
+   },
+   "hiRes": {
+    "burnPct90": 5.926,
+    "burnM90": 59.26,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   }
+  },
+  {
+   "key": "AUCTION_LENGTH",
+   "lo": 86400,
+   "hi": 604800,
+   "loRes": {
+    "burnPct90": 5.224,
+    "burnM90": 52.24,
+    "locked90": 283.9,
+    "sold90": 47,
+    "floor90": 189.7,
+    "composed90": 237,
+    "toBB90": 17.03,
+    "costVsMarket": 1.426
+   },
+   "hiRes": {
+    "burnPct90": 6.39,
+    "burnM90": 63.9,
+    "locked90": 285,
+    "sold90": 54.67,
+    "floor90": 191.7,
+    "composed90": 249.3,
+    "toBB90": 20.51,
+    "costVsMarket": 1.391
+   }
+  },
+  {
+   "key": "gasGwei",
+   "lo": 0.5,
+   "hi": 10,
+   "loRes": {
+    "burnPct90": 6.258,
+    "burnM90": 62.58,
+    "locked90": 283.4,
+    "sold90": 55.33,
+    "floor90": 189,
+    "composed90": 245.7,
+    "toBB90": 20.67,
+    "costVsMarket": 1.408
+   },
+   "hiRes": {
+    "burnPct90": 5.003,
+    "burnM90": 50.03,
+    "locked90": 285.1,
+    "sold90": 41.67,
+    "floor90": 186,
+    "composed90": 228.7,
+    "toBB90": 15.8,
+    "costVsMarket": 1.426
+   }
+  },
+  {
+   "key": "listedShare",
+   "lo": 0,
+   "hi": 0.5,
+   "loRes": {
+    "burnPct90": 5.926,
+    "burnM90": 59.26,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   },
+   "hiRes": {
+    "burnPct90": 7.498,
+    "burnM90": 74.98,
+    "locked90": 279.9,
+    "sold90": 72,
+    "floor90": 213.3,
+    "composed90": 286.3,
+    "toBB90": 25.95,
+    "costVsMarket": 1.218
+   }
+  },
+  {
+   "key": "sniperVolShare",
+   "lo": 0.2,
+   "hi": 0.6,
+   "loRes": {
+    "burnPct90": 5.863,
+    "burnM90": 58.63,
+    "locked90": 230.3,
+    "sold90": 52.33,
+    "floor90": 165.3,
+    "composed90": 219,
+    "toBB90": 18.96,
+    "costVsMarket": 1.354
+   },
+   "hiRes": {
+    "burnPct90": 5.65,
+    "burnM90": 56.5,
+    "locked90": 337.3,
+    "sold90": 48.33,
+    "floor90": 210,
+    "composed90": 259.3,
+    "toBB90": 18.33,
+    "costVsMarket": 1.466
+   }
+  },
+  {
+   "key": "h1Share",
+   "lo": 0.45,
+   "hi": 0.7,
+   "loRes": {
+    "burnPct90": 5.946,
+    "burnM90": 59.46,
+    "locked90": 258.5,
+    "sold90": 53,
+    "floor90": 179,
+    "composed90": 233,
+    "toBB90": 19.21,
+    "costVsMarket": 1.382
+   },
+   "hiRes": {
+    "burnPct90": 5.584,
+    "burnM90": 55.84,
+    "locked90": 304.8,
+    "sold90": 48.33,
+    "floor90": 197,
+    "composed90": 246.3,
+    "toBB90": 18.03,
+    "costVsMarket": 1.442
+   }
+  },
+  {
+   "key": "SPEND_CAP_BPS_PER_HOUR",
+   "lo": 1000,
+   "hi": 4000,
+   "loRes": {
+    "burnPct90": 3.27,
+    "burnM90": 32.7,
+    "locked90": 286.5,
+    "sold90": 24,
+    "floor90": 188,
+    "composed90": 212,
+    "toBB90": 10.17,
+    "costVsMarket": 1.528
+   },
+   "hiRes": {
+    "burnPct90": 7.851,
+    "burnM90": 78.51,
+    "locked90": 279.2,
+    "sold90": 74.33,
+    "floor90": 184.3,
+    "composed90": 259.7,
+    "toBB90": 27.48,
+    "costVsMarket": 1.363
+   }
+  },
+  {
+   "key": "DROP_BPS",
+   "lo": 500,
+   "hi": 2000,
+   "loRes": {
+    "burnPct90": 4.183,
+    "burnM90": 41.83,
+    "locked90": 285,
+    "sold90": 30.67,
+    "floor90": 180.7,
+    "composed90": 211.3,
+    "toBB90": 13.3,
+    "costVsMarket": 1.539
+   },
+   "hiRes": {
+    "burnPct90": 7.047,
+    "burnM90": 70.47,
+    "locked90": 281.2,
+    "sold90": 65.67,
+    "floor90": 193.7,
+    "composed90": 260.7,
+    "toBB90": 23.82,
+    "costVsMarket": 1.344
+   }
+  },
+  {
+   "key": "CLIMB_BASE_BPS_PER_HOUR",
+   "lo": 50,
+   "hi": 200,
+   "loRes": {
+    "burnPct90": 6.844,
+    "burnM90": 68.44,
+    "locked90": 281.6,
+    "sold90": 62.67,
+    "floor90": 223,
+    "composed90": 287,
+    "toBB90": 22.27,
+    "costVsMarket": 1.27
+   },
+   "hiRes": {
+    "burnPct90": 3.194,
+    "burnM90": 31.94,
+    "locked90": 286.2,
+    "sold90": 24,
+    "floor90": 156.7,
+    "composed90": 180.7,
+    "toBB90": 10.7,
+    "costVsMarket": 1.711
+   }
+  },
+  {
+   "key": "bidMode",
+   "lo": "flat",
+   "hi": "perPoint",
+   "loRes": {
+    "burnPct90": 9.131,
+    "burnM90": 91.31,
+    "locked90": 277.6,
+    "sold90": 102,
+    "floor90": 225,
+    "composed90": 328.7,
+    "toBB90": 33.34,
+    "costVsMarket": 1.088
+   },
+   "hiRes": {
+    "burnPct90": 5.926,
+    "burnM90": 59.26,
+    "locked90": 283.3,
+    "sold90": 50.67,
+    "floor90": 187,
+    "composed90": 238.7,
+    "toBB90": 19.47,
+    "costVsMarket": 1.426
+   }
+  }
+ ]
+}

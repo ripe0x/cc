@@ -2,7 +2,7 @@
   "stack": {
     "poolManager": "0x000000000004444c5dc75cB358380D2e3dE08A90",
     "hook": "0x636c050296B5Cc528D8785169Bf8923716FCa9cc",
-    "tickSpacing": 200,
+    "tickSpacing": 16777416,
     "poolFee": 8388608,
     "factory": "0x49596c375c139E79bb937bcf826068a8F78D4e0e",
     "locker": "0x866ea3Dc2bf7A3e77374619cf50EB697FA766aab",
@@ -10,32 +10,27 @@
     "mevModule": "0xb038D597365FfD108D63C265Bb0621444a1D8B83"
   },
   "factoryOwner": "0xCB43078C32423F5348Cab5885911C3B5faE217F9",
-  "owner": "0x0000000000000000000000000000000000000000",
-  "creator": "0x0000000000000000000000000000000000000000",
-  "name": "",
-  "symbol": "",
-  "salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "rateStart": 5600000000000,
+  "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "creator": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  "name": "Runbook Coin",
+  "symbol": "RBK",
+  "salt": "0xabababababababababababababababababababababababababababababababab",
+  "rateStart": 4000000000000,
   "launch": {
     "supply": "1000000000000000000000000000",
     "startTick": -175000,
     "positionLower": -175000,
     "positionUpper": 887200,
     "baselineSkimBps": 10000,
-    "bountyBps": 9500,
+    "bountyBps": 75036,
     "maxReferralBps": 0,
     "lpFee": 0,
     "sniperStartBps": 90000,
     "sniperEndBps": 10000,
     "sniperSeconds": 1800,
-    "taxBps": 1500,
+    "taxBps": 67036,
     "taxBpsMax": 2000,
     "taxBurn": "0x000000000000000000000000000000000000dEaD",
     "tokenCodeFile": "script/data/ArtCoinsToken.creation.hex"
-  },
-  "overrides": {
-    "bounty": false,
-    "taxBurn": false,
-    "openFactory": false
   }
 }

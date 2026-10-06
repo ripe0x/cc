@@ -23,7 +23,9 @@ import {
     ICreditScore,
     IStatements,
     Stack,
-    Mainnet
+    Mainnet,
+    RATE_START_MIN_WEI,
+    RATE_START_MAX_WEI
 } from "./interfaces/Interfaces.sol";
 
 /// custody and every rule of the credits engine. the only mutable slots are the ones the owner can
@@ -113,6 +115,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error DailyCap();
     error BadRate();
     error BadStack();
+    /// a stack member that must be a contract has no code
+    error NoCode(address who);
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -152,8 +156,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public constant CREATOR_BPS = 50;
     uint256 public constant AVG_SCORE = 4_330_000;
     /// bounds of the opening bid, wei per whole point. the right opening depends on the market on launch day
-    uint256 public constant RATE_START_MIN = 1e11;
-    uint256 public constant RATE_START_MAX = 1e15;
+    uint256 public constant RATE_START_MIN = RATE_START_MIN_WEI;
+    uint256 public constant RATE_START_MAX = RATE_START_MAX_WEI;
     uint256 public constant CLIMB_BASE_BPS_PER_HOUR = 100;
     uint256 public constant CLIMB_DOUBLE_EVERY = 24 hours;
     uint256 public constant CLIMB_MAX_BPS_PER_HOUR = 800;
@@ -273,7 +277,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             stack_.poolManager == address(0) || stack_.hook == address(0) || stack_.factory == address(0)
                 || stack_.locker == address(0) || stack_.escrow == address(0)
         ) revert ZeroAddress();
-        if (stack_.tickSpacing <= 0) revert BadStack();
+        if (stack_.tickSpacing <= 0 || stack_.tickSpacing > 32_767) revert BadStack();
+        // the five stack members must be contracts. the coin is not deployed yet when the core is created
+        if (stack_.poolManager.code.length == 0) revert NoCode(stack_.poolManager);
+        if (stack_.hook.code.length == 0) revert NoCode(stack_.hook);
+        if (stack_.factory.code.length == 0) revert NoCode(stack_.factory);
+        if (stack_.locker.code.length == 0) revert NoCode(stack_.locker);
+        if (stack_.escrow.code.length == 0) revert NoCode(stack_.escrow);
         if (rateStart_ < RATE_START_MIN || rateStart_ > RATE_START_MAX) revert BadRate();
         OWNER = owner_;
         COIN = coin_;

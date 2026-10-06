@@ -4,10 +4,17 @@ pragma solidity ^0.8.28;
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {Core} from "../src/Core.sol";
 import {ControllerV1} from "../src/ControllerV1.sol";
 import {Mainnet, Stack} from "../src/interfaces/Interfaces.sol";
-import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook, IArtCoinsLocker} from "../src/interfaces/ArtCoins.sol";
+import {
+    IArtCoinsFactory,
+    IArtCoinsToken,
+    IArtCoinsSkimHook,
+    IArtCoinsLocker,
+    IArtCoinsMevSkim
+} from "../src/interfaces/ArtCoins.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {SystemBuilder} from "./Builder.sol";
 import {Report} from "./Report.sol";
@@ -15,8 +22,18 @@ import {Report} from "./Report.sol";
 /// @notice reads a launched system back and compares it with the config. read only, safe against mainnet any time.
 /// run it right after the launch: the supply and rate rows are exact at launch and tolerant once trading started
 abstract contract PostflightChecks is SystemBuilder, Report {
+    using PositionInfoLibrary for PositionInfo;
+
     /// @dev the locker keeps rounding dust of the supply
     uint256 internal constant LOCKER_DUST_MAX = 1e6;
+
+    /// @dev a staticcall that never reverts. ok is false when the call failed or returned less than a word
+    function _word(address target, bytes memory data) internal view returns (bool ok, uint256 w) {
+        bytes memory out;
+        (ok, out) = target.staticcall(data);
+        if (ok && out.length >= 32) w = abi.decode(out, (uint256));
+        else ok = false;
+    }
 
     function postflight(LaunchConfig memory c, address core_) internal {
         _reset();
@@ -34,6 +51,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _postHook(c, core_, id);
         _postTax(c, core_, IArtCoinsToken(coin), id);
         _postLocker(c, coin, key);
+        _postMev(c, id);
+        _postPosition(c, core, coin, id);
+        _postUnreadable(c);
     }
 
     /// @notice the constructor arguments of a deployed core, read back from its immutables, in the encoding etherscan
@@ -100,6 +120,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     }
 
     function _postCoin(LaunchConfig memory c, Core core, IArtCoinsToken coin, bytes32 id) private {
+        _eq("coin: name", coin.name(), c.name);
+        _eq("coin: symbol", coin.symbol(), c.symbol);
         _eq("coin: supply", coin.totalSupply(), c.supply);
         _eq("coin: admin is owner", coin.admin(), c.owner);
         _eq("coin: pool id", coin.canonicalPoolId(), id);
@@ -196,5 +218,87 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             keccak256(abi.encode(info.poolKey)) == keccak256(abi.encode(key)),
             "tokenRewards poolKey"
         );
+    }
+
+    /// @dev the mev module exposes only `currentSkimBps(poolId)`, a function of the stored start, end and duration and
+    /// of the time since the pool was created. inside the window one read pins the three values together (the formula is
+    /// the module's `start - (start - end) * elapsed / duration`), after the window it reads the end value only
+    function _postMev(LaunchConfig memory c, bytes32 id) private {
+        uint256 created = IArtCoinsSkimHook(c.stack.hook).poolCreationTimestamp(id);
+        (bool ok, uint256 cur) = _word(c.mevModule, abi.encodeCall(IArtCoinsMevSkim.currentSkimBps, (id)));
+        uint256 elapsed = block.timestamp > created ? block.timestamp - created : 0;
+        uint256 start = c.sniperStartBps;
+        uint256 end = c.sniperEndBps;
+        if (elapsed < c.sniperSeconds && start >= end) {
+            uint256 want = start - (start - end) * elapsed / c.sniperSeconds;
+            _check(
+                "mev: skim now matches start, end and duration",
+                ok && cur + 1 >= want && cur <= want + 1,
+                string.concat(
+                    "inside the window at ",
+                    vm.toString(elapsed),
+                    "s, module ",
+                    vm.toString(cur),
+                    " want ",
+                    vm.toString(want)
+                )
+            );
+        } else {
+            _check(
+                "mev: skim now equals the end bps",
+                ok && cur == end,
+                string.concat(
+                    "window over, module ",
+                    vm.toString(cur),
+                    " want ",
+                    vm.toString(end),
+                    ". start bps and duration cannot be read after the window, run postflight inside it"
+                )
+            );
+        }
+    }
+
+    /// @dev the launch position as the position manager stores it. the pool is eth against the coin, so the pool ticks
+    /// are the negated config ticks. the start tick is read from the pool while untraded
+    function _postPosition(LaunchConfig memory c, Core core, address coin, bytes32 id) private {
+        IArtCoinsLocker.TokenRewardInfo memory info = IArtCoinsLocker(c.stack.locker).tokenRewards(coin);
+        (bool ok, uint256 w) =
+            _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("positionInfo(uint256)", info.positionId));
+        PositionInfo pi = PositionInfo.wrap(w);
+        _check(
+            "position: ticks equal the config",
+            ok && pi.tickLower() == -c.positionUpper && pi.tickUpper() == -c.positionLower,
+            string.concat(
+                "pool ticks ",
+                vm.toString(int256(pi.tickLower())),
+                " to ",
+                vm.toString(int256(pi.tickUpper())),
+                ", config ",
+                vm.toString(int256(-c.positionUpper)),
+                " to ",
+                vm.toString(int256(-c.positionLower))
+            )
+        );
+        (bool ok2, uint256 holder) =
+            _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("ownerOf(uint256)", info.positionId));
+        _check("position: held by the locker", ok2 && address(uint160(holder)) == c.stack.locker, "ownerOf");
+        (, int24 tick,,) = StateLibrary.getSlot0(core.MANAGER(), PoolId.wrap(id));
+        bool inRange = tick >= pi.tickLower() && tick <= pi.tickUpper();
+        _check(
+            "pool: start tick",
+            inRange && (tick == -c.startTick || tick < -c.startTick),
+            tick == -c.startTick
+                ? "untraded, the pool sits at the start tick"
+                : "traded, the start tick itself is no longer readable, the pool is inside the position"
+        );
+    }
+
+    /// @dev what a read back cannot cover, said in the output
+    function _postUnreadable(LaunchConfig memory c) private {
+        _info(
+            "not readable on chain",
+            "protocolBps argument (0), sniper fee config, token image metadata context, locker data, the deploy fee paid, the salt itself (bound by coin: equals prediction)"
+        );
+        _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
     }
 }

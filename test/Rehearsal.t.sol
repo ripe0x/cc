@@ -24,8 +24,9 @@ interface IPermit2R {
 /// @notice the launch rehearsal. forks mainnet at the LATEST block (read from the rpc, not the pinned one), runs the
 /// preflight, the real deploy path as the factory owner enables the deployer, the postflight, and a short smoke:
 /// a buy and a sell through the universal router and a real credit sold into the bid. it skips cleanly unless the
-/// env var REHEARSAL is set, so the default suite stays pinned and fast.
-/// `set -a; . ./.env; set +a; REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv`
+/// env var REHEARSAL is set, so the default suite stays pinned and fast. it reads the config file named by
+/// LAUNCH_CONFIG, like the scripts do, so the operator rehearses the exact file they will launch with.
+/// `set -a; . ./.env; set +a; REHEARSAL=1 LAUNCH_CONFIG=script/config/local.json forge test --match-path test/Rehearsal.t.sol -vv`
 contract RehearsalTest is Test, SystemDeployer {
     LaunchConfig internal c;
     Deployed internal d;
@@ -42,12 +43,18 @@ contract RehearsalTest is Test, SystemDeployer {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
         console.log("rehearsal at block", block.number, "timestamp", block.timestamp);
 
-        c = loadConfig(DEFAULT_CONFIG_FILE);
-        c.owner = _user("owner");
-        c.creator = _user("creator");
-        c.name = "Rehearsal Coin";
-        c.symbol = "REH";
-        c.salt = keccak256("credits engine rehearsal");
+        // the exact file the operator will launch with: LAUNCH_CONFIG, as the scripts read it. a placeholder the file
+        // leaves unset gets a rehearsal value, a placeholder it fills is rehearsed as it is
+        string memory file = vm.envOr("LAUNCH_CONFIG", DEFAULT_CONFIG_FILE);
+        console.log("rehearsing the config file", file);
+        c = loadConfig(file);
+        if (c.owner == address(0)) c.owner = _user("owner");
+        if (c.creator == address(0)) c.creator = _user("creator");
+        if (bytes(c.name).length == 0) c.name = "Rehearsal Coin";
+        if (bytes(c.symbol).length == 0) c.symbol = "REH";
+        if (c.salt == bytes32(0)) c.salt = keccak256("credits engine rehearsal");
+        console.log("config hash");
+        console.logBytes32(configHash(c));
         deployer = _user("deployer");
         trader = _user("trader");
         vm.deal(deployer, 2 ether);
@@ -146,7 +153,9 @@ contract RehearsalTest is Test, SystemDeployer {
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
         uint256 bought = coin.balanceOf(trader);
         assertGt(bought, 0, "bought coin through the universal router");
-        assertEq(core.ethPot() - pot, 0.095 ether, "9.5 points of the buy reached the pot");
+        // the baseline skim of the config (hundredths of a basis point of volume) times the bounty share of it
+        uint256 want = uint256(1 ether) * c.baselineSkimBps / 100_000 * c.bountyBps / 10_000;
+        assertEq(core.ethPot() - pot, want, "the bounty share of the baseline skim reached the pot");
         assertEq(address(core).balance, core.ethPot(), "pot equals balance");
 
         uint256 sellIn = bought / 2;

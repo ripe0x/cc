@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {CommonBase} from "forge-std/Base.sol";
-import {Stack, Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Stack, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
 /// memory by the tests. nothing here is read by `src/`: the Core takes `stack` and `rateStart` as constructor arguments
@@ -34,6 +34,13 @@ struct LaunchConfig {
     uint16 taxBps;
     uint16 taxBpsMax;
     address taxBurn;
+    // explicit overrides of pinned preflight rules. all false by default. each one is part of the config hash
+    /// allow a bountyBps other than 9500
+    bool allowBounty;
+    /// allow a tax recipient other than the dead address
+    bool allowTaxBurn;
+    /// allow launching while the factory is not deprecated (a future public factory)
+    bool allowOpenFactory;
     /// creation bytecode of the token implementation of this artcoins version, without constructor arguments
     string tokenCodeFile;
 }
@@ -41,8 +48,12 @@ struct LaunchConfig {
 /// @notice reads and checks a `LaunchConfig`
 abstract contract ConfigReader is CommonBase {
     string internal constant DEFAULT_CONFIG_FILE = "script/config/mainnet.json";
-    uint256 internal constant RATE_START_MIN = 1e11;
-    uint256 internal constant RATE_START_MAX = 1e15;
+    /// @dev a json number does not fit the field it is cut into
+    error ConfigOutOfRange(string key);
+
+    /// @dev the bounds of the Core constructor argument, one shared definition with the Core, so they cannot drift
+    uint256 internal constant RATE_START_MIN = RATE_START_MIN_WEI;
+    uint256 internal constant RATE_START_MAX = RATE_START_MAX_WEI;
 
     /// @notice the default config in memory: the live artcoins stack and the launch parameters of
     /// docs/ARCHITECTURE.md section 2, with owner, creator, name, symbol and salt left unset. tests fill them
@@ -50,7 +61,7 @@ abstract contract ConfigReader is CommonBase {
         c.stack = Mainnet.defaultStack();
         c.mevModule = Mainnet.MEV_LINEAR_SKIM;
         c.factoryOwner = Mainnet.ARTCOINS_FACTORY_OWNER;
-        c.rateStart = 4e12;
+        c.rateStart = 5_600_000_000_000;
         c.supply = 1_000_000_000e18;
         c.startTick = -175_000;
         c.positionLower = -175_000;
@@ -68,16 +79,19 @@ abstract contract ConfigReader is CommonBase {
         c.tokenCodeFile = "script/data/ArtCoinsToken.creation.hex";
     }
 
-    /// @notice parses a config file. a missing key reverts inside the cheatcode
-    function loadConfig(string memory file) internal view returns (LaunchConfig memory c) {
-        string memory j = vm.readFile(file);
+    /// @notice parses a config file. a missing key reverts inside the cheatcode, a number that does not fit its field
+    /// reverts with `ConfigOutOfRange`
+    function loadConfig(string memory file) internal view returns (LaunchConfig memory) {
+        return parseConfig(vm.readFile(file));
+    }
+
+    /// @notice parses a config given as json text
+    function parseConfig(string memory j) internal view returns (LaunchConfig memory c) {
         c.stack = Stack({
             poolManager: vm.parseJsonAddress(j, ".stack.poolManager"),
             hook: vm.parseJsonAddress(j, ".stack.hook"),
-            // forge-lint: disable-next-line(unsafe-typecast)
-            tickSpacing: int24(vm.parseJsonInt(j, ".stack.tickSpacing")),
-            // forge-lint: disable-next-line(unsafe-typecast)
-            poolFee: uint24(vm.parseJsonUint(j, ".stack.poolFee")),
+            tickSpacing: _i24(j, ".stack.tickSpacing"),
+            poolFee: _u24(j, ".stack.poolFee"),
             factory: vm.parseJsonAddress(j, ".stack.factory"),
             locker: vm.parseJsonAddress(j, ".stack.locker"),
             escrow: vm.parseJsonAddress(j, ".stack.escrow")
@@ -91,27 +105,61 @@ abstract contract ConfigReader is CommonBase {
         c.salt = vm.parseJsonBytes32(j, ".salt");
         c.rateStart = vm.parseJsonUint(j, ".rateStart");
         _loadLaunch(c, j);
+        // the overrides are optional, a missing key means false
+        c.allowBounty = _flag(j, ".overrides.bounty");
+        c.allowTaxBurn = _flag(j, ".overrides.taxBurn");
+        c.allowOpenFactory = _flag(j, ".overrides.openFactory");
     }
 
     function _loadLaunch(LaunchConfig memory c, string memory j) private pure {
         // the supply is a decimal string, it does not fit a json number
         c.supply = vm.parseJsonUint(j, ".launch.supply");
-        // forge-lint: disable-start(unsafe-typecast)
-        c.startTick = int24(vm.parseJsonInt(j, ".launch.startTick"));
-        c.positionLower = int24(vm.parseJsonInt(j, ".launch.positionLower"));
-        c.positionUpper = int24(vm.parseJsonInt(j, ".launch.positionUpper"));
-        c.baselineSkimBps = uint24(vm.parseJsonUint(j, ".launch.baselineSkimBps"));
-        c.bountyBps = uint16(vm.parseJsonUint(j, ".launch.bountyBps"));
-        c.maxReferralBps = uint24(vm.parseJsonUint(j, ".launch.maxReferralBps"));
-        c.lpFee = uint24(vm.parseJsonUint(j, ".launch.lpFee"));
-        c.sniperStartBps = uint24(vm.parseJsonUint(j, ".launch.sniperStartBps"));
-        c.sniperEndBps = uint24(vm.parseJsonUint(j, ".launch.sniperEndBps"));
-        c.sniperSeconds = uint32(vm.parseJsonUint(j, ".launch.sniperSeconds"));
-        c.taxBps = uint16(vm.parseJsonUint(j, ".launch.taxBps"));
-        c.taxBpsMax = uint16(vm.parseJsonUint(j, ".launch.taxBpsMax"));
-        // forge-lint: disable-end(unsafe-typecast)
+        c.startTick = _i24(j, ".launch.startTick");
+        c.positionLower = _i24(j, ".launch.positionLower");
+        c.positionUpper = _i24(j, ".launch.positionUpper");
+        c.baselineSkimBps = _u24(j, ".launch.baselineSkimBps");
+        c.bountyBps = _u16(j, ".launch.bountyBps");
+        c.maxReferralBps = _u24(j, ".launch.maxReferralBps");
+        c.lpFee = _u24(j, ".launch.lpFee");
+        c.sniperStartBps = _u24(j, ".launch.sniperStartBps");
+        c.sniperEndBps = _u24(j, ".launch.sniperEndBps");
+        c.sniperSeconds = _u32(j, ".launch.sniperSeconds");
+        c.taxBps = _u16(j, ".launch.taxBps");
+        c.taxBpsMax = _u16(j, ".launch.taxBpsMax");
         c.taxBurn = vm.parseJsonAddress(j, ".launch.taxBurn");
         c.tokenCodeFile = vm.parseJsonString(j, ".launch.tokenCodeFile");
+    }
+
+    // every narrowing below follows a bounds check, so the casts cannot truncate
+    function _uint(string memory j, string memory key, uint256 max) private pure returns (uint256 v) {
+        v = vm.parseJsonUint(j, key);
+        if (v > max) revert ConfigOutOfRange(key);
+    }
+
+    function _u16(string memory j, string memory key) private pure returns (uint16) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint16(_uint(j, key, type(uint16).max));
+    }
+
+    function _u24(string memory j, string memory key) private pure returns (uint24) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24(_uint(j, key, type(uint24).max));
+    }
+
+    function _u32(string memory j, string memory key) private pure returns (uint32) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint32(_uint(j, key, type(uint32).max));
+    }
+
+    function _i24(string memory j, string memory key) private pure returns (int24) {
+        int256 v = vm.parseJsonInt(j, key);
+        if (v < type(int24).min || v > type(int24).max) revert ConfigOutOfRange(key);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return int24(v);
+    }
+
+    function _flag(string memory j, string memory key) private view returns (bool) {
+        return vm.keyExistsJson(j, key) && vm.parseJsonBool(j, key);
     }
 
     /// @notice the placeholders every launch must fill: returns the names of those still unset

@@ -129,6 +129,8 @@ abstract contract Fixture is Test, SystemDeployer {
 
         vm.startPrank(deployer);
         lc = defaultConfig();
+        // the core tests are written against this opening bid, whatever the launch default is
+        lc.rateStart = 4e12;
         lc.owner = owner;
         lc.creator = creator;
         lc.name = "Fixture Coin";

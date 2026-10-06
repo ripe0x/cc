@@ -1,0 +1,3722 @@
+{
+ "meta": {
+  "window": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "first_block": 26037294,
+  "last_block": 26130271,
+  "start_utc": "2026-09-23T02:46Z",
+  "end_utc": "2026-10-06T02:12Z",
+  "units": "price_eth in ETH; wei_per_point = wei per whole score point (score_1e4/1e4); score points range 80..800",
+  "note": "the whole collection life is only ~13 days: 30d and 90d medians equal the whole-window median and are labelled as such"
+ },
+ "price_per_point_daily": {
+  "all_sales": {
+   "2026-09-23": {
+    "n": 38796,
+    "eth_volume": 1327.4048718152687,
+    "wpp_median": 79068015818787.06,
+    "wpp_p10": 42984257878350.73,
+    "wpp_p90": 224798155879229.25,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.024057,
+    "credit_price_eth_p90": 0.04159
+   },
+   "2026-09-24": {
+    "n": 12304,
+    "eth_volume": 428.33003938171913,
+    "wpp_median": 77249498879486.28,
+    "wpp_p10": 45645033894324.2,
+    "wpp_p90": 224135009515548.75,
+    "credit_price_eth_median": 0.0303,
+    "credit_price_eth_p10": 0.0274,
+    "credit_price_eth_p90": 0.035
+   },
+   "2026-09-25": {
+    "n": 6160,
+    "eth_volume": 177.3295813064197,
+    "wpp_median": 66383329792414.68,
+    "wpp_p10": 39207005531395.195,
+    "wpp_p90": 191428550800964.5,
+    "credit_price_eth_median": 0.026154995,
+    "credit_price_eth_p10": 0.0235,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-26": {
+    "n": 4536,
+    "eth_volume": 128.30106181455665,
+    "wpp_median": 61698031356609.84,
+    "wpp_p10": 36823104953235.44,
+    "wpp_p90": 185950544506830.84,
+    "credit_price_eth_median": 0.025,
+    "credit_price_eth_p10": 0.022499999,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-27": {
+    "n": 4502,
+    "eth_volume": 125.18892951411121,
+    "wpp_median": 64850672177316.1,
+    "wpp_p10": 37986590025605.6,
+    "wpp_p90": 188421595989371.34,
+    "credit_price_eth_median": 0.026,
+    "credit_price_eth_p10": 0.023859,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-28": {
+    "n": 5822,
+    "eth_volume": 146.31635219590513,
+    "wpp_median": 60570321219300.016,
+    "wpp_p10": 35527638750356.29,
+    "wpp_p90": 173083858986404.12,
+    "credit_price_eth_median": 0.024677,
+    "credit_price_eth_p10": 0.0217,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-29": {
+    "n": 5734,
+    "eth_volume": 163.9311082164316,
+    "wpp_median": 64626037818235.26,
+    "wpp_p10": 39273556004038.41,
+    "wpp_p90": 187136618664128.66,
+    "credit_price_eth_median": 0.0275,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-30": {
+    "n": 5202,
+    "eth_volume": 151.12246004864227,
+    "wpp_median": 65424327029658.54,
+    "wpp_p10": 40150233697026.766,
+    "wpp_p90": 181447958292886.44,
+    "credit_price_eth_median": 0.02844,
+    "credit_price_eth_p10": 0.0258,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-10-01": {
+    "n": 6598,
+    "eth_volume": 177.2112299538825,
+    "wpp_median": 61822451758654.2,
+    "wpp_p10": 35903891825271.586,
+    "wpp_p90": 178769672369549.97,
+    "credit_price_eth_median": 0.0269,
+    "credit_price_eth_p10": 0.0207,
+    "credit_price_eth_p90": 0.0314
+   },
+   "2026-10-02": {
+    "n": 12351,
+    "eth_volume": 174.8305900583227,
+    "wpp_median": 29262392623275.957,
+    "wpp_p10": 16525413055103.588,
+    "wpp_p90": 91026984646175.06,
+    "credit_price_eth_median": 0.0123,
+    "credit_price_eth_p10": 0.0093,
+    "credit_price_eth_p90": 0.025
+   },
+   "2026-10-03": {
+    "n": 5473,
+    "eth_volume": 71.61918277150323,
+    "wpp_median": 25840934117304.855,
+    "wpp_p10": 13581825860842.912,
+    "wpp_p90": 88662998782122.97,
+    "credit_price_eth_median": 0.009488,
+    "credit_price_eth_p10": 0.008316,
+    "credit_price_eth_p90": 0.02980000000000009
+   },
+   "2026-10-04": {
+    "n": 5706,
+    "eth_volume": 65.81432742982184,
+    "wpp_median": 22574446816793.098,
+    "wpp_p10": 11902699626457.016,
+    "wpp_p90": 78754857363440.78,
+    "credit_price_eth_median": 0.0082,
+    "credit_price_eth_p10": 0.0069,
+    "credit_price_eth_p90": 0.030272150249999998
+   },
+   "2026-10-05": {
+    "n": 3471,
+    "eth_volume": 32.072621494709566,
+    "wpp_median": 20189501545722.66,
+    "wpp_p10": 12238903394255.875,
+    "wpp_p90": 55284210305791.516,
+    "credit_price_eth_median": 0.0085,
+    "credit_price_eth_p10": 0.0068,
+    "credit_price_eth_p90": 0.012
+   },
+   "2026-10-06": {
+    "n": 898,
+    "eth_volume": 11.873104357518876,
+    "wpp_median": 26260834563156.953,
+    "wpp_p10": 19147832195905.258,
+    "wpp_p90": 73579845690246.34,
+    "credit_price_eth_median": 0.011777,
+    "credit_price_eth_p10": 0.0105,
+    "credit_price_eth_p90": 0.017109000000000006
+   }
+  },
+  "market (seaport+blur+strategy purchase seaport legs)": {
+   "2026-09-23": {
+    "n": 38697,
+    "eth_volume": 1313.2654006274397,
+    "wpp_median": 78387458006718.92,
+    "wpp_p10": 42721824313640.836,
+    "wpp_p90": 222286320795554.75,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.024,
+    "credit_price_eth_p90": 0.041
+   },
+   "2026-09-24": {
+    "n": 12045,
+    "eth_volume": 416.44950132662007,
+    "wpp_median": 76068355515029.39,
+    "wpp_p10": 45299385509797.15,
+    "wpp_p90": 219569296891159.8,
+    "credit_price_eth_median": 0.030195,
+    "credit_price_eth_p10": 0.0272,
+    "credit_price_eth_p90": 0.034
+   },
+   "2026-09-25": {
+    "n": 6154,
+    "eth_volume": 172.3034858072661,
+    "wpp_median": 64412296875509.984,
+    "wpp_p10": 38666426176619.01,
+    "wpp_p90": 185662616005347.6,
+    "credit_price_eth_median": 0.02585,
+    "credit_price_eth_p10": 0.0232,
+    "credit_price_eth_p90": 0.0288
+   },
+   "2026-09-26": {
+    "n": 4520,
+    "eth_volume": 123.68140258544369,
+    "wpp_median": 58586039459826.234,
+    "wpp_p10": 36089700789568.05,
+    "wpp_p90": 176862134712055.56,
+    "credit_price_eth_median": 0.0249,
+    "credit_price_eth_p10": 0.0223,
+    "credit_price_eth_p90": 0.0269
+   },
+   "2026-09-27": {
+    "n": 4184,
+    "eth_volume": 112.48046779698488,
+    "wpp_median": 62644706172985.08,
+    "wpp_p10": 37293363008275.16,
+    "wpp_p90": 179809293440224.28,
+    "credit_price_eth_median": 0.0255,
+    "credit_price_eth_p10": 0.0237,
+    "credit_price_eth_p90": 0.0275
+   },
+   "2026-09-28": {
+    "n": 5362,
+    "eth_volume": 130.92698761625172,
+    "wpp_median": 57571991081064.05,
+    "wpp_p10": 34942804492057.13,
+    "wpp_p90": 166443080884447.6,
+    "credit_price_eth_median": 0.023898,
+    "credit_price_eth_p10": 0.0214,
+    "credit_price_eth_p90": 0.0255
+   },
+   "2026-09-29": {
+    "n": 5229,
+    "eth_volume": 145.53134408283591,
+    "wpp_median": 63463166807790.01,
+    "wpp_p10": 38762648127144.61,
+    "wpp_p90": 180918977946824.75,
+    "credit_price_eth_median": 0.027,
+    "credit_price_eth_p10": 0.0247978,
+    "credit_price_eth_p90": 0.0283
+   },
+   "2026-09-30": {
+    "n": 4325,
+    "eth_volume": 121.40387323938396,
+    "wpp_median": 61509785414655.17,
+    "wpp_p10": 39036243917634.08,
+    "wpp_p90": 169018559338397.22,
+    "credit_price_eth_median": 0.027,
+    "credit_price_eth_p10": 0.025799,
+    "credit_price_eth_p90": 0.02935
+   },
+   "2026-10-01": {
+    "n": 4387,
+    "eth_volume": 110.09887523510272,
+    "wpp_median": 54438793137100.516,
+    "wpp_p10": 33794487537155.566,
+    "wpp_p90": 155984732585117.66,
+    "credit_price_eth_median": 0.0252,
+    "credit_price_eth_p10": 0.0202999,
+    "credit_price_eth_p90": 0.027999
+   },
+   "2026-10-02": {
+    "n": 11151,
+    "eth_volume": 139.5959918145689,
+    "wpp_median": 26756203901826.34,
+    "wpp_p10": 16210819279489.074,
+    "wpp_p90": 75667624913061.05,
+    "credit_price_eth_median": 0.01199,
+    "credit_price_eth_p10": 0.009108,
+    "credit_price_eth_p90": 0.0155
+   },
+   "2026-10-03": {
+    "n": 4508,
+    "eth_volume": 43.62711814186371,
+    "wpp_median": 21398850694146.48,
+    "wpp_p10": 13182784051460.756,
+    "wpp_p90": 60889434003249.414,
+    "credit_price_eth_median": 0.0092,
+    "credit_price_eth_p10": 0.008273,
+    "credit_price_eth_p90": 0.0111
+   },
+   "2026-10-04": {
+    "n": 4814,
+    "eth_volume": 39.29067187031316,
+    "wpp_median": 19243763387139.5,
+    "wpp_p10": 11576327181225.693,
+    "wpp_p90": 53187562230521.29,
+    "credit_price_eth_median": 0.007873343939393939,
+    "credit_price_eth_p10": 0.0067,
+    "credit_price_eth_p90": 0.0092
+   },
+   "2026-10-05": {
+    "n": 3447,
+    "eth_volume": 31.33589635944253,
+    "wpp_median": 20135310881013.125,
+    "wpp_p10": 12215561251105.512,
+    "wpp_p90": 54186230817233.93,
+    "credit_price_eth_median": 0.0085,
+    "credit_price_eth_p10": 0.0068,
+    "credit_price_eth_p90": 0.011777
+   },
+   "2026-10-06": {
+    "n": 890,
+    "eth_volume": 11.776661564222962,
+    "wpp_median": 26275012121473.758,
+    "wpp_p10": 19173897459425.36,
+    "wpp_p90": 73430079417998.73,
+    "credit_price_eth_median": 0.011777,
+    "credit_price_eth_p10": 0.0105,
+    "credit_price_eth_p90": 0.01720777
+   }
+  },
+  "seaport listing fill": {
+   "2026-09-23": {
+    "n": 31835,
+    "eth_volume": 1096.290670015269,
+    "wpp_median": 78381374722838.14,
+    "wpp_p10": 42991288160683.51,
+    "wpp_p90": 223138599359527.75,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.024416000000000004,
+    "credit_price_eth_p90": 0.042
+   },
+   "2026-09-24": {
+    "n": 9360,
+    "eth_volume": 329.8952690254222,
+    "wpp_median": 75158076760862.12,
+    "wpp_p10": 45317886196626.42,
+    "wpp_p90": 217495287067923.2,
+    "credit_price_eth_median": 0.03088,
+    "credit_price_eth_p10": 0.0275,
+    "credit_price_eth_p90": 0.03460999999999904
+   },
+   "2026-09-25": {
+    "n": 3328,
+    "eth_volume": 97.27121130641967,
+    "wpp_median": 61580757110363.16,
+    "wpp_p10": 38310128002750.375,
+    "wpp_p90": 176594213737341.03,
+    "credit_price_eth_median": 0.026,
+    "credit_price_eth_p10": 0.02374,
+    "credit_price_eth_p90": 0.030393
+   },
+   "2026-09-26": {
+    "n": 1998,
+    "eth_volume": 59.37006181455664,
+    "wpp_median": 52276433613900.016,
+    "wpp_p10": 35903611279343.484,
+    "wpp_p90": 168374079231868.75,
+    "credit_price_eth_median": 0.025245,
+    "credit_price_eth_p10": 0.022699999,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-27": {
+    "n": 1890,
+    "eth_volume": 52.941029514111214,
+    "wpp_median": 54194184455986.375,
+    "wpp_p10": 36821632942518.375,
+    "wpp_p90": 159219499023700.28,
+    "credit_price_eth_median": 0.0259,
+    "credit_price_eth_p10": 0.023859,
+    "credit_price_eth_p90": 0.029253200000000007
+   },
+   "2026-09-28": {
+    "n": 2528,
+    "eth_volume": 64.0289521959051,
+    "wpp_median": 54898986480062.27,
+    "wpp_p10": 34832398693311.98,
+    "wpp_p90": 153940216933145.3,
+    "credit_price_eth_median": 0.024245000000000003,
+    "credit_price_eth_p10": 0.0217999594,
+    "credit_price_eth_p90": 0.026693
+   },
+   "2026-09-29": {
+    "n": 3049,
+    "eth_volume": 86.71598838643159,
+    "wpp_median": 58625158093560.29,
+    "wpp_p10": 38318387086529.18,
+    "wpp_p90": 169425831878523.03,
+    "credit_price_eth_median": 0.02729,
+    "credit_price_eth_p10": 0.02518,
+    "credit_price_eth_p90": 0.029
+   },
+   "2026-09-30": {
+    "n": 2133,
+    "eth_volume": 62.11326426074928,
+    "wpp_median": 55252657163593.336,
+    "wpp_p10": 38530235985471.63,
+    "wpp_p90": 152477016294092.6,
+    "credit_price_eth_median": 0.02781,
+    "credit_price_eth_p10": 0.026,
+    "credit_price_eth_p90": 0.031
+   },
+   "2026-10-01": {
+    "n": 2411,
+    "eth_volume": 60.13101788820145,
+    "wpp_median": 49829536935348.695,
+    "wpp_p10": 32673037265498.254,
+    "wpp_p90": 141331658291457.28,
+    "credit_price_eth_median": 0.024948,
+    "credit_price_eth_p10": 0.020295,
+    "credit_price_eth_p90": 0.0283
+   },
+   "2026-10-02": {
+    "n": 7143,
+    "eth_volume": 91.73772609034116,
+    "wpp_median": 26544390563544.996,
+    "wpp_p10": 16362611224993.23,
+    "wpp_p90": 77189544293763.55,
+    "credit_price_eth_median": 0.0122493,
+    "credit_price_eth_p10": 0.00924,
+    "credit_price_eth_p90": 0.01658580000000001
+   },
+   "2026-10-03": {
+    "n": 3074,
+    "eth_volume": 30.71843835962689,
+    "wpp_median": 21398850694146.48,
+    "wpp_p10": 13661945953075.395,
+    "wpp_p90": 60179990316254.555,
+    "credit_price_eth_median": 0.00948,
+    "credit_price_eth_p10": 0.0084998,
+    "credit_price_eth_p90": 0.012
+   },
+   "2026-10-04": {
+    "n": 2821,
+    "eth_volume": 24.079862377141446,
+    "wpp_median": 18728808699785.98,
+    "wpp_p10": 11882422891617.355,
+    "wpp_p90": 52424169117717.51,
+    "credit_price_eth_median": 0.008199,
+    "credit_price_eth_p10": 0.007193,
+    "credit_price_eth_p90": 0.0096
+   },
+   "2026-10-05": {
+    "n": 2550,
+    "eth_volume": 24.422379159442535,
+    "wpp_median": 20141024871525.508,
+    "wpp_p10": 12647463669031.904,
+    "wpp_p90": 54633521545366.875,
+    "credit_price_eth_median": 0.0087992,
+    "credit_price_eth_p10": 0.0069572,
+    "credit_price_eth_p90": 0.012504899999999996
+   },
+   "2026-10-06": {
+    "n": 710,
+    "eth_volume": 9.854166564222961,
+    "wpp_median": 26166650459644.258,
+    "wpp_p10": 21302893847021.656,
+    "wpp_p90": 73200368789862.45,
+    "credit_price_eth_median": 0.012,
+    "credit_price_eth_p10": 0.0109,
+    "credit_price_eth_p90": 0.018
+   }
+  },
+  "seaport offer accept": {
+   "2026-09-23": {
+    "n": 4761,
+    "eth_volume": 155.65,
+    "wpp_median": 77222932818223.75,
+    "wpp_p10": 41377860793891.016,
+    "wpp_p90": 218787411792778.22,
+    "credit_price_eth_median": 0.031,
+    "credit_price_eth_p10": 0.0221,
+    "credit_price_eth_p90": 0.0384
+   },
+   "2026-09-24": {
+    "n": 1416,
+    "eth_volume": 44.243700000000004,
+    "wpp_median": 74853199750379.19,
+    "wpp_p10": 43239844698701.44,
+    "wpp_p90": 214756425985653.2,
+    "credit_price_eth_median": 0.0285,
+    "credit_price_eth_p10": 0.026,
+    "credit_price_eth_p90": 0.032
+   },
+   "2026-09-25": {
+    "n": 1350,
+    "eth_volume": 36.5607,
+    "wpp_median": 61946557338850.42,
+    "wpp_p10": 36708824226292.39,
+    "wpp_p90": 181123555061361.4,
+    "credit_price_eth_median": 0.0249,
+    "credit_price_eth_p10": 0.0225,
+    "credit_price_eth_p90": 0.0273
+   },
+   "2026-09-26": {
+    "n": 941,
+    "eth_volume": 22.884,
+    "wpp_median": 56070948440092.86,
+    "wpp_p10": 34013128217163.617,
+    "wpp_p90": 173736239558755.47,
+    "credit_price_eth_median": 0.0236,
+    "credit_price_eth_p10": 0.0215,
+    "credit_price_eth_p90": 0.0261
+   },
+   "2026-09-27": {
+    "n": 1087,
+    "eth_volume": 28.3844,
+    "wpp_median": 62267281952645.14,
+    "wpp_p10": 35940420749396.74,
+    "wpp_p90": 182600970787742.7,
+    "credit_price_eth_median": 0.0246,
+    "credit_price_eth_p10": 0.0232,
+    "credit_price_eth_p90": 0.0268
+   },
+   "2026-09-28": {
+    "n": 1601,
+    "eth_volume": 37.3975,
+    "wpp_median": 55947580645161.29,
+    "wpp_p10": 33719340911114.34,
+    "wpp_p90": 170726912904996.72,
+    "credit_price_eth_median": 0.023,
+    "credit_price_eth_p10": 0.0209,
+    "credit_price_eth_p90": 0.025
+   },
+   "2026-09-29": {
+    "n": 980,
+    "eth_volume": 26.814300000000003,
+    "wpp_median": 67110759773504.26,
+    "wpp_p10": 38112957197635.78,
+    "wpp_p90": 179265470029896.3,
+    "credit_price_eth_median": 0.0265,
+    "credit_price_eth_p10": 0.0241,
+    "credit_price_eth_p90": 0.028
+   },
+   "2026-09-30": {
+    "n": 1282,
+    "eth_volume": 34.5693,
+    "wpp_median": 65389178033582.28,
+    "wpp_p10": 38281830476515.01,
+    "wpp_p90": 175594870958370.53,
+    "credit_price_eth_median": 0.0261,
+    "credit_price_eth_p10": 0.0256,
+    "credit_price_eth_p90": 0.0281
+   },
+   "2026-10-01": {
+    "n": 1204,
+    "eth_volume": 29.077099999999998,
+    "wpp_median": 54534652741067.76,
+    "wpp_p10": 33500073933853.68,
+    "wpp_p90": 155764300458127.38,
+    "credit_price_eth_median": 0.0246,
+    "credit_price_eth_p10": 0.0192,
+    "credit_price_eth_p90": 0.0271
+   },
+   "2026-10-02": {
+    "n": 3792,
+    "eth_volume": 44.981,
+    "wpp_median": 26947754169882.26,
+    "wpp_p10": 15868346457093.521,
+    "wpp_p90": 73649899695530.27,
+    "credit_price_eth_median": 0.0112,
+    "credit_price_eth_p10": 0.0091,
+    "credit_price_eth_p90": 0.015
+   },
+   "2026-10-03": {
+    "n": 1384,
+    "eth_volume": 12.4301,
+    "wpp_median": 21134063242790.492,
+    "wpp_p10": 12301804264625.479,
+    "wpp_p90": 61217373853227.33,
+    "credit_price_eth_median": 0.0087,
+    "credit_price_eth_p10": 0.008,
+    "credit_price_eth_p90": 0.0097
+   },
+   "2026-10-04": {
+    "n": 1957,
+    "eth_volume": 14.9155,
+    "wpp_median": 20146168198808.586,
+    "wpp_p10": 11256426036077.049,
+    "wpp_p90": 54577796201779.2,
+    "credit_price_eth_median": 0.0075,
+    "credit_price_eth_p10": 0.0065,
+    "credit_price_eth_p90": 0.0089
+   },
+   "2026-10-05": {
+    "n": 870,
+    "eth_volume": 6.649,
+    "wpp_median": 19946849781616.203,
+    "wpp_p10": 10819084712669.176,
+    "wpp_p90": 52891500651037.8,
+    "credit_price_eth_median": 0.0076,
+    "credit_price_eth_p10": 0.0065,
+    "credit_price_eth_p90": 0.0087
+   },
+   "2026-10-06": {
+    "n": 172,
+    "eth_volume": 1.8259999999999998,
+    "wpp_median": 29350517417489.324,
+    "wpp_p10": 15316048139597.377,
+    "wpp_p90": 80710458188141.34,
+    "credit_price_eth_median": 0.0105,
+    "credit_price_eth_p10": 0.0101,
+    "credit_price_eth_p90": 0.01129
+   }
+  },
+  "credit strategy sale": {
+   "2026-09-23": {
+    "n": 78,
+    "eth_volume": 2.784,
+    "wpp_median": 93018318169334.12,
+    "wpp_p10": 50011895386056.695,
+    "wpp_p90": 241483885534068.16,
+    "credit_price_eth_median": 0.036,
+    "credit_price_eth_p10": 0.024,
+    "credit_price_eth_p90": 0.03959999999999996
+   },
+   "2026-09-24": {
+    "n": 197,
+    "eth_volume": 6.024000000000001,
+    "wpp_median": 85154190111270.98,
+    "wpp_p10": 47486876783915.16,
+    "wpp_p90": 235927754932618.47,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-25": {
+    "n": 4,
+    "eth_volume": 0.132,
+    "wpp_median": 46354083072457.08,
+    "wpp_p10": 41390161596290.266,
+    "wpp_p90": 51061826963022.3,
+    "credit_price_eth_median": 0.033,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-09-27": {
+    "n": 10,
+    "eth_volume": 0.36,
+    "wpp_median": 79133904100562.9,
+    "wpp_p10": 45909540465044.98,
+    "wpp_p90": 151550321833124.72,
+    "credit_price_eth_median": 0.036,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.0426
+   },
+   "2026-09-28": {
+    "n": 17,
+    "eth_volume": 0.534,
+    "wpp_median": 54034582132564.836,
+    "wpp_p10": 45295043676468.64,
+    "wpp_p90": 118648117720783.2,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-09-29": {
+    "n": 122,
+    "eth_volume": 3.894,
+    "wpp_median": 53449677993773.66,
+    "wpp_p10": 39601434612609.48,
+    "wpp_p90": 141831867744946.12,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-09-30": {
+    "n": 193,
+    "eth_volume": 6.654,
+    "wpp_median": 68342747230362.7,
+    "wpp_p10": 47579442058146.75,
+    "wpp_p90": 184166987783176.03,
+    "credit_price_eth_median": 0.036,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-10-01": {
+    "n": 30,
+    "eth_volume": 1.032,
+    "wpp_median": 74374947649694.28,
+    "wpp_p10": 47684700964704.05,
+    "wpp_p90": 180986495383433.2,
+    "credit_price_eth_median": 0.036,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-10-02": {
+    "n": 10,
+    "eth_volume": 0.2486513432515148,
+    "wpp_median": 61489385115535.2,
+    "wpp_p10": 18910211977962.2,
+    "wpp_p90": 169682911841269.22,
+    "credit_price_eth_median": 0.024,
+    "credit_price_eth_p10": 0.012684105421773355,
+    "credit_price_eth_p90": 0.036
+   },
+   "2026-10-03": {
+    "n": 7,
+    "eth_volume": 0.11096621981845314,
+    "wpp_median": 16731734523145.564,
+    "wpp_p10": 16087465405987.365,
+    "wpp_p90": 43945207406495.64,
+    "credit_price_eth_median": 0.012,
+    "credit_price_eth_p10": 0.012,
+    "credit_price_eth_p90": 0.023379731891071898
+   },
+   "2026-10-04": {
+    "n": 1,
+    "eth_volume": 0.007647224980514148,
+    "wpp_median": 32237744497208.62,
+    "wpp_p10": 32237744497208.62,
+    "wpp_p90": 32237744497208.62,
+    "credit_price_eth_median": 0.007647224980514148,
+    "credit_price_eth_p10": 0.007647224980514148,
+    "credit_price_eth_p90": 0.007647224980514148
+   },
+   "2026-10-05": {
+    "n": 2,
+    "eth_volume": 0.024,
+    "wpp_median": 83206331239259.97,
+    "wpp_p10": 29771396230667.938,
+    "wpp_p90": 136641266247852.0,
+    "credit_price_eth_median": 0.012,
+    "credit_price_eth_p10": 0.012,
+    "credit_price_eth_p90": 0.012
+   },
+   "2026-10-06": {
+    "n": 7,
+    "eth_volume": 0.08131430131456145,
+    "wpp_median": 23497919944544.91,
+    "wpp_p10": 19865779844674.6,
+    "wpp_p90": 66198599032714.05,
+    "credit_price_eth_median": 0.012,
+    "credit_price_eth_p10": 0.01074508098991263,
+    "credit_price_eth_p90": 0.012
+   }
+  },
+  "credit strategy purchase (price paid by strategy)": {
+   "2026-09-23": {
+    "n": 1962,
+    "eth_volume": 65.9,
+    "wpp_median": 99941284820202.72,
+    "wpp_p10": 49464112262385.99,
+    "wpp_p90": 266756126132897.94,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.04
+   },
+   "2026-09-24": {
+    "n": 1299,
+    "eth_volume": 42.18000000000001,
+    "wpp_median": 95633223090996.92,
+    "wpp_p10": 51480733913483.984,
+    "wpp_p90": 263103889201690.2,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.035
+   },
+   "2026-09-25": {
+    "n": 1470,
+    "eth_volume": 43.14,
+    "wpp_median": 83986562150056.0,
+    "wpp_p10": 46104434580456.625,
+    "wpp_p90": 227612719635068.47,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-26": {
+    "n": 1593,
+    "eth_volume": 43.795,
+    "wpp_median": 76140933822868.78,
+    "wpp_p10": 42071112702412.68,
+    "wpp_p90": 202566492391701.1,
+    "credit_price_eth_median": 0.025,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-27": {
+    "n": 1506,
+    "eth_volume": 43.275000000000006,
+    "wpp_median": 82244550256193.86,
+    "wpp_p10": 44011324670457.94,
+    "wpp_p90": 223591054941337.53,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-28": {
+    "n": 1671,
+    "eth_volume": 44.22500000000001,
+    "wpp_median": 73813637689597.7,
+    "wpp_p10": 39735899318767.74,
+    "wpp_p90": 207916114995908.22,
+    "credit_price_eth_median": 0.025,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-29": {
+    "n": 1469,
+    "eth_volume": 43.230000000000004,
+    "wpp_median": 79680957446384.67,
+    "wpp_p10": 44770691997621.36,
+    "wpp_p90": 224781775486769.4,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-09-30": {
+    "n": 1432,
+    "eth_volume": 42.99000000000001,
+    "wpp_median": 78511728311854.22,
+    "wpp_p10": 46351694077197.79,
+    "wpp_p90": 210503125057801.44,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.03,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-10-01": {
+    "n": 1148,
+    "eth_volume": 33.87040999787549,
+    "wpp_median": 74116165928914.78,
+    "wpp_p10": 44098883570123.63,
+    "wpp_p90": 201259031004634.7,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.03
+   },
+   "2026-10-02": {
+    "n": 191,
+    "eth_volume": 3.2267366699818774,
+    "wpp_median": 38679801639662.58,
+    "wpp_p10": 22563509510218.41,
+    "wpp_p90": 112278702890158.47,
+    "credit_price_eth_median": 0.015,
+    "credit_price_eth_p10": 0.012700639763488413,
+    "credit_price_eth_p90": 0.02
+   },
+   "2026-10-03": {
+    "n": 38,
+    "eth_volume": 0.4113196958476531,
+    "wpp_median": 42999079937956.984,
+    "wpp_p10": 17286117648346.154,
+    "wpp_p90": 100121905502438.69,
+    "credit_price_eth_median": 0.01,
+    "credit_price_eth_p10": 0.01,
+    "credit_price_eth_p90": 0.015
+   },
+   "2026-10-04": {
+    "n": 14,
+    "eth_volume": 0.144802367774886,
+    "wpp_median": 33454466900300.78,
+    "wpp_p10": 15462199961385.828,
+    "wpp_p90": 82554661941837.78,
+    "credit_price_eth_median": 0.01,
+    "credit_price_eth_p10": 0.008934737085377682,
+    "credit_price_eth_p90": 0.013500000000000005
+   },
+   "2026-10-05": {
+    "n": 15,
+    "eth_volume": 0.18924733526703358,
+    "wpp_median": 43402300553408.27,
+    "wpp_p10": 24631298944398.17,
+    "wpp_p90": 104804115317809.0,
+    "credit_price_eth_median": 0.01,
+    "credit_price_eth_p10": 0.01,
+    "credit_price_eth_p90": 0.015
+   },
+   "2026-10-06": {
+    "n": 2,
+    "eth_volume": 0.026574491981350642,
+    "wpp_median": 95950735238498.61,
+    "wpp_p10": 39786070622082.33,
+    "wpp_p90": 152115399854914.9,
+    "credit_price_eth_median": 0.013287245990675321,
+    "credit_price_eth_p10": 0.011917042783215578,
+    "credit_price_eth_p90": 0.014657449198135063
+   }
+  },
+  "strategy purchase seaport leg (price seller received from searcher)": {
+   "2026-09-23": {
+    "n": 1941,
+    "eth_volume": 54.54452881217081,
+    "wpp_median": 83434835566382.47,
+    "wpp_p10": 42266951018138.73,
+    "wpp_p90": 214456053665482.88,
+    "credit_price_eth_median": 0.02739999,
+    "credit_price_eth_p10": 0.0238,
+    "credit_price_eth_p90": 0.034
+   },
+   "2026-09-24": {
+    "n": 1237,
+    "eth_volume": 36.323461944900956,
+    "wpp_median": 86184267745091.11,
+    "wpp_p10": 46323664336174.45,
+    "wpp_p90": 233160967785546.34,
+    "credit_price_eth_median": 0.029,
+    "credit_price_eth_p10": 0.027,
+    "credit_price_eth_p90": 0.0323
+   },
+   "2026-09-25": {
+    "n": 1468,
+    "eth_volume": 38.24590450084644,
+    "wpp_median": 74248934323883.84,
+    "wpp_p10": 41434288929740.04,
+    "wpp_p90": 204999633757990.8,
+    "credit_price_eth_median": 0.0260295,
+    "credit_price_eth_p10": 0.0235,
+    "credit_price_eth_p90": 0.0281
+   },
+   "2026-09-26": {
+    "n": 1577,
+    "eth_volume": 39.17534077088706,
+    "wpp_median": 68739142652418.05,
+    "wpp_p10": 38431916542949.56,
+    "wpp_p90": 185446642519309.62,
+    "credit_price_eth_median": 0.0249,
+    "credit_price_eth_p10": 0.0227,
+    "credit_price_eth_p90": 0.0268
+   },
+   "2026-09-27": {
+    "n": 1198,
+    "eth_volume": 30.92653828287368,
+    "wpp_median": 75557426692903.53,
+    "wpp_p10": 41235160581134.664,
+    "wpp_p90": 198315546617478.34,
+    "credit_price_eth_median": 0.026111115,
+    "credit_price_eth_p10": 0.0242,
+    "credit_price_eth_p90": 0.02727790909090909
+   },
+   "2026-09-28": {
+    "n": 1231,
+    "eth_volume": 29.449635420346596,
+    "wpp_median": 67070058846048.945,
+    "wpp_p10": 36869531389610.984,
+    "wpp_p90": 184301343710992.0,
+    "credit_price_eth_median": 0.024,
+    "credit_price_eth_p10": 0.0224293699,
+    "credit_price_eth_p90": 0.0252506
+   },
+   "2026-09-29": {
+    "n": 1190,
+    "eth_volume": 31.56105570640434,
+    "wpp_median": 74562353909705.69,
+    "wpp_p10": 41352905227813.25,
+    "wpp_p90": 208530782050045.3,
+    "credit_price_eth_median": 0.0267,
+    "credit_price_eth_p10": 0.0246,
+    "credit_price_eth_p90": 0.027990800000000003
+   },
+   "2026-09-30": {
+    "n": 909,
+    "eth_volume": 24.693308978634676,
+    "wpp_median": 72788353863381.86,
+    "wpp_p10": 42872475733713.27,
+    "wpp_p90": 191264252393084.78,
+    "credit_price_eth_median": 0.026698,
+    "credit_price_eth_p10": 0.026,
+    "credit_price_eth_p90": 0.0287
+   },
+   "2026-10-01": {
+    "n": 762,
+    "eth_volume": 20.30785734690127,
+    "wpp_median": 66608398513272.75,
+    "wpp_p10": 39846242229822.74,
+    "wpp_p90": 181282824313247.38,
+    "credit_price_eth_median": 0.0266979998,
+    "credit_price_eth_p10": 0.0249949,
+    "credit_price_eth_p90": 0.02815
+   },
+   "2026-10-02": {
+    "n": 185,
+    "eth_volume": 2.3354352495739903,
+    "wpp_median": 31054620303700.625,
+    "wpp_p10": 18878294868429.348,
+    "wpp_p90": 81855261230642.03,
+    "credit_price_eth_median": 0.0121,
+    "credit_price_eth_p10": 0.008708,
+    "credit_price_eth_p90": 0.014954
+   },
+   "2026-10-03": {
+    "n": 37,
+    "eth_volume": 0.3527797822368221,
+    "wpp_median": 42057440345069.2,
+    "wpp_p10": 13565117952081.414,
+    "wpp_p90": 81433931789302.38,
+    "credit_price_eth_median": 0.0096,
+    "credit_price_eth_p10": 0.009162535999999999,
+    "credit_price_eth_p90": 0.00972368020778
+   },
+   "2026-10-04": {
+    "n": 14,
+    "eth_volume": 0.10823401717171716,
+    "wpp_median": 26030957844535.242,
+    "wpp_p10": 12021673132900.088,
+    "wpp_p90": 62916681987501.875,
+    "credit_price_eth_median": 0.007198,
+    "credit_price_eth_p10": 0.006869375151515152,
+    "credit_price_eth_p90": 0.0088997
+   },
+   "2026-10-05": {
+    "n": 15,
+    "eth_volume": 0.13061720000000004,
+    "wpp_median": 33308383233532.938,
+    "wpp_p10": 19226834704480.04,
+    "wpp_p90": 75694323478982.48,
+    "credit_price_eth_median": 0.00879,
+    "credit_price_eth_p10": 0.0086,
+    "credit_price_eth_p90": 0.009126200000000001
+   },
+   "2026-10-06": {
+    "n": 1,
+    "eth_volume": 0.011446,
+    "wpp_median": 25459102396483.15,
+    "wpp_p10": 25459102396483.15,
+    "wpp_p90": 25459102396483.15,
+    "credit_price_eth_median": 0.011446,
+    "credit_price_eth_p10": 0.011446,
+    "credit_price_eth_p90": 0.011446
+   }
+  },
+  "blur takeAsk (single-token, single-maker only)": {
+   "2026-09-23": {
+    "n": 160,
+    "eth_volume": 6.7802018,
+    "wpp_median": 65836797854483.09,
+    "wpp_p10": 38166749412761.23,
+    "wpp_p90": 172467800832705.3,
+    "credit_price_eth_median": 0.0282,
+    "credit_price_eth_p10": 0.022860000000000002,
+    "credit_price_eth_p90": 0.06358999999999997
+   },
+   "2026-09-24": {
+    "n": 32,
+    "eth_volume": 5.987070356296886,
+    "wpp_median": 79425621951806.12,
+    "wpp_p10": 45427009687175.875,
+    "wpp_p90": 430949957499718.1,
+    "credit_price_eth_median": 0.033100000000000004,
+    "credit_price_eth_p10": 0.027044,
+    "credit_price_eth_p90": 0.3429970000000001
+   },
+   "2026-09-25": {
+    "n": 8,
+    "eth_volume": 0.22567000000000004,
+    "wpp_median": 75074583585737.33,
+    "wpp_p10": 44204837240524.7,
+    "wpp_p90": 169521566289647.1,
+    "credit_price_eth_median": 0.027,
+    "credit_price_eth_p10": 0.026386,
+    "credit_price_eth_p90": 0.03133
+   },
+   "2026-09-26": {
+    "n": 4,
+    "eth_volume": 2.252,
+    "wpp_median": 172197842595410.97,
+    "wpp_p10": 55406054766851.83,
+    "wpp_p90": 1828278869072229.5,
+    "credit_price_eth_median": 0.1135,
+    "credit_price_eth_p10": 0.0265,
+    "credit_price_eth_p90": 1.4591000000000003
+   },
+   "2026-09-27": {
+    "n": 9,
+    "eth_volume": 0.22849999999999998,
+    "wpp_median": 58188702081603.836,
+    "wpp_p10": 39632795314496.445,
+    "wpp_p90": 238675979560216.34,
+    "credit_price_eth_median": 0.0255,
+    "credit_price_eth_p10": 0.0251,
+    "credit_price_eth_p90": 0.0255
+   },
+   "2026-09-28": {
+    "n": 2,
+    "eth_volume": 0.0509,
+    "wpp_median": 94853820155639.89,
+    "wpp_p10": 56306794182177.21,
+    "wpp_p90": 133400846129102.58,
+    "credit_price_eth_median": 0.02545,
+    "credit_price_eth_p10": 0.02541,
+    "credit_price_eth_p90": 0.02549
+   },
+   "2026-09-29": {
+    "n": 10,
+    "eth_volume": 0.43999999,
+    "wpp_median": 42303708318360.03,
+    "wpp_p10": 38777904568319.06,
+    "wpp_p90": 62765338520545.695,
+    "credit_price_eth_median": 0.03,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.045299999999999944
+   },
+   "2026-09-30": {
+    "n": 1,
+    "eth_volume": 0.028,
+    "wpp_median": 41053870448940.2,
+    "wpp_p10": 41053870448940.2,
+    "wpp_p90": 41053870448940.2,
+    "credit_price_eth_median": 0.028,
+    "credit_price_eth_p10": 0.028,
+    "credit_price_eth_p90": 0.028
+   },
+   "2026-10-01": {
+    "n": 10,
+    "eth_volume": 0.5829,
+    "wpp_median": 67337663907914.64,
+    "wpp_p10": 35478799142433.71,
+    "wpp_p90": 173098855203983.5,
+    "credit_price_eth_median": 0.0259,
+    "credit_price_eth_p10": 0.02384,
+    "credit_price_eth_p90": 0.1379
+   },
+   "2026-10-02": {
+    "n": 31,
+    "eth_volume": 0.5418304746537423,
+    "wpp_median": 29323054904418.25,
+    "wpp_p10": 17693714264498.402,
+    "wpp_p90": 84253731343283.58,
+    "credit_price_eth_median": 0.0122,
+    "credit_price_eth_p10": 0.0107,
+    "credit_price_eth_p90": 0.0197
+   },
+   "2026-10-03": {
+    "n": 13,
+    "eth_volume": 0.1258,
+    "wpp_median": 18595976961220.992,
+    "wpp_p10": 12304077745311.352,
+    "wpp_p90": 64227494937212.336,
+    "credit_price_eth_median": 0.0091,
+    "credit_price_eth_p10": 0.0087,
+    "credit_price_eth_p90": 0.011920000000000002
+   },
+   "2026-10-04": {
+    "n": 22,
+    "eth_volume": 0.187075476,
+    "wpp_median": 14297994305347.346,
+    "wpp_p10": 10208570109602.135,
+    "wpp_p90": 40715717710975.58,
+    "credit_price_eth_median": 0.0084745,
+    "credit_price_eth_p10": 0.0073,
+    "credit_price_eth_p90": 0.009288888
+   },
+   "2026-10-05": {
+    "n": 12,
+    "eth_volume": 0.1339,
+    "wpp_median": 16413909380966.76,
+    "wpp_p10": 13328763386665.305,
+    "wpp_p90": 46059506757370.695,
+    "credit_price_eth_median": 0.01075,
+    "credit_price_eth_p10": 0.00937,
+    "credit_price_eth_p90": 0.01339
+   },
+   "2026-10-06": {
+    "n": 7,
+    "eth_volume": 0.085049,
+    "wpp_median": 25358775547432.566,
+    "wpp_p10": 21722936260924.758,
+    "wpp_p90": 36320051015333.85,
+    "credit_price_eth_median": 0.0124,
+    "credit_price_eth_p10": 0.0117796,
+    "credit_price_eth_p90": 0.0124
+   }
+  },
+  "fwa hub bid accepted": {
+   "2026-09-28": {
+    "n": 3,
+    "eth_volume": 0.08,
+    "wpp_median": 222923887542924.0,
+    "wpp_p10": 91016137079998.03,
+    "wpp_p90": 270263763512384.4,
+    "credit_price_eth_median": 0.0275,
+    "credit_price_eth_p10": 0.025500000000000002,
+    "credit_price_eth_p90": 0.0275
+   },
+   "2026-09-29": {
+    "n": 104,
+    "eth_volume": 2.83681984,
+    "wpp_median": 69787780581327.45,
+    "wpp_p10": 41434923542308.234,
+    "wpp_p90": 191501419282212.72,
+    "credit_price_eth_median": 0.0275,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.030388
+   },
+   "2026-09-30": {
+    "n": 161,
+    "eth_volume": 4.767895787893,
+    "wpp_median": 89996989755859.89,
+    "wpp_p10": 46057602394744.67,
+    "wpp_p90": 222309101641254.44,
+    "credit_price_eth_median": 0.028355,
+    "credit_price_eth_p10": 0.027,
+    "credit_price_eth_p90": 0.0319
+   },
+   "2026-10-01": {
+    "n": 1795,
+    "eth_volume": 52.51780206780556,
+    "wpp_median": 78877793987236.28,
+    "wpp_p10": 43790817997606.13,
+    "wpp_p90": 218071523004136.88,
+    "credit_price_eth_median": 0.0289,
+    "credit_price_eth_p10": 0.025771499999999996,
+    "credit_price_eth_p90": 0.0319
+   },
+   "2026-10-02": {
+    "n": 1184,
+    "eth_volume": 34.09464548009443,
+    "wpp_median": 77577821011673.16,
+    "wpp_p10": 43496742114444.28,
+    "wpp_p90": 197381428809831.03,
+    "credit_price_eth_median": 0.029,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.0319
+   },
+   "2026-10-03": {
+    "n": 957,
+    "eth_volume": 27.82255849621024,
+    "wpp_median": 76290201229157.11,
+    "wpp_p10": 43718837050604.82,
+    "wpp_p90": 217944557364168.94,
+    "credit_price_eth_median": 0.0319,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.0319
+   },
+   "2026-10-04": {
+    "n": 891,
+    "eth_volume": 26.479439983924998,
+    "wpp_median": 76976498278766.89,
+    "wpp_p10": 44169611307420.49,
+    "wpp_p90": 202518253794342.4,
+    "credit_price_eth_median": 0.0319,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.0319
+   },
+   "2026-10-05": {
+    "n": 22,
+    "eth_volume": 0.6540950000000002,
+    "wpp_median": 91246328735877.0,
+    "wpp_p10": 42015256162633.85,
+    "wpp_p90": 169182820928204.88,
+    "credit_price_eth_median": 0.0319,
+    "credit_price_eth_p10": 0.025,
+    "credit_price_eth_p90": 0.0319
+   }
+  }
+ },
+ "price_per_point_current_and_trailing": {
+  "window_end": "2026-10-06T02:12Z",
+  "by_group": {
+   "all_sales": {
+    "last_1h": {
+     "n": 278,
+     "wpp_median": 27846068413353.586,
+     "wpp_p10": 16461665996716.22,
+     "wpp_p90": 76410085259356.64,
+     "credit_price_eth_median": 0.0108
+    },
+    "last_6h": {
+     "n": 1674,
+     "wpp_median": 24706960757215.523,
+     "wpp_p10": 17266314967062.621,
+     "wpp_p90": 70551640537173.4,
+     "credit_price_eth_median": 0.011
+    },
+    "last_24h": {
+     "n": 4188,
+     "wpp_median": 22000363471657.285,
+     "wpp_p10": 12789275990361.078,
+     "wpp_p90": 58671333357215.6,
+     "credit_price_eth_median": 0.0089
+    },
+    "last_7d": {
+     "n": 44950,
+     "wpp_median": 41691840322221.36,
+     "wpp_p10": 15643390140962.412,
+     "wpp_p90": 124471191398986.56,
+     "credit_price_eth_median": 0.01489
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 117553,
+     "wpp_median": 61431664951699.35,
+     "wpp_p10": 22860471414178.54,
+     "wpp_p90": 184894002820304.56,
+     "credit_price_eth_median": 0.027
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 117553,
+     "wpp_median": 61431664951699.35,
+     "wpp_p10": 22860471414178.54,
+     "wpp_p90": 184894002820304.56,
+     "credit_price_eth_median": 0.027
+    }
+   },
+   "market (seaport+blur+strategy purchase seaport legs)": {
+    "last_1h": {
+     "n": 278,
+     "wpp_median": 27846068413353.586,
+     "wpp_p10": 16461665996716.22,
+     "wpp_p90": 76410085259356.64,
+     "credit_price_eth_median": 0.0108
+    },
+    "last_6h": {
+     "n": 1663,
+     "wpp_median": 24705127459367.363,
+     "wpp_p10": 17265671347208.955,
+     "wpp_p90": 70172409357066.016,
+     "credit_price_eth_median": 0.011
+    },
+    "last_24h": {
+     "n": 4159,
+     "wpp_median": 21947355609677.586,
+     "wpp_p10": 12768300288202.275,
+     "wpp_p90": 57545559729923.805,
+     "credit_price_eth_median": 0.008899
+    },
+    "last_7d": {
+     "n": 38307,
+     "wpp_median": 36313112195231.46,
+     "wpp_p10": 14996039748987.436,
+     "wpp_p90": 103102446965704.75,
+     "credit_price_eth_median": 0.01248
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 109713,
+     "wpp_median": 59538553485845.96,
+     "wpp_p10": 21787092683488.76,
+     "wpp_p90": 178686648611448.97,
+     "credit_price_eth_median": 0.0263
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 109713,
+     "wpp_median": 59538553485845.96,
+     "wpp_p10": 21787092683488.76,
+     "wpp_p90": 178686648611448.97,
+     "credit_price_eth_median": 0.0263
+    }
+   },
+   "seaport listing fill": {
+    "last_1h": {
+     "n": 156,
+     "wpp_median": 29623651551757.008,
+     "wpp_p10": 20513531080020.5,
+     "wpp_p90": 80389634522356.52,
+     "credit_price_eth_median": 0.0117
+    },
+    "last_6h": {
+     "n": 1361,
+     "wpp_median": 24638902755900.508,
+     "wpp_p10": 18399554608114.785,
+     "wpp_p90": 67216062095530.37,
+     "credit_price_eth_median": 0.0116
+    },
+    "last_24h": {
+     "n": 3138,
+     "wpp_median": 21971883504458.95,
+     "wpp_p10": 13319754254414.56,
+     "wpp_p90": 57462201178563.84,
+     "credit_price_eth_median": 0.009244
+    },
+    "last_7d": {
+     "n": 23677,
+     "wpp_median": 33963022508038.582,
+     "wpp_p10": 15071268728322.615,
+     "wpp_p90": 93530271760560.98,
+     "credit_price_eth_median": 0.0122999
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 74830,
+     "wpp_median": 60217213991538.22,
+     "wpp_p10": 22277005574195.227,
+     "wpp_p90": 181665066030395.3,
+     "credit_price_eth_median": 0.027
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 74830,
+     "wpp_median": 60217213991538.22,
+     "wpp_p10": 22277005574195.227,
+     "wpp_p90": 181665066030395.3,
+     "credit_price_eth_median": 0.027
+    }
+   },
+   "seaport offer accept": {
+    "last_1h": {
+     "n": 121,
+     "wpp_median": 23455132069767.727,
+     "wpp_p10": 15013037750926.84,
+     "wpp_p90": 62841325652726.86,
+     "credit_price_eth_median": 0.0105
+    },
+    "last_6h": {
+     "n": 289,
+     "wpp_median": 25274056029232.645,
+     "wpp_p10": 14556404525778.602,
+     "wpp_p90": 75058776219008.97,
+     "credit_price_eth_median": 0.0102
+    },
+    "last_24h": {
+     "n": 986,
+     "wpp_median": 21441139261689.42,
+     "wpp_p10": 11124297438543.766,
+     "wpp_p90": 57521951863918.55,
+     "credit_price_eth_median": 0.0077
+    },
+    "last_7d": {
+     "n": 11517,
+     "wpp_median": 33399764544216.27,
+     "wpp_p10": 13948662232750.879,
+     "wpp_p90": 96606648199445.98,
+     "credit_price_eth_median": 0.0108
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 22797,
+     "wpp_median": 50160025179230.22,
+     "wpp_p10": 17241561822613.135,
+     "wpp_p90": 154089673031359.4,
+     "credit_price_eth_median": 0.0234
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 22797,
+     "wpp_median": 50160025179230.22,
+     "wpp_p10": 17241561822613.135,
+     "wpp_p90": 154089673031359.4,
+     "credit_price_eth_median": 0.0234
+    }
+   },
+   "credit strategy sale": {
+    "last_1h": {
+     "n": 0,
+     "wpp_median": null,
+     "wpp_p10": null,
+     "wpp_p90": null,
+     "credit_price_eth_median": null
+    },
+    "last_6h": {
+     "n": 8,
+     "wpp_median": 23914937976995.29,
+     "wpp_p10": 20302826475011.805,
+     "wpp_p90": 131044306471445.52,
+     "credit_price_eth_median": 0.012
+    },
+    "last_24h": {
+     "n": 9,
+     "wpp_median": 23497919944544.91,
+     "wpp_p10": 17077332545825.092,
+     "wpp_p90": 128336350253080.6,
+     "credit_price_eth_median": 0.012
+    },
+    "last_7d": {
+     "n": 368,
+     "wpp_median": 60289389067524.11,
+     "wpp_p10": 40458223718041.5,
+     "wpp_p90": 170854355504736.94,
+     "credit_price_eth_median": 0.03
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 678,
+     "wpp_median": 70545775270039.53,
+     "wpp_p10": 42697707487314.94,
+     "wpp_p90": 215625141688874.03,
+     "credit_price_eth_median": 0.03
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 678,
+     "wpp_median": 70545775270039.53,
+     "wpp_p10": 42697707487314.94,
+     "wpp_p90": 215625141688874.03,
+     "credit_price_eth_median": 0.03
+    }
+   },
+   "credit strategy purchase (price paid by strategy)": {
+    "last_1h": {
+     "n": 0,
+     "wpp_median": null,
+     "wpp_p10": null,
+     "wpp_p90": null,
+     "credit_price_eth_median": null
+    },
+    "last_6h": {
+     "n": 3,
+     "wpp_median": 35977762864328.82,
+     "wpp_p10": 27791476147248.367,
+     "wpp_p90": 140120805380080.94,
+     "credit_price_eth_median": 0.015
+    },
+    "last_24h": {
+     "n": 17,
+     "wpp_median": 43402300553408.27,
+     "wpp_p10": 23835680129662.844,
+     "wpp_p90": 122173693221888.14,
+     "credit_price_eth_median": 0.011574491981350642
+    },
+    "last_7d": {
+     "n": 4176,
+     "wpp_median": 74925074925074.92,
+     "wpp_p10": 43341833434461.734,
+     "wpp_p90": 208045969837495.28,
+     "credit_price_eth_median": 0.03
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 13810,
+     "wpp_median": 81773055777306.36,
+     "wpp_p10": 44185315570050.95,
+     "wpp_p90": 224792564343704.22,
+     "credit_price_eth_median": 0.03
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 13810,
+     "wpp_median": 81773055777306.36,
+     "wpp_p10": 44185315570050.95,
+     "wpp_p90": 224792564343704.22,
+     "credit_price_eth_median": 0.03
+    }
+   },
+   "strategy purchase seaport leg (price seller received from searcher)": {
+    "last_1h": {
+     "n": 0,
+     "wpp_median": null,
+     "wpp_p10": null,
+     "wpp_p90": null,
+     "credit_price_eth_median": null
+    },
+    "last_6h": {
+     "n": 2,
+     "wpp_median": 22923250676468.07,
+     "wpp_p10": 20894569300456.01,
+     "wpp_p90": 24951932052480.133,
+     "credit_price_eth_median": 0.009973
+    },
+    "last_24h": {
+     "n": 16,
+     "wpp_median": 33229603293413.176,
+     "wpp_p10": 19420262079808.867,
+     "wpp_p90": 75448036146490.16,
+     "credit_price_eth_median": 0.0087945
+    },
+    "last_7d": {
+     "n": 3008,
+     "wpp_median": 68397126690676.55,
+     "wpp_p10": 38919669153385.91,
+     "wpp_p90": 189063766500919.94,
+     "credit_price_eth_median": 0.026515
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 11765,
+     "wpp_median": 73908174692049.28,
+     "wpp_p10": 40065068253521.47,
+     "wpp_p90": 201004630351939.84,
+     "credit_price_eth_median": 0.0263
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 11765,
+     "wpp_median": 73908174692049.28,
+     "wpp_p10": 40065068253521.47,
+     "wpp_p90": 201004630351939.84,
+     "credit_price_eth_median": 0.0263
+    }
+   },
+   "blur takeAsk (single-token, single-maker only)": {
+    "last_1h": {
+     "n": 1,
+     "wpp_median": 25358775547432.566,
+     "wpp_p10": 25358775547432.566,
+     "wpp_p90": 25358775547432.566,
+     "credit_price_eth_median": 0.0124
+    },
+    "last_6h": {
+     "n": 11,
+     "wpp_median": 24853683957347.87,
+     "wpp_p10": 16389926574891.303,
+     "wpp_p90": 39248021108179.42,
+     "credit_price_eth_median": 0.0119
+    },
+    "last_24h": {
+     "n": 19,
+     "wpp_median": 19139371371175.188,
+     "wpp_p10": 14306498601344.174,
+     "wpp_p90": 41208543468822.016,
+     "credit_price_eth_median": 0.0119
+    },
+    "last_7d": {
+     "n": 105,
+     "wpp_median": 26647301821902.5,
+     "wpp_p10": 12753714871796.46,
+     "wpp_p90": 78751246008630.34,
+     "credit_price_eth_median": 0.01195
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 321,
+     "wpp_median": 56063580446240.02,
+     "wpp_p10": 17576980235148.277,
+     "wpp_p90": 175642808769393.8,
+     "credit_price_eth_median": 0.0259
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 321,
+     "wpp_median": 56063580446240.02,
+     "wpp_p10": 17576980235148.277,
+     "wpp_p90": 175642808769393.8,
+     "credit_price_eth_median": 0.0259
+    }
+   },
+   "fwa hub bid accepted": {
+    "last_1h": {
+     "n": 0,
+     "wpp_median": null,
+     "wpp_p10": null,
+     "wpp_p90": null,
+     "credit_price_eth_median": null
+    },
+    "last_6h": {
+     "n": 2,
+     "wpp_median": 60841958737460.484,
+     "wpp_p10": 40920548159222.98,
+     "wpp_p90": 80763369315698.0,
+     "credit_price_eth_median": 0.02845
+    },
+    "last_24h": {
+     "n": 19,
+     "wpp_median": 99308946708764.52,
+     "wpp_p10": 45327171749601.87,
+     "wpp_p90": 184912319652673.25,
+     "credit_price_eth_median": 0.0319
+    },
+    "last_7d": {
+     "n": 5107,
+     "wpp_median": 77951898066356.39,
+     "wpp_p10": 43793903949061.06,
+     "wpp_p90": 209966708356794.28,
+     "credit_price_eth_median": 0.0294
+    },
+    "last_30d (=whole window, 13d)": {
+     "n": 5117,
+     "wpp_median": 77951898066356.39,
+     "wpp_p10": 43812772580813.79,
+     "wpp_p90": 210115586946429.06,
+     "credit_price_eth_median": 0.0293
+    },
+    "last_90d (=whole window, 13d)": {
+     "n": 5117,
+     "wpp_median": 77951898066356.39,
+     "wpp_p10": 43812772580813.79,
+     "wpp_p90": 210115586946429.06,
+     "credit_price_eth_median": 0.0293
+    }
+   }
+  }
+ },
+ "price_regimes_market": {
+  "before_2026-10-02": {
+   "n": 84903,
+   "wpp_median": 70690388846369.45,
+   "credit_price_eth_median": 0.0276,
+   "wpp_p10": 39606859614557.8,
+   "wpp_p50": 70690388846369.45,
+   "wpp_p90": 202150099558924.03
+  },
+  "from_2026-10-02": {
+   "n": 24810,
+   "wpp_median": 23726432347735.125,
+   "credit_price_eth_median": 0.009899999,
+   "wpp_p10": 13561377514743.346,
+   "wpp_p50": 23726432347735.125,
+   "wpp_p90": 65204880074357.23
+  }
+ },
+ "regression_price_on_score": {
+  "market_all_clean": {
+   "n": 109713,
+   "slope_eth_per_point": 1.584748476322672e-05,
+   "slope_wei_per_point": 15847484763226.72,
+   "intercept_eth": 0.019759056132722698,
+   "r_squared": 0.00531768032050111,
+   "pearson_r": 0.07292242673211795,
+   "p_value": 3.124188252967977e-129,
+   "spearman_rho": 0.057117487107808736
+  },
+  "market_all_clean_log_price_vs_points": {
+   "slope_dlnP_per_point": 0.00018900838563528578,
+   "intercept": -3.8552289938821485,
+   "r_squared": 0.005887804659827853
+  },
+  "market_clean_score_below_700": {
+   "n": 95623,
+   "slope_eth_per_point": -5.520911199450036e-07,
+   "slope_wei_per_point": -552091119945.0035,
+   "intercept_eth": 0.024796380548114224,
+   "r_squared": 9.575079594981915e-05,
+   "pearson_r": -0.009785233566441792,
+   "p_value": 0.0024787984149140575,
+   "spearman_rho": -0.015410955592283029
+  },
+  "market_clean_score_700_plus": {
+   "n": 14090,
+   "slope_eth_per_point": 0.0006709286198262387,
+   "slope_wei_per_point": 670928619826238.8,
+   "intercept_eth": -0.462975653512392,
+   "r_squared": 0.02501577362301078,
+   "pearson_r": 0.15816375571859306,
+   "p_value": 1.3372995156955305e-79,
+   "spearman_rho": 0.2539951199610956
+  },
+  "market_relative_to_day_median_all": {
+   "n": 109713,
+   "slope_eth_per_point": 0.0006590637897864421,
+   "slope_wei_per_point": 659063789786442.1,
+   "intercept_eth": 0.8063572946098371,
+   "r_squared": 0.008294941466166234,
+   "pearson_r": 0.0910765692489909,
+   "p_value": 9.632253756269869e-201,
+   "spearman_rho": 0.16780728674347956
+  },
+  "market_relative_to_day_median_below_780": {
+   "n": 106988,
+   "slope_eth_per_point": 0.0001998160777665334,
+   "slope_wei_per_point": 199816077766533.4,
+   "intercept_eth": 0.9489005814085468,
+   "r_squared": 0.019724429463052657,
+   "pearson_r": 0.14044368787187503,
+   "p_value": 0.0,
+   "spearman_rho": 0.12864761387899357
+  },
+  "market_last_72h": {
+   "n": 12827,
+   "slope_eth_per_point": 4.123009515156413e-06,
+   "slope_wei_per_point": 4123009515156.413,
+   "intercept_eth": 0.007408027625945245,
+   "r_squared": 0.045917923347540635,
+   "pearson_r": 0.21428467828461426,
+   "p_value": 4.071472162095946e-133,
+   "spearman_rho": 0.2628634957276834
+  },
+  "venue: seaport listing fill": {
+   "n": 74830,
+   "slope_eth_per_point": 1.7923679433791026e-05,
+   "slope_wei_per_point": 17923679433791.027,
+   "intercept_eth": 0.02003748695664029,
+   "r_squared": 0.005388110074659404,
+   "pearson_r": 0.07340374700694376,
+   "p_value": 6.481246005851604e-90,
+   "spearman_rho": 0.06750435716349286
+  },
+  "venue: seaport offer accept": {
+   "n": 22797,
+   "slope_eth_per_point": 9.88711699806358e-06,
+   "slope_wei_per_point": 9887116998063.58,
+   "intercept_eth": 0.01765704488119074,
+   "r_squared": 0.006483517793707756,
+   "pearson_r": 0.08052029429720035,
+   "p_value": 4.141628035680808e-34,
+   "spearman_rho": 0.03341571768621089
+  },
+  "venue: credit strategy purchase (price paid by strategy)": {
+   "n": 13810,
+   "slope_eth_per_point": -2.29318277954648e-07,
+   "slope_wei_per_point": -229318277954.64798,
+   "intercept_eth": 0.029528665993782115,
+   "r_squared": 9.061135293393115e-05,
+   "pearson_r": -0.009518999576317416,
+   "p_value": 0.2633285697545201,
+   "spearman_rho": -0.004718398918998389
+  },
+  "venue: credit strategy sale": {
+   "n": 678,
+   "slope_eth_per_point": 7.139887530996765e-07,
+   "slope_wei_per_point": 713988753099.6765,
+   "intercept_eth": 0.03195770365952034,
+   "r_squared": 0.0006962656291099876,
+   "pearson_r": 0.026386845759013858,
+   "p_value": 0.49276119115836575,
+   "spearman_rho": 0.06681229272466217
+  },
+  "venue: fwa hub bid": {
+   "n": 5117,
+   "slope_eth_per_point": -1.6512690389103828e-07,
+   "slope_wei_per_point": -165126903891.03827,
+   "intercept_eth": 0.02923226502132726,
+   "r_squared": 7.32008138912214e-05,
+   "pearson_r": -0.008555747418619919,
+   "p_value": 0.540616001322852,
+   "spearman_rho": -0.0032430380184049878
+  },
+  "flat_vs_per_point_model_fit": {
+   "all_clean_market": {
+    "n": 109713,
+    "flat_mean_abs_log_err": 0.1333586623942816,
+    "per_point_mean_abs_log_err": 0.4807974263208333,
+    "flat_median_abs_log_err": 0.08137960626837784,
+    "per_point_median_abs_log_err": 0.39655834584277094,
+    "flat_rmse_eth": 0.04431241003169317,
+    "per_point_rmse_eth": 0.04496068841694446
+   },
+   "score_below_700": {
+    "n": 95623,
+    "flat_mean_abs_log_err": 0.10934974984969559,
+    "per_point_mean_abs_log_err": 0.4763204680207514,
+    "flat_median_abs_log_err": 0.07646564032984547,
+    "per_point_median_abs_log_err": 0.3755072587676022,
+    "flat_rmse_eth": 0.006109423475066778,
+    "per_point_rmse_eth": 0.012859053687991298
+   },
+   "score_700_plus": {
+    "n": 14090,
+    "flat_mean_abs_log_err": 0.2962972176995299,
+    "per_point_mean_abs_log_err": 0.511180689878585,
+    "flat_median_abs_log_err": 0.14957980973838253,
+    "per_point_median_abs_log_err": 0.5064125654355582,
+    "flat_rmse_eth": 0.12262279838020336,
+    "per_point_rmse_eth": 0.12090534370496299
+   },
+   "note": "each model uses the same day's median (flat: median price per credit; per point: median wei per point times score); lower error wins"
+  },
+  "price_relative_to_day_median_by_score_bucket": {
+   "(79.9, 150.0]": {
+    "n": 11637.0,
+    "rel_median": 0.9894144165381965,
+    "rel_mean": 1.0033435807193,
+    "share_over_3x": 0.0006015296038497895,
+    "median_eth": 0.026266506405,
+    "wpp_median": 225954711614707.7
+   },
+   "(150.0, 250.0]": {
+    "n": 16112.0,
+    "rel_median": 0.9920634920634921,
+    "rel_mean": 1.0054947183058283,
+    "share_over_3x": 0.0006206554121151937,
+    "median_eth": 0.026199,
+    "wpp_median": 130375174602243.33
+   },
+   "(250.0, 350.0]": {
+    "n": 16140.0,
+    "rel_median": 0.9933333333333334,
+    "rel_mean": 1.006529263781221,
+    "share_over_3x": 0.0009913258983890955,
+    "median_eth": 0.026198495000000002,
+    "wpp_median": 87111354553781.75
+   },
+   "(350.0, 450.0]": {
+    "n": 15377.0,
+    "rel_median": 0.9925925925925926,
+    "rel_mean": 1.005449972241496,
+    "share_over_3x": 0.0004552253365415881,
+    "median_eth": 0.0262,
+    "wpp_median": 65237651444548.0
+   },
+   "(450.0, 550.0]": {
+    "n": 14907.0,
+    "rel_median": 0.9992467947108545,
+    "rel_mean": 1.0140540269316074,
+    "share_over_3x": 0.0006037432078889113,
+    "median_eth": 0.026,
+    "wpp_median": 51844024330270.04
+   },
+   "(550.0, 650.0]": {
+    "n": 14219.0,
+    "rel_median": 1.0,
+    "rel_mean": 1.0212909565577677,
+    "share_over_3x": 0.00035164216892889793,
+    "median_eth": 0.026,
+    "wpp_median": 43293080939947.78
+   },
+   "(650.0, 700.0]": {
+    "n": 7231.0,
+    "rel_median": 1.009671179883946,
+    "rel_mean": 1.0569219312517584,
+    "share_over_3x": 0.0027658691743880515,
+    "median_eth": 0.0261,
+    "wpp_median": 38751520237335.586
+   },
+   "(700.0, 740.0]": {
+    "n": 5796.0,
+    "rel_median": 1.037037037037037,
+    "rel_mean": 1.138191018100864,
+    "share_over_3x": 0.007763975155279503,
+    "median_eth": 0.0265,
+    "wpp_median": 36900885158159.414
+   },
+   "(740.0, 780.0]": {
+    "n": 5569.0,
+    "rel_median": 1.1253,
+    "rel_mean": 1.2588606533910338,
+    "share_over_3x": 0.01364697432214042,
+    "median_eth": 0.02802754322,
+    "wpp_median": 36988443506339.46
+   },
+   "(780.0, 790.0]": {
+    "n": 1318.0,
+    "rel_median": 1.2441534027793963,
+    "rel_mean": 1.6213234997961923,
+    "share_over_3x": 0.07511380880121396,
+    "median_eth": 0.03034,
+    "wpp_median": 38615643874398.734
+   },
+   "(790.0, 800.1]": {
+    "n": 1407.0,
+    "rel_median": 1.9941176470588233,
+    "rel_mean": 4.832241105203961,
+    "share_over_3x": 0.3724235963041933,
+    "median_eth": 0.0461,
+    "wpp_median": 58021592628249.21
+   }
+  },
+  "verdict": "flat price per credit across scores 80..~700 (relative price within 1-3% of day median in every bucket, r2 ~0.5% pooled); a convex premium only appears above ~740 pts and is large above 790 (median ~2x, only ~1.4% of credits). buyers do NOT pay per point in the core of the distribution."
+ },
+ "price_per_credit_ignoring_score": {
+  "all_sales": {
+   "daily": {
+    "2026-09-23": {
+     "median_eth": 0.03,
+     "p10_eth": 0.024057,
+     "p90_eth": 0.04159,
+     "n": 38796
+    },
+    "2026-09-24": {
+     "median_eth": 0.0303,
+     "p10_eth": 0.0274,
+     "p90_eth": 0.035,
+     "n": 12304
+    },
+    "2026-09-25": {
+     "median_eth": 0.026154995,
+     "p10_eth": 0.0235,
+     "p90_eth": 0.03,
+     "n": 6160
+    },
+    "2026-09-26": {
+     "median_eth": 0.025,
+     "p10_eth": 0.022499999,
+     "p90_eth": 0.03,
+     "n": 4536
+    },
+    "2026-09-27": {
+     "median_eth": 0.026,
+     "p10_eth": 0.023859,
+     "p90_eth": 0.03,
+     "n": 4502
+    },
+    "2026-09-28": {
+     "median_eth": 0.024677,
+     "p10_eth": 0.0217,
+     "p90_eth": 0.03,
+     "n": 5822
+    },
+    "2026-09-29": {
+     "median_eth": 0.0275,
+     "p10_eth": 0.025,
+     "p90_eth": 0.03,
+     "n": 5734
+    },
+    "2026-09-30": {
+     "median_eth": 0.02844,
+     "p10_eth": 0.0258,
+     "p90_eth": 0.03,
+     "n": 5202
+    },
+    "2026-10-01": {
+     "median_eth": 0.0269,
+     "p10_eth": 0.0207,
+     "p90_eth": 0.0314,
+     "n": 6598
+    },
+    "2026-10-02": {
+     "median_eth": 0.0123,
+     "p10_eth": 0.0093,
+     "p90_eth": 0.025,
+     "n": 12351
+    },
+    "2026-10-03": {
+     "median_eth": 0.009488,
+     "p10_eth": 0.008316,
+     "p90_eth": 0.02980000000000009,
+     "n": 5473
+    },
+    "2026-10-04": {
+     "median_eth": 0.0082,
+     "p10_eth": 0.0069,
+     "p90_eth": 0.030272150249999998,
+     "n": 5706
+    },
+    "2026-10-05": {
+     "median_eth": 0.0085,
+     "p10_eth": 0.0068,
+     "p90_eth": 0.012,
+     "n": 3471
+    },
+    "2026-10-06": {
+     "median_eth": 0.011777,
+     "p10_eth": 0.0105,
+     "p90_eth": 0.017109000000000006,
+     "n": 898
+    }
+   }
+  },
+  "market (seaport+blur+strategy purchase seaport legs)": {
+   "daily": {
+    "2026-09-23": {
+     "median_eth": 0.03,
+     "p10_eth": 0.024,
+     "p90_eth": 0.041,
+     "n": 38697
+    },
+    "2026-09-24": {
+     "median_eth": 0.030195,
+     "p10_eth": 0.0272,
+     "p90_eth": 0.034,
+     "n": 12045
+    },
+    "2026-09-25": {
+     "median_eth": 0.02585,
+     "p10_eth": 0.0232,
+     "p90_eth": 0.0288,
+     "n": 6154
+    },
+    "2026-09-26": {
+     "median_eth": 0.0249,
+     "p10_eth": 0.0223,
+     "p90_eth": 0.0269,
+     "n": 4520
+    },
+    "2026-09-27": {
+     "median_eth": 0.0255,
+     "p10_eth": 0.0237,
+     "p90_eth": 0.0275,
+     "n": 4184
+    },
+    "2026-09-28": {
+     "median_eth": 0.023898,
+     "p10_eth": 0.0214,
+     "p90_eth": 0.0255,
+     "n": 5362
+    },
+    "2026-09-29": {
+     "median_eth": 0.027,
+     "p10_eth": 0.0247978,
+     "p90_eth": 0.0283,
+     "n": 5229
+    },
+    "2026-09-30": {
+     "median_eth": 0.027,
+     "p10_eth": 0.025799,
+     "p90_eth": 0.02935,
+     "n": 4325
+    },
+    "2026-10-01": {
+     "median_eth": 0.0252,
+     "p10_eth": 0.0202999,
+     "p90_eth": 0.027999,
+     "n": 4387
+    },
+    "2026-10-02": {
+     "median_eth": 0.01199,
+     "p10_eth": 0.009108,
+     "p90_eth": 0.0155,
+     "n": 11151
+    },
+    "2026-10-03": {
+     "median_eth": 0.0092,
+     "p10_eth": 0.008273,
+     "p90_eth": 0.0111,
+     "n": 4508
+    },
+    "2026-10-04": {
+     "median_eth": 0.007873343939393939,
+     "p10_eth": 0.0067,
+     "p90_eth": 0.0092,
+     "n": 4814
+    },
+    "2026-10-05": {
+     "median_eth": 0.0085,
+     "p10_eth": 0.0068,
+     "p90_eth": 0.011777,
+     "n": 3447
+    },
+    "2026-10-06": {
+     "median_eth": 0.011777,
+     "p10_eth": 0.0105,
+     "p90_eth": 0.01720777,
+     "n": 890
+    }
+   }
+  }
+ },
+ "score_distribution_points": {
+  "all_credits_ever_minted_122154_full_census": {
+   "n": 122154,
+   "mean": 440.0378760187959,
+   "median": 440.0,
+   "min": 80.0,
+   "max": 800.0,
+   "deciles": {
+    "p10": 152.0,
+    "p20": 224.0,
+    "p30": 295.98239000000024,
+    "p40": 368.0,
+    "p50": 440.0,
+    "p60": 511.9928400000001,
+    "p70": 584.0075999999993,
+    "p80": 656.0,
+    "p90": 727.99757
+   },
+   "share_ge_700": 0.13843181557705847,
+   "share_ge_790": 0.01417882345236341
+  },
+  "held_by_creditstrategy_now": {
+   "n": 13132,
+   "mean": 370.7124716037161,
+   "median": 355.05525,
+   "min": 80.0,
+   "max": 784.4737,
+   "deciles": {
+    "p10": 130.11527000000004,
+    "p20": 181.0217,
+    "p30": 238.3203,
+    "p40": 295.80668000000003,
+    "p50": 355.05525,
+    "p60": 415.80675999999994,
+    "p70": 480.4934,
+    "p80": 556.14906,
+    "p90": 640.25442
+   },
+   "share_ge_700": 0.04081632653061224,
+   "share_ge_790": 0.0
+  },
+  "credits_bought_by_strategy_ever": {
+   "n": 13810,
+   "mean": 374.74889632874726,
+   "median": 360.8,
+   "min": 80.0,
+   "max": 794.7049,
+   "deciles": {
+    "p10": 131.4099,
+    "p20": 182.0607,
+    "p30": 238.4,
+    "p40": 299.5435,
+    "p50": 360.8,
+    "p60": 420.981,
+    "p70": 489.1468,
+    "p80": 565.2338,
+    "p90": 645.8629
+   },
+   "share_ge_700": 0.04663287472845764,
+   "share_ge_790": 0.00021723388848660392
+  },
+  "credits_that_traded_any_sale": {
+   "n": 65815,
+   "mean": 425.3626491498898,
+   "median": 418.2568,
+   "min": 80.0,
+   "max": 800.0,
+   "deciles": {
+    "p10": 145.4609,
+    "p20": 212.9107,
+    "p30": 279.5272,
+    "p40": 348.1314400000003,
+    "p50": 418.2568,
+    "p60": 489.2753600000001,
+    "p70": 564.7110599999997,
+    "p80": 639.9958,
+    "p90": 717.0678
+   },
+   "share_ge_700": 0.12105143204436679,
+   "share_ge_790": 0.01195776038896908
+  },
+  "credits_that_traded_market_clean": {
+   "n": 65631,
+   "mean": 425.4073911352867,
+   "median": 418.2139,
+   "min": 80.0,
+   "max": 800.0,
+   "deciles": {
+    "p10": 145.4609,
+    "p20": 212.9107,
+    "p30": 279.5272,
+    "p40": 348.0631,
+    "p50": 418.2139,
+    "p60": 489.4415,
+    "p70": 564.9179,
+    "p80": 640.0814,
+    "p90": 717.2
+   },
+   "share_ge_700": 0.12122320245006171,
+   "share_ge_790": 0.011991284606359799
+  },
+  "credits_sold_by_strategy": {
+   "n": 678,
+   "mean": 452.92932330383485,
+   "median": 474.3575,
+   "min": 80.0,
+   "max": 794.7049,
+   "deciles": {
+    "p10": 143.3819,
+    "p20": 231.2,
+    "p30": 310.56161,
+    "p40": 388.9497,
+    "p50": 474.3575,
+    "p60": 537.87924,
+    "p70": 602.4013999999999,
+    "p80": 671.3083,
+    "p90": 732.4983500000002
+   },
+   "share_ge_700": 0.1592920353982301,
+   "share_ge_790": 0.004424778761061947
+  },
+  "credits_burned_into_statements": {
+   "n": 12240,
+   "mean": 433.44932757352944,
+   "median": 429.2,
+   "min": 80.0,
+   "max": 798.4804,
+   "deciles": {
+    "p10": 151.3856,
+    "p20": 221.97486,
+    "p30": 291.5878,
+    "p40": 360.748,
+    "p50": 429.2,
+    "p60": 497.95636,
+    "p70": 574.1527799999999,
+    "p80": 649.2775,
+    "p90": 718.7747
+   },
+   "share_ge_700": 0.12794117647058822,
+   "share_ge_790": 0.007107843137254902
+  },
+  "note": "score = scoreOf(seedOf(id), timestampOf(id)) read on chain for all 122,154 ids (full census, not a sample)",
+  "fraction_of_credits_traded_at_least_once": 0.538787104802135
+ },
+ "daily_sales_and_volume": {
+  "2026-09-23": {
+   "sales": 39070,
+   "eth_volume": 1335.1123518152688,
+   "by_venue": {
+    "blur": {
+     "n": 434,
+     "eth": 14.4876818
+    },
+    "credit strategy purchase": {
+     "n": 1962,
+     "eth": 65.9
+    },
+    "credit strategy sale": {
+     "n": 78,
+     "eth": 2.784
+    },
+    "seaport listing fill": {
+     "n": 31835,
+     "eth": 1096.290670015269
+    },
+    "seaport offer accept": {
+     "n": 4761,
+     "eth": 155.65
+    }
+   },
+   "distinct_sellers": 8821,
+   "distinct_buyers": 3292,
+   "eth_volume_market_clean": 1313.2654006274397,
+   "sales_market_clean": 38697
+  },
+  "2026-09-24": {
+   "sales": 12316,
+   "eth_volume": 429.0400793817191,
+   "by_venue": {
+    "blur": {
+     "n": 44,
+     "eth": 6.697110356296886
+    },
+    "credit strategy purchase": {
+     "n": 1299,
+     "eth": 42.18000000000001
+    },
+    "credit strategy sale": {
+     "n": 197,
+     "eth": 6.024000000000001
+    },
+    "seaport listing fill": {
+     "n": 9360,
+     "eth": 329.8952690254222
+    },
+    "seaport offer accept": {
+     "n": 1416,
+     "eth": 44.243700000000004
+    }
+   },
+   "distinct_sellers": 2403,
+   "distinct_buyers": 1189,
+   "eth_volume_market_clean": 416.44950132662007,
+   "sales_market_clean": 12045
+  },
+  "2026-09-25": {
+   "sales": 6188,
+   "eth_volume": 178.1143413064197,
+   "by_venue": {
+    "blur": {
+     "n": 36,
+     "eth": 1.01043
+    },
+    "credit strategy purchase": {
+     "n": 1470,
+     "eth": 43.14
+    },
+    "credit strategy sale": {
+     "n": 4,
+     "eth": 0.132
+    },
+    "seaport listing fill": {
+     "n": 3328,
+     "eth": 97.27121130641967
+    },
+    "seaport offer accept": {
+     "n": 1350,
+     "eth": 36.5607
+    }
+   },
+   "distinct_sellers": 1080,
+   "distinct_buyers": 621,
+   "eth_volume_market_clean": 172.3034858072661,
+   "sales_market_clean": 6154
+  },
+  "2026-09-26": {
+   "sales": 4540,
+   "eth_volume": 128.40666161455664,
+   "by_venue": {
+    "blur": {
+     "n": 8,
+     "eth": 2.3575997999999996
+    },
+    "credit strategy purchase": {
+     "n": 1593,
+     "eth": 43.795
+    },
+    "seaport listing fill": {
+     "n": 1998,
+     "eth": 59.37006181455664
+    },
+    "seaport offer accept": {
+     "n": 941,
+     "eth": 22.884
+    }
+   },
+   "distinct_sellers": 807,
+   "distinct_buyers": 391,
+   "eth_volume_market_clean": 123.68140258544369,
+   "sales_market_clean": 4520
+  },
+  "2026-09-27": {
+   "sales": 4509,
+   "eth_volume": 125.3154295141112,
+   "by_venue": {
+    "blur": {
+     "n": 14,
+     "eth": 0.3549999999999999
+    },
+    "credit strategy purchase": {
+     "n": 1506,
+     "eth": 43.275000000000006
+    },
+    "credit strategy sale": {
+     "n": 10,
+     "eth": 0.36
+    },
+    "seaport listing fill": {
+     "n": 1892,
+     "eth": 52.941029514111214
+    },
+    "seaport offer accept": {
+     "n": 1087,
+     "eth": 28.3844
+    }
+   },
+   "distinct_sellers": 676,
+   "distinct_buyers": 396,
+   "eth_volume_market_clean": 112.48046779698488,
+   "sales_market_clean": 4184
+  },
+  "2026-09-28": {
+   "sales": 5858,
+   "eth_volume": 147.1907521769051,
+   "by_venue": {
+    "blur": {
+     "n": 38,
+     "eth": 0.9252999809999998
+    },
+    "credit strategy purchase": {
+     "n": 1671,
+     "eth": 44.22500000000001
+    },
+    "credit strategy sale": {
+     "n": 17,
+     "eth": 0.534
+    },
+    "fwa hub bid": {
+     "n": 3,
+     "eth": 0.08
+    },
+    "seaport listing fill": {
+     "n": 2528,
+     "eth": 64.0289521959051
+    },
+    "seaport offer accept": {
+     "n": 1601,
+     "eth": 37.3975
+    }
+   },
+   "distinct_sellers": 755,
+   "distinct_buyers": 481,
+   "eth_volume_market_clean": 130.92698761625172,
+   "sales_market_clean": 5362
+  },
+  "2026-09-29": {
+   "sales": 5759,
+   "eth_volume": 164.5960582064316,
+   "by_venue": {
+    "blur": {
+     "n": 35,
+     "eth": 1.10494998
+    },
+    "credit strategy purchase": {
+     "n": 1469,
+     "eth": 43.230000000000004
+    },
+    "credit strategy sale": {
+     "n": 122,
+     "eth": 3.894
+    },
+    "fwa hub bid": {
+     "n": 104,
+     "eth": 2.83681984
+    },
+    "seaport listing fill": {
+     "n": 3049,
+     "eth": 86.71598838643159
+    },
+    "seaport offer accept": {
+     "n": 980,
+     "eth": 26.814300000000003
+    }
+   },
+   "distinct_sellers": 993,
+   "distinct_buyers": 486,
+   "eth_volume_market_clean": 145.53134408283591,
+   "sales_market_clean": 5229
+  },
+  "2026-09-30": {
+   "sales": 5202,
+   "eth_volume": 151.12246004864227,
+   "by_venue": {
+    "blur": {
+     "n": 1,
+     "eth": 0.028
+    },
+    "credit strategy purchase": {
+     "n": 1432,
+     "eth": 42.99000000000001
+    },
+    "credit strategy sale": {
+     "n": 193,
+     "eth": 6.654
+    },
+    "fwa hub bid": {
+     "n": 161,
+     "eth": 4.767895787893
+    },
+    "seaport listing fill": {
+     "n": 2133,
+     "eth": 62.11326426074928
+    },
+    "seaport offer accept": {
+     "n": 1282,
+     "eth": 34.5693
+    }
+   },
+   "distinct_sellers": 844,
+   "distinct_buyers": 401,
+   "eth_volume_market_clean": 121.40387323938396,
+   "sales_market_clean": 4325
+  },
+  "2026-10-01": {
+   "sales": 6604,
+   "eth_volume": 177.3792299538825,
+   "by_venue": {
+    "blur": {
+     "n": 16,
+     "eth": 0.7509
+    },
+    "credit strategy purchase": {
+     "n": 1148,
+     "eth": 33.87040999787549
+    },
+    "credit strategy sale": {
+     "n": 30,
+     "eth": 1.032
+    },
+    "fwa hub bid": {
+     "n": 1795,
+     "eth": 52.51780206780556
+    },
+    "seaport listing fill": {
+     "n": 2411,
+     "eth": 60.13101788820145
+    },
+    "seaport offer accept": {
+     "n": 1204,
+     "eth": 29.077099999999998
+    }
+   },
+   "distinct_sellers": 835,
+   "distinct_buyers": 474,
+   "eth_volume_market_clean": 110.09887523510272,
+   "sales_market_clean": 4387
+  },
+  "2026-10-02": {
+   "sales": 12404,
+   "eth_volume": 175.5050096237249,
+   "by_venue": {
+    "blur": {
+     "n": 84,
+     "eth": 1.2162500400559484
+    },
+    "credit strategy purchase": {
+     "n": 191,
+     "eth": 3.2267366699818774
+    },
+    "credit strategy sale": {
+     "n": 10,
+     "eth": 0.2486513432515148
+    },
+    "fwa hub bid": {
+     "n": 1184,
+     "eth": 34.09464548009443
+    },
+    "seaport listing fill": {
+     "n": 7143,
+     "eth": 91.73772609034116
+    },
+    "seaport offer accept": {
+     "n": 3792,
+     "eth": 44.981
+    }
+   },
+   "distinct_sellers": 1198,
+   "distinct_buyers": 939,
+   "eth_volume_market_clean": 139.5959918145689,
+   "sales_market_clean": 11151
+  },
+  "2026-10-03": {
+   "sales": 5523,
+   "eth_volume": 72.07568276350324,
+   "by_venue": {
+    "blur": {
+     "n": 63,
+     "eth": 0.5822999919999998
+    },
+    "credit strategy purchase": {
+     "n": 38,
+     "eth": 0.4113196958476531
+    },
+    "credit strategy sale": {
+     "n": 7,
+     "eth": 0.11096621981845314
+    },
+    "fwa hub bid": {
+     "n": 957,
+     "eth": 27.82255849621024
+    },
+    "seaport listing fill": {
+     "n": 3074,
+     "eth": 30.71843835962689
+    },
+    "seaport offer accept": {
+     "n": 1384,
+     "eth": 12.4301
+    }
+   },
+   "distinct_sellers": 589,
+   "distinct_buyers": 402,
+   "eth_volume_market_clean": 43.62711814186371,
+   "sales_market_clean": 4508
+  },
+  "2026-10-04": {
+   "sales": 5862,
+   "eth_volume": 67.03416942982184,
+   "by_venue": {
+    "blur": {
+     "n": 178,
+     "eth": 1.4069174759999998
+    },
+    "credit strategy purchase": {
+     "n": 14,
+     "eth": 0.144802367774886
+    },
+    "credit strategy sale": {
+     "n": 1,
+     "eth": 0.007647224980514148
+    },
+    "fwa hub bid": {
+     "n": 891,
+     "eth": 26.479439983924998
+    },
+    "seaport listing fill": {
+     "n": 2821,
+     "eth": 24.079862377141446
+    },
+    "seaport offer accept": {
+     "n": 1957,
+     "eth": 14.9155
+    }
+   },
+   "distinct_sellers": 454,
+   "distinct_buyers": 361,
+   "eth_volume_market_clean": 39.29067187031316,
+   "sales_market_clean": 4814
+  },
+  "2026-10-05": {
+   "sales": 3528,
+   "eth_volume": 32.64729949470957,
+   "by_venue": {
+    "blur": {
+     "n": 69,
+     "eth": 0.708578
+    },
+    "credit strategy purchase": {
+     "n": 15,
+     "eth": 0.18924733526703358
+    },
+    "credit strategy sale": {
+     "n": 2,
+     "eth": 0.024
+    },
+    "fwa hub bid": {
+     "n": 22,
+     "eth": 0.6540950000000002
+    },
+    "seaport listing fill": {
+     "n": 2550,
+     "eth": 24.422379159442535
+    },
+    "seaport offer accept": {
+     "n": 870,
+     "eth": 6.649
+    }
+   },
+   "distinct_sellers": 507,
+   "distinct_buyers": 315,
+   "eth_volume_market_clean": 31.33589635944253,
+   "sales_market_clean": 3447
+  },
+  "2026-10-06": {
+   "sales": 953,
+   "eth_volume": 12.568674357518876,
+   "by_venue": {
+    "blur": {
+     "n": 62,
+     "eth": 0.7806190000000001
+    },
+    "credit strategy purchase": {
+     "n": 2,
+     "eth": 0.026574491981350642
+    },
+    "credit strategy sale": {
+     "n": 7,
+     "eth": 0.08131430131456145
+    },
+    "seaport listing fill": {
+     "n": 710,
+     "eth": 9.854166564222961
+    },
+    "seaport offer accept": {
+     "n": 172,
+     "eth": 1.8259999999999998
+    }
+   },
+   "distinct_sellers": 222,
+   "distinct_buyers": 78,
+   "eth_volume_market_clean": 11.776661564222962,
+   "sales_market_clean": 890
+  }
+ },
+ "sale_totals": {
+  "total_sales_rows": 118316,
+  "total_eth_priced": 3196.1081996872153,
+  "by_group": {
+   "blur": {
+    "n": 1082,
+    "eth": 32.41163642535283,
+    "n_flagged_not_clean": 761
+   },
+   "credit strategy purchase": {
+    "n": 13810,
+    "eth": 406.6040905587284,
+    "n_flagged_not_clean": 0
+   },
+   "credit strategy sale": {
+    "n": 678,
+    "eth": 21.886579089365046,
+    "n_flagged_not_clean": 0
+   },
+   "fwa hub bid": {
+    "n": 5117,
+    "eth": 149.25325665592823,
+    "n_flagged_not_clean": 0
+   },
+   "seaport listing fill": {
+    "n": 74832,
+    "eth": 2089.570036957841,
+    "n_flagged_not_clean": 2
+   },
+   "seaport offer accept": {
+    "n": 22797,
+    "eth": 496.3826000000001,
+    "n_flagged_not_clean": 0
+   }
+  },
+  "median_credit_price_eth_all": 0.027
+ },
+ "movements_not_counted_as_sales": {
+  "mints": 122154,
+  "burns_into_statements": 12240,
+  "fwa_hub_deposits": 8181,
+  "fwa_hub_returns_to_depositor": 2958,
+  "plain_transfers_no_payment_found": 26328,
+  "note": "mints are all in the first day; every non-sale move with tx.value>0 or WETH in tx is flagged in the raw rows but not priced"
+ },
+ "holders_and_concentration": {
+  "current_all_addresses": {
+   "label": "all holders incl protocol contracts",
+   "credits": 109914,
+   "holders": 13715,
+   "top1_share": 0.11947522608584894,
+   "top10_share": 0.1773659406445039,
+   "top100_share": 0.3187128118347071,
+   "top10": [
+    {
+     "address": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6",
+     "credits": 13132,
+     "label": "CreditStrategy"
+    },
+    {
+     "address": "0x224af408b93c6c3442b251f8b90bf86a24145192",
+     "credits": 1650,
+     "label": ""
+    },
+    {
+     "address": "0xc90d95d2ae793ad128ef3c3e4892a195afe6af7b",
+     "credits": 980,
+     "label": ""
+    },
+    {
+     "address": "0x0681e9b477a0cfe979b1401174d085af4a9d1448",
+     "credits": 815,
+     "label": ""
+    },
+    {
+     "address": "0xbdf883bdb53f42620f20629c3d40e75148965363",
+     "credits": 705,
+     "label": ""
+    },
+    {
+     "address": "0xa74e8583a17e339d98983161e529019e226584c2",
+     "credits": 535,
+     "label": ""
+    },
+    {
+     "address": "0xdf90937e07c60108b505fe3c542ab782e0a19ae5",
+     "credits": 480,
+     "label": ""
+    },
+    {
+     "address": "0x1a71a3ee9efda7acecf9693c0f270ea95d76f9f8",
+     "credits": 446,
+     "label": ""
+    },
+    {
+     "address": "0xfe15ad68637151528d3ea8dddfcf4ea74dfa7823",
+     "credits": 387,
+     "label": ""
+    },
+    {
+     "address": "0xc8f8e2f59dd95ff67c3d39109eca2e2a017d4c8a",
+     "credits": 365,
+     "label": ""
+    }
+   ]
+  },
+  "current_excluding_strategy_and_hub": {
+   "label": "excluding CreditStrategy and FWA hub",
+   "credits": 96680,
+   "holders": 13713,
+   "top1_share": 0.01706661150186181,
+   "top10_share": 0.0692594124948283,
+   "top100_share": 0.22759619362846503,
+   "top10": [
+    {
+     "address": "0x224af408b93c6c3442b251f8b90bf86a24145192",
+     "credits": 1650,
+     "label": ""
+    },
+    {
+     "address": "0xc90d95d2ae793ad128ef3c3e4892a195afe6af7b",
+     "credits": 980,
+     "label": ""
+    },
+    {
+     "address": "0x0681e9b477a0cfe979b1401174d085af4a9d1448",
+     "credits": 815,
+     "label": ""
+    },
+    {
+     "address": "0xbdf883bdb53f42620f20629c3d40e75148965363",
+     "credits": 705,
+     "label": ""
+    },
+    {
+     "address": "0xa74e8583a17e339d98983161e529019e226584c2",
+     "credits": 535,
+     "label": ""
+    },
+    {
+     "address": "0xdf90937e07c60108b505fe3c542ab782e0a19ae5",
+     "credits": 480,
+     "label": ""
+    },
+    {
+     "address": "0x1a71a3ee9efda7acecf9693c0f270ea95d76f9f8",
+     "credits": 446,
+     "label": ""
+    },
+    {
+     "address": "0xfe15ad68637151528d3ea8dddfcf4ea74dfa7823",
+     "credits": 387,
+     "label": ""
+    },
+    {
+     "address": "0xc8f8e2f59dd95ff67c3d39109eca2e2a017d4c8a",
+     "credits": 365,
+     "label": ""
+    },
+    {
+     "address": "0x2efed473d498d749df0912c01ebb632d9edacc19",
+     "credits": 333,
+     "label": ""
+    }
+   ]
+  },
+  "original_mint_recipients": {
+   "distinct": 25406,
+   "top10_share": 0.03268005959690227,
+   "top100_share": 0.12182163498534637,
+   "top10": [
+    {
+     "address": "0xc8f8e2f59dd95ff67c3d39109eca2e2a017d4c8a",
+     "credits": 579
+    },
+    {
+     "address": "0x48138f98cbd6e958a9606075db045a8dba682d59",
+     "credits": 547
+    },
+    {
+     "address": "0xbdf883bdb53f42620f20629c3d40e75148965363",
+     "credits": 404
+    },
+    {
+     "address": "0xfe15ad68637151528d3ea8dddfcf4ea74dfa7823",
+     "credits": 401
+    },
+    {
+     "address": "0xff530642b6b945f27ef486f7120e31ad017db890",
+     "credits": 395
+    },
+    {
+     "address": "0x46b410ea39439974ff0c87325d62ace9963ad91a",
+     "credits": 375
+    },
+    {
+     "address": "0x08cc394e9a690e7ca60d57072876cecd3cf4ed32",
+     "credits": 349
+    },
+    {
+     "address": "0xda77fc9dafaa95de16d47859d62b733a58365e45",
+     "credits": 348
+    },
+    {
+     "address": "0x35c282a36c06df99f7744312f4b77977c59a79d8",
+     "credits": 304
+    },
+    {
+     "address": "0xcef99ab15ef93ba9f523e57bf8039a19f1cea636",
+     "credits": 290
+    }
+   ]
+  },
+  "distinct_sellers_window": 13422,
+  "distinct_buyers_window": 5573,
+  "distinct_sellers_market": 13412,
+  "distinct_buyers_market": 5519
+ },
+ "creditstrategy": {
+  "holding_now": 13132,
+  "listing_price_eth_now": {
+   "deciles": {
+    "p0": 0.011898117355227831,
+    "p10": 0.03,
+    "p25": 0.036,
+    "p50": 0.036,
+    "p75": 0.036,
+    "p90": 0.042,
+    "p100": 0.138
+   },
+   "value_counts_top": {
+    "0.036": 8703,
+    "0.03": 2790,
+    "0.042": 699,
+    "0.048": 599,
+    "0.018": 135,
+    "0.06": 89,
+    "0.012": 48,
+    "0.024": 30,
+    "0.072": 14,
+    "0.054": 2
+   },
+   "note": "nftForSale(id) read on chain at block 26130271 for every held id; all equal 1.2x the strategy's own purchase price. seaport listings by third parties are NOT derivable from logs (off chain order signatures)"
+  },
+  "listing_price_per_point_now_wei": {
+   "deciles": {
+    "p10": 53874630182475.06,
+    "p25": 67606363196279.54,
+    "p50": 99714254586849.19,
+    "p75": 170339211613348.9,
+    "p90": 271683640371498.84
+   }
+  },
+  "listing_vs_market_now": {
+   "listing_median_eth": 0.036,
+   "market_median_eth_last_24h": 0.008899
+  },
+  "purchases": {
+   "count": 13810,
+   "eth_spent": 406.6040905587284,
+   "price_paid_eth_value_counts": {
+    "0.03": 8945,
+    "0.025": 3162,
+    "0.035": 714,
+    "0.04": 615,
+    "0.015": 138,
+    "0.05": 90,
+    "0.01": 63,
+    "0.02": 42
+   },
+   "mean_score_pts": 374.74889632874726,
+   "score_vs_price_paid": {
+    "n": 13810,
+    "slope_eth_per_point": -2.29318277954648e-07,
+    "slope_wei_per_point": -229318277954.64798,
+    "intercept_eth": 0.029528665993782115,
+    "r_squared": 9.061135293393115e-05,
+    "pearson_r": -0.009518999576317416,
+    "p_value": 0.2633285697545201,
+    "spearman_rho": -0.004718398918998389
+   },
+   "note": "strategy pays a flat tier price per credit regardless of score; tier steps look like 0.025/0.03/0.035/0.04 and fell to 0.01 after its eth ran out"
+  },
+  "sales": {
+   "count": 678,
+   "eth_received": 21.886579089365046,
+   "buyers_distinct": 91,
+   "sell_through_of_listed": 0.049094858797972485
+  },
+  "purchase_searchers": {
+   "distinct_tx_senders": 33,
+   "top1_share": 0.5544532947139754,
+   "top5_share": 0.8769007965242578,
+   "top5": [
+    {
+     "address": "0xc8bd1dca424a79b246223b91bc096287473e1fed",
+     "n": 7657
+    },
+    {
+     "address": "0x72350ba04accd336a9e1ef1f95582400d24fc164",
+     "n": 1810
+    },
+    {
+     "address": "0x4988c8966e79ebf81ae02d834a3041afe0037337",
+     "n": 1334
+    },
+    {
+     "address": "0x2f104d7388e0c7b3703a9c1c52406e587479d585",
+     "n": 879
+    },
+    {
+     "address": "0x7d79bd0e4b3dc90665a3ed30aa6c6c06c89d224e",
+     "n": 430
+    }
+   ]
+  },
+  "arb_roundtrips_sell_then_buy_back_same_tx": {
+   "count": 85,
+   "loss_to_strategy_eth": 0.0,
+   "pairs_matched": 85,
+   "strategy_net_eth": -0.46525185442804534,
+   "mean_spread_eth_per_roundtrip": 0.005473551228565239,
+   "note": "strategy sells a relisted credit at its 1.2x listing and the same tx sells it back at the (higher) current bid tier: a risk-free arb that drains the strategy"
+  }
+ },
+ "creditstr_pool": {
+  "pool_id": "0x75f26ca71b6dd3f7316b3da177fdd469a72e66bdac73a4533c70657431e559fe",
+  "launch_block": 26037623,
+  "launch_utc": "2026-09-23T03:53Z",
+  "total_swaps": 7796,
+  "total_eth_volume": 1943.9483795967344,
+  "distinct_traders_tx_from": 1234,
+  "daily": {
+   "2026-09-23": {
+    "swaps": 5489,
+    "eth_volume": 1557.1214539866633,
+    "fee_at_10pct_of_notional": 155.71214539866634,
+    "strategy_share_8pct": 124.56971631893306,
+    "traders": 1006,
+    "strategy_eth_inflow_implied_from_balance": 376.872021
+   },
+   "2026-09-24": {
+    "swaps": 665,
+    "eth_volume": 80.64767637139576,
+    "fee_at_10pct_of_notional": 8.064767637139576,
+    "strategy_share_8pct": 6.451814109711661,
+    "traders": 226,
+    "strategy_eth_inflow_implied_from_balance": 6.16453864
+   },
+   "2026-09-25": {
+    "swaps": 185,
+    "eth_volume": 41.9393216944203,
+    "fee_at_10pct_of_notional": 4.19393216944203,
+    "strategy_share_8pct": 3.355145735553624,
+    "traders": 88,
+    "strategy_eth_inflow_implied_from_balance": 3.22329379
+   },
+   "2026-09-26": {
+    "swaps": 193,
+    "eth_volume": 46.227713129865705,
+    "fee_at_10pct_of_notional": 4.622771312986571,
+    "strategy_share_8pct": 3.6982170503892564,
+    "traders": 91,
+    "strategy_eth_inflow_implied_from_balance": 3.57941303
+   },
+   "2026-09-27": {
+    "swaps": 229,
+    "eth_volume": 57.08171521633175,
+    "fee_at_10pct_of_notional": 5.708171521633176,
+    "strategy_share_8pct": 4.56653721730654,
+    "traders": 100,
+    "strategy_eth_inflow_implied_from_balance": 4.34014374
+   },
+   "2026-09-28": {
+    "swaps": 71,
+    "eth_volume": 12.75053273069814,
+    "fee_at_10pct_of_notional": 1.275053273069814,
+    "strategy_share_8pct": 1.0200426184558513,
+    "traders": 40,
+    "strategy_eth_inflow_implied_from_balance": 0.972288271
+   },
+   "2026-09-29": {
+    "swaps": 195,
+    "eth_volume": 27.778438527271838,
+    "fee_at_10pct_of_notional": 2.777843852727184,
+    "strategy_share_8pct": 2.222275082181747,
+    "traders": 65,
+    "strategy_eth_inflow_implied_from_balance": 2.08167196
+   },
+   "2026-09-30": {
+    "swaps": 399,
+    "eth_volume": 57.612166028438374,
+    "fee_at_10pct_of_notional": 5.761216602843838,
+    "strategy_share_8pct": 4.60897328227507,
+    "traders": 91,
+    "strategy_eth_inflow_implied_from_balance": 4.37444297
+   },
+   "2026-10-01": {
+    "swaps": 123,
+    "eth_volume": 11.78913603324901,
+    "fee_at_10pct_of_notional": 1.178913603324901,
+    "strategy_share_8pct": 0.9431308826599208,
+    "traders": 53,
+    "strategy_eth_inflow_implied_from_balance": 0.910186115
+   },
+   "2026-10-02": {
+    "swaps": 153,
+    "eth_volume": 40.76154796967329,
+    "fee_at_10pct_of_notional": 4.076154796967329,
+    "strategy_share_8pct": 3.260923837573863,
+    "traders": 96,
+    "strategy_eth_inflow_implied_from_balance": 3.20583385
+   },
+   "2026-10-03": {
+    "swaps": 42,
+    "eth_volume": 5.285299714463069,
+    "fee_at_10pct_of_notional": 0.528529971446307,
+    "strategy_share_8pct": 0.42282397715704556,
+    "traders": 29,
+    "strategy_eth_inflow_implied_from_balance": 0.414165966
+   },
+   "2026-10-04": {
+    "swaps": 17,
+    "eth_volume": 1.9281529897577125,
+    "fee_at_10pct_of_notional": 0.19281529897577127,
+    "strategy_share_8pct": 0.154252239180617,
+    "traders": 12,
+    "strategy_eth_inflow_implied_from_balance": 0.143586656
+   },
+   "2026-10-05": {
+    "swaps": 23,
+    "eth_volume": 2.603041156871101,
+    "fee_at_10pct_of_notional": 0.26030411568711015,
+    "strategy_share_8pct": 0.2082432925496881,
+    "traders": 13,
+    "strategy_eth_inflow_implied_from_balance": 0.191907324
+   },
+   "2026-10-06": {
+    "swaps": 12,
+    "eth_volume": 0.42218404763515927,
+    "fee_at_10pct_of_notional": 0.04221840476351593,
+    "strategy_share_8pct": 0.03377472381081274,
+    "traders": 5,
+    "strategy_eth_inflow_implied_from_balance": 0.0211643058
+   }
+  },
+  "peak_day": {
+   "date": "2026-09-23",
+   "eth_volume": 1557.1214539866633
+  },
+  "peak_hour": {
+   "hour": "2026-09-23T04:00Z",
+   "eth_volume": 912.5641332561022
+  },
+  "first_24h_share_of_volume": 0.8010096720313545,
+  "last_30_days_equals_whole_window": {
+   "eth_volume": 1943.9483795967344,
+   "mean_daily_eth_volume": 149.53449073821034,
+   "fee_at_10pct": 194.39483795967345,
+   "days_covered": 13.0
+  },
+  "last_7_calendar_days": {
+   "eth_volume": 120.4015279400877,
+   "mean_daily_eth_volume": 17.200218277155386,
+   "mean_daily_fee_at_10pct": 1.720021827715539
+  },
+  "last_3_calendar_days": {
+   "mean_daily_eth_volume": 1.6511260647546575,
+   "mean_daily_fee_at_10pct": 0.16511260647546577
+  },
+  "last_30_days_equals_window_minus_launch_day": {
+   "mean_daily_eth_volume_excluding_launch_day": 29.755917354620863,
+   "mean_daily_fee_at_10pct_excluding_launch_day": 2.975591735462087
+  },
+  "fee_model": {
+   "hook_fee_rate_steady_state": 0.1,
+   "note": "verified on traces: hook takes ~10% of the eth notional (coin side on buys, eth side on sells) and forwards 80% to the strategy, 10% to each of two other recipients; strategy inflow reconciled from eth_getBalance every 300 blocks is 7.7% of notional after the first ~600 blocks, matching 8%",
+   "launch_surcharge": "the first ~600 blocks (~2h) carried a decaying launch fee: strategy inflow was 39.8% of notional right after launch (hook fee ~50%) falling to 8% by ~block +600; first 300 blocks: 915 eth volume, 322 eth to the strategy",
+   "total_strategy_inflow_implied_eth": 406.49465761780004,
+   "total_fee_at_flat_10pct_eth": 194.39483795967345,
+   "steady_state_strategy_inflow_over_volume": 0.0767
+  },
+  "concentration": {
+   "top10_traders_share_of_volume": 0.16086724235235433,
+   "top100_traders_share": 0.6298453033462397,
+   "top1_share": 0.019066393420434667,
+   "balanced_two_sided_traders_share_of_volume": 0.3901295585252433,
+   "balanced_traders": 134,
+   "matched_buy_sell_volume_share": 0.7083953464194175,
+   "note": "matched share is volume that a trader both bought and sold; high values mean heavy round trip churn (market makers, bots, or wash)"
+  },
+  "buybacks": {
+   "count": 434,
+   "eth_spent": 21.777146193918217,
+   "coins_burned": 55868718.58115305,
+   "note": "BoughtAndBurned events: the strategy spends its credit sale proceeds (~1:1) on buying and burning its coin"
+  },
+  "coin_price_eth_last": 1.3349698913947518e-07,
+  "coin_price_eth_first_swap": 2.518085743642695e-08
+ },
+ "statements": {
+  "count": 153,
+  "supply_on_chain": 153,
+  "first_compose_utc": "2026-10-02T00:15Z",
+  "last_compose_utc": "2026-10-06T02:10Z",
+  "composed_per_day": {
+   "2026-10-02": 119,
+   "2026-10-03": 19,
+   "2026-10-04": 9,
+   "2026-10-05": 3,
+   "2026-10-06": 3
+  },
+  "composed_per_7day_period": {
+   "days 0-6 after first compose": 153
+  },
+  "days_from_first_to_last_compose": 4.079444444444444,
+  "note_on_weekly_rate": "all 153 statements were composed in the first 4.1 days after the statements contract went live (2026/10/02 00:15 utc); weekly rates cannot be extrapolated, the run rate decays 119, 19, 9, 3, 3 per day",
+  "rating_points_incl_overprints": {
+   "n": 153,
+   "mean": 38705.918593464055,
+   "median": 32105.7504,
+   "min": 22509.5245,
+   "max": 264387.7806,
+   "deciles": {
+    "p10": 26389.6109,
+    "p20": 27990.9061,
+    "p30": 28901.3403,
+    "p40": 30025.310439999997,
+    "p50": 32105.7504,
+    "p60": 33876.81042,
+    "p70": 36244.16358,
+    "p80": 45116.67868000001,
+    "p90": 53878.73428000001
+   }
+  },
+  "base_rating_points_of_the_80_credits": {
+   "n": 153,
+   "mean": 34675.946205882356,
+   "median": 31709.068,
+   "min": 22509.5245,
+   "max": 62235.9646,
+   "deciles": {
+    "p10": 26389.6109,
+    "p20": 27990.9061,
+    "p30": 28901.3403,
+    "p40": 29938.81682,
+    "p50": 31709.068,
+    "p60": 33739.0453,
+    "p70": 35575.12234,
+    "p80": 41266.47596000001,
+    "p90": 49094.013880000006
+   }
+  },
+  "overprints": {
+   "statements_with_overprints": 7,
+   "max": 7,
+   "note": "overprinted statements hold 80*(1+overprints) credits and rate up to 7.8x the base; creditsOf returns 160/240/320/640 for them"
+  },
+  "distinct_composers": 92,
+  "top_composer_share": 0.1437908496732026,
+  "credits_burned_total": 12240,
+  "ever_priced_sale": {
+   "count": 33,
+   "fraction": 0.21568627450980393
+  },
+  "ever_transferred_after_mint": 57,
+  "priced_sales": {
+   "count": 42,
+   "price_eth": {
+    "n": 42,
+    "mean": 0.789707119047619,
+    "median": 0.745,
+    "min": 0.5544,
+    "max": 1.65,
+    "deciles": {
+     "p10": 0.5991,
+     "p20": 0.62,
+     "p30": 0.69558,
+     "p40": 0.716,
+     "p50": 0.745,
+     "p60": 0.791794,
+     "p70": 0.8194699999999999,
+     "p80": 0.859,
+     "p90": 1.04058
+    }
+   },
+   "venues": {
+    "seaport listing fill": 36,
+    "seaport offer accept": 6
+   },
+   "eth_per_rating_point": {
+    "median": 2.2119959537530137e-05,
+    "p10": 7.75035147547102e-06,
+    "p90": 2.8151375707749893e-05
+   },
+   "regression_price_on_rating": {
+    "n": 42,
+    "slope": -8.702174483678269e-07,
+    "intercept": 0.831117461478005,
+    "r_squared": 0.029157838330387043
+   },
+   "regression_price_on_rating_excluding_overprinted": {
+    "n": 37,
+    "slope": 1.015682616755984e-05,
+    "intercept": 0.4552820780193577,
+    "r_squared": 0.10922695095878152
+   }
+  },
+  "premium_over_parts": {
+   "definition": "ratio = statement sale price / estimated cost of its credits at the time of sale. flat cost = credits_count x trailing 24h median market credit price (eth); per point cost = rating points x trailing 24h median market wei per point. >1 premium, <1 discount",
+   "ratio_vs_flat": {
+    "p10": 0.4785530214061272,
+    "p25": 0.7074585459183673,
+    "p50": 0.8379315783166066,
+    "p75": 1.0737179487179487,
+    "p90": 1.2213830376940131,
+    "mean": 0.8388606452533846
+   },
+   "ratio_vs_per_point": {
+    "p10": 0.3399155368114752,
+    "p25": 0.715489019361941,
+    "p50": 0.8888808602536828,
+    "p75": 1.033779309363669,
+    "p90": 1.1240064601401687,
+    "mean": 0.8368347544567355,
+    "note": "noisy: per point cost scales with rating, but price does not (see regression)"
+   },
+   "share_of_sales_at_or_above_1_0x_flat": 0.2619047619047619,
+   "share_at_or_above_1_2x_flat": 0.21428571428571427,
+   "share_at_or_above_4x_flat": 0.0,
+   "max_ratio_vs_flat": 1.3159384197419064,
+   "share_at_or_above_1_2x_perpoint": 0.07142857142857142,
+   "share_at_or_above_4x_perpoint": 0.0,
+   "before_2026_10_02": {
+    "n": 0,
+    "ratio_vs_flat_median": null,
+    "price_eth_median": null
+   },
+   "from_2026_10_02": {
+    "n": 42,
+    "ratio_vs_flat_median": 0.8379315783166066,
+    "price_eth_median": 0.745
+   }
+  },
+  "cost_basis": {
+   "credits_burned": 12240,
+   "priced_acquisitions": 8448,
+   "acquired_by_mint": 905,
+   "unknown_or_unpriced_transfer": 2887,
+   "mean_known_cost_basis_eth_per_statement": 1.4868186398169934,
+   "statements_with_80_priced": 54
+  },
+  "sale_vs_actual_cost_basis": {
+   "n": 24,
+   "median_ratio": 0.3817010963741176,
+   "note": "cost basis scaled to 80 credits from the priced ones; composers mostly bought credits near the launch price"
+  },
+  "auction_4x_to_1_2x_cost_feasibility": {
+   "verdict": "statements sold at a median 0.84x of their credits' market cost (a discount). 9 of 42 sales (21%) reached 1.2x, the maximum was 1.32x and none came near 4x. an auction that starts at 4x and floors at 1.2x of cost would clear only against the top ~20% of observed buyers and would not clear at 4x at all",
+   "caveat": "only 42 priced statement sales exist; cost defined with trailing market credit price, not what the builder actually paid"
+  }
+ },
+ "wash_and_dominance": {
+  "flags_by_type": {
+   "repeat_pair_ge5": {
+    "rows": 32489,
+    "share_of_rows": 0.27459515196592177,
+    "eth": 695.0399356370979,
+    "share_of_eth": 0.21746445746270962
+   },
+   "price_gt10x_day_median": {
+    "rows": 104,
+    "share_of_rows": 0.0008790019946583725,
+    "eth": 86.66305187,
+    "share_of_eth": 0.02711518085604274
+   },
+   "returns_to_prior_seller": {
+    "rows": 110,
+    "share_of_rows": 0.0009297136481963555,
+    "eth": 2.1294549999999997,
+    "share_of_eth": 0.0006662649907185236
+   },
+   "same_party": {
+    "rows": 1,
+    "share_of_rows": 8.451942256330504e-06,
+    "eth": 0.05889,
+    "share_of_eth": 1.842553390581809e-05
+   },
+   "strategy_roundtrip_arb": {
+    "rows": 170,
+    "share_of_rows": 0.0014368301835761858,
+    "eth": 5.484748145571956,
+    "share_of_eth": 0.0017160708595875184
+   }
+  },
+  "bidirectional_pairs_ge3_each_way": {
+   "pairs": 48,
+   "rows_involved": 706,
+   "top": [
+    {
+     "a": "0x15bb2435aab00b270456093444b2b6205ceee671",
+     "b": "0x8b64f748cd261ee40bcaf46d4f38832f87e48136",
+     "a_to_b": 21,
+     "b_to_a": 32
+    },
+    {
+     "a": "0x8b64f748cd261ee40bcaf46d4f38832f87e48136",
+     "b": "0xff46c87fce367fbf6f9f3e47db1c22429fd177a3",
+     "a_to_b": 30,
+     "b_to_a": 4
+    },
+    {
+     "a": "0x12b6d12a6b5d23804c94ec1e40e0df5e91bd0cc0",
+     "b": "0xbbb017c054c1bd00b95add371e5d68557a9273de",
+     "a_to_b": 25,
+     "b_to_a": 5
+    },
+    {
+     "a": "0x49a616dfc3a8980497807b2320084be1350601a1",
+     "b": "0xc823e24d0694ac72dc299f2600c949d25effcd69",
+     "a_to_b": 5,
+     "b_to_a": 25
+    },
+    {
+     "a": "0x3772fad0e4de82f27620c946e7f52946332ea02c",
+     "b": "0xc823e24d0694ac72dc299f2600c949d25effcd69",
+     "a_to_b": 11,
+     "b_to_a": 15
+    }
+   ]
+  },
+  "tokens_with_ge3_sales": 12451,
+  "max_sales_of_one_token": 12,
+  "market_buyers": {
+   "distinct": 5518,
+   "top1_eth_share": 0.025911744219528587,
+   "top10_eth_share": 0.12441774730566336,
+   "top100_eth_share": 0.3678942703536834,
+   "top10_count_share": 0.1388083472863152,
+   "top5": [
+    {
+     "address": "0x72350ba04accd336a9e1ef1f95582400d24fc164",
+     "sales": 2753,
+     "eth": 67.463857
+    },
+    {
+     "address": "0x18ec1b1286502e24a0d5f9f588c3bb169959cb86",
+     "sales": 2006,
+     "eth": 57.58608442244463
+    },
+    {
+     "address": "0xd5e7c9c5dad87014898e7daa4f42bd102637a565",
+     "sales": 1294,
+     "eth": 42.70271201679996
+    },
+    {
+     "address": "0xbbb017c054c1bd00b95add371e5d68557a9273de",
+     "sales": 1468,
+     "eth": 27.641085
+    },
+    {
+     "address": "0xebad3ac3a7cb423ca9205917b8e2c826f2785db5",
+     "sales": 991,
+     "eth": 26.33517847440544
+    }
+   ]
+  },
+  "market_sellers": {
+   "distinct": 12541,
+   "top1_eth_share": 0.007729743870467574,
+   "top10_eth_share": 0.05627763343427789,
+   "top100_eth_share": 0.2139466418189327,
+   "top5": [
+    {
+     "address": "0xbbb017c054c1bd00b95add371e5d68557a9273de",
+     "sales": 1153,
+     "eth": 20.125172999
+    },
+    {
+     "address": "0x577d94d9d64454cc4cc76a4860c7041cbd0c6c88",
+     "sales": 566,
+     "eth": 17.9717842
+    },
+    {
+     "address": "0x9247f8142ac5ed8ce991d5f8753e325e4596b586",
+     "sales": 613,
+     "eth": 17.37504996998
+    },
+    {
+     "address": "0xf76b17ce8ff08f96ad7bb785d4ed898d5d5014ef",
+     "sales": 561,
+     "eth": 16.95202
+    },
+    {
+     "address": "0x8b64f748cd261ee40bcaf46d4f38832f87e48136",
+     "sales": 969,
+     "eth": 14.49535278
+    }
+   ]
+  },
+  "strategy_feed": {
+   "top_searcher_share_of_strategy_purchases": 0.5544532947139754,
+   "top5_searchers_share": 0.8769007965242578,
+   "top_searcher": {
+    "address": "0xc8bd1dca424a79b246223b91bc096287473e1fed",
+    "n": 7657
+   },
+   "note": "one bot (0xc8bd1dca...) delivered 55% of everything the strategy bought: single actor dominance. the same address family mostly sweeps the lowest seaport listings"
+  },
+  "fwa_hub": {
+   "bids_accepted": 4100,
+   "distinct_bidders": 53,
+   "top_bidder_share": 0.3360975609756098,
+   "hub_credits_held_now": 102,
+   "note": "fwa hub 0x958c: depositors escrow a credit with eth backing 0.025 to 0.032 (a flat band, not score based); accepted bids pay that same flat band (gross = payout + 10% fee), even when the open market is far below it"
+  },
+  "pool": {
+   "top10_traders_share_of_volume": 0.16086724235235433,
+   "top100_traders_share": 0.6298453033462397,
+   "top1_share": 0.019066393420434667,
+   "balanced_two_sided_traders_share_of_volume": 0.3901295585252433,
+   "balanced_traders": 134,
+   "matched_buy_sell_volume_share": 0.7083953464194175,
+   "note": "71% of CREDITSTR pool volume is matched buy and sell volume by the same tx sender: heavy round trip churn; top 10 senders are only 16% so no single wash actor, but more than half of volume is two sided churn (bots, arb, market making)"
+  },
+  "verdict": "no single wallet dominates organic market sales (top buyer ~3% of eth, top10 buyers ~14% of count); concentration risk is in (a) one searcher bot feeding 55% of strategy purchases, (b) 27% of sales rows sit in repeat pairs of >=5 trades (sweeper bots buying a dumper's whole stack) which is ordinary sweeping but should be treated as one actor, (c) CreditStrategy holds 12% of all live credits, (d) 71% pool churn. clear self-trades (buyer==seller) are ~0."
+ },
+ "bid_design": {
+  "engine_open_wei_per_point": 4000000000000.0,
+  "climb_per_hour": 0.01,
+  "formula": "hours = ln(target/4e12)/ln(1.01); 1%/h compounding = x1.27/day, x5.3/week, x14 per 2 weeks",
+  "open_bid_pays_eth_by_score": {
+   "80": 0.00032,
+   "150": 0.0006,
+   "250": 0.001,
+   "440": 0.00176,
+   "600": 0.0024,
+   "700": 0.0028,
+   "800": 0.0032
+  },
+  "open_bid_over_current_median_price_per_credit_for_440pt": 0.19777503090234858,
+  "vs_market_targets": {
+   "last_24h": {
+    "n": 4159,
+    "p10_wei_per_pt": 12768300288202.275,
+    "median_wei_per_pt": 21947355609677.586,
+    "p90_wei_per_pt": 57545559729923.805,
+    "hours_to_reach_p10": 116.64649299116395,
+    "hours_to_reach_median": 171.08499434856182,
+    "hours_to_reach_p90": 267.9591920529458,
+    "days_to_reach_median": 7.128541431190076,
+    "ratio_median_over_open": 5.486838902419397,
+    "ratio_p10_over_open": 3.192075072050569
+   },
+   "last_72h": {
+    "n": 12827,
+    "p10_wei_per_pt": 12402058031341.014,
+    "median_wei_per_pt": 21084132011967.35,
+    "p90_wei_per_pt": 56892605099825.484,
+    "hours_to_reach_p10": 113.72165254472067,
+    "hours_to_reach_median": 167.0523707825689,
+    "hours_to_reach_p90": 266.81233495115,
+    "days_to_reach_median": 6.960515449273704,
+    "ratio_median_over_open": 5.271033002991838,
+    "ratio_p10_over_open": 3.1005145078352534
+   },
+   "whole_window": {
+    "n": 109713,
+    "p10_wei_per_pt": 21787092683488.76,
+    "median_wei_per_pt": 59538553485845.96,
+    "p90_wei_per_pt": 178686648611448.97,
+    "hours_to_reach_p10": 170.34844163484195,
+    "hours_to_reach_median": 271.38089568984145,
+    "hours_to_reach_p90": 381.83045371428733,
+    "days_to_reach_median": 11.307537320410061,
+    "ratio_median_over_open": 14.88463837146149,
+    "ratio_p10_over_open": 5.4467731708721905
+   },
+   "first_24h_launch_regime": {
+    "n": 40772,
+    "p10_wei_per_pt": 42825047200424.65,
+    "median_wei_per_pt": 78093549320775.5,
+    "p90_wei_per_pt": 221714742758504.75,
+    "hours_to_reach_p10": 238.26632704426154,
+    "hours_to_reach_median": 298.6446522272109,
+    "hours_to_reach_p90": 403.5139445336381,
+    "days_to_reach_median": 12.443527176133786,
+    "ratio_median_over_open": 19.523387330193874,
+    "ratio_p10_over_open": 10.706261800106162
+   },
+   "creditstrategy_listing_level_now": {
+    "median_wei_per_pt": 99714254586849.19,
+    "p10_wei_per_pt": 53874630182475.06,
+    "p90_wei_per_pt": 271683640371498.84,
+    "hours_to_reach_median": 323.20676848618575,
+    "days_to_reach_median": 13.466948686924406,
+    "hours_to_reach_p10": 261.33455874887994,
+    "hours_to_reach_p90": 423.9400682895968,
+    "listing_median_eth": 0.036
+   }
+  },
+  "flat_ask_clearing_table": {
+   "flat_ask_p10_last24h": {
+    "flat_ask_eth": 0.006898,
+    "hours_until_first_credit_clears_800pt": 77.19147393620773,
+    "hours_until_median_440pt_credit_clears": 137.27359678996936,
+    "hours_until_every_credit_clears_80pt": 308.59936649496865,
+    "by_hour": {
+     "0h": {
+      "bid_wei_per_pt": 4000000000000.0,
+      "min_score_that_clears": 1724.5,
+      "share_of_credits_clearing": 0.0
+     },
+     "24h": {
+      "bid_wei_per_pt": 5078938594127.659,
+      "min_score_that_clears": 1358.1577867422075,
+      "share_of_credits_clearing": 0.0
+     },
+     "72h": {
+      "bid_wei_per_pt": 8188397248400.528,
+      "min_score_that_clears": 842.4114989471735,
+      "share_of_credits_clearing": 0.0
+     },
+     "168h": {
+      "bid_wei_per_pt": 21283879271492.465,
+      "min_score_that_clears": 324.0950539143093,
+      "share_of_credits_clearing": 0.6609790917856816
+     },
+     "336h": {
+      "bid_wei_per_pt": 113250879210866.69,
+      "min_score_that_clears": 60.90901940952102,
+      "share_of_credits_clearing": 1.0
+     },
+     "720h": {
+      "bid_wei_per_pt": 5169506846356800.0,
+      "min_score_that_clears": 1.3343632584337037,
+      "share_of_credits_clearing": 1.0
+     }
+    }
+   },
+   "flat_ask_median_last24h": {
+    "flat_ask_eth": 0.008899,
+    "hours_until_first_credit_clears_800pt": 102.78935606883849,
+    "hours_until_median_440pt_credit_clears": 162.87147892260015,
+    "hours_until_every_credit_clears_80pt": 334.1972486275994,
+    "by_hour": {
+     "0h": {
+      "bid_wei_per_pt": 4000000000000.0,
+      "min_score_that_clears": 2224.7500000000005,
+      "share_of_credits_clearing": 0.0
+     },
+     "24h": {
+      "bid_wei_per_pt": 5078938594127.659,
+      "min_score_that_clears": 1752.137741985924,
+      "share_of_credits_clearing": 0.0
+     },
+     "72h": {
+      "bid_wei_per_pt": 8188397248400.528,
+      "min_score_that_clears": 1086.7816655742097,
+      "share_of_credits_clearing": 0.0
+     },
+     "168h": {
+      "bid_wei_per_pt": 21283879271492.465,
+      "min_score_that_clears": 418.1098702208522,
+      "share_of_credits_clearing": 0.5304029580265942
+     },
+     "336h": {
+      "bid_wei_per_pt": 113250879210866.69,
+      "min_score_that_clears": 78.57775641132613,
+      "share_of_credits_clearing": 1.0
+     },
+     "720h": {
+      "bid_wei_per_pt": 5169506846356800.0,
+      "min_score_that_clears": 1.7214407997682708,
+      "share_of_credits_clearing": 1.0
+     }
+    }
+   },
+   "flat_ask_median_whole_window": {
+    "flat_ask_eth": 0.0263,
+    "hours_until_first_credit_clears_800pt": 211.69327537559963,
+    "hours_until_median_440pt_credit_clears": 271.77539822936126,
+    "hours_until_every_credit_clears_80pt": 443.10116793436055,
+    "by_hour": {
+     "0h": {
+      "bid_wei_per_pt": 4000000000000.0,
+      "min_score_that_clears": 6575.0,
+      "share_of_credits_clearing": 0.0
+     },
+     "24h": {
+      "bid_wei_per_pt": 5078938594127.659,
+      "min_score_that_clears": 5178.2472878109675,
+      "share_of_credits_clearing": 0.0
+     },
+     "72h": {
+      "bid_wei_per_pt": 8188397248400.528,
+      "min_score_that_clears": 3211.8617602653903,
+      "share_of_credits_clearing": 0.0
+     },
+     "168h": {
+      "bid_wei_per_pt": 21283879271492.465,
+      "min_score_that_clears": 1235.6769959330725,
+      "share_of_credits_clearing": 0.0
+     },
+     "336h": {
+      "bid_wei_per_pt": 113250879210866.69,
+      "min_score_that_clears": 232.2277776848946,
+      "share_of_credits_clearing": 0.7885725309932019
+     },
+     "720h": {
+      "bid_wei_per_pt": 5169506846356800.0,
+      "min_score_that_clears": 5.087525905596754,
+      "share_of_credits_clearing": 1.0
+     }
+    }
+   },
+   "strategy_listing_0_036": {
+    "flat_ask_eth": 0.036,
+    "hours_until_first_credit_clears_800pt": 243.2449899773741,
+    "hours_until_median_440pt_credit_clears": 303.32711283113576,
+    "hours_until_every_credit_clears_80pt": 474.65288253613505,
+    "by_hour": {
+     "0h": {
+      "bid_wei_per_pt": 4000000000000.0,
+      "min_score_that_clears": 8999.999999999998,
+      "share_of_credits_clearing": 0.0
+     },
+     "24h": {
+      "bid_wei_per_pt": 5078938594127.659,
+      "min_score_that_clears": 7088.095146813491,
+      "share_of_credits_clearing": 0.0
+     },
+     "72h": {
+      "bid_wei_per_pt": 8188397248400.528,
+      "min_score_that_clears": 4396.464766903196,
+      "share_of_credits_clearing": 0.0
+     },
+     "168h": {
+      "bid_wei_per_pt": 21283879271492.465,
+      "min_score_that_clears": 1691.4209830262587,
+      "share_of_credits_clearing": 0.0
+     },
+     "336h": {
+      "bid_wei_per_pt": 113250879210866.69,
+      "min_score_that_clears": 317.8783268690572,
+      "share_of_credits_clearing": 0.6696134349040872
+     },
+     "720h": {
+      "bid_wei_per_pt": 5169506846356800.0,
+      "min_score_that_clears": 6.963913787128636,
+      "share_of_credits_clearing": 1.0
+     }
+    }
+   }
+  },
+  "per_point_pricing_by_sellers": "not observed: fills are flat per credit between 80 and ~700 points; the only score premium is at >=740 points",
+  "note": "the bid only wins credits whose flat ask is below bid_per_point x score. a per point bid therefore clears the highest score credits first and the lowest score credits last (adverse for the bidder: it overpays high score credits relative to their flat ask)"
+ },
+ "windows": {
+  "price_per_point_daily": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "price_per_point_current_and_trailing": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days); trailing windows end at the last sale (2026/10/06 02:12 utc); 30d and 90d equal the whole 13 day window",
+  "regression_price_on_score": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "price_per_credit_ignoring_score": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "score_distribution_points": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "daily_sales_and_volume": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "holders_and_concentration": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days); holders as of block 26130271",
+  "creditstrategy": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days); listings as of block 26130271",
+  "creditstr_pool": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "statements": "statements exist from 2026/10/02 00:15 utc to 2026/10/06 02:10 utc (block 26100733 to 26130271)",
+  "wash_and_dominance": "2026-09-23T02:46Z to 2026-10-06T02:12Z (blocks 26037294..26130271, whole life of the collection, ~13 days)",
+  "bid_design": "targets use last 24h to 2026/10/06 02:12 utc, last 72h, whole window, and listings at block 26130271"
+ }
+}

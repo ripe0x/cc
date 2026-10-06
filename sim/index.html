@@ -1,0 +1,1319 @@
+<title>Credits Engine Simulator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #eef1f5; --surface: #f8fafc; --surface2: #e6ebf1; --ink: #14202e; --muted: #546478; --line: #c9d2dd;
+  --accent: #1d4f91; --accent-ink: #ffffff; --good: #1b7a4b; --warn: #a96a07; --bad: #b3261e;
+  --s1: #1d4f91; --s2: #c2570c; --s3: #0e8a86; --s4: #6b7b90; --grid: #d5dce5;
+  --good-bg: #dcefe4; --warn-bg: #f6e8cf; --bad-bg: #f6dcd9;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141b; --surface: #161d27; --surface2: #1e2733; --ink: #e2e8f0; --muted: #8d9bb0; --line: #2b3646;
+    --accent: #6ea6ea; --accent-ink: #0b1118; --good: #4cc38a; --warn: #e0a93b; --bad: #f0746b;
+    --s1: #6ea6ea; --s2: #f09a55; --s3: #3fc4bf; --s4: #8d9bb0; --grid: #263140;
+    --good-bg: #16342a; --warn-bg: #3a2f17; --bad-bg: #3d1f1d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #161d27; --surface2: #1e2733; --ink: #e2e8f0; --muted: #8d9bb0; --line: #2b3646;
+  --accent: #6ea6ea; --accent-ink: #0b1118; --good: #4cc38a; --warn: #e0a93b; --bad: #f0746b;
+  --s1: #6ea6ea; --s2: #f09a55; --s3: #3fc4bf; --s4: #8d9bb0; --grid: #263140;
+  --good-bg: #16342a; --warn-bg: #3a2f17; --bad-bg: #3d1f1d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); }
+.wrap { padding-inline: 16px; padding-block: 14px 40px; max-width: 1480px; margin-inline: auto; }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: 0; }
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 6px; }
+.top h1 { font-size: 15px; text-transform: lowercase; }
+.top .meta { color: var(--muted); font: 12px var(--mono); }
+.verdict { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-left-width: 6px; background: var(--surface); }
+.verdict.good { border-left-color: var(--good); background: var(--good-bg); }
+.verdict.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.verdict.bad { border-left-color: var(--bad); background: var(--bad-bg); }
+.verdict .v1 { font: 500 15px/1.35 var(--mono); }
+.verdict .v2 { margin-top: 4px; color: var(--muted); }
+.layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 16px; margin-top: 12px; align-items: start; }
+.controls { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; border: 1px solid var(--line); background: var(--surface); }
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--surface2); border: 1px solid var(--line); padding: 4px 8px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.scen { padding: 8px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; }
+.scen .lab { width: 100%; color: var(--muted); font-size: 11px; text-transform: lowercase; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.grp { border-bottom: 1px solid var(--line); }
+details.grp > summary { cursor: pointer; padding: 7px 10px; font-weight: 600; text-transform: lowercase; list-style: none; display: flex; justify-content: space-between; }
+details.grp > summary::after { content: "+"; color: var(--muted); font-family: var(--mono); }
+details.grp[open] > summary::after { content: "-"; }
+details.grp > summary::-webkit-details-marker { display: none; }
+.rows { padding: 2px 10px 10px; display: grid; gap: 8px; }
+.ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.ctl label { color: var(--ink); }
+.ctl .val { font: 12px var(--mono); text-align: right; color: var(--accent); min-width: 7ch; }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+.ctl select, .ctl input[type=number] { grid-column: 1 / -1; width: 100%; background: var(--bg); border: 1px solid var(--line); padding: 3px 6px; }
+.ctl .hint { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.main { min-width: 0; display: grid; gap: 14px; }
+.panel { border: 1px solid var(--line); background: var(--surface); }
+.panel > h2 { font-size: 12px; text-transform: lowercase; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface2); display: flex; justify-content: space-between; gap: 8px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-family: var(--sans); }
+th:first-child, td:first-child { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.chart { border: 1px solid var(--line); background: var(--surface); min-width: 0; overflow: hidden; }
+.chart h3 { font-size: 12px; text-transform: lowercase; padding: 6px 10px 0; display: flex; justify-content: space-between; gap: 8px; }
+.chart .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 2px 10px; color: var(--muted); font-size: 11px; }
+.chart .legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 4px; }
+.chart canvas { display: block; width: 100%; height: 200px; touch-action: pan-y; }
+.chart .readout { font: 11px var(--mono); color: var(--muted); padding: 0 10px 6px; min-height: 18px; overflow-wrap: anywhere; }
+.notes { padding: 8px 10px; color: var(--muted); font-size: 12px; }
+.notes b { color: var(--ink); font-weight: 600; }
+.calib > *, .charts > *, .main > * { min-width: 0; }
+.chart canvas { max-width: 100%; }
+.calib { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 10px; }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .controls { position: static; max-height: none; }
+  .charts, .calib { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+</style>
+<div class="wrap">
+  <div class="top">
+    <h1>credits engine simulator</h1>
+    <div class="meta"><span id="runinfo">starting</span> <button id="themeToggle" type="button" aria-label="switch theme">theme: auto</button></div>
+  </div>
+  <div id="verdict" class="verdict" role="status" aria-live="polite">
+    <div class="v1" id="v1">running the calibrated base case</div>
+    <div class="v2" id="v2"></div>
+  </div>
+  <div class="layout">
+    <aside class="controls" aria-label="controls">
+      <div class="btnrow">
+        <button id="reset" type="button" class="primary">reset to calibrated base case</button>
+      </div>
+      <div class="scen" id="scenarios"><span class="lab">named scenarios from the analysis</span></div>
+      <div id="ctlRoot"></div>
+    </aside>
+    <main class="main">
+      <section class="panel" aria-label="headline numbers">
+        <h2><span>headline numbers</span><span id="tblnote"></span></h2>
+        <div class="scroll"><table id="tbl"></table></div>
+        <div class="notes" id="notes"></div>
+      </section>
+      <section class="charts" id="charts" aria-label="charts"></section>
+      <section class="panel" aria-label="calibration">
+        <h2><span>calibration data embedded in the model</span><span>13 days, whole life of the collection</span></h2>
+        <div class="calib">
+          <div class="chart" style="border:0"><h3>daily swap volume of the comparable coin, eth</h3><div class="legend" id="calLegend"></div><canvas id="calChart" height="200" aria-label="comparable daily volume against the model"></canvas></div>
+          <div class="scroll"><table id="calTbl"></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<script>
+(function () {
+try {
+// credits engine economic simulator. plain es module, no dependencies, runs in node 22 and in a browser.
+// core rules are ported from src/Core.sol. units: eth for pots and prices, wei per whole point for the rate,
+// seconds for time, whole coins for coin amounts. exitModule and exitToken are the only names for phase 2.
+
+const W = 1e18;
+const BPS = 10000;
+
+// every engine constant, with the Core's names
+const CORE_PARAMS = {
+  SUPPLY: 1e9,
+  FEE_BPS: 1000,
+  CREATOR_BPS: 50,
+  AVG_SCORE: 4330000, // 1e4 scale, 433 points
+  CLIMB_BASE_BPS_PER_HOUR: 100,
+  CLIMB_DOUBLE_EVERY: 24 * 3600,
+  CLIMB_MAX_BPS_PER_HOUR: 800,
+  DROP_BPS: 1000,
+  SPEND_CAP_BPS_PER_HOUR: 2000,
+  BONUS_CAP_BPS: 2500,
+  TIP_SAVINGS_BPS: 1000,
+  TIP_CAP_BPS: 200,
+  AUCTION_START_X: 40000,
+  AUCTION_FLOOR_X: 12000,
+  AUCTION_LENGTH: 72 * 3600,
+  SALE_SPLIT: 5000,
+  EXIT_SPLIT: 5000,
+  BUYBACK_SLICE: 1,
+  BUYBACK_DELAY: 25, // blocks, 12 s each
+  KEEPER_TIP_BPS: 50,
+  XRATE_START: 6000,
+  XRATE_CAP: 9700,
+  XRATE_FLOOR: 3000,
+  XRATE_CLIMB_PER_HOUR: 100,
+  XRATE_DROP_PER_CREDIT: 20,
+  XAUCTION_HALF_LIFE: 6 * 3600,
+  EXIT_SLICE_CREDITS: 20,
+  REIMBURSE_BPS: 11000,
+  REIMBURSE_CAP_BPS: 500,
+  COMPOSE_OVERHEAD_GAS: 50000,
+  PAGE: 80,
+};
+
+// launch config (script/config/mainnet.json) and simulator inputs
+const SIM_DEFAULTS = {
+  seed: 7,
+  days: 90,
+  rateStart: 4e12,
+  inventoryGate: 0, // design change under test: stop buying while this many statements are unsold, 0 is the Core
+  bidMode: 'perPoint', // 'perPoint' is the Core, 'flat' is a counterfactual that pays avg score for every credit
+  fundedRule: 'new', // 'new' = 20 percent of the pot affords one average credit, 'old' = the pot affords one
+  baselineSkimBps: 10000, // of 100000
+  bountyBps: 9500, // of the skim, to the engine
+  sniperStartBps: 90000,
+  sniperEndBps: 10000,
+  sniperSeconds: 1800,
+  startTick: -175000,
+  positionUpper: 887200,
+  // coin market
+  volPreset: 'comparable', // comparable | sustained17 | sustained50 | deadWeek1 | custom
+  volScale: 1,
+  volDay0: 1557,
+  volTail: 17, // custom: eth a day after day one
+  volHalfLifeDays: 3, // custom: decay of day one volume to the tail
+  h1Share: 0.586, // share of day one volume in the first hour
+  sniperVolShare: 0.4, // share of first hour volume inside the 30 minute anti sniper window
+  buyShare0: 0.526,
+  buyShareLate: null, // null: 0.46 for the comparable and week one presets, 0.5 for sustained presets, 0.49 custom
+  // credit market
+  pricePath: 'flat', // flat | decline | recovery
+  priceP0: 0.0089,
+  priceTauDays: 20,
+  priceEndMult: null, // decline floor and recovery target as a multiple of p0, default 0.4 and 2.2
+  askSigma: 0.27,
+  impactElast: 0.12,
+  impactHalfLifeHours: 48,
+  marketDailyEth: 33,
+  impactCap: 3,
+  offersPerHour: 150,
+  bookChurn: 0.05, // share of resting offers that leave each hour
+  supplyElast: 1.5,
+  holders: 96800,
+  listedShare: 0, // share of market offers that are visible listings the keeper takes at the ask through the listing door
+  strategyOn: true,
+  gasGwei: 1.5,
+  composeGas: 8.3e6,
+  // statement buyers
+  stmtPerDay: 8,
+  stmtDecayDays: 21,
+  stmtFloorPerDay: 2,
+  wtpMult: 1,
+  // phase 2 (exitModule and exitToken)
+  phase2Day: null,
+  xp: 2.5e-5, // eth value of the exitToken paid per point of rating
+  takerThreshold: 0.15,
+  exitMinRatio: 0, // exit only when rating * xp is at least this times the floor price
+  keeperBuyback: true,
+};
+
+const DEFAULTS = Object.assign({}, CORE_PARAMS, SIM_DEFAULTS);
+
+// quantiles of statement willingness to pay as a multiple of the parts' market cost (data: p10 .48, p25 .71, p50 .84, p75 1.07, 21 percent at 1.2 or more, max 1.32)
+const WTP_Q = [[0, 0.25], [0.1, 0.48], [0.25, 0.71], [0.5, 0.84], [0.75, 1.07], [0.79, 1.2], [0.9, 1.23], [1, 1.32]];
+// credit score deciles of the CreditStrategy inventory and its listing price counts (eth, count)
+const STRAT_SCORE_Q = [[0, 80], [0.1, 130], [0.2, 181], [0.3, 238], [0.4, 296], [0.5, 355], [0.6, 416], [0.7, 480], [0.8, 556], [0.9, 640], [1, 785]];
+const STRAT_LISTINGS = [[0.036, 8726], [0.03, 2790], [0.042, 699], [0.048, 599], [0.018, 135], [0.06, 89], [0.012, 48], [0.024, 30], [0.072, 14], [0.054, 2]];
+// comparable coin daily volume fit: 122.6 * exp(-0.286 d) for d >= 1, floor 0.5 eth a day
+const COMPARABLE = { a: 122.6, k: 0.286, floor: 0.5 };
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function normal(rng) {
+  let u = rng();
+  if (u < 1e-12) u = 1e-12;
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+}
+function poisson(rng, lam) {
+  if (lam <= 0) return 0;
+  if (lam > 60) return Math.max(0, Math.round(lam + Math.sqrt(lam) * normal(rng)));
+  const L = Math.exp(-lam);
+  let k = 0, p = 1;
+  do { k++; p *= rng(); } while (p > L);
+  return k - 1;
+}
+function interp(table, u) {
+  for (let i = 1; i < table.length; i++) {
+    if (u <= table[i][0]) {
+      const [x0, y0] = table[i - 1], [x1, y1] = table[i];
+      return y0 + ((y1 - y0) * (u - x0)) / (x1 - x0);
+    }
+  }
+  return table[table.length - 1][1];
+}
+
+// ---------------------------------------------------------------- core port
+// the Core's state and rules. pots are in eth, the rate in wei per whole point, time in seconds.
+class Core {
+  constructor(p, t0 = 0) {
+    this.p = p;
+    this.ethPot = 0; this.ethToBuyback = 0; this.xPot = 0; this.xToBuyback = 0;
+    this.rateAtCheckpoint = p.rateStart; this.checkpointTime = t0; this.lastFillTime = t0; this.funded = false;
+    this.windowStart = -1e12; this.windowPot = 0; this.windowSpent = 0;
+    this.xRateAtCheckpoint = p.XRATE_START; this.xCheckpointTime = t0; this.xFunded = false;
+    this.xp = 0; this.moduleSet = false; this.xStartPrice = 0; this.xStartTime = 0;
+    this.lastBuybackTime = -1e12;
+    this.capHits = 0; this.clampTime = 0; this.gated = false; // gated: a proposed design change, no buying and no climb while unsold inventory is high
+  }
+  // the climb stops where 20 percent of the pot no longer buys one average credit (new rule); the old rule has no clamp
+  clamp() {
+    const p = this.p;
+    if (p.fundedRule === 'old') return Infinity;
+    return (this.ethPot * W * p.SPEND_CAP_BPS_PER_HOUR) / p.AVG_SCORE;
+  }
+  ethRate(now) {
+    const p = this.p;
+    let r = this.rateAtCheckpoint;
+    if (!this.funded || this.gated) return r;
+    const cap = this.clamp();
+    if (cap <= r) return r;
+    const last = this.lastFillTime;
+    let t = this.checkpointTime;
+    while (t < now && r < cap) {
+      const k = Math.floor((t - last) / p.CLIMB_DOUBLE_EVERY);
+      const bps = Math.min(p.CLIMB_BASE_BPS_PER_HOUR * Math.pow(2, Math.min(k, 16)), p.CLIMB_MAX_BPS_PER_HOUR);
+      const end = Math.min(now, last + (k + 1) * p.CLIMB_DOUBLE_EVERY);
+      r *= Math.pow(1 + bps / BPS, (end - t) / 3600);
+      t = end;
+    }
+    return Math.min(r, cap);
+  }
+  checkpoint(now) { this.rateAtCheckpoint = this.ethRate(now); this.checkpointTime = now; }
+  setGate(g, now) { if (g !== this.gated) { this.checkpoint(now); this.gated = g; } }
+  syncFunded() {
+    const p = this.p;
+    if (p.fundedRule === 'old') this.funded = this.ethPot * W >= (p.AVG_SCORE * this.rateAtCheckpoint) / 1e4;
+    else this.funded = this.ethPot * W * p.SPEND_CAP_BPS_PER_HOUR >= p.AVG_SCORE * this.rateAtCheckpoint;
+  }
+  // fixed window cap. returns the window state it would use, without committing
+  room(x, now) {
+    const p = this.p;
+    let ws = this.windowStart, wp = this.windowPot, wsp = this.windowSpent;
+    if (now >= ws + 3600) { ws = now; wp = this.ethPot; wsp = 0; }
+    return { ok: wsp + x <= (wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS + 1e-18, ws, wp, wsp };
+  }
+  // _spend: checkpoint, hourly cap, drop on fill. false means the Core would revert
+  spend(x, now) {
+    const p = this.p;
+    this.checkpoint(now);
+    const pot = this.ethPot;
+    if (!(x > 0) || x > pot + 1e-18) return false;
+    const rm = this.room(x, now);
+    if (!rm.ok) { this.capHits++; return false; }
+    this.windowStart = rm.ws; this.windowPot = rm.wp; this.windowSpent = rm.wsp + x;
+    let r = this.rateAtCheckpoint;
+    r -= (r * p.DROP_BPS * Math.min(x, pot)) / (BPS * pot);
+    this.rateAtCheckpoint = r;
+    this.lastFillTime = now;
+    this.ethPot = pot - x;
+    this.syncFunded();
+    return true;
+  }
+  addFees(amount, now) { // receive(): checkpoint, add, resync
+    this.checkpoint(now);
+    this.ethPot += amount;
+    this.syncFunded();
+  }
+  ceiling(pts, rate) { return (pts * rate) / W; }
+  // door one: sell into the bid at the ceiling. returns the price paid or 0
+  sellForEth(pts, now) {
+    const price = this.ceiling(pts, this.ethRate(now));
+    return this.spend(price, now) ? price : 0;
+  }
+  // door two: buy a listing at its ask. returns {cost, tip} or null
+  buyListing(pts, ask, now) {
+    const p = this.p;
+    this.checkpoint(now);
+    const ceil = this.ceiling(pts, this.rateAtCheckpoint);
+    if (ask > this.ethPot || ask > ceil) return null;
+    if (!this.room(ask, now).ok) { this.capHits++; return null; }
+    const tip = Math.min((p.TIP_SAVINGS_BPS * (ceil - ask)) / BPS, (p.TIP_CAP_BPS * ask) / BPS);
+    if (!this.spend(ask + tip, now)) return null;
+    return { cost: ask, tip };
+  }
+  // compose 80 credits. cost is the sum of their costs. returns the statement
+  compose(costSum, lane, now, gasPriceGwei) {
+    const p = this.p;
+    const gasEth = ((p.composeGas + p.COMPOSE_OVERHEAD_GAS) * gasPriceGwei * 1e-9 * p.REIMBURSE_BPS) / BPS;
+    let cap;
+    if (lane === 'eth') cap = costSum;
+    else cap = (p.PAGE * p.AVG_SCORE * this.ethRate(now)) / 1e4 / W;
+    const reimb = Math.min(gasEth, (cap * p.REIMBURSE_CAP_BPS) / BPS, this.ethPot);
+    let cost = costSum;
+    if (reimb > 0) {
+      this.checkpoint(now);
+      this.ethPot -= reimb;
+      this.syncFunded();
+      if (lane === 'eth') cost += reimb;
+    }
+    return { cost, reimb, t0: now, lane };
+  }
+  priceOf(st, now) {
+    const p = this.p;
+    const el = Math.min(now - st.t0, p.AUCTION_LENGTH);
+    const factor = p.AUCTION_START_X * p.AUCTION_LENGTH - (p.AUCTION_START_X - p.AUCTION_FLOOR_X) * el;
+    return (st.cost * factor) / (p.AUCTION_LENGTH * BPS);
+  }
+  buyStatement(st, now) {
+    const p = this.p;
+    const price = this.priceOf(st, now);
+    const toBuyback = (price * p.SALE_SPLIT) / BPS;
+    this.ethToBuyback += toBuyback;
+    this.checkpoint(now);
+    this.ethPot += price - toBuyback;
+    this.syncFunded();
+    return { price, toBuyback, toPot: price - toBuyback };
+  }
+
+  // ---- phase 2: exitModule pays rating * unitPerPoint of exitToken. pots here hold the eth value of exitToken at xp per point
+  setExitModule(now, xp) {
+    const p = this.p;
+    this.moduleSet = true; this.xp = xp; this.xCheckpointTime = now;
+    this.xStartPrice = p.SUPPLY / (p.EXIT_SLICE_CREDITS * (p.AVG_SCORE / 1e4) * xp); // coin per eth of exitToken, asks the whole supply for a full slice
+    this.xStartTime = now;
+  }
+  xRate(now) {
+    const p = this.p;
+    const r = this.xRateAtCheckpoint;
+    if (!this.xFunded) return r;
+    const cap = Math.min(p.XRATE_CAP, (this.xPot * BPS) / ((p.AVG_SCORE / 1e4) * this.xp));
+    if (cap <= r) return r;
+    return Math.min(r + (p.XRATE_CLIMB_PER_HOUR * (now - this.xCheckpointTime)) / 3600, cap);
+  }
+  xCheckpoint(now) { this.xRateAtCheckpoint = this.xRate(now); this.xCheckpointTime = now; }
+  syncXFunded() {
+    const p = this.p;
+    this.xFunded = this.xPot * BPS >= (p.AVG_SCORE / 1e4) * this.xRateAtCheckpoint * this.xp;
+  }
+  // price in exitToken value for one credit at the current exit bid (without moving state)
+  xPrice(pts, now) { return (pts * this.xRate(now)) / BPS * this.xp; }
+  // sellForExitToken: pays pts * xRate of the credit's score in exitToken, drops xRate per credit
+  xBuy(pts, now) {
+    const p = this.p;
+    this.xCheckpoint(now);
+    const r = this.xRateAtCheckpoint;
+    const price = (pts * r * this.xp) / BPS;
+    if (!(price > 0) || price > this.xPot + 1e-18) return 0;
+    this.xPot -= price;
+    this.xRateAtCheckpoint = Math.max(Math.max(r - p.XRATE_DROP_PER_CREDIT, 0), p.XRATE_FLOOR);
+    this.syncXFunded();
+    return price;
+  }
+  exitReady(st, now) {
+    return this.moduleSet && (st.lane === 'exit' || now >= st.t0 + this.p.AUCTION_LENGTH);
+  }
+  // exitStatement: the module hands back rating * unitPerPoint. eth lane splits EXIT_SPLIT, exit lane keeps all
+  exitStatement(st, rating, now) {
+    const p = this.p;
+    const received = rating * this.xp;
+    const toBuyback = st.lane === 'eth' ? (received * p.EXIT_SPLIT) / BPS : 0;
+    this.xCheckpoint(now);
+    if (toBuyback > 0) {
+      this.xStartPrice = Math.max(this.xAuctionPrice(now), this.xStartPrice / 4, 1e-12);
+      this.xStartTime = now;
+    }
+    this.xToBuyback += toBuyback;
+    this.xPot += received - toBuyback;
+    this.syncXFunded();
+    return { received, toBuyback, toPot: received - toBuyback };
+  }
+  // dutch auction: coin per eth of exitToken, halves every XAUCTION_HALF_LIFE, the clock runs only while the pot is not empty
+  xAuctionPrice(now) {
+    if (this.xToBuyback === 0) return this.xStartPrice;
+    const el = now - this.xStartTime;
+    if (el / this.p.XAUCTION_HALF_LIFE >= 256) return 0;
+    return this.xStartPrice * Math.pow(0.5, el / this.p.XAUCTION_HALF_LIFE);
+  }
+  xSlice() { return Math.min(this.xToBuyback, this.p.EXIT_SLICE_CREDITS * (this.p.AVG_SCORE / 1e4) * this.xp); }
+  // buybackExit: a taker burns coinIn coin and takes the slice. restart at max(2 * clearing, start / 4)
+  xFill(now) {
+    const slice = this.xSlice();
+    const price = this.xAuctionPrice(now);
+    const coinIn = slice * price;
+    this.xToBuyback -= slice;
+    this.xStartPrice = Math.max(2 * price, this.xStartPrice / 4, 1e-12);
+    this.xStartTime = now;
+    return { slice, price, coinIn };
+  }
+  // buyback(): one slice at most per BUYBACK_DELAY blocks, tip on the slice
+  takeBuybackSlice(now) {
+    const p = this.p;
+    const pool = this.ethToBuyback;
+    if (pool <= 1e-15 || now < this.lastBuybackTime + p.BUYBACK_DELAY * 12) return null;
+    const slice = Math.min(pool, p.BUYBACK_SLICE);
+    this.ethToBuyback = pool - slice;
+    this.lastBuybackTime = now;
+    const tip = (slice * p.KEEPER_TIP_BPS) / BPS;
+    return { slice, tip, budget: slice - tip };
+  }
+}
+
+// ---------------------------------------------------------------- the launch position
+// one concentrated liquidity position, whole supply single sided in coin from the start tick up to the max tick.
+// price is eth per coin, token0 is the coin. real v4 math: x = L (1/sqrtP - 1/sqrtPb), y = L (sqrtP - sqrtPa)
+class Pool {
+  constructor(p) {
+    this.sqrtPa = Math.pow(1.0001, p.startTick / 2);
+    this.sqrtPb = Math.pow(1.0001, p.positionUpper / 2);
+    this.L = p.SUPPLY / (1 / this.sqrtPa - 1 / this.sqrtPb);
+    this.sqrtP = this.sqrtPa;
+  }
+  get price() { return this.sqrtP * this.sqrtP; }
+  coinInPool() { return this.L * (1 / this.sqrtP - 1 / this.sqrtPb); }
+  ethInPool() { return this.L * (this.sqrtP - this.sqrtPa); }
+  // buyers add eth to the pool, coin leaves. returns coin out
+  buy(ethIn) {
+    if (ethIn <= 0) return 0;
+    const s1 = this.sqrtP + ethIn / this.L;
+    const out = this.L * (1 / this.sqrtP - 1 / s1);
+    this.sqrtP = s1;
+    return out;
+  }
+  // sellers remove up to ethOut from the pool, coin enters. returns {eth, coin} actually moved
+  sell(ethOut) {
+    const maxOut = this.ethInPool();
+    const eth = Math.min(ethOut, maxOut);
+    if (eth <= 0) return { eth: 0, coin: 0 };
+    const s1 = this.sqrtP - eth / this.L;
+    const coin = this.L * (1 / s1 - 1 / this.sqrtP);
+    this.sqrtP = s1;
+    return { eth, coin };
+  }
+  // eth into the pool needed to take coinOut coin out, without moving state
+  ethForCoin(coinOut) {
+    const inv = 1 / this.sqrtP - coinOut / this.L;
+    if (inv <= 1 / this.sqrtPb) return Infinity;
+    return this.L * (1 / inv - this.sqrtP);
+  }
+}
+
+// ---------------------------------------------------------------- market models
+const comparableDay = (d) => Math.max(COMPARABLE.a * Math.exp(-COMPARABLE.k * d), COMPARABLE.floor);
+
+// swap volume in eth for utc day d of the coin (before volScale)
+function dayVolume(p, d) {
+  if (d === 0) return p.volDay0;
+  switch (p.volPreset) {
+    case 'sustained17': return 17;
+    case 'sustained50': return 50;
+    case 'deadWeek1': return d < 7 ? comparableDay(d) : 0.2;
+    case 'custom': return p.volTail + (80.6 - p.volTail) * Math.pow(0.5, (d - 1) / p.volHalfLifeDays);
+    default: return comparableDay(d);
+  }
+}
+// flat median market price of a credit, eth, along the configured path (before the engine's own lift)
+function pathPrice(p, tSec) {
+  const d = tSec / 86400;
+  const e = Math.exp(-d / p.priceTauDays);
+  if (p.pricePath === 'decline') {
+    const end = p.priceEndMult == null ? 0.4 : p.priceEndMult;
+    return p.priceP0 * (end + (1 - end) * e);
+  }
+  if (p.pricePath === 'recovery') {
+    const end = p.priceEndMult == null ? 2.2 : p.priceEndMult;
+    return p.priceP0 * (1 + (end - 1) * (1 - e));
+  }
+  return p.priceP0;
+}
+// anti sniper skim as a fraction of notional at time t seconds after launch
+function skimFraction(p, t) {
+  const base = p.baselineSkimBps / 1e5;
+  if (t >= p.sniperSeconds) return base;
+  const f = (p.sniperStartBps - ((p.sniperStartBps - p.sniperEndBps) * t) / p.sniperSeconds) / 1e5;
+  return Math.max(base, f);
+}
+// share of a swap's notional that lands in the engine's pot: 9.5 of the 10 base points plus all of the anti sniper extra
+function engineFeeFraction(p, f) {
+  const base = p.baselineSkimBps / 1e5;
+  return base * (p.bountyBps / BPS) + Math.max(0, f - base);
+}
+// volume in a step [t, t+dt). the first hour runs in 120 s sub steps, 15 of them inside the anti sniper window
+function stepVolume(p, t, dt) {
+  const d = Math.floor(t / 86400);
+  const dv = dayVolume(p, d) * p.volScale;
+  if (d > 0) return (dv * dt) / 86400;
+  const h = Math.floor(t / 3600);
+  const h1 = dv * p.h1Share;
+  if (h === 0) {
+    const k = Math.floor(t / 120);
+    const nS = Math.round(p.sniperSeconds / 120);
+    if (k < nS) {
+      let wsum = 0;
+      for (let i = 0; i < nS; i++) wsum += 1 - skimFraction(p, i * 120 + 60);
+      return (h1 * p.sniperVolShare * (1 - skimFraction(p, k * 120 + 60))) / wsum;
+    }
+    return (h1 * (1 - p.sniperVolShare)) / (30 - nS);
+  }
+  let wsum = 0;
+  for (let i = 1; i < 24; i++) wsum += Math.exp(-(i - 1) / 5);
+  return (((dv * (1 - p.h1Share)) * Math.exp(-(h - 1) / 5)) / wsum) * (dt / 3600);
+}
+function stmtArrivalsPerDay(p, tSec) {
+  return Math.max(p.stmtFloorPerDay, p.stmtPerDay * Math.pow(0.5, tSec / (p.stmtDecayDays * 86400)));
+}
+function mergeDesc(a, b) {
+  const out = new Array(a.length + b.length);
+  let i = 0, j = 0, k = 0;
+  while (i < a.length && j < b.length) out[k++] = a[i].key >= b[j].key ? a[i++] : b[j++];
+  while (i < a.length) out[k++] = a[i++];
+  while (j < b.length) out[k++] = b[j++];
+  return out;
+}
+
+// ---------------------------------------------------------------- the simulation
+function simulate(userParams = {}) {
+  const p = Object.assign({}, DEFAULTS, userParams);
+  const rng = mulberry32(p.seed);
+  const core = new Core(p, 0);
+  const pool = new Pool(p);
+  const H = Math.round(p.days * 24);
+  const avgPts = p.AVG_SCORE / 1e4;
+  const bLate = p.buyShareLate != null ? p.buyShareLate : (p.volPreset === 'sustained17' || p.volPreset === 'sustained50') ? 0.5 : p.volPreset === 'custom' ? 0.49 : 0.46;
+  const phase2At = p.phase2Day == null ? Infinity : p.phase2Day * 86400;
+
+  // state
+  let book = []; // resting market offers, ordered by descending key (ask multiple per point), smallest last
+  let strat = []; // CreditStrategy listings, ordered by descending need (wei per point to clear)
+  let holdPool = p.holders;
+  const ethPile = [], xPile = [];
+  let stmts = []; // eth lane statements held for sale
+  let lnM = 0, nextSid = 1;
+  const T = { // totals
+    fees: 0, feesBuyback: 0, feesTaker: 0, saleGross: 0, saleToPot: 0, saleToBuyback: 0, spent: 0, tips: 0, reimb: 0,
+    bought: 0, boughtX: 0, pts: 0, cost: 0, mkt: 0, ask: 0, sumM: 0, composed: 0, composedX: 0, sold: 0, exited: 0, exitedX: 0,
+    soldPrice: 0, soldCost: 0, soldPts: 0, buybackSpent: 0, buybackTips: 0, burned: 0, burnedX: 0, bidSpendEth: 0, listBought: 0, stratBought: 0,
+    xFills: 0, xCoin: 0, xValue: 0, xGross: 0, xDiscSum: 0, xRecv: 0, xSpent: 0, firstFill: -1, capStepHits: 0, clampSteps: 0,
+    capBindSteps: 0, capBindRich: 0, potBindSteps: 0, vol: 0, stCost: 0, stRating: 0, stmtArrivals: 0, stmtMiss: 0, first80cost: 0, first80mkt: 0, first80pts: 0, first80n: 0, first80t: -1,
+  };
+  const histPts = new Array(10).fill(0), histCost = new Array(10).fill(0);
+  const xFillLog = [];
+  const S = {}; // series, one entry per hour
+  const names = ['pot', 'toBuyback', 'cumFees', 'rate', 'mktPerPoint', 'frontier', 'bidRatio', 'bought', 'avgScoreCum', 'avgScoreDay',
+    'costPerCredit', 'mktPerCredit', 'composed', 'sold', 'held', 'heldFloor', 'locked', 'exited', 'buybackSpent', 'burned', 'burnedPct',
+    'coinPrice', 'xPot', 'xToBuyback', 'xRate', 'xFills', 'book', 'saleToPot', 'saleToBuyback', 'cumPts', 'cumCost', 'cumMkt', 'xBought', 'xDisc', 'volume', 'poolEth'];
+  for (const n of names) S[n] = new Array(H + 1);
+
+  // initial resting book at steady state, and the CreditStrategy inventory
+  const flat = p.bidMode === 'flat';
+  const newOffer = () => {
+    const pts = 80 + 720 * rng();
+    const m = Math.exp(p.askSigma * normal(rng));
+    const prem = pts >= 790 ? 2.0 : pts >= 740 ? 1.12 : 1.0;
+    return { pts, m, prem, key: (m * prem) / (flat ? avgPts : pts), listed: rng() < p.listedShare };
+  };
+  const nBook0 = Math.round(p.offersPerHour / Math.max(p.bookChurn, 1e-3));
+  for (let i = 0; i < nBook0; i++) book.push(newOffer());
+  book.sort((a, b) => b.key - a.key);
+  if (p.strategyOn) {
+    for (const [price, count] of STRAT_LISTINGS) {
+      for (let i = 0; i < count; i++) {
+        const pts = interp(STRAT_SCORE_Q, rng());
+        strat.push({ pts, price, need: (price * W) / (flat ? avgPts : pts) });
+      }
+    }
+    strat.sort((a, b) => b.need - a.need);
+  }
+
+  const peff = (t) => pathPrice(p, t) * Math.exp(lnM);
+  let stepW = 1, peffNow = 0; // weight of the current step in hours, market price in the step
+  let prevRate = p.rateStart, signChanges = 0, lastDir = 0, rateMaxRatio = 0, rateAbsMove = 0, rateMoves = 0;
+
+  // ---- the engine buys: market offers through the bid or a listing, CreditStrategy listings, exit token bid in phase 2
+  // a seller whose credit does not fit the hourly cap or the pot waits, and another credit that fits sells instead
+  function pickFrom(arr, isStrat, r, xPerPt, Pw, Pe, afford, xAfford) {
+    const lim = Math.max(0, arr.length - 400);
+    const top = Math.max(r, xPerPt);
+    for (let i = arr.length - 1; i >= lim; i--) {
+      const it = arr[i];
+      const need = isStrat ? it.need : it.key * Pw;
+      if (need > top) return null;
+      const ethOk = need <= r, xOk = !isStrat && need <= xPerPt;
+      const listing = isStrat || it.listed;
+      const ep = flat ? avgPts : it.pts;
+      const ask = isStrat ? it.price : it.key * ep * Pe;
+      const ethFits = ethOk && (listing ? ask * (1 + p.TIP_CAP_BPS / BPS) <= afford : (ep * r) / W <= afford);
+      const xFits = xOk && (ep * xPerPt) / W <= xAfford;
+      if (ethFits || xFits) return { i, need, ethFits, xFits, isStrat, it, ask, listing };
+    }
+    return null;
+  }
+  // a sale that clears the bid but is blocked. cap bound: it would fit the pot but not the hourly cap room. pot bound: it exceeds the pot
+  function noteBind(r, xPerPt, Pw, roomLeft) {
+    let minPrice = Infinity;
+    for (const [arr, isS] of [[book, false], [strat, true]]) {
+      for (let i = arr.length - 1, n = 0; i >= 0 && n < 100; i--, n++) {
+        const it = arr[i], need = isS ? it.need : it.key * Pw;
+        if (need > Math.max(r, isS ? 0 : xPerPt) || (isS && need > r)) break;
+        const ep = flat ? avgPts : it.pts;
+        minPrice = Math.min(minPrice, isS || it.listed ? (isS ? it.price : it.key * ep * peffNow) : (ep * r) / W);
+      }
+    }
+    if (!isFinite(minPrice)) return;
+    if (minPrice <= core.ethPot && minPrice > roomLeft) { T.capBindSteps += stepW; if (core.ethPot > 5) T.capBindRich += stepW; }
+    else T.potBindSteps += stepW;
+  }
+  function engineBuys(now, Pe) {
+    let spentEth = 0;
+    const Pw = Pe * W;
+    for (let guard = 0; guard < 200000; guard++) {
+      const r = core.ethRate(now);
+      const p2 = core.moduleSet;
+      const xPerPt = p2 ? (core.xRate(now) / BPS) * core.xp * W : 0;
+      const rm = core.room(0, now);
+      const afford = Math.min(core.ethPot, (rm.wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS - rm.wsp);
+      const xAfford = p2 ? core.xPot : 0;
+      const roomLeft = (rm.wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS - rm.wsp;
+      if (afford <= 1e-15 && xAfford <= 0) { noteBind(r, xPerPt, Pw, roomLeft); break; }
+      const a = pickFrom(book, false, r, xPerPt, Pw, Pe, afford, xAfford);
+      const b = strat.length ? pickFrom(strat, true, r, 0, Pw, Pe, afford, 0) : null;
+      const c = a && b ? (b.need < a.need ? b : a) : a || b;
+      if (!c) { noteBind(r, xPerPt, Pw, roomLeft); break; }
+      const it = c.it, useS = c.isStrat, ep = flat ? avgPts : it.pts;
+      let door = c.ethFits && c.xFits ? (r >= xPerPt ? 'eth' : 'x') : c.ethFits ? 'eth' : 'x';
+      let cost = 0, tip = 0, viaListing = false, ok = false;
+      if (door === 'x') {
+        cost = core.xBuy(ep, now);
+        ok = cost > 0;
+        if (!ok && c.ethFits) door = 'eth';
+      }
+      if (door === 'eth') {
+        if (c.listing) {
+          const res = core.buyListing(ep, c.ask, now);
+          if (res) { cost = res.cost; tip = res.tip; ok = true; viaListing = true; }
+        } else {
+          cost = core.sellForEth(ep, now);
+          ok = cost > 0;
+        }
+      }
+      if (!ok) break;
+      if (useS) strat.splice(c.i, 1); else book.splice(c.i, 1);
+      holdPool -= 1;
+      const askEth = c.ask;
+      if (door === 'x') {
+        T.boughtX++; T.xSpent += cost; xPile.push({ pts: it.pts });
+      } else {
+        T.bought++; T.pts += it.pts; T.cost += cost + tip; T.mkt += Pe; T.ask += askEth; T.spent += cost + tip; T.tips += tip;
+        spentEth += cost + tip;
+        if (viaListing) T.listBought++;
+        if (useS) T.stratBought++;
+        else T.sumM += it.m;
+        const bin = Math.min(9, Math.floor((it.pts - 80) / 72));
+        histPts[bin]++; histCost[bin] += cost + tip;
+        ethPile.push({ pts: it.pts, cost: cost + tip });
+        if (T.firstFill < 0) T.firstFill = now / 3600;
+        if (T.first80n < 80) {
+          T.first80n++; T.first80cost += cost + tip; T.first80mkt += Pe; T.first80pts += it.pts;
+          if (T.first80n === 80) T.first80t = now / 3600;
+        }
+      }
+    }
+    return spentEth;
+  }
+
+  // ---- compose when a lane pile holds 80. the oldest first
+  function composeAll(now) {
+    while (ethPile.length >= p.PAGE) {
+      const page = ethPile.splice(0, p.PAGE);
+      let cost = 0, rating = 0;
+      for (const c of page) { cost += c.cost; rating += c.pts; }
+      const st = core.compose(cost, 'eth', now, p.gasGwei);
+      st.rating = rating; st.id = nextSid++;
+      T.reimb += st.reimb; T.composed++; T.stCost += st.cost; T.stRating += rating;
+      stmts.push(st);
+    }
+    while (xPile.length >= p.PAGE && core.moduleSet) {
+      const page = xPile.splice(0, p.PAGE);
+      let rating = 0;
+      for (const c of page) rating += c.pts;
+      const st = core.compose(0, 'exit', now, p.gasGwei);
+      T.reimb += st.reimb; T.composedX++;
+      const res = core.exitStatement(st, rating, now);
+      T.exitedX++; T.xRecv += res.received;
+    }
+  }
+
+  // ---- statement buyers meet the falling price auction
+  function statementBuyers(t0, now, Pe) {
+    const n = poisson(rng, (stmtArrivalsPerDay(p, now) * (now - t0)) / 86400);
+    for (let i = 0; i < n; i++) {
+      T.stmtArrivals++;
+      const budget = interp(WTP_Q, rng()) * p.wtpMult * p.PAGE * Pe;
+      let best = -1, bp = Infinity;
+      for (let j = 0; j < stmts.length; j++) {
+        const pr = core.priceOf(stmts[j], now);
+        if (pr <= budget && pr < bp) { bp = pr; best = j; }
+      }
+      if (best < 0) { T.stmtMiss++; continue; }
+      const st = stmts[best];
+      const res = core.buyStatement(st, now);
+      stmts.splice(best, 1);
+      T.sold++; T.soldPrice += res.price; T.soldCost += st.cost; T.soldPts += st.rating;
+      T.saleGross += res.price; T.saleToPot += res.toPot; T.saleToBuyback += res.toBuyback;
+    }
+  }
+
+  // ---- phase 2: statements past the auction exit through the exitModule
+  function exits(now) {
+    if (!core.moduleSet) return;
+    const keep = [];
+    for (const st of stmts) {
+      const floor = (st.cost * p.AUCTION_FLOOR_X) / BPS;
+      if (core.exitReady(st, now) && st.rating * core.xp >= p.exitMinRatio * floor) {
+        const res = core.exitStatement(st, st.rating, now);
+        T.exited++; T.xRecv += res.received;
+      } else keep.push(st);
+    }
+    stmts = keep;
+  }
+
+  // ---- phase 2 dutch auction: takers fill when the all in discount to the pool price reaches the threshold
+  function xAuction(stepStart, now) {
+    for (let guard = 0; core.moduleSet && core.xToBuyback > 1e-12 && guard < 500; guard++) {
+      const f = skimFraction(p, now), spot = pool.price, g = spot * (1 + f);
+      const tStar = core.xStartTime + p.XAUCTION_HALF_LIFE * Math.log2((core.xStartPrice * g) / (1 - p.takerThreshold));
+      if (!(tStar <= now)) break;
+      const tf = Math.max(tStar, stepStart, core.xStartTime);
+      const slice = core.xSlice(), coinIn = slice * core.xAuctionPrice(tf);
+      const poolEth = pool.ethForCoin(coinIn);
+      if (!isFinite(poolEth)) break;
+      core.xFill(tf);
+      const gross = poolEth * (1 + f);
+      pool.buy(poolEth);
+      const fee = poolEth * engineFeeFraction(p, f);
+      core.addFees(fee, now);
+      T.feesTaker += fee; T.burnedX += coinIn; T.xFills++; T.xCoin += coinIn; T.xValue += slice; T.xGross += gross;
+      T.xDiscSum += 1 - gross / slice;
+      xFillLog.push([tf / 3600, slice, coinIn, gross, 1 - gross / slice, 1 - (coinIn * spot) / slice]);
+    }
+  }
+
+  // ---- eth buyback keeper: one slice per BUYBACK_DELAY blocks, coin bought in the pool and burned
+  function buybacks(stepStart, now) {
+    if (!p.keeperBuyback) return;
+    const delay = p.BUYBACK_DELAY * 12;
+    let tb = Math.max(stepStart, core.lastBuybackTime + delay), feeBack = 0;
+    while (tb <= now && core.ethToBuyback > 1e-15) {
+      const info = core.takeBuybackSlice(tb);
+      if (!info) break;
+      const f = skimFraction(p, tb);
+      const notional = info.budget / (1 + f);
+      T.burned += pool.buy(notional);
+      T.buybackSpent += info.budget; T.buybackTips += info.tip;
+      feeBack += notional * engineFeeFraction(p, f);
+      tb += delay;
+    }
+    if (feeBack > 0) { core.addFees(feeBack, now); T.feesBuyback += feeBack; }
+  }
+
+  // ---- series snapshot at the end of hour index h
+  function record(h, t) {
+    const Pe = peff(t), r = core.ethRate(t);
+    const held = stmts.length;
+    let floorN = 0, locked = 0;
+    for (const s of stmts) { if (t - s.t0 >= p.AUCTION_LENGTH) floorN++; locked += s.cost; }
+    S.pot[h] = core.ethPot; S.toBuyback[h] = core.ethToBuyback;
+    S.cumFees[h] = T.fees + T.feesBuyback + T.feesTaker;
+    S.rate[h] = r; S.mktPerPoint[h] = (Pe * W) / 440; S.frontier[h] = Math.min(900, (Pe * W) / r);
+    S.bidRatio[h] = (r * 440) / (Pe * W);
+    S.bought[h] = T.bought; S.cumPts[h] = T.pts; S.cumCost[h] = T.cost; S.cumMkt[h] = T.mkt;
+    S.avgScoreCum[h] = T.bought ? T.pts / T.bought : 0;
+    const h24 = Math.max(0, h - 24);
+    const dB = T.bought - S.bought[h24], dP = T.pts - S.cumPts[h24];
+    S.avgScoreDay[h] = dB > 0 ? dP / dB : (h > 0 ? S.avgScoreDay[h - 1] : 0);
+    S.costPerCredit[h] = T.bought ? T.cost / T.bought : 0; S.mktPerCredit[h] = Pe;
+    S.composed[h] = T.composed; S.sold[h] = T.sold; S.held[h] = held; S.heldFloor[h] = floorN; S.locked[h] = locked;
+    S.exited[h] = T.exited + T.exitedX; S.buybackSpent[h] = T.buybackSpent;
+    S.burned[h] = T.burned + T.burnedX; S.burnedPct[h] = ((T.burned + T.burnedX) / p.SUPPLY) * 100;
+    S.coinPrice[h] = pool.price; S.xPot[h] = core.xPot; S.xToBuyback[h] = core.xToBuyback;
+    S.xRate[h] = core.moduleSet ? core.xRate(t) : 0; S.xFills[h] = T.xFills; S.book[h] = book.length;
+    S.saleToPot[h] = T.saleToPot; S.saleToBuyback[h] = T.saleToBuyback; S.xBought[h] = T.boughtX;
+    S.volume[h] = T.vol; S.xDisc[h] = T.xFills ? T.xDiscSum / T.xFills : 0; S.poolEth[h] = pool.ethInPool();
+  }
+
+  // ---- the main loop. hour 0 runs in 120 s sub steps for the anti sniper window, then hourly
+  const steps = [];
+  for (let k = 0; k < 30; k++) steps.push([k * 120, (k + 1) * 120]);
+  for (let h = 1; h < H; h++) steps.push([h * 3600, (h + 1) * 3600]);
+  record(0, 0);
+  for (const [t0, t1] of steps) {
+    const dt = t1 - t0, mid = (t0 + t1) / 2;
+    stepW = dt / 3600;
+    // coin market: volume, fees to the pot, price impact on the single position
+    const V = stepVolume(p, t0, dt), f = skimFraction(p, mid), b = t0 < 86400 ? p.buyShare0 : bLate;
+    const net = b * V - (1 - b) * V; // notional is the pool's own delta, the skim comes on top
+    if (net > 0) pool.buy(net); else if (net < 0) pool.sell(-net);
+    const fee = V * engineFeeFraction(p, f);
+    core.addFees(fee, mid);
+    T.fees += fee; T.vol += V;
+    if (!core.moduleSet && t1 >= phase2At) core.setExitModule(t1, p.xp);
+    // credit market: the engine's own buying lifts the flat price, the lift decays
+    lnM *= Math.pow(0.5, dt / (p.impactHalfLifeHours * 3600));
+    const Pe = peff(t1), r0 = core.ethRate(t1);
+    const xPay = core.moduleSet ? (core.xRate(t1) / BPS) * core.xp * W : 0;
+    const boost = Math.pow(Math.max(1, (Math.max(r0, xPay) * 440) / (Pe * W)), p.supplyElast);
+    const nOff = Math.min(poisson(rng, (p.offersPerHour * dt * boost) / 3600), 1500, Math.floor(Math.max(holdPool, 0) * 0.05));
+    if (p.bookChurn > 0) {
+      const keepP = Math.pow(1 - p.bookChurn, dt / 3600);
+      book = book.filter(() => rng() < keepP);
+    }
+    if (nOff > 0) {
+      const add = [];
+      for (let i = 0; i < nOff; i++) add.push(newOffer());
+      add.sort((x, y) => y.key - x.key);
+      book = mergeDesc(book, add);
+      if (book.length > 6000) book = book.slice(book.length - 6000); // keep the cheapest to clear
+    }
+    // the engine acts
+    if (p.inventoryGate > 0) core.setGate(stmts.length + ethPile.length / p.PAGE >= p.inventoryGate, t0);
+    const capBefore = core.capHits;
+    peffNow = Pe;
+    const spentEth = core.gated ? 0 : engineBuys(t1, Pe);
+    if (core.capHits > capBefore) T.capStepHits++;
+    if (core.funded && core.clamp() < Infinity && core.ethRate(t1) >= core.clamp() * (1 - 1e-9)) T.clampSteps++;
+    lnM = Math.min(lnM + (p.impactElast * spentEth) / p.marketDailyEth, Math.log(p.impactCap));
+    composeAll(t1);
+    statementBuyers(t0, t1, peff(t1));
+    exits(t1);
+    xAuction(t0, t1);
+    buybacks(t0, t1);
+    // rate path statistics
+    const rr = core.ethRate(t1);
+    if (T.firstFill >= 0 && dt === 3600) {
+      const lc = Math.log(rr / prevRate);
+      rateAbsMove += Math.abs(lc); rateMoves++;
+      const dir = Math.abs(lc) < 0.002 ? 0 : lc > 0 ? 1 : -1;
+      if (dir !== 0) { if (lastDir !== 0 && dir !== lastDir) signChanges++; lastDir = dir; }
+    }
+    prevRate = rr;
+    rateMaxRatio = Math.max(rateMaxRatio, (rr * 440) / (peff(t1) * W));
+    if (t1 % 3600 === 0) record(t1 / 3600, t1);
+  }
+
+  // ---- results
+  const at = (d) => {
+    const i = Math.min(H, Math.round(d * 24));
+    const o = { day: d };
+    for (const n of names) o[n] = S[n][i];
+    return o;
+  };
+  const med = (a) => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+  const intervals = [];
+  for (let i = 1; i < xFillLog.length; i++) intervals.push(xFillLog[i][0] - xFillLog[i - 1][0]);
+  const avgPtsBought = T.bought ? T.pts / T.bought : 0;
+  const stats = {
+    firstFillHour: T.firstFill,
+    first80: T.first80n === 80 ? { hours: T.first80t, cost: T.first80cost, market: T.first80mkt, ratio: T.first80cost / T.first80mkt, avgScore: T.first80pts / 80 } : null,
+    avgScoreBought: avgPtsBought,
+    costVsMarket: T.mkt ? T.cost / T.mkt : 0, // eth paid per credit over the flat market price at the time
+    costPerPointVsMarket: T.bought ? (T.cost / T.pts) / (T.mkt / T.bought / 440) : 0,
+    costVsAsk: T.ask ? T.cost / T.ask : 0,
+    capSteps: T.capBindSteps, capStepsRich: T.capBindRich, potBlockedSteps: T.potBindSteps, clampSteps: T.clampSteps,
+    rateMaxBidRatio: rateMaxRatio, rateSignChanges: signChanges, rateMeanAbsMove: rateMoves ? rateAbsMove / rateMoves : 0,
+    saleOverCost: T.soldCost ? T.soldPrice / T.soldCost : 0,
+    stmtArrivals: T.stmtArrivals, stmtMiss: T.stmtMiss,
+    xFills: T.xFills, xMedianIntervalH: med(intervals), xMeanDiscount: T.xFills ? T.xDiscSum / T.xFills : 0,
+    potCheck: T.fees + T.feesBuyback + T.feesTaker + T.saleToPot - T.spent - T.reimb - core.ethPot,
+    buybackCheck: T.saleToBuyback - core.ethToBuyback - T.buybackSpent - T.buybackTips,
+    finalRate: core.ethRate(H * 3600), finalPot: core.ethPot,
+  };
+  return { params: p, H, S, T, stats, at, histPts, histCost, xFillLog, core, pool };
+}
+
+// headline numbers at day 30, 60, 90 and the one line verdict
+function headline(res) {
+  const rows = [30, 60, 90].filter((d) => d * 24 <= res.H).map((d) => res.at(d));
+  const last = res.at(res.H / 24);
+  const stuck = last.heldFloor;
+  const loops = last.sold >= 0.5 * Math.max(1, last.composed) && last.sold > 10;
+  return { rows, last, stuck, loops, burnedPct: last.burnedPct, locked: last.locked };
+}
+
+
+// ================================================================= page: controls and state
+const REAL_VOL = [1557.1, 80.6, 41.9, 46.2, 57.1, 12.8, 27.8, 57.6, 11.8, 40.8, 5.3, 1.9, 2.6, 0.4];
+const REAL_P = [0.03, 0.0303, 0.0262, 0.025, 0.026, 0.0247, 0.0275, 0.0284, 0.0269, 0.0123, 0.0095, 0.0082, 0.0085, 0.0118];
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const fmtAx = (v) => (v == null || !isFinite(v) ? 'n/a' : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-US') : String(+v.toPrecision(3)));
+const fmtN = (x, d = 3) => (x == null || !isFinite(x) ? 'n/a' : Number.isInteger(x) ? x.toLocaleString('en-US') : Math.abs(x) >= 1000 ? Math.round(x).toLocaleString('en-US') : Math.abs(x) >= 100 ? x.toFixed(0) : Math.abs(x) >= 10 ? x.toFixed(1) : Math.abs(x) >= 1 ? x.toFixed(2) : x === 0 ? '0' : x.toPrecision(d));
+const fmtSci = (x) => (x == null || !isFinite(x) ? 'n/a' : x === 0 ? '0' : x.toExponential(2).replace('e+', 'e'));
+
+// every control: key in the params object, how to show it
+const BASE_STATE = { volPreset: 'comparable', volScale: 1, volTail: 17, volHalfLifeDays: 3, buyShareLate: 'auto', pricePath: 'flat', priceP0: 0.0089, wtpMult: 1, stmtPerDay: 8, impactElast: 0.12,
+  rateStart: 4e12, startX: 4, floorX: 1.2, lengthH: 72, fundedRule: 'new', CLIMB_BASE_BPS_PER_HOUR: 100, DROP_BPS: 1000, SPEND_CAP_BPS_PER_HOUR: 2000, bidMode: 'perPoint', inventoryGate: 0,
+  phase2On: false, phase2Day: 14, xp: 2.5e-5, takerThreshold: 0.15, days: 90, seed: 7 };
+const GROUPS = [
+  { title: 'market', open: true, ctl: [
+    { k: 'volPreset', t: 'select', label: 'coin volume preset', opts: [['comparable', 'comparable decay'], ['sustained17', 'sustained 17 eth a day'], ['sustained50', 'sustained 50 eth a day'], ['deadWeek1', 'dead after week one'], ['custom', 'custom']] },
+    { k: 'volScale', t: 'range', label: 'volume scale', min: 0.05, max: 5, log: true, fmt: (v) => v.toFixed(2) + 'x', hint: 'multiplies every day, launch day included' },
+    { k: 'volTail', t: 'range', label: 'custom: eth a day', min: 0.2, max: 200, log: true, fmt: (v) => fmtN(v), only: 'custom' },
+    { k: 'volHalfLifeDays', t: 'range', label: 'custom: half life of day two volume, days', min: 0.5, max: 20, step: 0.5, fmt: (v) => v + 'd', only: 'custom' },
+    { k: 'buyShareLate', t: 'select', label: 'net flow after day one', opts: [['auto', 'preset default'], [0.42, 'heavy selling, 0.42 buys'], [0.46, 'selling, 0.46'], [0.5, 'balanced, 0.50'], [0.54, 'buying, 0.54']] },
+    { k: 'pricePath', t: 'select', label: 'credit price path', opts: [['flat', 'flat at today'], ['decline', 'continued decline'], ['recovery', 'recovery']] },
+    { k: 'priceP0', t: 'range', label: 'flat credit price today, eth', min: 0.003, max: 0.04, log: true, fmt: (v) => v.toFixed(4), hint: 'median 0.0089 at the snapshot, was 0.03' },
+    { k: 'impactElast', t: 'range', label: 'engine price impact on credits', min: 0, max: 0.5, step: 0.02, fmt: (v) => v.toFixed(2), hint: '0 means the engine never moves the market' },
+    { k: 'wtpMult', t: 'range', label: 'statement buyer willingness to pay', min: 0.5, max: 1.6, step: 0.05, fmt: (v) => v.toFixed(2) + 'x', hint: '1.00x is the observed median 0.84 of parts cost' },
+    { k: 'stmtPerDay', t: 'range', label: 'statement buyers a day at launch', min: 1, max: 40, step: 1, fmt: (v) => v.toFixed(0), hint: 'observed 4 to 13 a day, decays' },
+  ] },
+  { title: 'launch config', open: true, ctl: [
+    { k: 'rateStart', t: 'range', label: 'rateStart, wei per point', min: 1e11, max: 1e14, log: true, fmt: fmtSci, hint: 'rule: price per credit in wei over 1600 =', hintFn: (s) => fmtSci((s.priceP0 * 1e18) / 1600) },
+  ] },
+  { title: 'engine constants', open: false, ctl: [
+    { k: 'startX', t: 'range', label: 'AUCTION_START_X', min: 1.5, max: 4, step: 0.25, fmt: (v) => v.toFixed(2) + 'x' },
+    { k: 'floorX', t: 'range', label: 'AUCTION_FLOOR_X', min: 0.5, max: 1.4, step: 0.05, fmt: (v) => v.toFixed(2) + 'x' },
+    { k: 'lengthH', t: 'range', label: 'AUCTION_LENGTH, hours', min: 12, max: 336, step: 12, fmt: (v) => v + 'h' },
+    { k: 'fundedRule', t: 'select', label: 'funded rule', opts: [['new', 'new: 20 percent of pot affords one average credit'], ['old', 'old: pot affords one average credit']] },
+    { k: 'CLIMB_BASE_BPS_PER_HOUR', t: 'range', label: 'CLIMB_BASE_BPS_PER_HOUR', min: 25, max: 400, step: 25, fmt: (v) => v },
+    { k: 'DROP_BPS', t: 'range', label: 'DROP_BPS', min: 250, max: 4000, step: 250, fmt: (v) => v },
+    { k: 'SPEND_CAP_BPS_PER_HOUR', t: 'range', label: 'SPEND_CAP_BPS_PER_HOUR', min: 500, max: 5000, step: 250, fmt: (v) => v },
+    { k: 'bidMode', t: 'select', label: 'bid shape', opts: [['perPoint', 'per point, as in the Core'], ['flat', 'flat per credit (design change)']] },
+    { k: 'inventoryGate', t: 'range', label: 'inventory gate, design change', min: 0, max: 100, step: 5, fmt: (v) => (v === 0 ? 'off' : v + ' unsold'), hint: 'stop buying while this many statements are unsold. off is the Core' },
+  ] },
+  { title: 'phase 2: exitModule and exitToken', open: false, ctl: [
+    { k: 'phase2On', t: 'check', label: 'phase 2 switched on' },
+    { k: 'phase2Day', t: 'range', label: 'on day', min: 1, max: 89, step: 1, fmt: (v) => 'day ' + v },
+    { k: 'xp', t: 'range', label: 'exitToken price, eth per point of rating', min: 2e-6, max: 3e-4, log: true, fmt: fmtSci, hint: 'floor sale beats exit when this is under 1.2 x cost / rating' },
+    { k: 'takerThreshold', t: 'range', label: 'dutch auction taker threshold', min: 0.02, max: 0.4, step: 0.01, fmt: (v) => (v * 100).toFixed(0) + '%', hint: 'discount to the pool price, skim included, that triggers a fill' },
+  ] },
+  { title: 'run', open: false, ctl: [
+    { k: 'days', t: 'select', label: 'horizon', opts: [[30, '30 days'], [60, '60 days'], [90, '90 days'], [180, '180 days']] },
+    { k: 'seed', t: 'number', label: 'seed' },
+  ] },
+];
+let state = Object.assign({}, BASE_STATE);
+const widgets = {};
+const toSlider = (c, v) => (c.log ? (Math.log(v / c.min) / Math.log(c.max / c.min)) * 1000 : v);
+const fromSlider = (c, s) => {
+  if (c.log) { const v = c.min * Math.pow(c.max / c.min, s / 1000); return +v.toPrecision(3); }
+  return +s;
+};
+function buildControls() {
+  const root = $('ctlRoot');
+  for (const g of GROUPS) {
+    const d = el('details', 'grp'); d.open = g.open;
+    d.appendChild(el('summary', null, g.title));
+    const rows = el('div', 'rows');
+    for (const c of g.ctl) {
+      const w = el('div', 'ctl'); w.id = 'row-' + c.k;
+      const lab = el('label', null, c.label); lab.htmlFor = 'c-' + c.k; w.appendChild(lab);
+      let inp;
+      if (c.t === 'range') {
+        inp = el('input'); inp.type = 'range';
+        inp.min = c.log ? 0 : c.min; inp.max = c.log ? 1000 : c.max; inp.step = c.log ? 1 : c.step;
+        const val = el('span', 'val'); val.id = 'v-' + c.k; w.appendChild(val); c.valEl = val;
+      } else if (c.t === 'select') {
+        inp = el('select');
+        for (const [v, t] of c.opts) { const o = el('option', null, t); o.value = String(v); inp.appendChild(o); }
+      } else if (c.t === 'check') {
+        inp = el('input'); inp.type = 'checkbox'; inp.style.justifySelf = 'end';
+      } else { inp = el('input'); inp.type = 'number'; inp.step = 1; }
+      inp.id = 'c-' + c.k; w.appendChild(inp); c.inp = inp;
+      if (c.hint) { const h = el('div', 'hint', c.hint); c.hintEl = h; w.appendChild(h); }
+      const onChange = () => {
+        if (c.t === 'range') state[c.k] = fromSlider(c, inp.value);
+        else if (c.t === 'check') state[c.k] = inp.checked;
+        else if (c.t === 'number') state[c.k] = +inp.value || 0;
+        else { const o = c.opts.find((x) => String(x[0]) === inp.value); state[c.k] = o ? o[0] : inp.value; }
+        syncControls(); schedule();
+      };
+      inp.addEventListener('input', onChange);
+      if (c.t === 'select' || c.t === 'check') inp.addEventListener('change', onChange);
+      rows.appendChild(w); widgets[c.k] = c;
+    }
+    d.appendChild(rows); root.appendChild(d);
+  }
+}
+// push state into the widgets and show or hide the conditional ones
+function syncControls() {
+  for (const k of Object.keys(widgets)) {
+    const c = widgets[k], v = state[k];
+    if (c.t === 'range') { c.inp.value = toSlider(c, v); c.valEl.textContent = c.fmt(v); }
+    else if (c.t === 'check') c.inp.checked = !!v;
+    else c.inp.value = String(v);
+    if (c.only) $('row-' + k).style.display = state.volPreset === c.only ? '' : 'none';
+    if (k === 'phase2Day' || k === 'xp' || k === 'takerThreshold') $('row-' + k).style.opacity = state.phase2On ? 1 : 0.5;
+    if (c.hintFn) c.hintEl.innerHTML = c.hint + ' <b>' + c.hintFn(state) + '</b>';
+  }
+}
+function toParams(s) {
+  const p = {
+    volPreset: s.volPreset, volScale: s.volScale, volTail: s.volTail, volHalfLifeDays: s.volHalfLifeDays, buyShareLate: s.buyShareLate === 'auto' ? null : +s.buyShareLate,
+    pricePath: s.pricePath, priceP0: s.priceP0, wtpMult: s.wtpMult, stmtPerDay: s.stmtPerDay, impactElast: s.impactElast, rateStart: s.rateStart,
+    AUCTION_START_X: Math.round(s.startX * 1e4), AUCTION_FLOOR_X: Math.round(Math.min(s.floorX, s.startX) * 1e4), AUCTION_LENGTH: s.lengthH * 3600,
+    fundedRule: s.fundedRule, CLIMB_BASE_BPS_PER_HOUR: s.CLIMB_BASE_BPS_PER_HOUR, DROP_BPS: s.DROP_BPS, SPEND_CAP_BPS_PER_HOUR: s.SPEND_CAP_BPS_PER_HOUR,
+    bidMode: s.bidMode, inventoryGate: s.inventoryGate, phase2Day: s.phase2On ? s.phase2Day : null, xp: s.xp, takerThreshold: s.takerThreshold, days: +s.days, seed: s.seed,
+  };
+  if (p.phase2Day != null && p.phase2Day >= p.days) p.phase2Day = null;
+  return p;
+}
+
+
+// ================================================================= page: charts drawn on canvas
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function niceTicks(lo, hi, n) {
+  const span = hi - lo || 1, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / mag, step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
+  return out;
+}
+function logTicks(lo, hi) {
+  const out = [];
+  for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) { const v = Math.pow(10, e); if (v >= lo * 0.999 && v <= hi * 1.001) out.push(v); }
+  return out;
+}
+const charts = [];
+function mkChart(spec) {
+  const box = el('div', 'chart');
+  box.appendChild(el('h3', null, '<span>' + spec.title + '</span>'));
+  const lg = el('div', 'legend');
+  for (const s of spec.series) lg.appendChild(el('span', null, '<i style="border-color:var(' + s.color + ');' + (s.dash ? 'border-top-style:dashed' : '') + '"></i>' + s.label + (s.axis === 'r' ? ' (right)' : '')));
+  box.appendChild(lg);
+  const cv = el('canvas'); cv.id = 'chart-' + spec.id; cv.setAttribute('role', 'img'); cv.setAttribute('aria-label', spec.title);
+  box.appendChild(cv);
+  const ro = el('div', 'readout', 'move over the chart for values'); ro.id = 'readout-' + spec.id; box.appendChild(ro);
+  $('charts').appendChild(box);
+  const ch = { spec, cv, ro, hover: -1, xs: [], data: [] };
+  cv.addEventListener('pointermove', (e) => { const r = cv.getBoundingClientRect(); ch.hover = (e.clientX - r.left) / r.width; paint(ch); });
+  cv.addEventListener('pointerleave', () => { ch.hover = -1; paint(ch); });
+  charts.push(ch);
+  return ch;
+}
+function paint(ch) {
+  const { cv, spec } = ch, xs = ch.xs;
+  const dpr = window.devicePixelRatio || 1, W0 = cv.clientWidth || 300, H0 = cv.clientHeight || 200;
+  if (cv.width !== Math.round(W0 * dpr) || cv.height !== Math.round(H0 * dpr)) { cv.width = Math.round(W0 * dpr); cv.height = Math.round(H0 * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W0, H0);
+  const muted = cssVar('--muted'), grid = cssVar('--grid'), ink = cssVar('--ink');
+  const hasR = spec.series.some((s) => s.axis === 'r');
+  const m = { l: 54, r: hasR ? 50 : 10, t: 8, b: 20 }, pw = W0 - m.l - m.r, ph = H0 - m.t - m.b;
+  const xmax = xs.length ? xs[xs.length - 1] : 1;
+  const X = (x) => m.l + (x / xmax) * pw;
+  const dom = {};
+  for (const ax of ['l', 'r']) {
+    const ss = spec.series.filter((s) => (s.axis || 'l') === ax); if (!ss.length) continue;
+    const log = !!(spec.log && spec.log[ax]);
+    let lo = Infinity, hi = -Infinity;
+    for (const s of ss) for (const v of ch.data[spec.series.indexOf(s)]) { if (!isFinite(v) || (log && v <= 0)) continue; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (!isFinite(lo)) { lo = log ? 1 : 0; hi = log ? 10 : 1; }
+    if (spec.fixed && spec.fixed[ax]) { lo = spec.fixed[ax][0]; hi = spec.fixed[ax][1]; }
+    else if (log) { lo = Math.pow(10, Math.floor(Math.log10(lo))); hi = Math.pow(10, Math.ceil(Math.log10(hi))); if (hi <= lo) hi = lo * 10; }
+    else { lo = Math.min(lo, 0); if (hi <= lo) hi = lo + 1; hi *= 1.05; }
+    const f = log ? (v) => (Math.log10(Math.max(v, lo)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) : (v) => (v - lo) / (hi - lo);
+    dom[ax] = { lo, hi, log, Y: (v) => m.t + ph - f(v) * ph, ticks: log ? logTicks(lo, hi) : niceTicks(lo, hi, 4) };
+  }
+  g.font = '10px ' + cssVar('--mono'); g.textBaseline = 'middle';
+  g.lineWidth = 1;
+  const dl = dom.l || dom.r;
+  for (const v of dl.ticks) { const y = Math.round(dl.Y(v)) + 0.5; g.strokeStyle = grid; g.beginPath(); g.moveTo(m.l, y); g.lineTo(W0 - m.r, y); g.stroke(); }
+  g.fillStyle = muted; g.textAlign = 'right';
+  if (dom.l) for (const v of dom.l.ticks) g.fillText(spec.fmt.l(v), m.l - 5, dom.l.Y(v));
+  g.textAlign = 'left';
+  if (dom.r) for (const v of dom.r.ticks) g.fillText(spec.fmt.r(v), W0 - m.r + 5, dom.r.Y(v));
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  const step = xmax > 120 ? 30 : xmax > 45 ? 10 : 5;
+  for (let d = 0; d <= xmax + 1e-9; d += step) { const x = X(d); g.fillText(d + 'd', Math.min(Math.max(x, 8), W0 - 8), H0 - m.b + 5); g.strokeStyle = grid; g.beginPath(); g.moveTo(Math.round(x) + 0.5, m.t + ph); g.lineTo(Math.round(x) + 0.5, m.t + ph + 3); g.stroke(); }
+  g.save(); g.beginPath(); g.rect(m.l, m.t, pw, ph); g.clip();
+  spec.series.forEach((s, i) => {
+    const d = dom[s.axis || 'l']; if (!d) return;
+    g.strokeStyle = cssVar(s.color); g.lineWidth = 1.6; g.setLineDash(s.dash ? [5, 3] : []);
+    g.beginPath(); let pen = false;
+    ch.data[i].forEach((v, j) => {
+      if (!isFinite(v) || (d.log && v <= 0)) { pen = false; return; }
+      const x = X(xs[j]), y = d.Y(v);
+      if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y);
+    });
+    g.stroke();
+  });
+  g.restore(); g.setLineDash([]);
+  if (spec.marks) for (const mk of spec.marks(ch)) { g.strokeStyle = cssVar('--muted'); g.setLineDash([2, 3]); const x = Math.round(X(mk.x)) + 0.5; g.beginPath(); g.moveTo(x, m.t); g.lineTo(x, m.t + ph); g.stroke(); g.setLineDash([]); g.textAlign = 'left'; g.fillStyle = muted; g.fillText(mk.label, x + 3, m.t + 2); }
+  if (ch.hover >= 0 && xs.length) {
+    const fx = Math.min(1, Math.max(0, (ch.hover * W0 - m.l) / pw)) * xmax;
+    let j = 0; while (j < xs.length - 1 && xs[j + 1] <= fx) j++;
+    if (j < xs.length - 1 && fx - xs[j] > xs[j + 1] - fx) j++;
+    const x = Math.round(X(xs[j])) + 0.5; g.strokeStyle = ink; g.globalAlpha = 0.5; g.beginPath(); g.moveTo(x, m.t); g.lineTo(x, m.t + ph); g.stroke(); g.globalAlpha = 1;
+    ch.ro.textContent = 'day ' + xs[j].toFixed(1) + '  ' + spec.series.map((s, i) => s.short + ' ' + (spec.fmt[s.axis || 'l'])(ch.data[i][j])).join('  ');
+  } else ch.ro.textContent = ch.ro.dataset.idle || 'move over the chart for values';
+}
+function setChartData(ch, res) {
+  const H = res.H, step = Math.max(1, Math.ceil(H / 540)), idx = [];
+  for (let h = 0; h <= H; h += h < 48 ? 1 : step) idx.push(h);
+  if (idx[idx.length - 1] !== H) idx.push(H);
+  ch.xs = idx.map((h) => h / 24);
+  ch.data = ch.spec.series.map((s) => idx.map((h) => s.f(res, h)));
+  paint(ch);
+}
+const redrawAll = () => { charts.forEach(paint); if (calCh) paint(calCh); };
+
+
+// ================================================================= page: charts, verdict, table
+const mark2 = () => { const p = toParams(state); return p.phase2Day != null ? [{ x: p.phase2Day, label: 'phase 2' }] : []; };
+const CHART_SPECS = [
+  { id: 'pot', title: 'eth pot, cumulative fees, eth locked in unsold statements', fmt: { l: fmtAx }, marks: mark2, series: [
+    { label: 'eth pot', short: 'pot', color: '--s1', f: (r, h) => r.S.pot[h] },
+    { label: 'cumulative fees', short: 'fees', color: '--s4', dash: true, f: (r, h) => r.S.cumFees[h] },
+    { label: 'locked in unsold statements', short: 'locked', color: '--s2', f: (r, h) => r.S.locked[h] } ] },
+  { id: 'rate', title: 'bid rate against market clearing rate, wei per point, and the score frontier', fmt: { l: fmtSci, r: (v) => v.toFixed(0) }, log: { l: true }, fixed: { r: [0, 900] }, marks: mark2, series: [
+    { label: 'bid rate', short: 'bid', color: '--s1', f: (r, h) => r.S.rate[h] },
+    { label: 'market price over 440 points', short: 'market', color: '--s4', dash: true, f: (r, h) => r.S.mktPerPoint[h] },
+    { label: 'score frontier', short: 'frontier', color: '--s2', axis: 'r', f: (r, h) => r.S.frontier[h] } ] },
+  { id: 'bought', title: 'credits bought and average score', fmt: { l: fmtAx, r: (v) => v.toFixed(0) }, fixed: { r: [0, 800] }, marks: mark2, series: [
+    { label: 'credits bought', short: 'bought', color: '--s1', f: (r, h) => r.S.bought[h] },
+    { label: 'average score, last 24h', short: 'avg24h', color: '--s2', axis: 'r', f: (r, h) => (r.S.avgScoreDay[h] || NaN) },
+    { label: 'average score, cumulative', short: 'avgCum', color: '--s3', dash: true, axis: 'r', f: (r, h) => (r.S.avgScoreCum[h] || NaN) } ] },
+  { id: 'stmts', title: 'statements composed, sold, held at the floor, exited', fmt: { l: fmtAx }, marks: mark2, series: [
+    { label: 'composed', short: 'composed', color: '--s4', dash: true, f: (r, h) => r.S.composed[h] },
+    { label: 'sold', short: 'sold', color: '--s3', f: (r, h) => r.S.sold[h] },
+    { label: 'held at the floor', short: 'floor', color: '--s2', f: (r, h) => r.S.heldFloor[h] },
+    { label: 'exited', short: 'exited', color: '--s1', f: (r, h) => r.S.exited[h] } ] },
+  { id: 'burn', title: 'eth to buyback and coin burned', fmt: { l: fmtAx, r: (v) => v.toFixed(1) + '%' }, marks: mark2, series: [
+    { label: 'eth sent to buyback', short: 'toBB', color: '--s4', dash: true, f: (r, h) => r.S.saleToBuyback[h] },
+    { label: 'eth spent buying coin', short: 'spent', color: '--s1', f: (r, h) => r.S.buybackSpent[h] },
+    { label: 'coin burned, percent of supply', short: 'burned', color: '--s2', axis: 'r', f: (r, h) => r.S.burnedPct[h] } ] },
+  { id: 'price', title: 'coin price, eth per coin', fmt: { l: fmtSci }, log: { l: true }, marks: mark2, series: [
+    { label: 'pool price', short: 'price', color: '--s1', f: (r, h) => r.S.coinPrice[h] } ] },
+  { id: 'x', title: 'phase 2: exit bid in bps of score, pots in eth value of exitToken', fmt: { l: fmtAx, r: (v) => v.toFixed(0) }, fixed: { r: [0, 10000] }, marks: mark2, series: [
+    { label: 'exit bid pot', short: 'xPot', color: '--s3', f: (r, h) => r.S.xPot[h] },
+    { label: 'waiting for the dutch auction', short: 'xToBB', color: '--s2', dash: true, f: (r, h) => r.S.xToBuyback[h] },
+    { label: 'exit bid rate', short: 'xRate', color: '--s1', axis: 'r', f: (r, h) => (r.S.xRate[h] || NaN) } ] },
+];
+let lastRes = null;
+function renderVerdict(res, ms) {
+  const p = res.params, days = res.H / 24, a = res.at(days), st = res.stats, T = res.T;
+  const composed = a.composed + T.composedX * 0, soldShare = a.composed ? a.sold / a.composed : 0, lockShare = a.cumFees ? a.locked / a.cumFees : 0;
+  const exitedShare = a.composed ? T.exited / a.composed : 0;
+  const turns = soldShare + exitedShare >= 0.6 && lockShare < 0.25;
+  const mid = (soldShare + exitedShare >= 0.3 && lockShare < 0.5) || (T.exited > 0 && lockShare < 0.1);
+  const cls = turns ? 'good' : mid ? 'warn' : 'bad';
+  $('verdict').className = 'verdict ' + cls;
+  $('v1').textContent = (turns ? 'the loop turns' : mid ? 'the loop turns partly' : 'the loop stalls') + ': ' + fmtN(a.sold) + ' of ' + fmtN(a.composed) + ' statements sold' + (T.exited ? ', ' + fmtN(T.exited) + ' exited' : '') + ', ' + fmtN(a.heldFloor) + ' stuck at the floor, ' + fmtN(a.locked) + ' eth locked, ' + a.burnedPct.toFixed(1) + '% of supply burned by day ' + days;
+  const dry = (() => { for (let h = 48; h <= res.H; h++) if (res.S.pot[h] < 1 && res.S.cumFees[h] > 20) return (h / 24).toFixed(0); return null; })();
+  $('v2').textContent = 'fees in ' + fmtN(a.cumFees) + ' eth. credits cost ' + st.costVsMarket.toFixed(2) + 'x the flat market price on average, average score bought ' + st.avgScoreBought.toFixed(0) + ' against 440 in the population. ' + fmtN(st.stmtArrivals - st.stmtMiss) + ' of ' + fmtN(st.stmtArrivals) + ' statement buyers found a price they accept. ' + (dry ? 'the pot is under 1 eth from day ' + dry + '.' : 'the pot stays above 1 eth.');
+  $('runinfo').textContent = 'ran ' + Math.round(ms) + ' ms, ' + res.H + ' hours, seed ' + p.seed;
+}
+function renderTable(res) {
+  const days = res.H / 24, ds = [30, 60, 90, 180].filter((d) => d <= days);
+  if (!ds.length || ds[ds.length - 1] !== days) ds.push(days);
+  const cols = [['day', (a) => a.day], ['fees in, eth', (a) => fmtN(a.cumFees)], ['credits bought', (a) => fmtN(a.bought)], ['composed', (a) => fmtN(a.composed)], ['sold', (a) => fmtN(a.sold)],
+    ['stuck at floor', (a) => fmtN(a.heldFloor)], ['eth locked', (a) => fmtN(a.locked)], ['returned to pot', (a) => fmtN(a.saleToPot)], ['to buyback', (a) => fmtN(a.saleToBuyback)],
+    ['coin burned, m', (a) => fmtN(a.burned / 1e6)], ['percent of supply', (a) => a.burnedPct.toFixed(2) + '%'], ['pot now', (a) => fmtN(a.pot)]];
+  let h = '<thead><tr>' + cols.map((c) => '<th>' + c[0] + '</th>').join('') + '</tr></thead><tbody>';
+  for (const d of ds) { const a = res.at(d); h += '<tr>' + cols.map((c) => '<td>' + c[1](a) + '</td>').join('') + '</tr>'; }
+  $('tbl').innerHTML = h + '</tbody>';
+  const st = res.stats, T = res.T;
+  const notes = [
+    '<b>cost per credit</b> ' + st.costVsMarket.toFixed(2) + 'x the flat price, per point ' + st.costPerPointVsMarket.toFixed(2) + 'x the market per point, ' + st.costVsAsk.toFixed(2) + 'x what sellers asked',
+    '<b>first fill</b> hour ' + (st.firstFillHour < 0 ? 'none' : st.firstFillHour.toFixed(1)) + (st.first80 ? ', first 80 credits cost ' + st.first80.ratio.toFixed(2) + 'x market at score ' + st.first80.avgScore.toFixed(0) : ''),
+    '<b>hourly cap</b> blocked a sale in ' + fmtN(st.capSteps) + ' hours, ' + fmtN(st.capStepsRich) + ' of them with the pot above 5 eth; climb clamp active ' + fmtN(st.clampSteps) + ' hours',
+    '<b>bid</b> peaked at ' + st.rateMaxBidRatio.toFixed(2) + 'x the market rate for a 440 point credit',
+  ];
+  if (T.xFills || T.boughtX) notes.push('<b>phase 2</b> exit bid bought ' + fmtN(T.boughtX) + ' credits, ' + fmtN(T.exited + T.exitedX) + ' statements exited, ' + fmtN(T.xFills) + ' dutch fills at ' + (st.xMeanDiscount * 100).toFixed(0) + '% all in discount, one every ' + st.xMedianIntervalH.toFixed(1) + ' h');
+  $('notes').innerHTML = notes.join(' &nbsp; ');
+  $('tblnote').textContent = 'engine eth accounting closes to ' + Math.abs(st.potCheck).toExponential(1) + ' eth';
+}
+function run() {
+  const t = performance.now();
+  const res = simulate(toParams(state));
+  const ms = performance.now() - t;
+  lastRes = res;
+  renderVerdict(res, ms); renderTable(res);
+  for (const ch of charts) {
+    if (ch.spec.id === 'x') ch.ro.dataset.idle = res.params.phase2Day == null ? 'phase 2 is off, switch it on in the controls' : 'move over the chart for values';
+    setChartData(ch, res);
+  }
+  setCalData();
+}
+let timer = null;
+function schedule() { clearTimeout(timer); timer = setTimeout(run, 140); }
+
+
+// ================================================================= page: calibration, scenarios, theme, start
+const SCENARIOS = [
+  { id: 'sc-base', label: 'calibrated base case', set: {} },
+  { id: 'sc-rec', label: 'recommended constants', set: { rateStart: 5.6e12, startX: 2, floorX: 0.8, DROP_BPS: 2000 } },
+  { id: 'sc-rec2', label: 'recommended plus design changes', set: { rateStart: 5.6e12, startX: 2, floorX: 0.8, DROP_BPS: 2000, bidMode: 'flat', inventoryGate: 20 } },
+  { id: 'sc-s17', label: 'sustained 17 eth a day', set: { volPreset: 'sustained17' } },
+  { id: 'sc-dead', label: 'dead after week one', set: { volPreset: 'deadWeek1' } },
+  { id: 'sc-recov', label: 'credit price recovery', set: { pricePath: 'recovery' } },
+  { id: 'sc-p2', label: 'phase 2 from day 14', set: { phase2On: true, phase2Day: 14, xp: 3e-5 } },
+  { id: 'sc-old', label: 'old funded rule, small pot', set: { fundedRule: 'old', volScale: 0.03 } },
+  { id: 'sc-noimp', label: 'engine never moves the market', set: { impactElast: 0 } },
+];
+function applyScenario(sc) { state = Object.assign({}, BASE_STATE, sc.set); syncControls(); run(); }
+let calCh = null;
+function modelVolume(p, d) { return dayVolume(p, d) * p.volScale; }
+function setCalData() {
+  const p = Object.assign({}, DEFAULTS, toParams(state));
+  calCh.xs = REAL_VOL.map((_, i) => i);
+  calCh.data = [REAL_VOL, calCh.xs.map((d) => modelVolume(p, d))];
+  paint(calCh);
+}
+function buildCalibration() {
+  const spec = { id: 'cal', title: '', fmt: { l: (v) => (v >= 1 ? v.toFixed(0) : v.toFixed(1)) }, log: { l: true }, series: [
+    { label: 'observed daily volume', short: 'observed', color: '--s2', f: null }, { label: 'model, current preset', short: 'model', color: '--s1', f: null } ] };
+  calCh = { spec, cv: $('calChart'), ro: { textContent: '', dataset: {} }, hover: -1, xs: [], data: [] };
+  $('calLegend').innerHTML = '<span><i style="border-color:var(--s2)"></i>observed</span><span><i style="border-color:var(--s1)"></i>model, current preset</span>';
+  const rows = [
+    ['flat credit price per credit', 'median 0.0089 eth now, 0.03 at launch, p10 0.0069, p90 0.0138', 'flat in score, premium only above 740 points, 2x at 790 and up'],
+    ['credit scores', 'uniform 80 to 800, mean 440', 'census of 122,154 credits'],
+    ['statement buyer willingness to pay', 'p10 0.48, p25 0.71, median 0.84, p75 1.07, 21% at 1.2 or more, max 1.32 of parts cost', '42 priced sales, 33 statements'],
+    ['statement buyers a day', '13, 11, 8, 6, 4 in the first five days, model 8 decaying to 2', 'composed 119, 19, 9, 3, 3 a day'],
+    ['comparable coin volume', 'day one 1,557 eth, 912 in hour one, then 81, 42, 46, 57, 13, 28, 58, 12, 41, 5, 2, 3', 'fit 123 exp(-0.286 d), floor 0.5 eth a day'],
+    ['coin buys against sells', 'day one 819 to 738 eth, net 80 eth moves price 2.5e-8 to 4.4e-7', 'model reproduces 4.48e-7 on day one'],
+    ['CreditStrategy inventory', '13,132 credits listed at median 0.036 eth, mean score 371', 'static, cleared through buyListing when the ceiling passes the ask'],
+    ['launch position', 'tick -175000 to 887200, whole supply, 10% skim of which 9.5 points to the engine, 90% falling to 10% over 30 minutes', 'script/config/mainnet.json'],
+  ];
+  $('calTbl').innerHTML = '<thead><tr><th>input</th><th>value in the model</th><th>source</th></tr></thead><tbody>' + rows.map((r) => '<tr><td>' + r[0] + '</td><td style="white-space:normal;text-align:left">' + r[1] + '</td><td style="white-space:normal;text-align:left">' + r[2] + '</td></tr>').join('') + '</tbody>';
+}
+function setTheme(mode) {
+  const root = document.documentElement;
+  if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
+  $('themeToggle').textContent = 'theme: ' + mode;
+  $('themeToggle').dataset.mode = mode;
+  redrawAll();
+}
+function start() {
+  buildControls(); syncControls();
+  const sc = $('scenarios');
+  for (const s of SCENARIOS) { const b = el('button', null, s.label); b.type = 'button'; b.id = s.id; b.addEventListener('click', () => applyScenario(s)); sc.appendChild(b); }
+  $('reset').addEventListener('click', () => applyScenario(SCENARIOS[0]));
+  for (const spec of CHART_SPECS) mkChart(spec);
+  buildCalibration();
+  $('themeToggle').addEventListener('click', () => { const m = $('themeToggle').dataset.mode || 'auto'; setTheme(m === 'auto' ? 'light' : m === 'light' ? 'dark' : 'auto'); });
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawAll);
+  let raf = 0;
+  const redraw = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(redrawAll); };
+  if (window.ResizeObserver) new ResizeObserver(redraw).observe($('charts')); else window.addEventListener('resize', redraw);
+  run();
+}
+start();
+
+} catch (e) { document.getElementById("v1").textContent = "script error: " + e.message; throw e; }
+})();
+</script>

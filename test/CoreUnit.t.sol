@@ -151,6 +151,31 @@ contract CoreUnitTest is CoreBase {
         Stack memory flat = Stack(st.poolManager, st.hook, 0, st.poolFee, st.factory, st.locker, st.escrow);
         vm.expectRevert(Core.BadStack.selector);
         new Core(owner, address(coin), address(ctl), flat, r);
+        flat.tickSpacing = 32_768;
+        vm.expectRevert(Core.BadStack.selector);
+        new Core(owner, address(coin), address(ctl), flat, r);
+        flat.tickSpacing = 32_767;
+        new Core(owner, address(coin), address(ctl), flat, r);
+    }
+
+    /// every stack member must be a contract, the coin is not checked (it does not exist yet)
+    function test_constructorRequiresCodeAtTheStack() public {
+        Stack memory st = lc.stack;
+        uint256 r = lc.rateStart;
+        address nobody = makeAddr("no code");
+        for (uint256 i; i < 5; ++i) {
+            Stack memory bad =
+                Stack(st.poolManager, st.hook, st.tickSpacing, st.poolFee, st.factory, st.locker, st.escrow);
+            if (i == 0) bad.poolManager = nobody;
+            if (i == 1) bad.hook = nobody;
+            if (i == 2) bad.factory = nobody;
+            if (i == 3) bad.locker = nobody;
+            if (i == 4) bad.escrow = nobody;
+            vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, nobody));
+            new Core(owner, address(coin), address(ctl), bad, r);
+        }
+        // the coin has no code at construction time and that is fine
+        new Core(owner, nobody, address(ctl), st, r);
     }
 
     /// the opening bid is a deploy input bounded to [1e11, 1e15] wei per whole point
@@ -175,6 +200,10 @@ contract CoreUnitTest is CoreBase {
     function test_stackIsStored() public {
         Stack memory other =
             Stack(address(0x1111), address(0x2222), 60, 3000, address(0x3333), address(0x4444), address(0x5555));
+        // the constructor wants code at the five members
+        for (uint160 a = 0x1111; a <= 0x5555; a += 0x1111) {
+            vm.etch(address(a), hex"00");
+        }
         Core c2 = new Core(owner, address(coin), address(ctl), other, lc.rateStart);
         assertEq(address(c2.MANAGER()), address(0x1111));
         assertEq(c2.HOOK(), address(0x2222));
