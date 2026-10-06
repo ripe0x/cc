@@ -137,3 +137,18 @@ fee share rules:
 * an injection into `ethToBuyback` needs no re anchor (the eth buyback has no auction).
 
 size: the Core has about 450 bytes of room. put the price math and anything else movable into `CoreLib`. the new settings may use a fourth storage word if three do not fit, keep the hot path (the two sell doors) at the loads it has today. margin after the change at least 100 bytes.
+
+### 9a. amendment (owner confirmed, wins over the text above where they differ)
+
+| item | value |
+|---|---|
+| `buyNowAfter` | launch 48 hours, bounds 1 hour to 365 days |
+| `buyNowStepBps` | launch 100 (one point of cost per step), bounds 1 to 5_000 |
+| `buyNowStepEvery` | launch 4 hours, bounds 1 minute to 30 days (a short step makes the decay effectively smooth) |
+| `buyNowFloorBps` | launch 7_500, bounds 1_000 to 40_000 |
+
+so with launch values: auction only at 90 percent for 48 hours, buy now opens at 90 at hour 48, 89 at hour 52, 84 at hour 72, 78 at hour 96, 75 (the floor) at hour 108 and it stays there.
+
+redeem rule. the setting `exitAfter` is REMOVED from the `Settings` struct, the bounds, the config, the scripts, the tests and the docs. an eth lane statement may be handed to the exitModule exactly when its buy now price has reached the floor: listed, no bid, and the current buy now bps equals the effective floor `min(buyNowFloorBps, reserveBps)`. with launch values that is hour 108. one shared helper must decide both the buy now price and "at the floor" so they can never disagree. while no exitModule is set the statement simply stays buyable at the floor. a buy or a bid that lands first wins, the exit then reverts.
+
+redeem reimbursement. `exitStatement` repays the caller's gas in eth from `ethPot` with the same rule and settings as compose (`reimburseBps` of gas cost, capped at `reimburseCapBps` of the statement cost and at the pot; an exit lane statement uses the same notional cap `composeExit` uses). nothing is added to any cost basis. measure gas the way compose does, with a fixed gas cap or fixed allowance around the exitModule call so a gas burning module cannot inflate it beyond the cap. the payment happens after all state is final and must not open reentrancy.
