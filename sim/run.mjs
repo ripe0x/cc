@@ -17,6 +17,7 @@ export function metrics(res) {
     Object.assign(m, {
       ['credits' + d]: a.credits, ['stmts' + d]: a.statements, ['sold' + d]: a.sold, ['burnEth' + d]: a.burnEth, ['burnPct' + d]: a.burnPct,
       ['waiting' + d]: a.waiting, ['exited' + d]: a.exited, ['locked' + d]: a.locked, ['pot' + d]: a.pot, ['recycled' + d]: a.recycled,
+      ['salePct' + d]: a.avgSalePct, ['feeToBurn' + d]: a.feeToBurn, ['saleToBurn' + d]: a.saleToBurn,
     });
   }
   const s = summary(res);
@@ -26,12 +27,13 @@ export function metrics(res) {
     steadyBurnEth: s.steadyBurnEth == null ? NaN : s.steadyBurnEth,
     firstFillHour: st.firstFillHour, costVsMarket: st.costVsMarket, costPerPointVsMarket: st.costPerPointVsMarket, costVsAsk: st.costVsAsk,
     avgScoreBought: st.avgScoreBought, capSteps: st.capSteps, clampSteps: st.clampSteps, rateMaxBidRatio: st.rateMaxBidRatio,
-    saleOverCost: st.saleOverCost, saleOverReserve: st.saleOverReserve, bidsPerSale: st.bidsPerSale, contestedShare: st.contestedShare,
+    saleOverCost: st.saleOverCost, saleOverFloor: st.saleOverFloor, saleAgeH: st.saleAgeHours, saleAtFloor: st.saleAtFloorShare, soldInstant: T.soldInstant, bidsPerSale: st.bidsPerSale, contestedShare: st.contestedShare,
     stmtArrivals: st.stmtArrivals, stmtMiss: st.stmtMiss, rebids: T.rebids, extended: T.extended,
     xFills: st.xFills, xMedianIntervalH: st.xMedianIntervalH, xMeanDiscount: st.xMeanDiscount,
     boughtX: T.boughtX, exitedX: T.exitedX, burnEthM: T.burned / 1e6, burnXM: T.burnedX / 1e6, tips: T.tips, reimb: T.reimb, spent: T.spent,
     stCost: T.composed ? T.stCost / T.composed : NaN, stRating: T.composed ? T.stRating / T.composed : NaN,
     xPotEnd: res.core.xPot, xToBuybackEnd: res.core.xToBuyback, potEnd: res.core.ethPot, toBuybackEnd: res.core.ethToBuyback,
+    feeToBurnEnd: res.core.feeToBuyback,
     recycledRatio: T.spent ? T.saleGross / T.spent : 0, fees: S.cumFees[H], saleToPot: T.saleToPot, saleToBuyback: T.saleToBuyback,
     f80hours: st.first80 ? st.first80.hours : NaN, f80ratio: st.first80 ? st.first80.ratio : NaN, f80score: st.first80 ? st.first80.avgScore : NaN,
     exitedValue: T.exitedValue, exitedCost: T.exitedCost, exitedValueOverCost: T.exitedCost ? T.exitedValue / T.exitedCost : NaN,
@@ -106,15 +108,32 @@ batches.q3 = () => {
   return out;
 };
 
-// ---- q4: reserve and auction duration
+// ---- q4: the statement sale: start price, step length, floor, mode, fee share, the waiting buyer, and the auction rules that stay
+// a row is the mean over seeds; `both` lowers the curve floor and the hard floor together (the Core's hard floor wins over a lower curve floor)
+const designRows = (base, seeds) => {
+  const out = { base: many(base, seeds) };
+  const row = (over) => many(Object.assign({}, base, over), seeds);
+  out.startBps = [9000, 11000, 13000].map((v) => Object.assign({ startBps: v }, row({ startBps: v })));
+  out.stepEvery = [1, 3, 6].map((h) => Object.assign({ stepEveryH: h }, row({ stepEvery: h * 3600 })));
+  out.stepBps = [50, 100, 200].map((v) => Object.assign({ stepBps: v }, row({ stepBps: v })));
+  out.floorHardHolds = [7500, 6000, 5000].map((v) => Object.assign({ floorBps: v, saleFloorBps: 7500 }, row({ floorBps: v })));
+  out.floorBoth = [7500, 6000, 5000].map((v) => Object.assign({ floorBps: v, saleFloorBps: v }, row({ floorBps: v, saleFloorBps: v })));
+  out.mode = [false, true].map((v) => Object.assign({ buyOnly: v }, row({ buyOnly: v })));
+  out.fee = [0, 1000, 2500, 5000].map((v) => Object.assign({ feeToBuybackBps: v }, row({ feeToBuybackBps: v })));
+  out.wait = ['no', 'floor'].map((v) => Object.assign({ buyerWaits: v }, row({ buyerWaits: v })));
+  out.waitBuyOnly = ['no', 'floor'].map((v) => Object.assign({ buyerWaits: v }, row({ buyerWaits: v, buyOnly: true })));
+  return out;
+};
 batches.q4 = () => {
-  const out = { reserve: {}, duration: [], pick: [], wtp: [], change: [] };
-  for (const v of ['comparable', 'sustained17']) out.reserve[v] = sweep('reserveBps', [5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000], { volPreset: v }, SEEDS5);
+  const out = { comparable: designRows({}, SEEDS5), sustained17: designRows({ volPreset: 'sustained17' }, SEEDS3), duration: [], pick: [], wtp: [], buyers: [], change: [] };
   for (const d of [3600, 6 * 3600, 24 * 3600, 72 * 3600, 7 * 86400]) out.duration.push(Object.assign({ auctionDuration: d }, many({ auctionDuration: d }, SEEDS5)));
-  for (const pick of ['cheapest', 'random']) for (const per of [8, 20]) out.pick.push(Object.assign({ pick, stmtPerDay: per }, many({ stmtPick: pick, stmtPerDay: per }, SEEDS5)));
+  for (const buyOnly of [false, true]) for (const pick of ['cheapest', 'random']) for (const per of [8, 20]) out.pick.push(Object.assign({ buyOnly, pick, stmtPerDay: per }, many({ buyOnly, stmtPick: pick, stmtPerDay: per }, SEEDS5)));
   for (const w of [0.7, 0.84, 1, 1.3, 1.6]) out.wtp.push(Object.assign({ wtpMult: w }, many({ wtpMult: w }, SEEDS3)));
-  for (const [day, rb] of [[14, 6000], [14, 7500], [30, 6000], [7, 6000]]) out.change.push(Object.assign({ day, reserveBps: rb }, many({ schedule: [{ day, patch: { reserveBps: rb } }] }, SEEDS5)));
-  out.base = many({}, SEEDS5);
+  for (const n of [3, 8, 20, 40]) out.buyers.push(Object.assign({ stmtPerDay: n }, many({ stmtPerDay: n, stmtFloorPerDay: Math.min(2, n) }, SEEDS3)));
+  const lower = { floorBps: 6000, saleFloorBps: 6000 };
+  for (const [day, patch] of [[7, lower], [14, lower], [30, lower], [14, { startBps: 9000 }], [14, { buyOnly: true }], [14, { feeToBuybackBps: 2500 }]]) {
+    out.change.push({ day, patch: JSON.stringify(patch), ...many({ schedule: [{ day, patch }] }, SEEDS5) });
+  }
   return out;
 };
 
@@ -174,7 +193,7 @@ batches.q8 = () => {
   const r = simulate({ xp: 3e-5, phase2Day: 14, seed: 1 });
   out.fills = r.xFillLog.slice(0, 10).map(([hour, sliceValue, coinIn, ethCost, disc]) => ({ day: hour / 24, sliceValue, coinIn, ethCost, disc }));
   out.fillCount = r.xFillLog.length;
-  // a keeper that exits only when the module pays at least the reserve
+  // a keeper that exits only when the module pays at least the asking price
   out.keeper = [0, 1].map((ratio) => Object.assign({ exitMinRatio: ratio }, many({ phase2Day: 30, xp: 1e-5, exitMinRatio: ratio }, SEEDS3)));
   return out;
 };
@@ -185,27 +204,25 @@ batches.q9 = () => {
   const tests = [
     ['volScale', 0.25, 4], ['priceP0', 0.0045, 0.018], ['pricePath', 'decline', 'recovery'], ['askSigma', 0.15, 0.4], ['impactElast', 0, 0.3],
     ['offersPerHour', 60, 400], ['supplyElast', 0.5, 3], ['bookChurn', 0.02, 0.15], ['stmtPerDay', 3, 20], ['wtpMult', 0.7, 1.3],
-    ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.0)], ['flatBps', 0, 10000], ['reserveBps', 5000, 12000], ['auctionDuration', 6 * 3600, 72 * 3600],
+    ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.0)], ['flatBps', 0, 10000], ['startBps', 9000, 13000], ['stepEvery', 3600, 6 * 3600], ['floor, both floors', { floorBps: 5000, saleFloorBps: 5000 }, { floorBps: 7500, saleFloorBps: 7500 }],
+    ['buyOnly', false, true], ['feeToBuybackBps', 0, 2500], ['buyerWaits', 'no', 'floor'], ['auctionDuration', 6 * 3600, 72 * 3600],
     ['saleToBuybackBps', 0, 10000], ['dropBps', 500, 4000], ['spendCapBps', 1000, 4000], ['climbBaseBps', 50, 200], ['gasGwei', 0.5, 10],
     ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7], ['exitAfter', 24 * 3600, 7 * 86400], ['stmtPick', 'cheapest', 'random'],
   ];
   const out = { base, rows: [] };
   for (const [k, lo, hi] of tests) {
-    const a = many({ [k]: lo }, SEEDS3), b = many({ [k]: hi }, SEEDS3);
-    const pick = (m) => ({ credits90: m.credits90, stmts90: m.stmts90, sold90: m.sold90, burnEth90: m.burnEth90, burnPct90: m.burnPct90, waiting90: m.waiting90, costVsMarket: m.costVsMarket, credits7: m.credits7, steadyCredits: m.steadyCredits });
-    out.rows.push({ key: k, lo, hi, loRes: pick(a), hiRes: pick(b) });
+    const ov = (v) => (v && typeof v === 'object' ? v : { [k]: v });
+    const a = many(ov(lo), SEEDS3), b = many(ov(hi), SEEDS3);
+    const pick = (m) => ({ salePct90: m.salePct90, credits90: m.credits90, stmts90: m.stmts90, sold90: m.sold90, burnEth90: m.burnEth90, burnPct90: m.burnPct90, waiting90: m.waiting90, costVsMarket: m.costVsMarket, credits7: m.credits7, steadyCredits: m.steadyCredits });
+    out.rows.push({ key: k, lo: JSON.stringify(lo), hi: JSON.stringify(hi), loRes: pick(a), hiRes: pick(b) });
   }
   return out;
 };
 
-// ---- q11: does the reserve and duration result hold when buyers pick any auction that fits instead of the cheapest
+// ---- q11: does the sale design result hold when buyers pick any statement that fits instead of the one with the lowest asking price
 batches.q11 = () => {
-  const out = { reserve: [], duration: [], change: [] };
-  const R = { stmtPick: 'random' };
-  out.reserve = sweep('reserveBps', [5000, 6000, 7000, 9000, 10000, 12000], R, SEEDS5);
-  out.duration = sweep('auctionDuration', [3600, 6 * 3600, 24 * 3600, 72 * 3600], R, SEEDS5);
-  for (const rb of [6000, 7500]) out.change.push(Object.assign({ day: 14, reserveBps: rb }, many(Object.assign({ schedule: [{ day: 14, patch: { reserveBps: rb } }] }, R), SEEDS5)));
-  out.base = many(R, SEEDS5);
+  const out = { base: designRows({ stmtPick: 'random' }, SEEDS5) };
+  delete out.base.waitBuyOnly;
   return out;
 };
 
@@ -213,9 +230,13 @@ batches.q11 = () => {
 export const COMBOS = {
   asLaunched: {},
   flat5000at30: { schedule: [{ day: 30, patch: { flatBps: 5000 } }] },
-  reserve6000at14: { schedule: [{ day: 14, patch: { reserveBps: 6000 } }] },
-  reserve6000: { reserveBps: 6000 },
-  reserve5000: { reserveBps: 5000 },
+  floor6000at14: { schedule: [{ day: 14, patch: { floorBps: 6000, saleFloorBps: 6000 } }] },
+  floor6000: { floorBps: 6000, saleFloorBps: 6000 },
+  floor5000: { floorBps: 5000, saleFloorBps: 5000 },
+  buyOnly: { buyOnly: true },
+  fee2500: { feeToBuybackBps: 2500 },
+  start13000: { startBps: 13000 },
+  waitFloor: { buyerWaits: 'floor' },
   split0: { saleToBuybackBps: 0 },
   split10000: { saleToBuybackBps: 10000 },
   open50: { rateStart: rateAt(0.5) },

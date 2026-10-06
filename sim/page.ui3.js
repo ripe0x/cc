@@ -27,11 +27,15 @@ const CHART_SPECS = [
     { label: 'sold', short: 'sold', color: '--s3', f: (r, h) => r.S.sold[h] },
     { label: 'waiting, no bid', short: 'waiting', color: '--s2', f: (r, h) => r.S.waiting[h] },
     { label: 'exited through the exitModule', short: 'exited', color: '--s1', f: (r, h) => r.S.exited[h] } ] },
-  { id: 'burn', title: 'eth sent to buy and burn the coin, and coin burned', fmt: { l: fmtAx, r: (v) => v.toFixed(1) + '%' }, marks: markX, series: [
-    { label: 'eth sent to the buyback pot', short: 'to burn', color: '--s4', dash: true, f: (r, h) => r.S.saleToBuyback[h] },
-    { label: 'eth spent buying coin', short: 'spent', color: '--s1', f: (r, h) => r.S.burnEth[h] },
-    { label: 'coin burned, percent of supply', short: 'burned', color: '--s2', axis: 'r', f: (r, h) => r.S.burnedPct[h] } ] },
-  { id: 'coin', title: 'coin price, eth per coin', fmt: { l: fmtSci }, log: { l: true }, marks: markX, series: [
+  { id: 'saleprice', title: 'statements: average sale price as percent of cost, and hours from listing to the first buyer', fmt: { l: (v) => v.toFixed(0) + '%', r: fmtAx }, fixed: { l: [0, 120] }, marks: markX, series: [
+    { label: 'average sale price, percent of what the engine paid', short: 'price', color: '--s1', f: (r, h) => r.S.avgSalePct[h] },
+    { label: 'average hours from listing to the first buyer', short: 'hours', color: '--s2', axis: 'r', f: (r, h) => r.S.avgSaleAgeH[h] } ] },
+  { id: 'burn', title: 'eth sent to buy and burn $CC: from sales and from fees, eth spent, and $CC burned', fmt: { l: fmtAx, r: (v) => v.toFixed(1) + '%' }, marks: markX, series: [
+    { label: 'eth to burn from sale proceeds', short: 'from sales', color: '--s3', f: (r, h) => r.S.saleToBuyback[h] },
+    { label: 'eth to burn from fees', short: 'from fees', color: '--s4', dash: true, f: (r, h) => r.S.feeToBuyback[h] },
+    { label: 'eth spent buying $CC', short: 'spent', color: '--s1', f: (r, h) => r.S.burnEth[h] },
+    { label: '$CC burned, percent of supply', short: 'burned', color: '--s2', axis: 'r', f: (r, h) => r.S.burnedPct[h] } ] },
+  { id: 'coin', title: '$CC price, eth per coin', fmt: { l: fmtSci }, log: { l: true }, marks: markX, series: [
     { label: 'pool price', short: 'price', color: '--s1', f: (r, h) => r.S.coinPrice[h] } ] },
   { id: 'x', title: 'phase 2: exit bid in bps of score, pots in eth value of exitToken', fmt: { l: fmtAx, r: (v) => v.toFixed(0) }, fixed: { r: [0, 10000] }, marks: markX, series: [
     { label: 'exit bid pot', short: 'xPot', color: '--s3', f: (r, h) => r.S.xPot[h] },
@@ -45,16 +49,17 @@ function renderVerdict(res, ms) {
   const flowing = last7 >= 1;
   // credits keep flowing in unless the last week bought nothing. unsold statements are fine, they wait for phase 2
   $('verdict').className = 'verdict ' + (!flowing ? 'bad' : sm.steadyCredits != null && sm.steadyCredits < 50 ? 'warn' : 'good');
-  $('v1').textContent = 'day ' + days + ': ' + fmtN(sm.credits) + ' credits acquired, ' + fmtN(sm.statements) + ' statements created, ' + fmtN(sm.sold) + ' sold, ' + fmtN(sm.waiting) + ' waiting for phase 2, ' + fmtN(sm.burnEth) + ' eth to buy and burn the coin (' + sm.burnPct.toFixed(1) + '% of supply), launch pot spent ' + (sm.potGoneDay == null ? 'not within ' + days + ' days' : 'by day ' + sm.potGoneDay.toFixed(1)) + '';
+  $('v1').textContent = 'day ' + days + ': ' + fmtN(sm.credits) + ' credits acquired, ' + fmtN(sm.statements) + ' statements created, ' + fmtN(sm.sold) + ' sold at ' + (st.saleOverCost * 100).toFixed(0) + '% of cost on average, ' + fmtN(sm.waiting) + ' still waiting, ' + fmtN(sm.burnEth) + ' eth to buy and burn $CC (' + sm.burnPct.toFixed(1) + '% of supply), launch pot spent ' + (sm.potGoneDay == null ? 'not within ' + days + ' days' : 'by day ' + sm.potGoneDay.toFixed(1)) + '';
   const steady = sm.steadyCredits == null ? '' : ' after the pot ran out: ' + fmtN(sm.steadyCredits) + ' credits and ' + fmtN(sm.steadyStatements) + ' statements a day.';
-  $('v2').textContent = 'fees in ' + fmtN(res.S.cumFees[res.H]) + ' eth. credits cost ' + st.costVsMarket.toFixed(2) + 'x the flat market price, average score ' + st.avgScoreBought.toFixed(0) + '. ' + fmtN(res.T.sold) + ' sold at ' + (st.saleOverCost * 100).toFixed(0) + '% of cost' + (res.T.sold ? ', ' + (st.contestedShare * 100).toFixed(0) + '% of auctions got a second bidder' : '') + '.' + steady + (!flowing ? ' no credit was bought in the last week.' : '');
+  $('v2').textContent = 'fees in ' + fmtN(res.S.cumFees[res.H]) + ' eth. credits cost ' + st.costVsMarket.toFixed(2) + 'x the flat market price, average score ' + st.avgScoreBought.toFixed(0) + '. ' + 'burn from sale proceeds ' + fmtN(sm.saleToBurn) + ' eth, from fees ' + fmtN(sm.feeToBurn) + ' eth.' + (res.T.sold && !res.params.buyOnly ? ' ' + (st.contestedShare * 100).toFixed(0) + '% of auctions got a second bidder.' : '') + steady + (!flowing ? ' no credit was bought in the last week.' : '');
   $('runinfo').textContent = 'ran ' + Math.round(ms) + ' ms, ' + res.H + ' hours, seed ' + p.seed;
 }
 function renderTable(res) {
   const days = res.H / 24, ds = [1, 3, 7, 14, 30, 60, 90, 180].filter((d) => d <= days);
   if (!ds.length || ds[ds.length - 1] !== days) ds.push(days);
   const cols = [['day', (a) => a.day], ['credits acquired', (a) => fmtN(a.credits)], ['statements created', (a) => fmtN(a.composed)], ['sold', (a) => fmtN(a.sold)],
-    ['waiting for phase 2', (a) => fmtN(a.waiting)], ['exited', (a) => fmtN(a.exited)], ['eth to buyback pot', (a) => fmtN(a.saleToBuyback)], ['eth spent buying coin', (a) => fmtN(a.burnEth)],
+    ['waiting', (a) => fmtN(a.waiting)], ['exited', (a) => fmtN(a.exited)], ['average sale price, percent of cost', (a) => (isNaN(a.avgSalePct) ? 'n/a' : a.avgSalePct.toFixed(0) + '%')],
+    ['eth to burn from sales', (a) => fmtN(a.saleToBuyback)], ['eth to burn from fees', (a) => fmtN(a.feeToBuyback)], ['eth spent buying $CC', (a) => fmtN(a.burnEth)],
     ['percent of supply burned', (a) => a.burnedPct.toFixed(2) + '%'], ['fees in, eth', (a) => fmtN(a.cumFees)], ['pot now, eth', (a) => fmtN(a.pot)]];
   let h = '<thead><tr>' + cols.map((c) => '<th>' + c[0] + '</th>').join('') + '</tr></thead><tbody>';
   for (const d of ds) { const a = res.at(d); h += '<tr>' + cols.map((c) => '<td>' + c[1](a) + '</td>').join('') + '</tr>'; }
@@ -63,7 +68,7 @@ function renderTable(res) {
   const notes = [
     '<b>cost per credit</b> ' + st.costVsMarket.toFixed(2) + 'x the flat price, ' + st.costVsAsk.toFixed(2) + 'x what sellers asked',
     '<b>first fill</b> hour ' + (st.firstFillHour < 0 ? 'none' : st.firstFillHour.toFixed(1)) + (st.first80 ? ', first 80 credits cost ' + st.first80.ratio.toFixed(2) + 'x market at score ' + st.first80.avgScore.toFixed(0) : ''),
-    '<b>auctions</b> ' + (T.sold ? st.bidsPerSale.toFixed(2) + ' bids a sale, ' + (st.saleOverReserve * 100 - 100).toFixed(1) + '% over the reserve on average' : 'none sold'),
+    '<b>statement sales</b> ' + (T.sold ? fmtN(T.sold) + ' sold, the first buyer came ' + st.saleAgeHours.toFixed(0) + ' hours after listing on average, ' + (st.saleAtFloorShare * 100).toFixed(0) + '% sold at the lowest price, ' + (st.saleOverFloor * 100 - 100).toFixed(0) + '% over the hard floor on average' : 'none sold'),
     '<b>hourly cap</b> blocked a sale in ' + fmtN(st.capSteps) + ' hours, climb clamp active ' + fmtN(st.clampSteps) + ' hours',
   ];
   if (T.settingsChanges) notes.push('<b>setting change</b> applied on day ' + p0().schedule[0].day);
