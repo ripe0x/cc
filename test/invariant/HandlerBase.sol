@@ -10,7 +10,16 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {Core} from "../../src/Core.sol";
-import {Lane, ICredits, ICreditScore, ICreditStrategy, IStatements, Mainnet} from "../../src/interfaces/Interfaces.sol";
+import {
+    Lane,
+    ICredits,
+    ICreditScore,
+    ICreditStrategy,
+    IStatements,
+    Mainnet,
+    Settings
+} from "../../src/interfaces/Interfaces.sol";
+import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsToken, IArtCoinsMevSkim} from "../../src/interfaces/ArtCoins.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
@@ -21,6 +30,7 @@ import {TestSwapRouter} from "../utils/TestSwapRouter.sol";
 /// everything the handler needs to know about the system under test.
 struct Wiring {
     Core core;
+    IAuctionHouse house;
     IArtCoinsToken coin;
     TestSwapRouter router;
     PoolKey launchKey;
@@ -36,14 +46,14 @@ struct Wiring {
     string tag;
 }
 
-/// @notice handler for the SPEC section 10 invariant suites. every action is bounded, never reverts, and keeps
+/// @notice base of the handler for the SPEC section 10 invariant suites, on the flow rework surface. every action is bounded, never reverts, and keeps
 /// ghost accounting that the invariant functions check. a violation is written to the `viol` counters and never
 /// asserted here, because under `fail_on_revert = false` a reverting handler would hide it.
 ///
 /// actors hold real credits moved out of the CreditStrategy by prank in the fixture. coin trades go through the
 /// real launch pool on the real PoolManager under the live skim hook, which pays its bounty into the core's
 /// `receive()`. the anti sniper window skims up to 90 percent of a swap, so the fee model reads the live skim rate.
-contract Handler is Test {
+abstract contract HandlerBase is Test {
     using FixedPointMathLib for uint256;
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
@@ -60,7 +70,7 @@ contract Handler is Test {
     uint8 internal constant A_WARP = 5;
     uint8 internal constant A_ROLL = 6;
     uint8 internal constant A_COMPOSE = 7;
-    uint8 internal constant A_BUY_STATEMENT = 8;
+    uint8 internal constant A_BID = 8;
     uint8 internal constant A_BUYBACK = 9;
     uint8 internal constant A_SKIM = 10;
     uint8 internal constant A_DONATE = 11;
@@ -74,23 +84,32 @@ contract Handler is Test {
     uint8 internal constant A_BUYBACK_EXIT = 19;
     uint8 internal constant A_MODULE_MODE = 20;
     uint8 internal constant A_SIDE_BUY = 21;
-    uint256 internal constant N_ACTIONS = 22;
+    uint8 internal constant A_END_AUCTION = 22;
+    uint8 internal constant A_COLLECT_SALES = 23;
+    uint8 internal constant A_SYNC_STATEMENT = 24;
+    uint8 internal constant A_REPRICE = 25;
+    uint8 internal constant A_SET_SETTINGS = 26;
+    uint8 internal constant A_SET_INVALID = 27;
+    uint8 internal constant A_SET_RATE = 28;
+    uint8 internal constant A_SET_XRATE = 29;
+    uint8 internal constant A_OWNER_MISC = 30;
+    uint256 internal constant N_ACTIONS = 31;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
     uint256 internal constant V_ETH_IN = 2; // eth arrived in the core beyond what the action explains
     uint256 internal constant V_X_OUT = 3; // exit token left the core beyond what the action explains
     uint256 internal constant V_X_IN = 4; // exit token arrived in the core beyond what the action explains
-    uint256 internal constant V_ABOVE_CAP = 5; // a credit was bought above score * rate * (1 + bonus cap)
-    uint256 internal constant V_TIP = 6; // a tip above min(10% of savings, 2% of cost)
-    uint256 internal constant V_SALE_FLOOR = 7; // a statement sold below AUCTION_FLOOR_X of its cost
+    uint256 internal constant V_ABOVE_CAP = 5; // a credit was bought above the blended ceiling with the bonus cap in force
+    uint256 internal constant V_TIP = 6; // a tip above min(tipSavingsBps of savings, tipCapBps of cost)
+    uint256 internal constant V_SALE_FLOOR = 7; // a statement sold below the reserve the core set, or a reserve off its rule
     uint256 internal constant V_DEPART = 8; // a statement left the core without a recorded legal exit
     uint256 internal constant V_EXIT_SHORT = 9; // an exit that returned less than rating * unit per point
     uint256 internal constant V_MODEL = 10; // the core disagrees with the handler's ghost model
     uint256 internal constant V_RATE_UNFUNDED = 11; // the rate rose in an interval that began unfunded
-    uint256 internal constant V_RATE_BOUND = 12; // the rate climbed faster or slower than the rules allow
+    uint256 internal constant V_RATE_BOUND = 12; // the rate moved faster or slower than the settings in force allow
     uint256 internal constant V_FUNDED_STALE = 13; // the stored funded flag disagrees with pot and rate
-    uint256 internal constant V_WINDOW = 14; // hourly spend above the cap in the ghost window
+    uint256 internal constant V_WINDOW = 14; // hourly spend above the cap the core had to apply in the ghost window
     uint256 internal constant V_HOSTILE_OK = 15; // a hostile listing target got through
     uint256 internal constant V_PROBE_OK = 16; // a controller attack call succeeded
     uint256 internal constant V_REENTER = 17; // a reentry attempt succeeded
@@ -99,12 +118,14 @@ contract Handler is Test {
     uint256 internal constant V_BUYBACK = 20; // a buyback slice or tip outside the rules
     uint256 internal constant V_COMPOSE = 21; // a compose outside the rules or a reimbursement above its cap
     uint256 internal constant V_POT = 22; // pot bookkeeping off from the action's flows
-    uint256 internal constant V_REFUND = 23; // an overpayment refund that is not msg.value minus price
+    uint256 internal constant V_REFUND = 23; // a house refund or payout that is not what the house rules give
     uint256 internal constant V_RECEIVE = 24; // the core's receive() reverted, or a swap failed for an unexplained reason
     uint256 internal constant V_SUPPLY = 25; // coin supply differs from the ghost, or rose
     uint256 internal constant V_AUCTION = 26; // the exit token auction broke its price, slice or restart rules
-    uint256 internal constant V_GATE = 27; // the eth bid was open while gated, closed while not, or the gate counter drifted
-    uint256 internal constant N_VIOL = 28;
+    uint256 internal constant V_SETTINGS = 27; // settings changed outside the owner's call, or an owner call misbehaved
+    uint256 internal constant V_HOUSE = 28; // sale proceeds on the house or their collection are off the ghost
+    uint256 internal constant V_OWNER = 29; // an owner action moved assets or the books it must not touch
+    uint256 internal constant N_VIOL = 30;
 
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
@@ -127,6 +148,7 @@ contract Handler is Test {
     //////////////////////////////////////////////////////////////*/
 
     Core public core;
+    IAuctionHouse public house;
     IArtCoinsToken public coin;
     TestSwapRouter public router;
     PoolKey public launchKey;
@@ -150,8 +172,18 @@ contract Handler is Test {
     mapping(uint256 => bool) internal gone;
     /// every controller that was ever installed or probed. none may hold anything.
     address[] public controllers;
-    /// the eth each controller held when the run began
-    mapping(address => uint256) public ethBase;
+
+    /// what the owner and every controller held when the run began, per asset. invariant 8: none may ever hold more
+    struct Base {
+        uint256 eth;
+        uint256 coin;
+        uint256 credits;
+        uint256 statements;
+        uint256 exitToken;
+    }
+
+    mapping(address => Base) public baseOf;
+    address[] public watched;
 
     // per action counters. the handler never reverts, so these survive failing core calls.
     uint256[N_ACTIONS] public attempts;
@@ -196,16 +228,25 @@ contract Handler is Test {
     uint256[] internal cgList;
     uint256[2] public pileCount;
 
-    /// buys the core refused with GateClosed while the gate was closed, in this run
-    uint256 public gateRefusals;
+    // ghost statements. status: the one place every statement ever composed sits at any time
+    uint8 public constant S_LISTED = 1; // eth lane, on the house under `auctionId`
+    uint8 public constant S_HELD = 2; // exit lane, held by the core, never listed
+    uint8 public constant S_SOLD = 3; // a house auction cleared, the winner holds it
+    uint8 public constant S_EXITED = 4; // handed to the exit module
+    uint8 public constant S_TOP = 5; // burned as the top of an overprint
 
-    // ghost statements
     struct SG {
-        uint8 status; // 0 unknown, 1 held, 2 sold, 3 exited, 4 overprint top
+        uint8 status;
         uint8 lane;
         uint256 cost;
-        uint256 price; // sale: paid
-        uint256 quote; // sale: priceOf at the time
+        uint256 reserve; // the reserve the core set at the listing or the latest reprice
+        uint256 auctionId;
+        uint64 listedAt;
+        uint256 bid; // listed: the top bid so far, zero before the first bid
+        address bidder;
+        uint256 price; // sold: the winning bid
+        address winner; // sold: who holds it
+        bool synced; // sold: the core cleared its record with syncStatement
         uint256 required; // exit: rating times unit per point
         uint256 received; // exit: exit token the core received
         uint256 base; // overprint top: the base it went into
@@ -216,11 +257,24 @@ contract Handler is Test {
     mapping(uint256 => SG) internal _sg;
     uint256[] public everHeld;
 
+    // house money. the sum of the winning bids of the auctions that settled, and the eth collected from the house
+    uint256 public gWon;
+    uint256 public gCollected;
+    /// the keccak of the settings the owner last set, which nobody else can change
+    bytes32 public gSettingsHash;
+
     // ghost hourly window
     uint256 public gWinStart;
     uint256 public gWinPot;
     uint256 public gWinSpent;
     uint256 public gSpendEvents;
+    /// the spend cap in bps the window opened under, and whether the owner changed it while the window was open
+    uint256 public gWinCap;
+    bool public gWinCapChanged;
+    /// spends that took a window past the cap it opened under (the owner raised it) or past the cap in force now
+    /// (the owner lowered it after the spending). informational: the core applies the cap in force at each spend
+    uint256 public gOverOpenCap;
+    uint256 public gOverNowCap;
 
     // overprint day counter in the ghost model
     uint256 internal gOpDay;
@@ -237,6 +291,7 @@ contract Handler is Test {
 
     constructor(Wiring memory w) {
         core = w.core;
+        house = w.house;
         coin = w.coin;
         router = w.router;
         launchKey = w.launchKey;
@@ -260,7 +315,7 @@ contract Handler is Test {
             "warp",
             "roll",
             "compose",
-            "buyStatement",
+            "bid",
             "buyback",
             "skim",
             "donate",
@@ -273,14 +328,29 @@ contract Handler is Test {
             "exitStatement",
             "buybackExit",
             "moduleMode",
-            "sideBuy"
+            "sideBuy",
+            "endAuction",
+            "collectSales",
+            "syncStatement",
+            "repriceStatement",
+            "setSettings",
+            "setSettingsInvalid",
+            "setRate",
+            "setXRate",
+            "ownerMisc"
         ];
         names = n;
         controllers.push(w.v1);
         controllers.push(address(w.fuzz));
-        // a contract created at an address that already holds eth on the fork starts with that eth
-        ethBase[w.v1] = w.v1.balance;
-        ethBase[address(w.fuzz)] = address(w.fuzz).balance;
+        // the owner and the controllers are watched from the start. a contract created at an address that already
+        // holds eth on the fork starts with that eth
+        watched.push(w.owner);
+        watched.push(w.v1);
+        watched.push(address(w.fuzz));
+        for (uint256 i; i < watched.length; ++i) {
+            _snapBase(watched[i]);
+        }
+        gSettingsHash = keccak256(abi.encode(core.settings()));
         gSupply = coin.totalSupply();
         gSupplyLast = gSupply;
         gDead = coin.balanceOf(DEAD);
@@ -323,8 +393,30 @@ contract Handler is Test {
         _addCredit(id, lane, cost);
     }
 
-    function seedGhostStatement(uint256 sid, uint8 lane, uint256 cost) external {
-        _sg[sid] = SG(1, lane, cost, 0, 0, 0, 0, 0, 0, address(0));
+    /// a statement the core held before the run began. a sold one is given with its winner, its winning bid and
+    /// whether the proceeds were collected already. a listed one is read back from the house
+    function seedGhostStatement(uint256 sid, address winner, uint256 price, bool collected) external {
+        (bool held, Lane lane, uint256 cost, uint64 clock) = core.statementInfo(sid);
+        SG storage g = _sg[sid];
+        g.lane = uint8(lane);
+        g.cost = cost;
+        g.listedAt = clock;
+        (, uint256 aid, uint256 reserve,,) = core.statementStatus(sid);
+        g.auctionId = aid;
+        if (price != 0) {
+            g.status = S_SOLD;
+            g.reserve = cost * core.settings().reserveBps / 10_000;
+            g.price = price;
+            g.winner = winner;
+            g.synced = !held;
+            gWon += price;
+            if (collected) gCollected += price;
+        } else if (lane == Lane.Exit) {
+            g.status = S_HELD;
+        } else {
+            g.status = S_LISTED;
+            g.reserve = reserve;
+        }
         everHeld.push(sid);
     }
 
@@ -332,6 +424,7 @@ contract Handler is Test {
         gWinStart = start;
         gWinPot = pot;
         gWinSpent = spent;
+        gWinCap = core.settings().spendCapBps;
     }
 
     function seedPendingController(address c, uint256 eta) external {
@@ -363,6 +456,10 @@ contract Handler is Test {
 
     function creditAt(uint256 i) external view returns (uint256) {
         return cgList[i];
+    }
+
+    function watchedCount() external view returns (uint256) {
+        return watched.length;
     }
 
     function controllerCount() external view returns (uint256) {
@@ -501,7 +598,8 @@ contract Handler is Test {
             wp = core.ethPot();
             sp = 0;
         }
-        uint256 cap = wp * 2000 / 10_000;
+        // the core applies the cap in force now to the pot the window opened with
+        uint256 cap = wp * core.settings().spendCapBps / 10_000;
         return cap > sp ? cap - sp : 0;
     }
 
@@ -544,66 +642,78 @@ contract Handler is Test {
         }
     }
 
-    /// the inventory gate is on and the core holds at least INVENTORY_GATE eth lane statements, from the immutables
-    /// and the counter, checked against the held list by the invariants
-    function _gatedNow() internal view returns (bool) {
-        uint256 g = core.INVENTORY_GATE();
-        return g != 0 && core.ethHeld() >= g;
-    }
-
     struct RS {
+        Settings st;
         uint256 rate;
         uint256 pot;
         bool funded;
     }
 
     function _rs() internal view returns (RS memory s) {
+        s.st = core.settings();
         s.rate = core.ethRate();
         s.pot = core.ethPot();
-        // an interval that begins gated is treated exactly like one that begins unfunded
-        s.funded = s.pot * 2000 >= core.AVG_SCORE() * s.rate && !_gatedNow();
+        s.funded = s.pot * s.st.spendCapBps >= uint256(s.st.avgScore) * s.rate;
     }
 
-    /// invariant 6 and its companions. the rate may not rise in an interval that began unfunded or gated. across a
-    /// warp it may not climb faster than 8 percent an hour and, while funded and under the clamp, not slower
-    /// than 1 percent an hour. the stored funded flag must agree with the pot and the rate.
+    /// whole hours as a wad, for the growth factor of the rate
+    function _growth(uint256 bps, uint256 dt) internal pure returns (uint256) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(dt * 1e18 / 3600)));
+    }
+
+    /// invariant 6 and its companions, against the settings in force over the interval (they cannot change inside
+    /// one action or one warp, only the owner's calls change them and those are checked on their own). the rate does
+    /// not rise in an interval that began unfunded. across a warp it climbs at most `climbMaxBps` an hour and, while
+    /// funded and under the clamp, at least `climbBaseBps` an hour. with a zero base it does not move at all. the
+    /// stored funded flag must agree with the pot and the stored rate
     function _rsCheck(RS memory s, uint256 dt) internal {
         uint256 rate1 = core.ethRate();
         if (!s.funded && rate1 > s.rate) {
-            _flag(V_RATE_UNFUNDED, "rate rose in an interval that began unfunded or gated");
+            _flag(V_RATE_UNFUNDED, "rate rose in an interval that began unfunded");
         }
         if (dt == 0) {
             if (rate1 > s.rate) _flag(V_RATE_BOUND, "rate rose with no time passing");
+        } else if (s.st.climbBaseBps == 0) {
+            if (rate1 != s.rate) _flag(V_RATE_BOUND, "rate moved with a zero climb");
         } else {
-            uint256 hoursWad = dt * 1e18 / 3600;
-            // forge-lint: disable-next-line(unsafe-typecast)
-            uint256 maxR = s.rate * uint256(FixedPointMathLib.powWad(1.08e18, int256(hoursWad))) / 1e18;
-            if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above 8 percent an hour");
+            uint256 maxR = s.rate * _growth(s.st.climbMaxBps, dt) / 1e18;
+            if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above climbMaxBps an hour");
             if (s.funded) {
-                uint256 cap = s.pot * 2000 / core.AVG_SCORE();
+                uint256 cap = s.pot * s.st.spendCapBps / s.st.avgScore;
                 uint256 minR = s.rate;
                 if (s.rate < cap) {
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    minR = s.rate * uint256(FixedPointMathLib.powWad(1.01e18, int256(hoursWad))) / 1e18;
+                    minR = s.rate * _growth(s.st.climbBaseBps, dt) / 1e18;
                     if (minR > cap) minR = cap;
                 }
-                if (rate1 + rate1 / 1e9 + 4 < minR) _flag(V_RATE_BOUND, "funded rate climbed below 1 percent an hour");
+                if (rate1 + rate1 / 1e9 + 4 < minR) {
+                    _flag(V_RATE_BOUND, "funded rate climbed below climbBaseBps an hour");
+                }
             } else if (rate1 != s.rate) {
                 _flag(V_RATE_UNFUNDED, "unfunded rate moved");
             }
         }
-        if (core.funded() != (core.ethPot() * 2000 >= core.AVG_SCORE() * rate1)) {
-            _flag(V_FUNDED_STALE, "funded flag disagrees with pot and rate");
-        }
+        _fundedCheck();
     }
 
-    /// independent hourly window ghost. a spend after the window expired opens a new window whose pot is the
-    /// pot as it stood before the action. every spend adds to the window.
+    function _fundedCheck() internal {
+        Settings memory st = core.settings();
+        bool want = core.ethPot() * st.spendCapBps >= uint256(st.avgScore) * core.rateAtCheckpoint();
+        if (core.funded() != want) _flag(V_FUNDED_STALE, "funded flag disagrees with pot and the stored rate");
+    }
+
+    /// independent hourly window ghost. a spend after the window expired opens a new window whose pot is the pot as
+    /// it stood before the action. every spend adds to the window. the core compares the window's spend with the
+    /// pot the window opened with times the cap in force at the spend, so that is what is checked. a spend that goes
+    /// past the cap the window opened under, because the owner raised the cap since, is counted and reported
     function _recordSpend(uint256 x, uint256 potPre) internal {
+        uint256 capNow = core.settings().spendCapBps;
         if (block.timestamp >= gWinStart + 1 hours) {
             gWinStart = block.timestamp;
             gWinPot = potPre;
             gWinSpent = 0;
+            gWinCap = capNow;
+            gWinCapChanged = false;
         }
         gWinSpent += x;
         gSpendEvents++;
@@ -612,7 +722,11 @@ contract Handler is Test {
             uint256 bps = gWinSpent * 10_000 / gWinPot;
             if (bps > biggestSpendBps) biggestSpendBps = bps;
         }
-        if (gWinSpent * 10_000 > gWinPot * 2000) _flag(V_WINDOW, "ghost window spend above 20 percent of its pot");
+        if (gWinSpent * 10_000 > gWinPot * capNow) _flag(V_WINDOW, "window spend above the cap in force at the spend");
+        if (gWinSpent * 10_000 > gWinPot * gWinCap) gOverOpenCap++;
+        if (!gWinCapChanged && gWinSpent * 10_000 > gWinPot * gWinCap) {
+            _flag(V_WINDOW, "window spend above the cap it opened under with no change of the cap");
+        }
     }
 
     /// true while the controller in charge answers hostilely. its answers may depend on gas and on warm or cold
@@ -622,15 +736,26 @@ contract Handler is Test {
         return core.controller() == address(fuzz) && fuzz.hostile();
     }
 
+    /// the most the core may pay for a credit of `score` at `rate` under settings `s`: the blend of the flat share
+    /// and the score share, with the controller bonus at its cap, written out again from docs/FLOW.md section 3
+    function _maxPrice(uint256 score, uint256 rate, Settings memory s) internal pure returns (uint256) {
+        uint256 blend = uint256(s.flatBps) * s.avgScore + (10_000 - uint256(s.flatBps)) * score;
+        return blend * rate * (10_000 + uint256(s.bonusCapBps)) / (10_000 * 10_000 * 1e4);
+    }
+
     /// the ceiling bound to check against: the exact one read before for a controller that answers the same way
-    /// twice, the bonus cap bound for a hostile one.
-    function _ceilBound(uint256 readBefore, uint256 score, uint256 rate) internal view returns (uint256) {
-        return _hostileNow() ? score * rate * 12_500 / 1e8 : readBefore;
+    /// twice, the blended ceiling with the bonus cap for a hostile one. the bonus cap bound is always checked too
+    function _ceilBound(uint256 readBefore, uint256 score, uint256 rate, Settings memory s)
+        internal
+        view
+        returns (uint256)
+    {
+        return _hostileNow() ? _maxPrice(score, rate, s) : readBefore;
     }
 
     /// what the rate becomes after a spend of x from pot p.
-    function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
-        return r - r * core.DROP_BPS() * x / (10_000 * p);
+    function _dropped(uint256 r, uint256 x, uint256 p, uint256 dropBps) internal pure returns (uint256) {
+        return r - r * dropBps * x / (10_000 * p);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -715,9 +840,35 @@ contract Handler is Test {
         if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "the core holds coin");
     }
 
+    /// the settings are the owner's alone: after every action they equal what the owner last set
+    function _settingsCheck() internal {
+        if (keccak256(abi.encode(core.settings())) != gSettingsHash) {
+            _flag(V_SETTINGS, "the settings differ from what the owner last set");
+        }
+    }
+
+    function _snapBase(address who) internal {
+        Base storage b = baseOf[who];
+        b.eth = who.balance;
+        b.coin = coin.balanceOf(who);
+        b.credits = CREDITS.balanceOf(who);
+        b.statements = STATEMENTS.balanceOf(who);
+        b.exitToken = _xBal(who);
+    }
+
+    /// what the house owes the core is the winning bids of the settled auctions less what was collected, always
+    function _houseCheck() internal {
+        if (house.pendingRefunds(address(core)) != gWon - gCollected) {
+            _flag(V_HOUSE, "what the house owes the core differs from the winning bids less the collected");
+        }
+    }
+
     modifier checked() {
         _;
         _coinCheck();
+        _houseCheck();
+        _settingsCheck();
+        _fundedCheck();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -905,39 +1056,21 @@ contract Handler is Test {
             p.score[i] = _score(ids[i]);
         }
         RS memory rs = _rs();
-        bool gated = _gatedNow();
         vm.recordLogs();
         _att(a);
         vm.prank(who);
         try core.sellForEth(ids) {
-            if (gated) _flag(V_GATE, "sellForEth went through while the gate was closed");
             _ok(a);
-            _afterSell(who, ids, p);
+            _afterSell(who, ids, p, rs.st);
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "sellForEth");
-            _gateReason(gated, why);
             // a hostile controller may answer differently each time it is asked, which moves the ceiling
-            if (!overshoot && !dup && !_hostileNow() && !gated) _unexpected(a, why);
+            if (!overshoot && !dup && !_hostileNow()) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
     }
 
-    /// while the gate is closed a buy reverts with GateClosed (the other guards that run before it are not tripped by
-    /// the handler's calls), and while it is open it never does
-    function _gateReason(bool gated, bytes memory why) internal {
-        bool isGate = why.length >= 4 && bytes4(why) == Core.GateClosed.selector;
-        if (isGate && gated) {
-            gateRefusals++;
-            string memory key = string.concat("INV_", tag, "_gaterefusals");
-            vm.setEnv(key, vm.toString(vm.envOr(key, uint256(0)) + 1));
-        }
-        if (isGate && !gated) _flag(V_GATE, "GateClosed while the gate is open");
-        if (gated && !isGate && !_hostileNow()) {
-            _flag(V_GATE, "a closed bid reverted for another reason than GateClosed");
-        }
-    }
-
-    function _afterSell(address who, uint256[] memory ids, SellPre memory p) internal {
+    function _afterSell(address who, uint256[] memory ids, SellPre memory p, Settings memory st) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         uint256[] memory costs = new uint256[](ids.length);
         uint256 total;
@@ -951,11 +1084,9 @@ contract Handler is Test {
             for (uint256 j; j < ids.length; ++j) {
                 if (ids[j] == id) {
                     costs[j] = cost;
-                    // invariant 2: score * rate * (1 + bonus cap), rate read just before the action
-                    if (cost > p.score[j] * p.rate * 12_500 / 1e8) {
-                        _flag(V_ABOVE_CAP, "sellForEth above the bonus cap");
-                    }
-                    uint256 limit = _ceilBound(p.ceil[j], p.score[j], p.rate);
+                    // invariant 2: the blended ceiling with the bonus cap in force, rate read just before the action
+                    if (cost > _maxPrice(p.score[j], p.rate, st)) _flag(V_ABOVE_CAP, "sellForEth above the bonus cap");
+                    uint256 limit = _ceilBound(p.ceil[j], p.score[j], p.rate, st);
                     if (cost > limit) _flag(V_ABOVE_CAP, "sellForEth above the ceiling read before");
                     ceilSum += limit;
                     break;
@@ -971,12 +1102,12 @@ contract Handler is Test {
         _eth(p.bal, paid, 0, "sellForEth");
         if (core.ethPot() != p.pot - total) _flag(V_POT, "sellForEth pot not reduced by the price");
 
-        // the drop on each fill, independently: r -= r * 10% * x / pot, pot measured before each spend
+        // the drop on each fill, independently: r -= r * dropBps * x / pot, pot measured before each spend
         uint256 r = p.rate;
         uint256 pot = p.pot;
         for (uint256 i; i < ids.length; ++i) {
             _recordSpend(costs[i], p.pot);
-            r = _dropped(r, costs[i], pot);
+            r = _dropped(r, costs[i], pot, st.dropBps);
             pot -= costs[i];
             _addCredit(ids[i], 0, costs[i]);
             _removeFrom(inventory[who], ids[i]);
@@ -998,8 +1129,8 @@ contract Handler is Test {
             if (gone[cand]) continue;
             uint256 p = ICreditStrategy(STRATEGY).nftForSale(cand);
             if (p == 0) continue;
-            // the keeper tip is booked as spend on top of the price, up to 2 percent of it
-            if (core.ceilingOf(cand) >= p && p * 10_200 / 10_000 <= _budget()) {
+            // the keeper tip is booked as spend on top of the price, up to tipCapBps of it
+            if (core.ceilingOf(cand) >= p && p * (10_000 + core.settings().tipCapBps) / 10_000 <= _budget()) {
                 id = cand;
                 price = p;
                 allowed = true;
@@ -1073,22 +1204,21 @@ contract Handler is Test {
         p.ceiling = core.ceilingOf(id);
         p.score = _score(id);
         RS memory rs = _rs();
-        bool gated = _gatedNow();
         _att(a);
         vm.prank(keeper);
         try core.buyListing(value, data, id, target) {
-            if (gated) _flag(V_GATE, "buyListing went through while the gate was closed");
             _ok(a);
-            _afterListing(a, id, value, expectCost, p);
+            _afterListing(a, id, value, expectCost, p, rs.st);
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "buyListing");
-            _gateReason(gated, why);
-            if (expect && !gated) _unexpected(a, why);
+            if (expect) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
     }
 
-    function _afterListing(uint8 a, uint256 id, uint256 value, uint256 expectCost, LPre memory p) internal {
+    function _afterListing(uint8 a, uint256 id, uint256 value, uint256 expectCost, LPre memory p, Settings memory st)
+        internal
+    {
         if (a == A_LISTING_HOSTILE && !probe.honest(probe.mode())) {
             _flag(V_HOSTILE_OK, "a hostile listing target got a buy through");
         }
@@ -1097,18 +1227,21 @@ contract Handler is Test {
         uint256 cost = outflow - tip;
         if (cost != expectCost) _flag(V_ETH_OUT, "listing cost differs from what the target should charge");
         // the ceiling was read before the action. the bonus cap and the tip rules are checked against it
-        uint256 ceiling = _ceilBound(p.ceiling, p.score, p.rate);
+        uint256 ceiling = _ceilBound(p.ceiling, p.score, p.rate, st);
         if (value > ceiling) _flag(V_ABOVE_CAP, "listing value above the ceiling");
         if (cost > value) _flag(V_ABOVE_CAP, "listing cost above the value");
-        if (cost + tip > p.score * p.rate * 12_500 / 1e8) _flag(V_ABOVE_CAP, "listing above the bonus cap");
+        if (cost + tip > _maxPrice(p.score, p.rate, st)) _flag(V_ABOVE_CAP, "listing above the bonus cap");
         if (cost + tip > ceiling) _flag(V_ABOVE_CAP, "listing cost plus tip above the ceiling");
-        if (tip * 10_000 > 1000 * (ceiling > cost ? ceiling - cost : 0) || tip * 10_000 > 200 * cost) {
-            _flag(V_TIP, "tip above min(10 percent of savings, 2 percent of cost)");
+        if (
+            tip * 10_000 > uint256(st.tipSavingsBps) * (ceiling > cost ? ceiling - cost : 0)
+                || tip * 10_000 > uint256(st.tipCapBps) * cost
+        ) {
+            _flag(V_TIP, "tip above min(tipSavingsBps of savings, tipCapBps of cost)");
         }
         _eth(p.bal, tip + expectCost, 0, "buyListing");
         if (core.ethPot() != p.pot - cost - tip) _flag(V_POT, "listing pot not reduced by cost and tip");
         _recordSpend(cost + tip, p.pot);
-        if (core.ethRate() != _dropped(p.rate, cost + tip, p.pot)) {
+        if (core.ethRate() != _dropped(p.rate, cost + tip, p.pot, st.dropBps)) {
             _flag(V_RATE_BOUND, "drop on fill is not proportional to the share spent");
         }
         if (CREDITS.ownerOf(id) != address(core)) _flag(V_MODEL, "listing did not deliver the credit");
@@ -1183,6 +1316,7 @@ contract Handler is Test {
         uint256 sum;
         uint256 basefee;
         uint256 gasUsed;
+        Settings st;
         bool valid;
     }
 
@@ -1202,6 +1336,7 @@ contract Handler is Test {
         if (ready ? gate % 2 != 0 : gate % 13 != 0) return _skip(a);
         CPre memory p;
         p.valid = ready && _validPage(lane, ids, format);
+        p.st = core.settings();
         p.pot = core.ethPot();
         p.rate = core.ethRate();
         p.bal = address(core).balance;
@@ -1247,20 +1382,24 @@ contract Handler is Test {
     }
 
     function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
-        vm.getRecordedLogs();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
         if (!p.valid) _flag(V_COMPOSE, "composed a page the ghost model considers invalid");
         uint256 sid = STATEMENTS.supply();
-        if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != address(core)) {
-            _flag(V_COMPOSE, "new statement id is not supply + 1 or not owned by the core");
+        if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != (lane == Lane.Eth ? address(house) : address(core))) {
+            _flag(V_COMPOSE, "new statement id is not supply + 1 or not held by the house (eth lane) or the core");
         }
         uint256 reimb = keeper.balance - p.callerBal;
-        // gas reimbursement: min(gas * basefee * 110%, 5% of the statement cost). the exit lane caps against
-        // 80 average credits at the eth rate. the gas used is what the handler saw, which is at least what
-        // the core measured, plus its fixed overhead
-        uint256 gasCap = (p.gasUsed + 50_000) * p.basefee * 110 / 100;
-        uint256 costCap = lane == Lane.Eth ? p.sum * 500 / 10_000 : 80 * core.AVG_SCORE() * p.rate / 1e4 * 500 / 10_000;
+        // gas reimbursement: min(gas * basefee * reimburseBps, reimburseCapBps of the cost). the exit lane caps against
+        // 80 average credits at the eth rate. the gas used is what the handler saw, which is at least what the core
+        // measured, plus its fixed overhead and, on the eth lane, the gas the core counts for the listing
+        uint256 extra = 50_000 + (lane == Lane.Eth ? 350_000 : 0);
+        uint256 gasCap = (p.gasUsed + extra) * p.basefee * p.st.reimburseBps / 10_000;
+        uint256 base = lane == Lane.Eth ? p.sum : 80 * uint256(p.st.avgScore) * p.rate / 1e4;
+        uint256 costCap = base * p.st.reimburseCapBps / 10_000;
         uint256 cap = gasCap < costCap ? gasCap : costCap;
-        if (reimb > cap) _flag(V_COMPOSE, "gas reimbursement above min(gas * basefee * 110%, 5% of cost)");
+        if (reimb > cap) {
+            _flag(V_COMPOSE, "gas reimbursement above min(gas * basefee * reimburseBps, reimburseCapBps of cost)");
+        }
         if (reimb > p.pot) _flag(V_COMPOSE, "gas reimbursement above the pot");
         _eth(p.bal, reimb, 0, "compose");
         if (core.ethPot() != p.pot - reimb) _flag(V_POT, "compose pot not reduced by the reimbursement");
@@ -1271,83 +1410,53 @@ contract Handler is Test {
             cg[ids[i]].inPile = false;
         }
         pileCount[uint8(lane)] -= 80;
-        _sg[sid] = SG(1, uint8(lane), cost, 0, 0, 0, 0, 0, 0, address(0));
-        everHeld.push(sid);
-    }
-
-    struct BPre {
-        uint256 bal;
-        uint256 pot;
-        uint256 toBuyback;
-        uint256 rate;
-        uint256 buyerBal;
-        uint256 price;
-        uint256 cost;
-        uint256 value;
-    }
-
-    /// buys an eth lane statement at its auction price with a random overpayment.
-    function buyStatement(uint256 sIdx, uint256 aSeed, uint256 overSeed, uint256 mode) external checked {
-        uint8 a = A_BUY_STATEMENT;
-        uint256[] memory held = core.heldStatements();
-        if (held.length == 0) return _skip(a);
-        uint256 sid = held[sIdx % held.length];
-        (, Lane lane, uint256 cost,) = core.statementInfo(sid);
-        address who = _actor(aSeed);
-        BPre memory p;
-        p.cost = cost;
-        if (lane == Lane.Eth) {
-            p.price = core.priceOf(sid);
-        } else {
-            // an exit lane statement is not for sale. a call with eth must revert
-            p.price = 1 ether;
-        }
-        uint256 over = mode % 4 == 0 ? 0 : _logBound(overSeed, 1, 20 ether);
-        p.value = p.price + over;
-        bool under = mode % 11 == 0;
-        if (under) p.value = p.price - 1;
-        p.bal = address(core).balance;
-        p.pot = core.ethPot();
-        p.toBuyback = core.ethToBuyback();
-        p.rate = core.ethRate();
-        vm.deal(who, who.balance + p.value);
-        p.buyerBal = who.balance;
-        RS memory rs = _rs();
-        _att(a);
-        vm.prank(who);
-        try core.buyStatement{value: p.value}(sid) {
-            _ok(a);
-            _afterBuy(sid, who, lane, p);
-        } catch (bytes memory why) {
-            _failed(p.bal, p.pot, p.rate, "buyStatement");
-            if (lane == Lane.Eth && !under) _unexpected(a, why);
-        }
-        _rsCheck(rs, 0);
-    }
-
-    function _afterBuy(uint256 sid, address who, Lane lane, BPre memory p) internal {
-        if (lane != Lane.Eth) _flag(V_SALE_FLOOR, "an exit lane statement was sold for eth");
-        if (p.value < p.price) _flag(V_SALE_FLOOR, "sold for less than the price");
-        uint256 paid = p.buyerBal - who.balance;
-        // refund is msg.value minus price, so the buyer is out exactly the price
-        if (paid != p.price) _flag(V_REFUND, "buyer paid something other than the price, refund is off");
-        _eth(p.bal, 0, paid, "buyStatement");
         SG storage g = _sg[sid];
-        // invariant 3: the price paid against the ghost cost basis
-        if (paid * 10_000 < g.cost * core.AUCTION_FLOOR_X()) {
-            _flag(V_SALE_FLOOR, "statement sold below AUCTION_FLOOR_X of its cost");
+        g.lane = uint8(lane);
+        g.cost = cost;
+        everHeld.push(sid);
+        if (lane == Lane.Exit) {
+            g.status = S_HELD;
+        } else {
+            // the statement sits on the house at the reserve of the settings in force, listed now
+            _ghostListed(sid, cost, p.st.reserveBps, logs);
         }
-        if (paid * 10_000 > g.cost * core.AUCTION_START_X() + 10_000) {
-            _flag(V_SALE_FLOOR, "statement sold above AUCTION_START_X of its cost");
+    }
+
+    /// the statement was listed on the house: the core's own event gives the auction id and the reserve, which must
+    /// be the cost times reserveBps, and the house must hold the statement under that auction at that reserve
+    function _ghostListed(uint256 sid, uint256 cost, uint256 reserveBps, Vm.Log[] memory logs) internal {
+        SG storage g = _sg[sid];
+        uint256 id;
+        uint256 reserve;
+        uint256 seen;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != Core.StatementListed.selector) continue;
+            if (uint256(logs[i].topics[1]) != sid) continue;
+            id = uint256(logs[i].topics[2]);
+            reserve = abi.decode(logs[i].data, (uint256));
+            seen++;
         }
-        if (g.cost != p.cost) _flag(V_MODEL, "statement cost basis differs from the ghost");
-        uint256 toBuyback = paid * 5000 / 10_000;
-        if (core.ethToBuyback() != p.toBuyback + toBuyback) _flag(V_POT, "sale buyback share is not half");
-        if (core.ethPot() != p.pot + paid - toBuyback) _flag(V_POT, "sale pot share is not the other half");
-        if (STATEMENTS.ownerOf(sid) != who) _flag(V_MODEL, "buyer does not own the statement");
-        g.status = 2;
-        g.price = paid;
-        g.quote = p.price;
+        if (seen != 1) _flag(V_MODEL, "a listing did not emit exactly one StatementListed");
+        uint256 want = cost * reserveBps / 10_000;
+        if (reserve != want) _flag(V_SALE_FLOOR, "the listing reserve is not cost * reserveBps");
+        IAuctionHouse.Auction memory au = house.getAuction(id);
+        if (au.reservePrice != reserve || au.tokenOwner != address(core) || au.tokenId != sid || au.amount != 0) {
+            _flag(V_SALE_FLOOR, "the house record differs from what the core listed");
+        }
+        if (_ownerOf(sid) != address(house)) _flag(V_MODEL, "a listed statement is not held by the house");
+        g.status = S_LISTED;
+        g.auctionId = id;
+        g.reserve = reserve;
+        g.listedAt = uint64(block.timestamp);
+        g.bid = 0;
+        g.bidder = address(0);
+    }
+
+    /// the statement can be named in an overprint: an exit lane statement the core holds, or an eth lane statement
+    /// listed on the house with no bid on it
+    function _openOrHeld(uint256 sid) internal view returns (bool) {
+        SG storage g = _sg[sid];
+        return g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
     }
 
     /// overprint as the controller asks. the cap, the pair rules and the rating sum are checked against ghosts.
@@ -1357,8 +1466,8 @@ contract Handler is Test {
         if (!ok || out.length < 96) return _skip(a);
         (uint256 flag, uint256 base, uint256 top) = abi.decode(out, (uint256, uint256, uint256));
         if (flag != 1 && block.number % 7 != 0) return _skip(a);
-        bool valid = flag == 1 && base != top && _sg[base].status == 1 && _sg[top].status == 1
-            && _sg[base].lane == _sg[top].lane;
+        bool valid =
+            flag == 1 && base != top && _sg[base].lane == _sg[top].lane && _openOrHeld(base) && _openOrHeld(top);
         uint256 day = block.timestamp / 1 days;
         uint256 countToday = day == gOpDay ? gOpCount : 0;
         bool capped = countToday >= 8;
@@ -1368,10 +1477,12 @@ contract Handler is Test {
         uint256 b0 = address(core).balance;
         uint256 rate0 = core.ethRate();
         RS memory rs = _rs();
+        vm.recordLogs();
         _att(a);
         vm.prank(keeper);
         try core.overprint() {
             _ok(a);
+            Vm.Log[] memory logs = vm.getRecordedLogs();
             if (!valid) _flag(V_OVERPRINT, "overprint of a pair the ghost model considers invalid");
             if (capped) _flag(V_OVERPRINT, "ninth overprint of the day succeeded");
             if (day != gOpDay) {
@@ -1380,11 +1491,17 @@ contract Handler is Test {
             }
             gOpCount++;
             _sg[base].cost += _sg[top].cost;
-            _sg[top].status = 4;
+            _sg[top].status = S_TOP;
             _sg[top].base = base;
             _sg[top].ratingSum = rb + rt;
+            // the eth lane base is listed again at the summed cost, its clock restarts. the exit lane is never listed
+            bool eth = _sg[base].lane == uint8(Lane.Eth);
+            if (eth) _ghostListed(base, _sg[base].cost, rs.st.reserveBps, logs);
             (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(base);
-            if (!held || uint8(lane) != _sg[base].lane || cost != _sg[base].cost || clockStart != block.timestamp) {
+            if (
+                !held || uint8(lane) != _sg[base].lane || cost != _sg[base].cost
+                    || clockStart != (eth ? block.timestamp : 0)
+            ) {
                 _flag(V_MODEL, "overprint cost basis or clock differs from the ghost");
             }
             if (STATEMENTS.creditScoreOf(base) != rb + rt) _flag(V_OVERPRINT, "overprint rating is not the sum");
@@ -1411,6 +1528,9 @@ contract Handler is Test {
         uint256 whoBal;
         uint256 dead;
         uint256 bps;
+        uint256 owed;
+        uint256 toSales;
+        Settings st;
     }
 
     /// the eth buyback: the core swaps a slice of the buyback pot for coin in the real pool and burns the coin on
@@ -1420,12 +1540,19 @@ contract Handler is Test {
         uint8 a = A_BUYBACK;
         address who = _actor(aSeed);
         BbPre memory p;
-        p.pool = core.ethToBuyback();
-        if (p.pool == 0 || (block.number < core.lastBuybackBlock() + 25 && aSeed % 5 != 0)) return _skip(a);
-        p.slice = p.pool < 1 ether ? p.pool : 1 ether;
-        p.tip0 = p.slice * 50 / 10_000;
+        p.st = core.settings();
+        // sale proceeds waiting in the house are collected first, split by the settings in force now. the buyback
+        // pot and the pot that the action starts from include that collection
+        p.owed = house.pendingRefunds(address(core));
+        p.toSales = p.owed * p.st.saleToBuybackBps / 10_000;
+        p.pool = core.ethToBuyback() + p.toSales;
+        if (p.pool == 0 || (block.number < core.lastBuybackBlock() + p.st.buybackDelay && aSeed % 5 != 0)) {
+            return _skip(a);
+        }
+        p.slice = p.pool < p.st.buybackSlice ? p.pool : p.st.buybackSlice;
+        p.tip0 = p.slice * p.st.keeperTipBps / 10_000;
         p.bal = address(core).balance;
-        p.pot = core.ethPot();
+        p.pot = core.ethPot() + p.owed - p.toSales;
         p.rate = core.ethRate();
         p.whoBal = who.balance;
         p.dead = coin.balanceOf(DEAD);
@@ -1438,7 +1565,7 @@ contract Handler is Test {
             _ok(a);
             _afterBuyback(who, p, vm.getRecordedLogs());
         } catch (bytes memory why) {
-            _failed(p.bal, p.pot, p.rate, "buyback");
+            _failed(p.bal, p.pot + p.toSales - p.owed, p.rate, "buyback");
             _swapFailed(why);
         }
         _rsCheck(rs, 0);
@@ -1450,8 +1577,11 @@ contract Handler is Test {
         uint256 evTip;
         uint256 bought;
         uint256 burned;
+        uint256 collected;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.Buyback.selector) {
+            if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.SalesCollected.selector) {
+                (collected,) = abi.decode(logs[i].data, (uint256, uint256));
+            } else if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.Buyback.selector) {
                 (spent, evTip) = abi.decode(logs[i].data, (uint256, uint256));
             } else if (logs[i].emitter == address(coin) && logs[i].topics[0] == TRANSFER) {
                 (uint256 amt) = abi.decode(logs[i].data, (uint256));
@@ -1468,12 +1598,15 @@ contract Handler is Test {
         if (burned != bought) _flag(V_BUYBACK, "buyback did not burn exactly the coin it bought");
         if (spent == 0 || spent > budget) _flag(V_BUYBACK, "buyback spent more than the slice less the tip");
         if (evTip != tip) _flag(V_BUYBACK, "buyback tip event differs from what the caller received");
-        if (tip != p.tip0 * spent / budget) _flag(V_BUYBACK, "buyback tip is not 0.5 percent of the slice, scaled");
+        if (tip != p.tip0 * spent / budget) _flag(V_BUYBACK, "buyback tip is not keeperTipBps of the slice, scaled");
+        // the sale proceeds the house owed were collected first, once, by the amount it owed
+        if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
+        gCollected += collected;
         if (core.ethToBuyback() != p.pool - spent - tip) {
             _flag(V_BUYBACK, "buyback pot is not the pot less what was spent and tipped");
         }
         // eth leaves as the swap input plus the tip. the skim of the swap comes back as an inflow
-        _eth(p.bal, spent + tip, bounty, "buyback");
+        _eth(p.bal, spent + tip, bounty + p.owed, "buyback");
         if (core.ethPot() != p.pot + bounty) _flag(V_POT, "buyback skim not booked to the pot");
         if (volume != spent) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
         (uint256 eb, uint256 ep) = _expectSkim(volume, true, p.bps);
@@ -1640,12 +1773,15 @@ contract Handler is Test {
         {
             uint256 pot = core.xPot();
             uint256 r = core.xRate();
+            Settings memory st = core.settings();
             for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
                 uint256 id = inventory[who][(pick % len + k) % len];
                 uint256 price = _score(id) * r * unit / 10_000;
-                if (price <= pot) {
+                // a credit the exit bid prices at zero (an exit rate of zero, which the owner may set) is refused
+                if (price != 0 && price <= pot) {
                     pot -= price;
-                    r = r >= 3020 ? r - 20 : 3000;
+                    r = r > st.xRateDropPerCredit ? r - st.xRateDropPerCredit : 0;
+                    if (r < st.xRateFloor) r = st.xRateFloor;
                     ids[n++] = id;
                 }
             }
@@ -1722,6 +1858,11 @@ contract Handler is Test {
         uint256 priceNow;
         uint8 lane;
         bool ripe;
+        /// the statement is listed with no bid on it (eth lane), or held and never listed (exit lane)
+        bool open;
+        /// the selector the call must revert with when the model says it reverts, zero when the cause is the module
+        bytes4 refusal;
+        Settings st;
     }
 
     /// exits a held statement through the module. eth lane statements only after their auction ran its length.
@@ -1734,10 +1875,18 @@ contract Handler is Test {
         uint256 sid = held[sIdx % held.length];
         (, Lane lane,, uint64 clock) = core.statementInfo(sid);
         EPre memory p;
+        p.st = core.settings();
         p.lane = uint8(lane);
-        p.ripe = lane == Lane.Exit || block.timestamp >= uint256(clock) + 72 hours;
-        // an unripe eth lane statement is only tried now and then, to see the refusal
-        if (!p.ripe && aSeed % 6 != 0) return _skip(a);
+        SG storage g = _sg[sid];
+        p.ripe = lane == Lane.Exit || block.timestamp >= uint256(clock) + p.st.exitAfter;
+        // an eth lane statement exits when it was listed without a bid for exitAfter. a bid makes the cancel revert,
+        // and a sold statement the core has not synced is no longer on the house
+        p.open = g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
+        if (!p.ripe) p.refusal = Core.TooEarly.selector;
+        else if (g.status == S_SOLD) p.refusal = Core.NotListed.selector;
+        else if (g.status == S_LISTED && g.bid != 0) p.refusal = Core.HasBid.selector;
+        // an unripe or unopen eth lane statement is only tried now and then, to see the refusal
+        if ((!p.ripe || !p.open) && aSeed % 6 != 0) return _skip(a);
         p.xbal = _xBal(address(core));
         p.xpot = core.xPot();
         p.xto = core.xToBuyback();
@@ -1758,21 +1907,26 @@ contract Handler is Test {
             _afterExit(sid, p);
         } catch (bytes memory why) {
             _failed(p.b0, p.pot0, p.rate0, "exitStatement");
-            if (_ownerOf(sid) != address(core)) _flag(V_DEPART, "an exit reverted but the statement left the core");
-            // the module pays by what it reports now. a payout below the stored unit must be refused
-            if (p.ripe && p.unit != 0 && module.shortfallBps() == 0 && module.currentUnit() >= p.unit) {
+            if (_ownerOf(sid) == address(0) || _ownerOf(sid) == address(module)) {
+                _flag(V_DEPART, "an exit reverted but the statement left the core");
+            }
+            if (p.refusal != 0 && bytes4(why) != p.refusal) {
                 _unexpected(a, why);
+            } else if (p.refusal == 0 && p.open && p.unit != 0 && module.shortfallBps() == 0) {
+                // the module pays by what it reports now. a payout below the stored unit must be refused
+                if (module.currentUnit() >= p.unit) _unexpected(a, why);
             }
         }
         _rsCheck(rs, 0);
     }
 
     function _afterExit(uint256 sid, EPre memory p) internal {
-        if (!p.ripe) _flag(V_DEPART, "an eth lane statement exited before its auction ran its length");
+        if (!p.ripe) _flag(V_DEPART, "an eth lane statement exited before exitAfter");
+        if (!p.open) _flag(V_DEPART, "a statement with a bid, or already sold, was exited");
         uint256 received = _xBal(address(core)) - p.xbal;
         if (received < p.required) _flag(V_EXIT_SHORT, "exit returned less than rating * unitPerPoint");
         if (p.unit == 0) _flag(V_EXIT_SHORT, "exit with an unreadable unit per point");
-        uint256 toBuyback = p.lane == uint8(Lane.Eth) ? received * 5000 / 10_000 : 0;
+        uint256 toBuyback = p.lane == uint8(Lane.Eth) ? received * p.st.exitToBuybackBps / 10_000 : 0;
         if (core.xToBuyback() != p.xto + toBuyback) _flag(V_POT, "exit buyback share wrong");
         if (core.xPot() != p.xpot + received - toBuyback) _flag(V_POT, "exit pot share wrong");
         _x(p.xbal, 0, received, "exitStatement");
@@ -1790,7 +1944,10 @@ contract Handler is Test {
         if (core.xStartTime() != wantStart) _flag(V_AUCTION, "an exit did not restart the auction clock on injection");
         if (_ownerOf(sid) != address(module)) _flag(V_DEPART, "exited statement is not with the module");
         SG storage g = _sg[sid];
-        g.status = 3;
+        if (g.lane == uint8(Lane.Eth) && house.getAuction(g.auctionId).tokenOwner != address(0)) {
+            _flag(V_DEPART, "an exit left the listing on the house");
+        }
+        g.status = S_EXITED;
         g.required = p.required;
         g.received = received;
         g.module = address(module);
@@ -1835,10 +1992,9 @@ contract Handler is Test {
         }
     }
 
-    /// the auction price written out again: the start price halved once per whole half life (6 hours) elapsed, and
+    /// the auction price written out again: the start price halved once per whole half life elapsed, and
     /// the part of a half life left over taken off with a plain exponential
-    function _modelPrice(uint256 startPrice, uint256 dt) internal pure returns (uint256 p) {
-        uint256 hl = 6 hours;
+    function _modelPrice(uint256 startPrice, uint256 dt, uint256 hl) internal pure returns (uint256 p) {
         uint256 halvings = dt / hl;
         if (halvings >= 256) return 0;
         p = startPrice >> halvings;
@@ -1862,7 +2018,19 @@ contract Handler is Test {
         p.takerCoin = coin.balanceOf(who);
         if (p.takerCoin < p.coinIn) {
             uint256 need = p.coinIn - p.takerCoin;
-            if (need > _coinFor(2 ether) || !_buyExact(who, need)) return _skip(a);
+            uint256 afford = _coinFor(2 ether);
+            if (need > afford && mode % 2 == 0) {
+                // the taker waits for the price to fall to what a little coin from the real pool can pay: one half
+                // life per halving
+                uint256 h = 1;
+                while ((need >> h) > afford && h < 200) ++h;
+                uint256 dt = h * core.settings().xAuctionHalfLife;
+                _advance(dt > 30 days ? 30 days : dt, 0);
+                (p.slice, p.coinIn) = core.exitAuctionQuote();
+                p.price = core.exitAuctionPrice();
+                need = p.coinIn > p.takerCoin ? p.coinIn - p.takerCoin : 0;
+            }
+            if (need > afford || (need != 0 && !_buyExact(who, need))) return _skip(a);
             p.takerCoin = coin.balanceOf(who);
         }
         vm.prank(who);
@@ -1904,14 +2072,17 @@ contract Handler is Test {
         }
         if (p.maxIn < p.coinIn) _flag(V_AUCTION, "a fill went through above the caller's maxCoinIn");
         // the slice is one full slice or what is left
-        uint256 full = 20 * core.AVG_SCORE() * core.unitPerPoint();
+        Settings memory st = core.settings();
+        uint256 full = uint256(st.exitSliceCredits) * st.avgScore * core.unitPerPoint();
         if (slice != (p.xto < full ? p.xto : full) || slice != p.slice) {
-            _flag(V_AUCTION, "auction slice is not min(pot, 20 average credits of exit token)");
+            _flag(V_AUCTION, "auction slice is not min(pot, exitSliceCredits average credits of exit token)");
         }
         // the price: the quote read before, and the halving model written out again
-        uint256 model = _modelPrice(p.startPrice, block.timestamp - p.startTime);
+        uint256 model = _modelPrice(p.startPrice, block.timestamp - p.startTime, st.xAuctionHalfLife);
         uint256 dp = model > p.price ? model - p.price : p.price - model;
-        if (dp > p.price / 1e9 + 2) _flag(V_AUCTION, "auction price is not the start price halved every 6 hours");
+        if (dp > p.price / 1e9 + 2) {
+            _flag(V_AUCTION, "auction price is not the start price halved every xAuctionHalfLife");
+        }
         // the exit token left the core only as this slice, paid for in coin at or above the quoted price
         uint256 owed = slice.mulDivUp(p.price, 1e18);
         if (coinIn < owed || coinIn != p.coinIn) _flag(V_AUCTION, "auction fill below the quoted coin price");

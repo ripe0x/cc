@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Core} from "../src/Core.sol";
-import {Lane, Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
 import {
@@ -250,7 +250,11 @@ abstract contract SeaportBase is Fixture {
         assertEq(core.ethPot(), before.pot - cost - tip, "pot down by exactly cost and tip");
         assertEq(address(core).balance, before.balance - cost - tip, "balance down by exactly cost and tip");
         assertEq(core.ethToBuyback(), before.toBuyback);
-        assertEq(core.rateAtCheckpoint(), rate - rate * 1000 * (cost + tip) / (10_000 * before.pot), "rate drop");
+        assertEq(
+            core.rateAtCheckpoint(),
+            rate - rate * core.settings().dropBps * (cost + tip) / (10_000 * before.pot),
+            "rate drop"
+        );
         assertEq(core.lastFillTime(), block.timestamp);
         assertLe(cost + tip, ceiling, "never above the ceiling");
         assertLe(tip, cost * 200 / 10_000, "tip within two percent of cost");
@@ -269,13 +273,14 @@ abstract contract SeaportBase is Fixture {
     }
 }
 
-/// every door case against genuine Seaport 1.6 orders, with the pot filled by real swaps
+/// every door case against genuine Seaport 1.6 orders, with the pot filled by real swaps. the launch settings: the
+/// eth bid is flat per credit (`flatBps` 10_000). `SeaportPerScoreTest` runs every case again with `flatBps` 0
 contract SeaportTest is SeaportBase {
     using FixedPointMathLib for uint256;
 
     /// the pot is large enough that the hourly cap clears every ceiling the tests use
     uint256 internal constant POT = 30 ether;
-    /// wei per whole point. the highest scoring credit then has a ceiling near 1.5 ether
+    /// wei per whole point. a flat credit then costs 0.00087 ether, the highest scoring one at flat 0 near 1.5 ether
     uint256 internal constant TARGET_RATE = 2e15;
 
     function setUp() public override {
@@ -664,9 +669,67 @@ contract SeaportTest is SeaportBase {
             else assertEq(viaListing, viaDoor);
         }
     }
+
+    /*//////////////////////////////////////////////////////////////
+                  10. settings reach the door at once
+    //////////////////////////////////////////////////////////////*/
+
+    function _setFlat(uint256 bps) internal {
+        Settings memory s = core.settings();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        s.flatBps = uint16(bps);
+        _setSettings(s);
+    }
+
+    /// a settings change moves the ceiling the door enforces, in the same block
+    function test_flatBpsChangeMovesTheDoorCeiling() public {
+        uint256 id = _list();
+        uint256 rate = core.ethRate();
+        uint256[3] memory bps = [uint256(10_000), 5_000, 0];
+        uint256[3] memory ceilings;
+        for (uint256 k; k < 3; ++k) {
+            _setFlat(bps[k]);
+            ceilings[k] = core.ceilingOf(id);
+            assertEq(ceilings[k], (bps[k] * 4_330_000 + (10_000 - bps[k]) * core.scoreOf(id)) * rate / 1e8);
+            bytes memory data = _basicData(_open(id, ceilings[k], 0));
+            _expectFail(id, ceilings[k] + 1, data, Core.AboveCeiling.selector);
+        }
+        // the middle setting prices between the two ends, and the door fills at exactly its ceiling
+        assertGe(ceilings[1], ceilings[0].min(ceilings[2]));
+        assertLe(ceilings[1], ceilings[0].max(ceilings[2]));
+        _setFlat(5_000);
+        _buy(id, ceilings[1], _basicData(_open(id, ceilings[1], 0)), ceilings[1]);
+    }
+
+    /// the tip rules are settings: raised to their bounds the door pays the larger tip and still never exceeds the ceiling
+    function test_tipSettingsReachTheDoor() public {
+        Settings memory s = core.settings();
+        s.tipSavingsBps = 2_500;
+        s.tipCapBps = 500;
+        _setSettings(s);
+        uint256 id = _list();
+        uint256 ceiling = core.ceilingOf(id);
+        uint256 price = ceiling * 6 / 10;
+        uint256 before = keeper.balance;
+        bytes memory data = _basicData(_open(id, price, 0));
+        vm.prank(keeper);
+        core.buyListing(price, data, id, Mainnet.SEAPORT);
+        uint256 tip = keeper.balance - before;
+        assertEq(tip, ((ceiling - price) * 2_500 / 10_000).min(price * 500 / 10_000));
+        assertGt(tip, price * 200 / 10_000, "above what the launch cap allows");
+        s.tipSavingsBps = 0;
+        _setSettings(s);
+        uint256 id2 = _list();
+        before = keeper.balance;
+        data = _basicData(_open(id2, price / 2, 0));
+        vm.prank(keeper);
+        core.buyListing(price / 2, data, id2, Mainnet.SEAPORT);
+        assertEq(keeper.balance, before, "no tip at zero");
+    }
 }
 
-/// the two pot bound refusals, on a core whose pot real swaps have not filled, or filled only a little
+/// the two pot bound refusals, on a core whose pot real swaps have not filled, or filled only a little. the launch
+/// settings, `SeaportColdPerScoreTest` runs them again with `flatBps` 0
 contract SeaportColdTest is SeaportBase {
     function test_fail_valueAbovePot() public {
         uint256 id = _list();
@@ -686,5 +749,28 @@ contract SeaportColdTest is SeaportBase {
         assertGt(core.ethPot(), price * 5 / 2);
         assertLt(core.ethPot(), price * 7 / 2);
         _expectFail(id, price, data, Core.HourlyCap.selector);
+    }
+}
+
+/// every case of `SeaportTest` with the bid priced per score point, so the ceilings differ by credit
+contract SeaportPerScoreTest is SeaportTest {
+    function _settings() internal view override returns (Settings memory s) {
+        s = super._settings();
+        s.flatBps = 0;
+    }
+
+    function test_perScore_ceilingsFollowTheScore() public {
+        uint256 a = _list();
+        uint256 b = _list();
+        assertEq(core.ceilingOf(a), core.scoreOf(a) * core.ethRate() / 1e4);
+        assertEq(core.ceilingOf(b), core.scoreOf(b) * core.ethRate() / 1e4);
+        assertTrue(core.scoreOf(a) != core.scoreOf(b), "two credits of different score");
+    }
+}
+
+contract SeaportColdPerScoreTest is SeaportColdTest {
+    function _settings() internal view override returns (Settings memory s) {
+        s = super._settings();
+        s.flatBps = 0;
     }
 }

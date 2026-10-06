@@ -7,6 +7,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {Mainnet} from "../src/interfaces/Interfaces.sol";
+import {IAuctionFactory, IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {
     IArtCoinsFactory,
     IArtCoinsSkimHook,
@@ -257,4 +258,28 @@ contract LaunchTest is Fixture {
 
 interface IArtCoinsExtensionSetter {
     function setPoolExtension(PoolKey calldata key, address extension, bytes calldata data) external;
+}
+
+/// the pieces of the launch that the Core itself creates: its auction house and its linked library
+contract LaunchWiringTest is Fixture {
+    /// the core created its own pnd auction house in its constructor, through the live factory
+    function test_coreOwnsItsHouse() public view {
+        IAuctionHouse h = core.HOUSE();
+        assertEq(IAuctionFactory(Mainnet.AUCTION_FACTORY).houseOf(address(core)), address(h), "the factory knows it");
+        assertEq(h.owner(), address(core), "the core owns it for good");
+        assertEq(h.protocolFeeBps(), 0, "no fee at the pin");
+        assertTrue(STATEMENTS.isApprovedForAll(address(core), address(h)), "it may take statements");
+        assertEq(core.AUCTION_FACTORY(), Mainnet.AUCTION_FACTORY);
+    }
+
+    /// the linked library: its address is in the Core code, its code is the compiled CoreLib, and the settings the
+    /// constructor wrote through it read back as the config
+    function test_coreIsLinkedToTheCompiledLibrary() public view {
+        address lib = findLibrary(address(core).code);
+        assertTrue(lib != address(0), "no library in the core code");
+        assertTrue(isCompiledLibrary(lib.code));
+        assertEq(abi.encode(core.settings()), abi.encode(lc.settings), "the settings through the library");
+        // the library address is the one forge test linked, never the address of a CREATE2 deployer deployment here
+        assertTrue(lib != libraryAddress());
+    }
 }

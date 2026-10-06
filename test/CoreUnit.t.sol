@@ -5,18 +5,19 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {Core} from "../src/Core.sol";
-import {Lane, ICreditScore, ICreditStrategy, Stack, Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Lane, ICreditScore, ICreditStrategy, Stack, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {HostileTarget} from "./attackers/HostileTarget.sol";
 import {ProbeTarget} from "./attackers/ProbeTarget.sol";
-import {DeafBuyer, ReentrantBuyer} from "./attackers/StatementBuyers.sol";
+import {ReentrantBidder} from "./attackers/StatementBuyers.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
 
 /// shared helpers of the core unit suites. everything runs on the real stack of the Fixture: the live coin, hook,
-/// pool, Credits, Statements, CreditStrategy and Seaport. a test that needs an exact pot donates eth to the core and
-/// calls `skim()`, which is the real path for eth that did not come from the hook
+/// pool, Credits, Statements, CreditStrategy, Seaport and the pnd auction house. a test that needs an exact pot donates
+/// eth to the core and calls `skim()`, which is the real path for eth that did not come from the hook. the launch
+/// settings are flat (`flatBps` 10_000), a test of the per point path sets `flatBps` to 0 through `setSettings`
 abstract contract CoreBase is Fixture {
     using stdStorage for StdStorage;
 
@@ -42,9 +43,30 @@ abstract contract CoreBase is Fixture {
         _timelock(Core.Action.SetController, abi.encode(c));
     }
 
-    /// @dev the rate after a spend of `x` from a pot of `p`
-    function _dropped(uint256 r, uint256 x, uint256 p) internal pure returns (uint256) {
-        return r - r * 1000 * x / (10_000 * p);
+    /// @dev the rate after a spend of `x` from a pot of `p`, at the drop of the settings now
+    function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
+        return r - r * core.settings().dropBps * x / (10_000 * p);
+    }
+
+    /// @dev the owner sets the flat share of the bid
+    function _flat(uint256 bps) internal {
+        Settings memory s = core.settings();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        s.flatBps = uint16(bps);
+        _setSettings(s);
+    }
+
+    /// @dev the launch settings are flat. the per point path is `flat == false`
+    function _mode(bool flat) internal {
+        if (!flat) _flat(0);
+    }
+
+    /// @dev the price of credit `id` at `rate` by the brief, in one division: the blend of the flat and the score
+    /// share, then the controller bonus in bps
+    function _ref(uint256 id, uint256 rate, uint256 bonus) internal view returns (uint256) {
+        Settings memory s = core.settings();
+        uint256 blend = uint256(s.flatBps) * s.avgScore + (10_000 - uint256(s.flatBps)) * core.scoreOf(id);
+        return blend * rate * (10_000 + bonus) / (10_000 * 10_000 * 1e4);
     }
 
     function _listing(uint256 id) internal pure returns (bytes memory) {
@@ -66,6 +88,14 @@ abstract contract CoreBase is Fixture {
         vm.prank(who);
         core.sellForEth(ids);
     }
+
+    /// @dev builds a core with other constructor arguments. external, so a revert of the constructor can be expected
+    function mk(address owner_, address coin_, address ctl_, Stack memory st, uint256 r, Settings memory s)
+        external
+        returns (Core)
+    {
+        return new Core(owner_, coin_, ctl_, st, r, s);
+    }
 }
 
 contract CoreUnitTest is CoreBase {
@@ -76,34 +106,14 @@ contract CoreUnitTest is CoreBase {
                               parameters
     //////////////////////////////////////////////////////////////*/
 
+    /// the constants that are left. every other economic number is a setting, covered in Flow.t.sol
     function test_parameters() public view {
         assertEq(core.SUPPLY(), 1_000_000_000e18);
-        assertEq(core.AVG_SCORE(), 4_330_000);
-        assertEq(core.RATE_START(), 4e12);
-        assertEq(core.CLIMB_BASE_BPS_PER_HOUR(), 100);
-        assertEq(core.CLIMB_DOUBLE_EVERY(), 24 hours);
-        assertEq(core.CLIMB_MAX_BPS_PER_HOUR(), 800);
-        assertEq(core.DROP_BPS(), 1000);
-        assertEq(core.SPEND_CAP_BPS_PER_HOUR(), 2000);
-        assertEq(core.BONUS_CAP_BPS(), 2500);
-        assertEq(core.TIP_SAVINGS_BPS(), 1000);
-        assertEq(core.TIP_CAP_BPS(), 200);
-        assertEq(core.AUCTION_START_X(), 40_000);
-        assertEq(core.AUCTION_FLOOR_X(), 12_000);
-        assertEq(core.AUCTION_LENGTH(), 72 hours);
-        assertEq(core.SALE_SPLIT(), 5000);
-        assertEq(core.EXIT_SPLIT(), 5000);
-        assertEq(core.BUYBACK_SLICE(), 1 ether);
-        assertEq(core.BUYBACK_DELAY(), 25);
-        assertEq(core.KEEPER_TIP_BPS(), 50);
         assertEq(core.XRATE_START(), 6000);
-        assertEq(core.XRATE_CAP(), 9700);
-        assertEq(core.XRATE_FLOOR(), 3000);
-        assertEq(core.XRATE_CLIMB_PER_HOUR(), 100);
-        assertEq(core.XRATE_DROP_PER_CREDIT(), 20);
-        assertEq(core.XAUCTION_HALF_LIFE(), 6 hours);
         assertEq(core.TIMELOCK(), 7 days);
         assertEq(core.OVERPRINT_CAP_PER_DAY(), 8);
+        assertEq(core.settings().avgScore, 4_330_000);
+        assertEq(core.settings().flatBps, 10_000);
     }
 
     function test_constructorState() public view {
@@ -115,6 +125,7 @@ contract CoreUnitTest is CoreBase {
         assertTrue(core.allowedTarget(Mainnet.CREDIT_STRATEGY));
         assertTrue(CREDITS.isApprovedForAll(address(core), address(STATEMENTS)));
         assertEq(core.ethRate(), 4e12);
+        assertEq(core.xRate(), 6000);
         assertEq(core.lastFillTime(), launchTime);
         assertFalse(core.funded());
         assertEq(core.ethPot(), 0);
@@ -125,80 +136,90 @@ contract CoreUnitTest is CoreBase {
         assertFalse(core.frozen());
     }
 
+    function _stack8(Stack memory st, uint256 which, address to) internal pure returns (Stack memory bad) {
+        bad = Stack(
+            st.poolManager, st.hook, st.tickSpacing, st.poolFee, st.factory, st.locker, st.escrow, st.auctionFactory
+        );
+        if (which == 0) bad.poolManager = to;
+        if (which == 1) bad.hook = to;
+        if (which == 2) bad.factory = to;
+        if (which == 3) bad.locker = to;
+        if (which == 4) bad.escrow = to;
+        if (which == 5) bad.auctionFactory = to;
+    }
+
     function test_constructorRejectsZero() public {
         Stack memory st = lc.stack;
         uint256 r = lc.rateStart;
+        Settings memory s = lc.settings;
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(address(0), address(coin), address(ctl), st, r, Mainnet.defaultEcon());
+        this.mk(address(0), address(coin), address(ctl), st, r, s);
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(owner, address(0), address(ctl), st, r, Mainnet.defaultEcon());
+        this.mk(owner, address(0), address(ctl), st, r, s);
         vm.expectRevert(Core.ZeroAddress.selector);
-        new Core(owner, address(coin), address(0), st, r, Mainnet.defaultEcon());
-        // every address of the stack is required
-        for (uint256 i; i < 5; ++i) {
-            Stack memory bad =
-                Stack(st.poolManager, st.hook, st.tickSpacing, st.poolFee, st.factory, st.locker, st.escrow);
-            if (i == 0) bad.poolManager = address(0);
-            if (i == 1) bad.hook = address(0);
-            if (i == 2) bad.factory = address(0);
-            if (i == 3) bad.locker = address(0);
-            if (i == 4) bad.escrow = address(0);
+        this.mk(owner, address(coin), address(0), st, r, s);
+        // every address of the stack is required, the auction factory included
+        for (uint256 i; i < 6; ++i) {
             vm.expectRevert(Core.ZeroAddress.selector);
-            new Core(owner, address(coin), address(ctl), bad, r, Mainnet.defaultEcon());
+            this.mk(owner, address(coin), address(ctl), _stack8(st, i, address(0)), r, s);
         }
-        Stack memory flat = Stack(st.poolManager, st.hook, 0, st.poolFee, st.factory, st.locker, st.escrow);
+        Stack memory flat = _stack8(st, 99, address(0));
+        flat.tickSpacing = 0;
         vm.expectRevert(Core.BadStack.selector);
-        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
+        this.mk(owner, address(coin), address(ctl), flat, r, s);
         flat.tickSpacing = 32_768;
         vm.expectRevert(Core.BadStack.selector);
-        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
+        this.mk(owner, address(coin), address(ctl), flat, r, s);
         flat.tickSpacing = 32_767;
-        new Core(owner, address(coin), address(ctl), flat, r, Mainnet.defaultEcon());
+        this.mk(owner, address(coin), address(ctl), flat, r, s);
     }
 
     /// every stack member must be a contract, the coin is not checked (it does not exist yet)
     function test_constructorRequiresCodeAtTheStack() public {
         Stack memory st = lc.stack;
         uint256 r = lc.rateStart;
+        Settings memory s = lc.settings;
         address nobody = makeAddr("no code");
-        for (uint256 i; i < 5; ++i) {
-            Stack memory bad =
-                Stack(st.poolManager, st.hook, st.tickSpacing, st.poolFee, st.factory, st.locker, st.escrow);
-            if (i == 0) bad.poolManager = nobody;
-            if (i == 1) bad.hook = nobody;
-            if (i == 2) bad.factory = nobody;
-            if (i == 3) bad.locker = nobody;
-            if (i == 4) bad.escrow = nobody;
+        for (uint256 i; i < 6; ++i) {
             vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, nobody));
-            new Core(owner, address(coin), address(ctl), bad, r, Mainnet.defaultEcon());
+            this.mk(owner, address(coin), address(ctl), _stack8(st, i, nobody), r, s);
         }
         // the coin has no code at construction time and that is fine
-        new Core(owner, nobody, address(ctl), st, r, Mainnet.defaultEcon());
+        this.mk(owner, nobody, address(ctl), st, r, s);
     }
 
     /// the opening bid is a deploy input bounded to [1e11, 1e15] wei per whole point
     function test_rateStartBounds() public {
+        Settings memory s = lc.settings;
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), address(ctl), lc.stack, 1e11 - 1, Mainnet.defaultEcon());
+        this.mk(owner, address(coin), address(ctl), lc.stack, 1e11 - 1, s);
         vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), address(ctl), lc.stack, 1e15 + 1, Mainnet.defaultEcon());
-        Core lo = new Core(owner, address(coin), address(ctl), lc.stack, 1e11, Mainnet.defaultEcon());
-        Core hi = new Core(owner, address(coin), address(ctl), lc.stack, 1e15, Mainnet.defaultEcon());
+        this.mk(owner, address(coin), address(ctl), lc.stack, 1e15 + 1, s);
+        Core lo = this.mk(owner, address(coin), address(ctl), lc.stack, 1e11, s);
+        Core hi = this.mk(owner, address(coin), address(ctl), lc.stack, 1e15, s);
         assertEq(lo.RATE_START(), 1e11);
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.RATE_START(), 1e15);
         assertEq(hi.rateAtCheckpoint(), 1e15);
     }
 
-    /// the stack is stored as given, nothing of it is hardcoded in the core
+    /// the stack is stored as given, nothing of it is hardcoded in the core. the five members that are only
+    /// addresses are stand in code, the auction factory is the live one because the constructor creates a house
     function test_stackIsStored() public {
-        Stack memory other =
-            Stack(address(0x1111), address(0x2222), 60, 3000, address(0x3333), address(0x4444), address(0x5555));
-        // the constructor wants code at the five members
+        Stack memory other = Stack(
+            address(0x1111),
+            address(0x2222),
+            60,
+            3000,
+            address(0x3333),
+            address(0x4444),
+            address(0x5555),
+            Mainnet.AUCTION_FACTORY
+        );
         for (uint160 a = 0x1111; a <= 0x5555; a += 0x1111) {
             vm.etch(address(a), hex"00");
         }
-        Core c2 = new Core(owner, address(coin), address(ctl), other, lc.rateStart, lc.econ);
+        Core c2 = this.mk(owner, address(coin), address(ctl), other, lc.rateStart, lc.settings);
         assertEq(address(c2.MANAGER()), address(0x1111));
         assertEq(c2.HOOK(), address(0x2222));
         assertEq(c2.TICK_SPACING(), 60);
@@ -206,6 +227,7 @@ contract CoreUnitTest is CoreBase {
         assertEq(c2.FACTORY(), address(0x3333));
         assertEq(c2.LOCKER(), address(0x4444));
         assertEq(c2.ESCROW(), address(0x5555));
+        assertEq(c2.AUCTION_FACTORY(), Mainnet.AUCTION_FACTORY);
         // only the configured hook is booked as fee income
         vm.deal(address(0x2222), 1 ether);
         vm.prank(address(0x2222));
@@ -278,6 +300,31 @@ contract CoreUnitTest is CoreBase {
         assertApproxEqRel(core.ethRate(), 8_635_699_989_091, 1e9);
     }
 
+    /// the same rule at another average score: funded needs `pot * spendCap >= avgScore * rate`, to the wei, and at
+    /// exactly that pot the cap equals the rate, so there is no room to climb
+    function test_rate_fundedThresholdFollowsTheAverageScore() public {
+        Settings memory s = core.settings();
+        s.avgScore = 8_000_000;
+        _setSettings(s);
+        _fund(1.6e16 - 1);
+        assertFalse(core.funded(), "one wei short of 8M * 4e12 / 20 percent");
+        _warp(1000 hours);
+        assertEq(core.ethRate(), 4e12);
+        _fund(1);
+        assertTrue(core.funded());
+        _warp(1000 hours);
+        assertEq(core.ethRate(), 4e12, "funded to the wei: the clamp equals the rate");
+        _fund(1e16);
+        assertEq(core.ethRate(), 4e12);
+        _warp(1 hours);
+        assertApproxEqRel(core.ethRate(), 4e12 * 108 / 100, 1e9, "room above the clamp, top tier");
+        // a lower average score reopens the room at once
+        s.avgScore = 800_000;
+        _setSettings(s);
+        _warp(10_000 hours);
+        assertEq(core.ethRate(), core.ethPot() * 2000 / 800_000);
+    }
+
     function test_rate_climbTiers() public {
         _fund(10 ether);
         assertTrue(core.funded());
@@ -289,6 +336,26 @@ contract CoreUnitTest is CoreBase {
         assertApproxEqRel(core.ethRate(), 5_719_709_774_456, 1e9, "24h at 1 percent then 6h at 2 percent");
         _warp(52 hours);
         assertApproxEqRel(core.ethRate(), 45_207_946_718_638, 1e9, "tiers 1, 2, 4 percent then 10h at 8 percent");
+    }
+
+    /// the tiers at other settings: 2 percent an hour, doubling every 12 hours, at most 10 percent. the numbers are
+    /// 4e12 * 1.02^12, then * 1.04^12, then * 1.08^12, then ten hours at 10 percent
+    function test_rate_climbTiersAtChangedSettings() public {
+        Settings memory s = core.settings();
+        s.climbBaseBps = 200;
+        s.climbDoubleEvery = 12 hours;
+        s.climbMaxBps = 1000;
+        _setSettings(s);
+        _fund(10 ether);
+        assertTrue(core.funded());
+        _warp(12 hours);
+        assertApproxEqRel(core.ethRate(), 5_072_967_178_250, 1e9, "12h at 2 percent");
+        _warp(12 hours);
+        assertApproxEqRel(core.ethRate(), 8_121_983_896_114, 1e9, "12h at 4 percent");
+        _warp(12 hours);
+        assertApproxEqRel(core.ethRate(), 20_452_537_136_481, 1e9, "12h at 8 percent");
+        _warp(10 hours);
+        assertApproxEqRel(core.ethRate(), 53_048_613_987_664, 1e9, "10h at the 10 percent maximum");
     }
 
     function test_rate_checkpointKeepsTierClock() public {
@@ -325,25 +392,71 @@ contract CoreUnitTest is CoreBase {
         assertApproxEqRel(core.ethRate(), cap * 108 / 100, 1e9, "tier 8 percent after a long wait");
     }
 
+    /// the clamp at a smaller spend cap and a smaller average score, then at a larger cap and a larger score
+    function test_rate_fundedClampAtChangedSettings() public {
+        Settings memory s = core.settings();
+        s.spendCapBps = 1000;
+        s.avgScore = 2_000_000;
+        _setSettings(s);
+        _fund(0.02 ether);
+        assertTrue(core.funded());
+        _warp(10_000 hours);
+        assertEq(core.ethRate(), 10_000_000_000_000, "2e16 * 1000 / 2e6");
+        assertGe(core.ethPot() * 1000, 2_000_000 * core.ethRate());
+        assertLt(core.ethPot() * 1000, 2_000_000 * (core.ethRate() + 1));
+        s.spendCapBps = 5000;
+        s.avgScore = 8_000_000;
+        _setSettings(s);
+        assertEq(core.rateAtCheckpoint(), 10_000_000_000_000, "the change credited the old clamp");
+        _warp(10_000 hours);
+        assertEq(core.ethRate(), 12_500_000_000_000, "2e16 * 5000 / 8e6");
+    }
+
+    /// the same clamp when the pot is filled by real swaps: it is measured, not assumed
+    function test_rate_fundedClampWithRealFees() public {
+        _skipSniperWindow();
+        _fundPot(0.01 ether);
+        uint256 pot = core.ethPot();
+        _warp(2000 hours);
+        assertEq(core.ethRate(), pot * 2000 / core.settings().avgScore, "clamp at what the hourly cap affords");
+    }
+
     /// at the clamp an average credit can actually be sold in the same block. 20 percent of the pot buys one average
-    /// credit there, so every credit scoring at most the average passes the hourly cap in a fresh window, the rate
-    /// drops with the fill, and a credit that would cost more than the cap is refused by it
-    function test_rate_atTheClampAnAverageCreditSells() public {
+    /// credit there. flat, every credit is an average credit: one sells, the rate drops with the fill and a second one
+    /// in the window is refused by the cap. per point, every credit scoring at most the average passes the hourly cap
+    /// in a fresh window and a credit that would cost more than the cap is refused by it
+    function _atTheClamp(bool flat) internal {
+        _mode(flat);
         _fund(0.02 ether);
         _warp(3000 hours);
+        uint256 avg = core.settings().avgScore;
         uint256 rate = core.ethRate();
-        assertEq(rate, uint256(0.02 ether) * 2000 / core.AVG_SCORE(), "at the clamp");
+        assertEq(rate, uint256(0.02 ether) * 2000 / avg, "at the clamp");
         uint256 hourlyCap = core.ethPot() * 2000 / 10_000;
         // an average credit costs the whole hourly cap, rounded down by the rate
-        assertLe(core.AVG_SCORE() * rate / 1e4, hourlyCap);
-        assertGt(core.AVG_SCORE() * (rate + 1) / 1e4 + 1, hourlyCap);
+        assertLe(avg * rate / 1e4, hourlyCap);
+        assertGt(avg * (rate + 1) / 1e4 + 1, hourlyCap);
 
         uint256[] memory ids = _credits(alice, 40);
+        if (flat) {
+            uint256 price = core.ceilingOf(ids[0]);
+            assertEq(price, avg * rate / 1e4, "the flat price is the average credit");
+            assertEq(core.ceilingOf(ids[39]), price);
+            uint256 before = alice.balance;
+            vm.prank(alice);
+            core.sellForEth(_one(ids[0]));
+            assertEq(alice.balance - before, price);
+            assertLt(core.rateAtCheckpoint(), rate, "the fill dropped the rate");
+            vm.prank(alice);
+            vm.expectRevert(Core.HourlyCap.selector);
+            core.sellForEth(_one(ids[1]));
+            return;
+        }
         uint256 sold;
         uint256 refused;
         for (uint256 i; i < ids.length; ++i) {
             uint256 price = core.ceilingOf(ids[i]);
-            bool atMostAverage = core.scoreOf(ids[i]) <= core.AVG_SCORE();
+            bool atMostAverage = core.scoreOf(ids[i]) <= avg;
             uint256 snap = vm.snapshotState();
             uint256 before = alice.balance;
             vm.prank(alice);
@@ -363,13 +476,12 @@ contract CoreUnitTest is CoreBase {
         assertGt(refused, 0, "some credit over the average was refused by the cap");
     }
 
-    /// the same clamp when the pot is filled by real swaps: it is measured, not assumed
-    function test_rate_fundedClampWithRealFees() public {
-        _skipSniperWindow();
-        _fundPot(0.01 ether);
-        uint256 pot = core.ethPot();
-        _warp(2000 hours);
-        assertEq(core.ethRate(), pot * 2000 / core.AVG_SCORE(), "clamp at what the hourly cap affords");
+    function test_rate_atTheClampAnAverageCreditSells_flat() public {
+        _atTheClamp(true);
+    }
+
+    function test_rate_atTheClampAnAverageCreditSells_perPoint() public {
+        _atTheClamp(false);
     }
 
     /// the pot shrinks below one average credit while the rate sits at its clamp. the next checkpoint applies no climb
@@ -391,13 +503,18 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
-    function test_rate_dropAndClockResetOnFill() public {
+    /// a fill drops the rate by `dropBps` of the share of the pot it spent and restarts the climb clock, flat and per
+    /// point. at the launch settings the flat price is 4.33e6 * rate / 1e4 to the wei
+    function _dropAndClockReset(bool flat) internal {
+        _mode(flat);
         _fund(10 ether);
         _warp(30 hours);
         uint256 id = _credits(alice, 1)[0];
         uint256 rate = core.ethRate();
         uint256 price = core.ceilingOf(id);
-        assertEq(price, core.scoreOf(id) * rate / 1e4);
+        assertEq(price, _ref(id, rate, 0));
+        if (flat) assertEq(price, 4_330_000 * rate / 1e4);
+        else assertEq(price, core.scoreOf(id) * rate / 1e4);
 
         uint256 before = alice.balance;
         vm.prank(alice);
@@ -422,14 +539,23 @@ contract CoreUnitTest is CoreBase {
         assertApproxEqRel(core.ethRate(), after_ * 101 / 100, 1e9);
     }
 
-    function test_sellForEth_multiDropsPerCredit() public {
+    function test_rate_dropAndClockResetOnFill_flat() public {
+        _dropAndClockReset(true);
+    }
+
+    function test_rate_dropAndClockResetOnFill_perPoint() public {
+        _dropAndClockReset(false);
+    }
+
+    function _multiDrops(bool flat) internal {
+        _mode(flat);
         _fund(10 ether);
         uint256[] memory ids = _credits(alice, 3);
         uint256 r = 4e12;
         uint256 p = 10 ether;
         uint256 total;
         for (uint256 i; i < 3; ++i) {
-            uint256 price = core.scoreOf(ids[i]) * r / 1e4;
+            uint256 price = _ref(ids[i], r, 0);
             r = _dropped(r, price, p);
             p -= price;
             total += price;
@@ -444,14 +570,24 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
+    function test_sellForEth_multiDropsPerCredit_flat() public {
+        _multiDrops(true);
+    }
+
+    function test_sellForEth_multiDropsPerCredit_perPoint() public {
+        _multiDrops(false);
+    }
+
     /*//////////////////////////////////////////////////////////////
                               hourly cap
     //////////////////////////////////////////////////////////////*/
 
-    function test_hourlyCap_window() public {
+    /// sells one credit at a time until the next one would pass `capBps` of the pot, which is then refused, in the
+    /// window and not after it
+    function _hourlyCapWindow(uint256 capBps) internal {
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
-        uint256 cap = uint256(0.05 ether) * 2000 / 10_000;
+        uint256 cap = uint256(0.05 ether) * capBps / 10_000;
         uint256 spent;
         uint256 i;
         for (; i < ids.length; ++i) {
@@ -480,6 +616,44 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
+    function test_hourlyCap_window_flat() public {
+        _hourlyCapWindow(2000);
+    }
+
+    function test_hourlyCap_window_perPoint() public {
+        _flat(0);
+        _hourlyCapWindow(2000);
+    }
+
+    /// the cap is a setting: at 10 percent of the pot the window admits less
+    function test_hourlyCap_followsTheSetting() public {
+        Settings memory s = core.settings();
+        s.spendCapBps = 1000;
+        _setSettings(s);
+        _hourlyCapWindow(1000);
+    }
+
+    /// and a change applies inside a running window
+    function test_hourlyCap_widerCapAdmitsMoreInTheSameWindow() public {
+        _fund(0.05 ether);
+        uint256[] memory ids = _credits(alice, 14);
+        uint256 n;
+        for (; n < 14; ++n) {
+            vm.prank(alice);
+            try core.sellForEth(_one(ids[n])) {}
+            catch {
+                break;
+            }
+        }
+        assertLt(n, 14);
+        Settings memory s = core.settings();
+        s.spendCapBps = 5000;
+        _setSettings(s);
+        vm.prank(alice);
+        core.sellForEth(_one(ids[n]));
+        assertEq(core.pileSize(Lane.Eth), n + 1, "the wider cap took effect inside the window");
+    }
+
     function test_hourlyCap_countsAllIdsOfOneCall() public {
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
@@ -492,7 +666,8 @@ contract CoreUnitTest is CoreBase {
                               sell door
     //////////////////////////////////////////////////////////////*/
 
-    function test_sellForEth_minOut() public {
+    function _minOut(bool flat) internal {
+        _mode(flat);
         _fund(10 ether);
         uint256 id = _credits(alice, 1)[0];
         uint256 price = core.ceilingOf(id);
@@ -505,6 +680,28 @@ contract CoreUnitTest is CoreBase {
         vm.prank(alice);
         core.sellForEth(_one(id), price);
         assertEq(alice.balance - before, price);
+    }
+
+    function test_sellForEth_minOut_flat() public {
+        _minOut(true);
+    }
+
+    function test_sellForEth_minOut_perPoint() public {
+        _minOut(false);
+    }
+
+    /// minOut guards the sum over many ids, and a rate drop inside the call lowers it
+    function test_sellForEth_minOutIsTheTotalAfterTheDrops() public {
+        _fund(10 ether);
+        uint256[] memory ids = _credits(alice, 3);
+        uint256 first = core.ceilingOf(ids[0]);
+        vm.prank(alice);
+        vm.expectRevert(Core.Slippage.selector);
+        core.sellForEth(ids, first * 3);
+        uint256 before = alice.balance;
+        vm.prank(alice);
+        core.sellForEth(ids, first * 3 - first / 1000);
+        assertLt(alice.balance - before, first * 3, "later credits were paid at the dropped rate");
     }
 
     function test_sellForEth_guards() public {
@@ -552,40 +749,53 @@ contract CoreUnitTest is CoreBase {
                          controller is only read
     //////////////////////////////////////////////////////////////*/
 
-    function test_controller_bonusAppliesAndClamps() public {
+    function _bonusAppliesAndClamps(bool flat) internal {
+        _mode(flat);
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
         _fund(10 ether);
         uint256 id = _credits(alice, 1)[0];
-        uint256 base = core.scoreOf(id) * core.ethRate() / 1e4;
-        assertEq(core.ceilingOf(id), base);
+        uint256 rate = core.ethRate();
+        assertEq(rate, 4e12);
+        assertEq(core.ceilingOf(id), _ref(id, rate, 0));
 
         scripted.setWants(id, 1000);
-        assertEq(core.ceilingOf(id), base * 11_000 / 10_000);
+        assertEq(core.ceilingOf(id), _ref(id, rate, 1000));
         scripted.setWants(id, 2500);
-        assertEq(core.ceilingOf(id), base * 12_500 / 10_000);
+        assertEq(core.ceilingOf(id), _ref(id, rate, 2500));
         scripted.setWants(id, 60_000);
-        assertEq(core.ceilingOf(id), base * 12_500 / 10_000, "clamped to the bonus cap");
+        assertEq(core.ceilingOf(id), _ref(id, rate, 2500), "clamped to the bonus cap");
+        if (flat) assertEq(core.ceilingOf(id), 2_165_000_000_000_000, "4.33e6 * 4e12 * 1.25 / 1e8");
 
         uint256 before = alice.balance;
         vm.prank(alice);
         core.sellForEth(_one(id));
-        assertEq(alice.balance - before, base * 12_500 / 10_000);
+        assertEq(alice.balance - before, _ref(id, rate, 2500));
     }
 
-    function test_controller_revertingOrOversizedOrGreedyWantsDoesNotBlockDoors() public {
+    function test_controller_bonusAppliesAndClamps_flat() public {
+        _bonusAppliesAndClamps(true);
+    }
+
+    function test_controller_bonusAppliesAndClamps_perPoint() public {
+        _bonusAppliesAndClamps(false);
+    }
+
+    function _hostileWants(bool flat) internal {
+        _mode(flat);
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
         _fund(10 ether);
         uint256[] memory ids = _credits(alice, 4);
-        uint256 base = core.scoreOf(ids[0]) * core.ethRate() / 1e4;
+        uint256 rate = core.ethRate();
+        uint256 base = _ref(ids[0], rate, 0);
 
         scripted.setRevertWants(true);
         assertEq(core.ceilingOf(ids[0]), base, "revert counts as zero");
 
         scripted.setRevertWants(false);
         scripted.setRawWants(true);
-        assertEq(core.ceilingOf(ids[0]), base * 12_500 / 10_000, "oversized word clamps");
+        assertEq(core.ceilingOf(ids[0]), _ref(ids[0], rate, 2500), "oversized word clamps");
 
         scripted.setRawWants(false);
         scripted.setBurnWants(true);
@@ -601,9 +811,17 @@ contract CoreUnitTest is CoreBase {
 
         // an empty controller address answers nothing and counts as zero too.
         _setController(address(0xBEEF));
-        assertEq(core.ceilingOf(ids[1]), core.scoreOf(ids[1]) * core.ethRate() / 1e4);
+        assertEq(core.ceilingOf(ids[1]), _ref(ids[1], core.ethRate(), 0));
         vm.expectRevert(Core.NotReady.selector);
         core.compose();
+    }
+
+    function test_controller_revertingOrOversizedOrGreedyWantsDoesNotBlockDoors_flat() public {
+        _hostileWants(true);
+    }
+
+    function test_controller_revertingOrOversizedOrGreedyWantsDoesNotBlockDoors_perPoint() public {
+        _hostileWants(false);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -625,16 +843,30 @@ contract CoreUnitTest is CoreBase {
         core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
     }
 
-    function test_buyListing_tipIsTenthOfSavingsWhenSmall() public {
+    /// the tip is `tipSavingsBps` of the savings (ceiling minus cost) and never more than `tipCapBps` of the cost. the
+    /// call is made after `extra` more seconds of climb, so the savings are small or large. the cost basis includes
+    /// the tip, the pot pays both, the keeper gets the tip
+    function _tipCase(bool flat, uint256 savingsBps, uint256 capBps, uint256 extra) internal returns (uint256 tip) {
+        if (savingsBps != 1000 || capBps != 200) {
+            Settings memory s = core.settings();
+            // forge-lint: disable-start(unsafe-typecast)
+            s.tipSavingsBps = uint16(savingsBps);
+            s.tipCapBps = uint16(capBps);
+            // forge-lint: disable-end(unsafe-typecast)
+            _setSettings(s);
+        }
+        _mode(flat);
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         assertEq(price, 0.036 ether);
         _fundAndClimb(LISTED_A, price);
+        _warp(extra);
 
         uint256 ceiling = core.ceilingOf(LISTED_A);
         uint256 rate = core.ethRate();
-        uint256 tip = (ceiling - price) * 1000 / 10_000;
-        assertLt(tip, price * 200 / 10_000, "savings bound branch");
-        assertGt(tip, 0);
+        assertEq(ceiling, _ref(LISTED_A, rate, 0));
+        tip = (ceiling - price) * savingsBps / 10_000;
+        uint256 capTip = price * capBps / 10_000;
+        if (tip > capTip) tip = capTip;
 
         uint256 pot = core.ethPot();
         uint256 keeperBefore = keeper.balance;
@@ -654,23 +886,48 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
-    function test_buyListing_tipIsCappedAtTwoPercentOfCost() public {
-        uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
-        _fundAndClimb(LISTED_A, price);
-        _warp(30 hours);
-        uint256 ceiling = core.ceilingOf(LISTED_A);
-        assertGt((ceiling - price) * 1000 / 10_000, price * 200 / 10_000);
-
-        uint256 keeperBefore = keeper.balance;
-        vm.prank(keeper);
-        core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
-        assertEq(keeper.balance - keeperBefore, price * 200 / 10_000);
-        (,, uint256 cost,) = core.creditInfo(LISTED_A);
-        assertEq(cost, price + price * 200 / 10_000);
-        _solvent();
+    function test_buyListing_tipIsTenthOfSavingsWhenSmall_flat() public {
+        uint256 tip = _tipCase(true, 1000, 200, 0);
+        assertGt(tip, 0);
+        assertLt(tip, 0.036 ether * 200 / 10_000, "savings bound branch");
     }
 
-    function test_buyListing_failedCallRevertsOnlyThatBuy() public {
+    function test_buyListing_tipIsTenthOfSavingsWhenSmall_perPoint() public {
+        uint256 tip = _tipCase(false, 1000, 200, 0);
+        assertGt(tip, 0);
+        assertLt(tip, 0.036 ether * 200 / 10_000, "savings bound branch");
+    }
+
+    function test_buyListing_tipIsCappedAtTwoPercentOfCost_flat() public {
+        uint256 tip = _tipCase(true, 1000, 200, 30 hours);
+        assertEq(tip, 0.036 ether * 200 / 10_000);
+    }
+
+    function test_buyListing_tipIsCappedAtTwoPercentOfCost_perPoint() public {
+        uint256 tip = _tipCase(false, 1000, 200, 30 hours);
+        assertEq(tip, 0.036 ether * 200 / 10_000);
+    }
+
+    /// the dials: a quarter of the savings with a cap of half a percent, then no tip at all, then the largest cap
+    function test_buyListing_tipAtChangedSettings() public {
+        uint256 tip = _tipCase(true, 2500, 50, 30 hours);
+        assertEq(tip, 0.036 ether * 50 / 10_000, "the half percent cap binds");
+    }
+
+    function test_buyListing_tipOffPaysNothing() public {
+        uint256 tip = _tipCase(true, 0, 200, 30 hours);
+        assertEq(tip, 0);
+        assertEq(keeper.balance, 0);
+    }
+
+    function test_buyListing_tipAtTheLargestBounds() public {
+        uint256 tip = _tipCase(false, 2500, 500, 60 hours);
+        assertLe(tip, 0.036 ether * 500 / 10_000, "never more than 5 percent of the cost");
+        assertGt(tip, 0.036 ether * 200 / 10_000, "above the launch cap");
+    }
+
+    function _failedCall(bool flat) internal {
+        _mode(flat);
         uint256 priceA = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         uint256 priceB = ICreditStrategy(STRATEGY).nftForSale(LISTED_B);
         _fundAndClimb(LISTED_A, priceA);
@@ -710,10 +967,18 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
+    function test_buyListing_failedCallRevertsOnlyThatBuy_flat() public {
+        _failedCall(true);
+    }
+
+    function test_buyListing_failedCallRevertsOnlyThatBuy_perPoint() public {
+        _failedCall(false);
+    }
+
     /// targets that were never allowed, and every address the core itself refuses, are not callable
     function test_buyListing_targetGuards() public {
         _fund(10 ether);
-        address[10] memory refused = [
+        address[14] memory refused = [
             address(0xABCD),
             address(CREDITS),
             address(STATEMENTS),
@@ -723,7 +988,11 @@ contract CoreUnitTest is CoreBase {
             Mainnet.POOL_MANAGER,
             Mainnet.ARTCOINS_FACTORY,
             Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW
+            Mainnet.FEE_ESCROW,
+            address(house),
+            Mainnet.AUCTION_FACTORY,
+            Mainnet.PERMIT2,
+            Mainnet.UNIVERSAL_ROUTER
         ];
         vm.startPrank(keeper);
         for (uint256 i; i < refused.length; ++i) {
@@ -735,12 +1004,12 @@ contract CoreUnitTest is CoreBase {
         vm.stopPrank();
     }
 
-    /// the listing is real but the pot is small: a buy larger than a fifth of the pot hits the hourly cap, and one
-    /// larger than the pot fails first with `PotTooSmall`
-    function test_buyListing_hourlyCapAndPotChecks() public {
+    /// the listing is real but the pot is small. per point, credit A scores 1.5 average credits, so a pot of 4 prices
+    /// clears its price at the clamp (ceiling 1.21 prices) while the hourly cap (0.8 prices) does not: a buy larger
+    /// than a fifth of the pot hits the hourly cap, and one larger than the pot fails first with `PotTooSmall`
+    function test_buyListing_hourlyCapAndPotChecks_perPoint() public {
+        _flat(0);
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
-        // the rate clamps where 20 percent of the pot buys one average credit. credit A scores 1.5 average credits, so a
-        // pot of 4 prices clears its price at the clamp (ceiling 1.21 prices) while the hourly cap (0.8 prices) does not
         _fund(price * 4);
         _warpUntilCeiling(LISTED_A, price);
         assertGt(price, core.ethPot() * 2000 / 10_000);
@@ -753,6 +1022,35 @@ contract CoreUnitTest is CoreBase {
         vm.prank(keeper);
         vm.expectRevert(Core.PotTooSmall.selector);
         core.buyListing(price * 4 + 1, _listing(LISTED_A), LISTED_A, STRATEGY);
+
+        // with a pot of ten times the price the cap no longer binds, tip included
+        _fund(price * 6);
+        vm.prank(keeper);
+        core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
+        assertEq(CREDITS.ownerOf(LISTED_A), address(core));
+        _solvent();
+    }
+
+    /// flat, the ceiling at the clamp is the hourly cap itself (an average credit), so the cap binds only through the
+    /// controller bonus (a quarter above the cap) or through spend already in the window
+    function test_buyListing_hourlyCapAndPotChecks_flat() public {
+        ScriptedController scripted = new ScriptedController();
+        _setController(address(scripted));
+        uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
+        scripted.setWants(LISTED_A, 2500);
+        _fund(price * 44 / 10);
+        _warpUntilCeiling(LISTED_A, price);
+        assertGt(price, core.ethPot() * 2000 / 10_000, "the listing is above the hourly cap");
+        assertGe(core.ceilingOf(LISTED_A), price, "and below the ceiling with the bonus");
+        vm.prank(keeper);
+        vm.expectRevert(Core.HourlyCap.selector);
+        core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
+
+        // a value above the pot fails first, before the ceiling and the cap
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(keeper);
+        vm.expectRevert(Core.PotTooSmall.selector);
+        core.buyListing(price * 44 / 10 + 1, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // with a pot of ten times the price the cap no longer binds, tip included
         _fund(price * 6);
@@ -796,7 +1094,8 @@ contract CoreUnitTest is CoreBase {
         uint256 ceiling = core.ceilingOf(id);
         uint256 value = ceiling * 3 / 4;
         uint256 cost = value - value / 2;
-        uint256 tip = ((ceiling - cost) * 1000 / 10_000).min(cost * 200 / 10_000);
+        Settings memory s = core.settings();
+        uint256 tip = ((ceiling - cost) * s.tipSavingsBps / 10_000).min(cost * s.tipCapBps / 10_000);
         uint256 excessBefore = address(core).balance - core.ethPot() - core.ethToBuyback();
         uint256 listingBefore = address(p).balance;
 
@@ -959,7 +1258,7 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.exitToken(), address(xt));
         assertEq(core.unitPerPoint(), UNIT);
         assertEq(core.xRate(), 6000);
-        assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / (20 * core.AVG_SCORE() * UNIT), "opening auction price");
+        assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / (20 * 4_330_000 * UNIT), "opening auction price");
         assertEq(core.xStartTime(), block.timestamp);
 
         MockExitModule other = new MockExitModule(address(xt), 1e10);
@@ -1020,7 +1319,7 @@ contract CoreUnitTest is CoreBase {
     }
 
     function test_timelock_targets() public {
-        address[10] memory forbidden = [
+        address[14] memory forbidden = [
             address(CREDITS),
             address(STATEMENTS),
             address(core),
@@ -1030,14 +1329,18 @@ contract CoreUnitTest is CoreBase {
             Mainnet.ARTCOINS_FACTORY,
             Mainnet.LP_LOCKER,
             Mainnet.FEE_ESCROW,
-            address(0)
+            address(0),
+            address(house),
+            Mainnet.AUCTION_FACTORY,
+            Mainnet.POSITION_MANAGER,
+            Mainnet.UNIVERSAL_ROUTER
         ];
         vm.startPrank(owner);
-        for (uint256 i; i < 10; ++i) {
+        for (uint256 i; i < forbidden.length; ++i) {
             core.queue(Core.Action.AddTarget, abi.encode(forbidden[i]));
         }
         _warp(7 days);
-        for (uint256 i; i < 10; ++i) {
+        for (uint256 i; i < forbidden.length; ++i) {
             vm.expectRevert(Core.ForbiddenTarget.selector);
             core.execute(Core.Action.AddTarget, abi.encode(forbidden[i]));
         }
@@ -1075,6 +1378,21 @@ contract CoreUnitTest is CoreBase {
         vm.prank(keeper);
         vm.expectRevert(Core.TargetNotAllowed.selector);
         core.buyListing(1, "", LISTED_A, address(mod));
+    }
+
+    /// the opening price of the exit auction asks the whole supply for one full slice, and a full slice is
+    /// `exitSliceCredits` average credits of the settings at the moment the module is set
+    function test_timelock_exitModuleOpeningPriceFollowsTheSettings() public {
+        Settings memory s = core.settings();
+        s.exitSliceCredits = 100;
+        s.avgScore = 2_000_000;
+        _setSettings(s);
+        _enterPhase2();
+        assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / (100 * 2_000_000 * UNIT));
+        // a later change of the slice does not move the price already set
+        s.exitSliceCredits = 1;
+        _setSettings(s);
+        assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / (100 * 2_000_000 * UNIT));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -1124,6 +1442,7 @@ contract CoreUnitTest is CoreBase {
         assertGe(direct, 800_000);
         assertLe(direct, 8_000_000);
 
+        assertEq(core.heldStatements().length, 0);
         assertEq(core.heldStatements().length, 0);
         (bool held,,,) = core.statementInfo(1);
         assertFalse(held);
@@ -1240,13 +1559,20 @@ contract CoreUnitTest is CoreBase {
                          doors that need no module
     //////////////////////////////////////////////////////////////*/
 
-    function test_buyStatement_unknownStatement() public {
-        vm.expectRevert(Core.NotForSale.selector);
-        core.priceOf(1);
-        vm.expectRevert(Core.NotForSale.selector);
-        core.buyStatement(1);
+    /// the sale doors are on the house, the core only settles records: with no statement they all say so
+    function test_statementDoorsRefuseAnUnknownStatement() public {
+        vm.expectRevert(Core.NotListed.selector);
+        core.syncStatement(1);
+        vm.expectRevert(Core.NotListed.selector);
+        core.repriceStatement(1);
         vm.expectRevert(Core.NoExitModule.selector);
         core.exitStatement(1);
+        (Core.StatementStatus status,,,,) = core.statementStatus(1);
+        assertEq(uint256(status), uint256(Core.StatementStatus.None));
+        // nothing is owed by the house to a core that sold nothing
+        core.collectSales();
+        assertEq(core.ethPot(), 0);
+        assertEq(core.ethToBuyback(), 0);
     }
 
     function test_exitDoorsClosedWithoutModule() public {
@@ -1296,19 +1622,32 @@ contract CoreUnitTest is CoreBase {
                          rate properties under fuzz
     //////////////////////////////////////////////////////////////*/
 
-    /// invariant 6: the rate never rises in an interval where the pot was unfunded, and it never climbs
-    /// past what the pot affords.
+    /// invariant 6: the rate never rises in an interval where the pot was unfunded, and it never climbs past what the
+    /// pot affords. flat or per point, from the launch settings or from another average score and cap
     /// forge-config: default.fuzz.runs = 24
-    function testFuzz_rateProperties(uint256[6] memory amounts, uint256[6] memory waits, bool[6] memory sells) public {
+    function testFuzz_rateProperties(
+        uint256[6] memory amounts,
+        uint256[6] memory waits,
+        bool[6] memory sells,
+        uint256 mode
+    ) public {
+        if (mode % 3 == 1) _flat(0);
+        if (mode % 3 == 2) {
+            Settings memory s = core.settings();
+            s.avgScore = 2_000_000;
+            s.spendCapBps = 1000;
+            _setSettings(s);
+        }
         uint256[] memory ids = _credits(alice, 6);
         for (uint256 i; i < 6; ++i) {
+            Settings memory st = core.settings();
             uint256 r0 = core.ethRate();
             bool f0 = core.funded();
             _warp(bound(waits[i], 0, 120 hours));
             uint256 r1 = core.ethRate();
             if (!f0) assertEq(r1, r0, "unfunded rate is frozen");
             else assertGe(r1, r0);
-            assertLe(r1, r0.max(core.ethPot() * 1e4 / 4_330_000), "never above the funded threshold");
+            assertLe(r1, r0.max(core.ethPot() * st.spendCapBps / st.avgScore), "never above the funded threshold");
 
             uint256 amount = bound(amounts[i], 0, 0.05 ether);
             if (amount != 0) _fund(amount);
@@ -1357,7 +1696,7 @@ contract CoreComposedTest is CoreBase {
         }
         assertEq(c.sid, c.supplyBefore + 1);
         assertEq(STATEMENTS.supply(), c.sid);
-        assertEq(STATEMENTS.ownerOf(c.sid), address(core));
+        assertEq(STATEMENTS.ownerOf(c.sid), address(house), "listed: the house holds it for the core");
         assertEq(STATEMENTS.creditsOf(c.sid), 80);
         assertEq(STATEMENTS.creditScoreOf(c.sid), _sumScores(ids));
 
@@ -1366,6 +1705,7 @@ contract CoreComposedTest is CoreBase {
         assertEq(uint8(lane), uint8(Lane.Eth));
         assertEq(cost, c.cost + c.reimb, "cost basis is the credits plus the gas refund");
         assertEq(clockStart, c.at);
+        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
 
         assertEq(core.pileSize(Lane.Eth), 0);
         assertEq(core.pileHead(Lane.Eth), 0);
@@ -1381,18 +1721,29 @@ contract CoreComposedTest is CoreBase {
         _solvent();
     }
 
-    /// the reimbursement tracks the gas of the call at 1.1 times the basefee, plus the fixed overhead. the part of
-    /// the call after the reimbursement is computed (the statement books and the events) is not repaid
+    /// at the launch settings the cost basis of a statement is the sum of the flat prices paid, whatever the scores
+    function test_compose_costBasisIsTheFlatPricesPaid() public {
+        Composed memory c = _composeOnce();
+        // every credit was sold at the flat price of its fill, at most the average credit at the opening rate
+        assertLe(c.cost, 80 * 4_330_000 * 4e12 / 1e4 * 12 / 10, "at most 80 average credits, a rising rate");
+        assertGt(c.cost, 80 * 4_330_000 * 3e12 / 1e4, "and not far under");
+    }
+
+    /// the reimbursement tracks the gas of the call at `reimburseBps` of the basefee, plus the fixed overhead of the
+    /// work after it and of the listing on the house. the part of the call after the reimbursement is computed (the
+    /// statement books, the events, the listing) is repaid by that fixed overhead and not by the meter
     function test_compose_gasReimbursementTracksGas() public {
         Composed memory c = _composeOnce();
         assertGt(c.reimb, 0);
         assertLt(c.reimb, c.cost * 500 / 10_000, "far below the 5 percent cap at this basefee");
-        assertLe(c.reimb, (c.gasUsed + 50_000) * composeBasefee * 11_000 / 10_000);
-        assertGe(c.reimb, (c.gasUsed - 250_000) * composeBasefee * 11_000 / 10_000);
+        // the gas the Core counted: the call up to the reimbursement plus 50k overhead plus 350k for the listing
+        uint256 counted = c.reimb * 10_000 / (composeBasefee * 11_000);
+        assertGe(counted, 400_000);
+        assertApproxEqAbs(counted, c.gasUsed, 100_000, "the meter plus the fixed overhead is the gas of the whole call");
         assertEq(keeper.balance, c.reimb, "the caller was repaid and nobody else");
     }
 
-    /// the same compose under other basefees and pot sizes, from the state kept right before the first compose
+    /// the same compose under other basefees, caps and pot sizes, from the state kept right before the first compose
     function test_compose_gasReimbursementCapAndPotLimit() public {
         Composed memory c = _composeOnce();
         uint256 snap = preComposeSnap;
@@ -1429,131 +1780,41 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.ethPot(), 0);
     }
 
-    /// skim never books the buyback pot: only what the core holds above both pots
-    function test_skim_neverBooksBuybackPot() public {
+    /// the reimbursement dials: a cap of 1 percent, no reimbursement at all, and the largest rate (1.5 times the gas)
+    function test_compose_gasReimbursementAtChangedSettings() public {
         Composed memory c = _composeOnce();
-        uint256 price = core.priceOf(c.sid);
-        vm.deal(alice, price);
-        vm.prank(alice);
-        core.buyStatement{value: price}(c.sid);
-        uint256 bb = core.ethToBuyback();
-        uint256 pot = core.ethPot();
-        assertEq(bb, price * 5000 / 10_000);
-        core.skim();
-        assertEq(core.ethPot(), pot, "nothing above the pots");
-        assertEq(core.ethToBuyback(), bb);
-        _fund(1 ether);
-        assertEq(core.ethPot(), pot + 1 ether);
-        assertEq(core.ethToBuyback(), bb, "the donation went to the pot, not the buyback");
-        _solvent();
-    }
+        uint256 snap = preComposeSnap;
+        uint256 supply = c.supplyBefore;
+        uint256 reimb11 = c.reimb;
+        Settings memory s = core.settings();
 
-    /*//////////////////////////////////////////////////////////////
-                                 auction
-    //////////////////////////////////////////////////////////////*/
+        vm.revertToState(snap);
+        s.reimburseCapBps = 100;
+        _setSettings(s);
+        vm.fee(2 gwei);
+        vm.prank(keeper);
+        core.compose();
+        assertEq(keeper.balance, c.cost * 100 / 10_000, "the cap of 1 percent binds exactly");
 
-    function _expectedPrice(uint256 cost, uint256 elapsed) internal pure returns (uint256) {
-        uint256 len = 72 hours;
-        return cost.mulDivUp(40_000 * len - 28_000 * elapsed.min(len), len * 10_000);
-    }
+        vm.revertToState(snap);
+        s.reimburseCapBps = 500;
+        s.reimburseBps = 0;
+        _setSettings(s);
+        vm.prank(keeper);
+        core.compose();
+        assertEq(keeper.balance, 0, "no reimbursement at all");
+        (,, uint256 cost,) = core.statementInfo(supply + 1);
+        assertEq(cost, c.cost);
 
-    function test_auction_priceCurve() public {
-        Composed memory c = _composeOnce();
-        (,, uint256 cost,) = core.statementInfo(c.sid);
-        assertEq(core.priceOf(c.sid), cost * 4, "opens at 4x");
-        _warp(18 hours);
-        assertEq(core.priceOf(c.sid), cost.mulDivUp(33_000, 10_000), "3.3x a quarter of the way down");
-        _warp(18 hours);
-        assertEq(core.priceOf(c.sid), cost.mulDivUp(26_000, 10_000), "2.6x half way");
-        _warp(36 hours);
-        assertEq(core.priceOf(c.sid), cost.mulDivUp(12_000, 10_000), "1.2x at the end");
-        assertGe(core.priceOf(c.sid) * 10, cost * 12);
-        _warp(5000 hours);
-        assertEq(core.priceOf(c.sid), cost.mulDivUp(12_000, 10_000), "flat at the floor");
-    }
-
-    /// invariant 3: no statement is priced below 1.2 times its cost or above 4 times.
-    /// forge-config: default.fuzz.runs = 16
-    function testFuzz_auction_priceBounds(uint256 dt) public {
-        Composed memory c = _composeOnce();
-        (,, uint256 cost,) = core.statementInfo(c.sid);
-        dt = bound(dt, 0, 400 hours);
-        _warp(dt);
-        uint256 p = core.priceOf(c.sid);
-        assertEq(p, _expectedPrice(cost, dt));
-        assertGe(p * 10, cost * 12);
-        assertLe(p, cost * 4);
-    }
-
-    function test_buyStatement_splitRefundAndTransfer() public {
-        Composed memory c = _composeOnce();
-        _warp(20 hours);
-        uint256 price = core.priceOf(c.sid);
-        address buyer = _user("buyer");
-        vm.deal(buyer, price + 1 ether);
-        uint256 pot = core.ethPot();
-        uint256 bb = core.ethToBuyback();
-
-        vm.prank(buyer);
-        vm.expectRevert(Core.Underpaid.selector);
-        core.buyStatement{value: price - 1}(c.sid);
-
-        vm.prank(buyer);
-        core.buyStatement{value: price + 1 ether}(c.sid);
-
-        assertEq(buyer.balance, 1 ether, "excess came back");
-        assertEq(STATEMENTS.ownerOf(c.sid), buyer);
-        uint256 half = price * 5000 / 10_000;
-        assertEq(core.ethToBuyback(), bb + half);
-        assertEq(core.ethPot(), pot + price - half);
-        assertEq(_held().length, 0);
-        (bool held,,,) = core.statementInfo(c.sid);
-        assertFalse(held);
-        _solvent();
-
-        vm.expectRevert(Core.NotForSale.selector);
-        core.priceOf(c.sid);
-        vm.prank(buyer);
-        vm.expectRevert(Core.NotForSale.selector);
-        core.buyStatement{value: price}(c.sid);
-    }
-
-    function test_buyStatement_exactPaymentAtTheFloorAndOddSplit() public {
-        Composed memory c = _composeOnce();
-        _warp(100 hours);
-        uint256 price = core.priceOf(c.sid);
-        uint256 pot = core.ethPot();
-        uint256 bb = core.ethToBuyback();
-        vm.deal(alice, price);
-        vm.prank(alice);
-        core.buyStatement{value: price}(c.sid);
-        assertEq(alice.balance, 0);
-        // the odd wei stays in the pot.
-        assertEq(core.ethToBuyback() - bb, price / 2);
-        assertEq(core.ethPot() - pot, price - price / 2);
-        _solvent();
-    }
-
-    function test_buyStatement_contractBuyerWithoutReceiverReverts() public {
-        Composed memory c = _composeOnce();
-        DeafBuyer buyer = new DeafBuyer();
-        uint256 price = core.priceOf(c.sid);
-        vm.deal(address(buyer), price);
-        vm.expectRevert();
-        buyer.buy(core, c.sid);
-        assertEq(STATEMENTS.ownerOf(c.sid), address(core));
-        assertEq(_held().length, 1);
-    }
-
-    function test_reentrancyThroughStatementReceiverReverts() public {
-        Composed memory c = _composeOnce();
-        ReentrantBuyer buyer = new ReentrantBuyer(core);
-        uint256 price = core.priceOf(c.sid);
-        vm.deal(address(buyer), price);
-        vm.expectRevert();
-        buyer.buy(c.sid);
-        assertEq(STATEMENTS.ownerOf(c.sid), address(core));
-        assertEq(_held().length, 1);
+        vm.revertToState(snap);
+        s.reimburseBps = 15_000;
+        _setSettings(s);
+        vm.fee(composeBasefee);
+        vm.prank(keeper);
+        core.compose();
+        assertApproxEqAbs(keeper.balance, reimb11 * 15 / 11, 2, "15000 over 11000 of the same gas");
+        (,, cost,) = core.statementInfo(supply + 1);
+        assertEq(cost, c.cost + keeper.balance);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -1564,10 +1825,10 @@ contract CoreComposedTest is CoreBase {
         Composed memory c = _composeOnce();
         vm.expectRevert(Core.NotHeld.selector);
         core.exitStatement(c.sid + 100);
-        vm.expectRevert(Core.AuctionRunning.selector);
+        vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(72 hours - 1);
-        vm.expectRevert(Core.AuctionRunning.selector);
+        vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(1);
         core.exitStatement(c.sid);
@@ -1602,7 +1863,8 @@ contract CoreComposedTest is CoreBase {
         mod.setShortfallBps(5000);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);
-        assertEq(STATEMENTS.ownerOf(c.sid), address(core), "the statement never left");
+        assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the statement never left, its listing is intact");
+        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
         assertEq(_held().length, 1);
 
         mod.setShortfallBps(0);
@@ -1625,17 +1887,6 @@ contract CoreComposedTest is CoreBase {
         core.exitStatement(c.sid);
         assertEq(xt.balanceOf(address(core)), out);
         assertEq(core.unitPerPoint(), UNIT, "the stored unit did not follow the module");
-    }
-
-    function test_exit_statementStaysBuyableAtFloorUntilExited() public {
-        Composed memory c = _composeOnce();
-        _warp(200 hours);
-        uint256 price = core.priceOf(c.sid);
-        vm.deal(alice, price);
-        vm.prank(alice);
-        core.buyStatement{value: price}(c.sid);
-        vm.expectRevert(Core.NotHeld.selector);
-        core.exitStatement(c.sid);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -1709,20 +1960,82 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.xRate(), 7440);
     }
 
-    /// the pot slot is forced to sizes that real fees cannot hit exactly, the balance of exit token covers it
-    function test_xBid_capAndAffordabilityClamp() public {
+    /// the exit bid stays per score point whatever `flatBps` says: phase 2 pays by rating
+    function test_xBid_isPerPointWhateverFlatBpsSays() public {
+        _fillExitBuyback();
+        uint256[] memory ids = _credits(alice, 2);
+        uint256 p0 = core.scoreOf(ids[0]) * 6000 * UNIT / 10_000;
+        uint256 p1 = core.scoreOf(ids[1]) * 5980 * UNIT / 10_000;
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        assertEq(xt.balanceOf(alice), p0 + p1);
+        _flat(0);
+        uint256[] memory more = _credits(alice, 1);
+        uint256 p2 = core.scoreOf(more[0]) * 5960 * UNIT / 10_000;
+        vm.prank(alice);
+        core.sellForExitToken(more);
+        assertEq(xt.balanceOf(alice), p0 + p1 + p2, "the same rule with the bid flat or per point");
+    }
+
+    /// the exit bid dials: climb 250 an hour, drop 100 per credit, cap 8000, floor 4000
+    function test_xBid_atChangedSettings() public {
+        Settings memory s = core.settings();
+        s.xRateClimbPerHour = 250;
+        s.xRateDropPerCredit = 100;
+        s.xRateCap = 8000;
+        s.xRateFloor = 4000;
+        _setSettings(s);
+        _fillExitBuyback();
+        _warp(4 hours);
+        assertEq(core.xRate(), 7000, "6000 + 4 * 250");
+        _warp(100 hours);
+        assertEq(core.xRate(), 8000, "the lower cap");
+        uint256[] memory ids = _credits(alice, 3);
+        uint256 total = core.scoreOf(ids[0]) * 8000 * UNIT / 10_000 + core.scoreOf(ids[1]) * 7900 * UNIT / 10_000
+            + core.scoreOf(ids[2]) * 7800 * UNIT / 10_000;
+        vm.prank(alice);
+        core.sellForExitToken(ids, total);
+        assertEq(xt.balanceOf(alice), total);
+        assertEq(core.xRate(), 7700, "100 bps per credit");
+        xt.mint(address(core), 1_000_000e18);
+        core.skim();
+        for (uint256 b; b < 2; ++b) {
+            uint256[] memory page = _credits(alice, 80);
+            vm.prank(alice);
+            core.sellForExitToken(page);
+        }
+        assertEq(core.xRate(), 4000, "the floor of the settings");
+    }
+
+    /// the pot slot is forced to sizes that real fees cannot hit exactly, the balance of exit token covers it. the
+    /// clamp is `xPot * 1e4 / (avgScore * unit)`
+    function _xClamp(uint256 avg) internal {
+        if (avg != 4_330_000) {
+            Settings memory s = core.settings();
+            // forge-lint: disable-next-line(unsafe-typecast)
+            s.avgScore = uint32(avg);
+            _setSettings(s);
+        }
         _fillExitBuyback();
         _warp(100 hours);
         assertEq(core.xRate(), 9700, "never above the cap");
 
         // a pot that only affords 70 percent of score stops the climb there.
-        uint256 pot = 7000 * 4_330_000 * UNIT / 10_000;
+        uint256 pot = 7000 * avg * UNIT / 10_000;
         stdstore.target(address(core)).sig("xPot()").checked_write(pot);
         assertEq(core.xRate(), 7000);
 
         // below one average credit at the current rate the climb stops and the rate holds.
         stdstore.target(address(core)).sig("xPot()").checked_write(pot / 10);
         assertEq(core.xRate(), 6000);
+    }
+
+    function test_xBid_capAndAffordabilityClamp() public {
+        _xClamp(4_330_000);
+    }
+
+    function test_xBid_capAndAffordabilityClampAtAnotherAverageScore() public {
+        _xClamp(2_000_000);
     }
 
     function test_xBid_floor() public {
@@ -1799,7 +2112,7 @@ contract CoreComposedTest is CoreBase {
         core.composeExit();
         uint256 paid = keeper.balance - balBefore;
 
-        assertEq(STATEMENTS.ownerOf(sidX), address(core));
+        assertEq(STATEMENTS.ownerOf(sidX), address(core), "held by the core, never listed");
         (bool held, Lane lane, uint256 cost,) = core.statementInfo(sidX);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Exit));
@@ -1808,11 +2121,11 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.ethPot(), potBefore - paid);
         assertLe(paid, 80 * 4_330_000 * core.ethRate() / 1e4 * 500 / 10_000, "notional cap");
         assertGt(paid, 0);
-
-        vm.expectRevert(Core.NotForSale.selector);
-        core.priceOf(sidX);
-        vm.expectRevert(Core.NotForSale.selector);
-        core.buyStatement(sidX);
+        assertEq(uint256(_live(sidX).status), uint256(Core.StatementStatus.Held));
+        vm.expectRevert(Core.NotListed.selector);
+        core.repriceStatement(sidX);
+        vm.expectRevert(Core.NotListed.selector);
+        core.syncStatement(sidX);
 
         // no auction in the exit lane, so it exits at once and everything returns to the bid pot, none of it to the
         // buyback, which also keeps its auction clock
@@ -1828,13 +2141,41 @@ contract CoreComposedTest is CoreBase {
         _solvent();
     }
 
+    /// the notional cap of an exit lane compose follows `avgScore`, the rate and `reimburseCapBps` of the settings
+    function test_exitLane_composeReimbursementCapFollowsTheSettings() public {
+        Settings memory s = core.settings();
+        s.reimburseCapBps = 100;
+        s.avgScore = 2_000_000;
+        _setSettings(s);
+        _fillExitBuyback();
+        xt.mint(address(core), 100e18);
+        core.skim();
+        uint256[] memory ids = _credits(alice, 80);
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        vm.fee(1000 gwei);
+        uint256 rate = core.ethRate();
+        uint256 before = keeper.balance;
+        vm.prank(keeper);
+        core.composeExit();
+        assertEq(
+            keeper.balance - before,
+            80 * 2_000_000 * rate / 1e4 * 100 / 10_000,
+            "1 percent of 80 notional credits, exactly"
+        );
+    }
+
     /*//////////////////////////////////////////////////////////////
                                 overprint
     //////////////////////////////////////////////////////////////*/
 
-    function test_overprint_mergesAndRestartsClock() public {
+    /// the merge of two listed statements: both listings are cancelled, the base keeps its id with the summed cost and
+    /// rating and is listed again at the reserve of the summed cost, and the cap is 8 a day and resets with the utc
+    /// day. eight real overprints need nine composes, so the counter slot is forced to the cap after one real one
+    function test_overprint_mergesRelistsAndTheDailyCap() public {
         Composed memory c = _composeOnce();
         uint256 sid2 = _composeNext();
+        uint256 sid3 = _composeNext();
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
         _warp(10 hours);
@@ -1851,23 +2192,35 @@ contract CoreComposedTest is CoreBase {
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Eth));
         assertEq(cost, c1 + c2, "cost bases are summed");
-        assertEq(clockStart, block.timestamp, "the auction restarts");
+        assertEq(clockStart, block.timestamp, "the listing clock restarts");
         assertEq(STATEMENTS.creditScoreOf(c.sid), r1 + r2);
         assertEq(STATEMENTS.overprintsOf(c.sid), 1);
         (bool held2,,,) = core.statementInfo(sid2);
         assertFalse(held2);
         uint256[] memory h = _held();
-        assertEq(h.length, 1);
-        assertEq(h[0], c.sid);
-        assertEq(core.priceOf(c.sid), (c1 + c2) * 4);
+        assertEq(h.length, 2);
+        assertEq(_live(c.sid).reserve, _reserveFor(c1 + c2), "listed again at the reserve of the summed cost");
         assertEq(core.overprintCount(), 1);
 
         // the top is gone from circulation.
         vm.expectRevert(Core.BadOverprint.selector);
         core.overprint();
+
+        stdstore.target(address(core)).sig("overprintCount()").checked_write(uint256(8));
+        scripted.setOverprint(true, c.sid, sid3);
+        vm.expectRevert(Core.DailyCap.selector);
+        core.overprint();
+
+        // the budget resets with the next utc day.
+        _warp(1 days);
+        core.overprint();
+        assertEq(core.overprintCount(), 1);
+        assertEq(STATEMENTS.overprintsOf(c.sid), 2);
+        assertEq(_held().length, 1);
+        _solvent();
     }
 
-    function test_overprint_guards() public {
+    function test_overprint_guardsAndTheExitLane() public {
         Composed memory c = _composeOnce();
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
@@ -1888,22 +2241,38 @@ contract CoreComposedTest is CoreBase {
         core.overprint();
 
         // a statement of the exit lane cannot be merged into an eth lane one.
-        xt.mint(address(core), 100e18);
+        xt.mint(address(core), 200e18);
         core.skim();
         uint256 sidX = STATEMENTS.supply() + 1;
-        uint256[] memory ids = _credits(alice, 80);
-        vm.prank(alice);
-        core.sellForExitToken(ids);
-        uint256[80] memory page;
-        for (uint256 i; i < 80; ++i) {
-            page[i] = ids[i];
-        }
+        uint256[80] memory page = _exitPage();
         scripted.setPage(Lane.Exit, true, page, 0);
         vm.prank(keeper);
         core.composeExit();
         scripted.setOverprint(true, c.sid, sidX);
         vm.expectRevert(Core.BadOverprint.selector);
         core.overprint();
+        scripted.setOverprint(true, sidX, c.sid);
+        vm.expectRevert(Core.BadOverprint.selector);
+        core.overprint();
+
+        // two exit lane statements merge with no house in the way: nothing is cancelled or listed
+        uint256 sidY = STATEMENTS.supply() + 1;
+        page = _exitPage();
+        scripted.setPage(Lane.Exit, true, page, 0);
+        vm.prank(keeper);
+        core.composeExit();
+        (,, uint256 cx,) = core.statementInfo(sidX);
+        (,, uint256 cy,) = core.statementInfo(sidY);
+        uint256 rating = STATEMENTS.creditScoreOf(sidX) + STATEMENTS.creditScoreOf(sidY);
+        scripted.setOverprint(true, sidX, sidY);
+        core.overprint();
+        (bool held,, uint256 cost,) = core.statementInfo(sidX);
+        assertTrue(held);
+        assertEq(cost, cx + cy);
+        assertEq(STATEMENTS.creditScoreOf(sidX), rating);
+        assertEq(STATEMENTS.ownerOf(sidX), address(core), "held, never listed");
+        assertEq(uint256(_live(sidX).status), uint256(Core.StatementStatus.Held));
+        assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the eth lane listing was not touched");
 
         scripted.setRevertPage(true);
         scripted.setOverprint(false, c.sid, sidX);
@@ -1911,29 +2280,54 @@ contract CoreComposedTest is CoreBase {
         core.overprint();
     }
 
-    /// the cap is 8 a day and resets with the utc day. eight real overprints need nine composes, so the counter slot
-    /// is forced to the cap after one real overprint
-    function test_overprint_dailyCap() public {
-        Composed memory c = _composeOnce();
-        uint256 sid2 = _composeNext();
-        uint256 sid3 = _composeNext();
-        ScriptedController scripted = new ScriptedController();
-        _setController(address(scripted));
+    /// a bidder that re enters the core from its eth refund and from the statement delivery cannot disturb the books:
+    /// outbid, or alone as the winner, and the proceeds are booked exactly once by `collectSales`
+    function test_reentrantBidderCannotDisturbTheBooks() public {
+        uint256 sid = _composeOnce().sid;
+        uint256 snap = vm.snapshotState();
+        uint256 reserve = _live(sid).reserve;
+        uint256 aid = _live(sid).auctionId;
+        uint256 pot0 = core.ethPot();
+        uint256 bal0 = address(core).balance;
+        ReentrantBidder rb = new ReentrantBidder(core);
+        vm.deal(address(rb), 10 ether);
 
-        scripted.setOverprint(true, c.sid, sid2);
-        core.overprint();
-        assertEq(core.overprintCount(), 1);
-
-        stdstore.target(address(core)).sig("overprintCount()").checked_write(uint256(8));
-        scripted.setOverprint(true, c.sid, sid3);
-        vm.expectRevert(Core.DailyCap.selector);
-        core.overprint();
-
-        // the budget resets with the next utc day.
-        _warp(1 days);
-        core.overprint();
-        assertEq(core.overprintCount(), 1);
-        assertEq(STATEMENTS.overprintsOf(c.sid), 2);
+        // outbid: the refund to the bidder runs its receive on the stipend
+        rb.bid{value: reserve}(house, aid);
+        _bid(alice, sid, reserve * 106 / 100);
+        _endAuction(sid);
+        assertEq(STATEMENTS.ownerOf(sid), alice);
+        assertEq(core.ethPot(), pot0, "nothing booked before the collection");
+        assertEq(address(core).balance, bal0, "and nothing in the balance");
+        uint256 owed = _collectSales();
+        assertEq(owed, reserve * 106 / 100);
+        assertEq(core.ethPot() + core.ethToBuyback(), pot0 + owed);
         _solvent();
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "exact books");
+        core.syncStatement(sid);
+        assertEq(_held().length, 0);
+
+        // the winner: the delivery of the statement calls back into the core
+        vm.revertToState(snap);
+        rb = new ReentrantBidder(core);
+        vm.deal(address(rb), 10 ether);
+        rb.bid{value: reserve}(house, aid);
+        _endAuction(sid);
+        assertEq(STATEMENTS.ownerOf(sid), address(rb));
+        owed = _collectSales();
+        assertEq(owed, reserve);
+        assertEq(core.ethPot() + core.ethToBuyback(), pot0 + reserve);
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "exact books");
+        _solvent();
+    }
+
+    /// @dev sells 80 fresh credits into the exit bid and returns them as a page
+    function _exitPage() internal returns (uint256[80] memory page) {
+        uint256[] memory ids = _credits(alice, 80);
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        for (uint256 i; i < 80; ++i) {
+            page[i] = ids[i];
+        }
     }
 }

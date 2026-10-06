@@ -1,477 +1,318 @@
 # simulation of the credits engine
 
-sim/engine.js is a deterministic hourly model of the engine in src/Core.sol (rate climb tiers, funded clamp, drop on fill, hourly cap, both doors, compose, statement auction, buyback, exit lane, exitToken bid, dutch auction). the launch position is real concentrated liquidity math. sellers, statement buyers and coin volume are calibrated on the 13 day data pull in sim/data/notes.md. every number below is a mean over 3 to 5 seeds of a 90 day run unless stated. raw rows are in sim/results/*.json, the interactive page is sim/index.html. `exitModule` and `exitToken` are the only names used for phase 2.
+sim/engine.js is a deterministic hourly model of the engine in src/Core.sol on branch flow: the blended bid (`flatBps`, `avgScore`), the rate climb, the funded rule, drop on fill, the hourly cap, both buy doors, compose, listing on the pnd auction house as an english auction, `collectSales`, the buyback, the exit lane, the exitToken bid, the exitToken dutch auction and settings changes mid run. rules and names are the Core's, launch values are script/config/mainnet.json (a test reads the file). the launch position is real concentrated liquidity math. sellers, statement buyers and coin volume are calibrated on the 13 day data pull in sim/data/notes.md. every number below is a mean over 3 to 5 seeds of a 90 day run unless stated. raw rows are in sim/results/*.json (node run.mjs q1 to q11), the interactive page is sim/index.html. `exitModule` and `exitToken` are the only names used for phase 2.
 
-verdict in one paragraph: **the phase 1 loop does not turn on today's market.** about 295 eth of fees arrive, 86 percent of them on day one. the engine spends all of it on credits by day 12 at 1.43x the flat market price per credit, composes about 240 statements at a cost basis near 1.3 eth, and buyers who pay 0.84x of parts cost show up at 8 a day and then fewer. about 50 statements sell, 187 sit at the floor, 283 eth is locked, and 5.8 percent of supply is burned from 19 eth of buyback. the cause is not the starting rate. it is the price the engine pays per credit against what statement buyers will pay, plus a pot that is spent far faster than statements can be sold.
+## the goal and the headline metrics
+
+the engine exists to keep credits flowing into statements. a statement selling below the cost of its 80 credits is better than no sale. unsold statements are fine, they wait for the exitModule in phase 2. the engine never stops buying because statements are unsold (there is no inventory gate in the Core and none in the model). early on it should acquire as many credits as possible, score can matter later.
+
+headline metrics, in this order: credits acquired, statements created, statements sold, eth sent to buy and burn the coin, statements waiting for phase 2, days until the launch pot is spent, steady state credits per day after that. the launch pot is spent when the pot falls under 5 percent of its peak. steady state is the last 30 days of a 90 day run.
+
+verdict in one paragraph: **the engine keeps buying under every volume preset, and unsold statements never slow it.** as launched on the comparable coin it acquires 27,100 credits in 90 days, 24,350 of them by day 30, creates 339 statements and sells 121 of them. 31 eth buys and burns 8.1 percent of the coin. 216 statements wait for phase 2. the launch pot of about 290 eth is spent on day 6.5. after that the flow is about 46 credits a day, paid for by the 0.05 eth a day the coin still pays and by sale proceeds. a second bidder shows up in about a third of the auctions the model sells, so in this model the reserve is the price.
+
+## what the model changed against the old branch
+
+| piece | now |
+|---|---|
+| bid | `flatBps` 10000 prices every credit as `avgScore`, 0 prices it by its own score, in between blends. no controller bonus (ControllerV1 returns 0) |
+| gate | removed, with every trace. a test checks the source |
+| statements | listed at compose on an english auction, reserve `reserveBps` of cost, `auctionDuration` timer from the first bid, 5 percent raise, 15 minute extension, highest bid wins, unbid statements stay listed |
+| proceeds | credited to the Core in the house at the end of the auction, reach the pots only when `collectSales` runs (a keeper every hour), split by `saleToBuybackBps` |
+| phase 2 exit | an unbid listing may exit through the exitModule after `exitAfter` (72 hours), a statement with a bid never |
+| settings | one `Settings` object with the Core's field names, `schedule` of `{day, patch}` changes it mid run with the Core's checkpoint, bounds and reprice rules |
+| opening limit | `rateStart` 1.54e13, 75 percent of the market price of a credit over `avgScore` |
+
+port checks: node engine.test.mjs runs 235 numeric checks against hand computed Core values: the launch values against mainnet.json, climb tiers, the funded rule and clamp, drop on fill, hourly cap, the blended ceiling at five values of `flatBps`, tip rule, compose reimbursement with the listing gas, the reserve and repricing, every english auction rule (reserve, 5 percent raise, extension, end, winner), the proceeds split at five values, `setSettings` bounds and checkpoint, exit eligibility, the exitToken auction and bid, buyback, the pool, and eth accounting identities over whole runs (pot, buyback pot, house).
 
 ## model in short
 
 | piece | what it does | calibration |
 |---|---|---|
 | coin market | exogenous daily volume, buy share, skim 10 percent with 9.5 points to the pot, anti sniper 90 to 10 percent over 30 minutes, single sided position tick -175000 to 887200 | model price after day one 4.48e-7, observed 4.44e-7 |
-| credit sellers | uniform scores 80 to 800, flat ask per credit with lognormal spread 0.27, top tier premium above 740, 150 offers an hour, 5 percent leave an hour, more offers when the bid is above market | median 0.0089 eth, p10 0.0069, p90 0.0138 |
-| doors | sell door pays score times rate for any credit whose ceiling clears its ask, cheapest ask per point first. CreditStrategy listings clear through the listing door with the tip | 13,132 listings at median 0.036 eth |
-| statements | arrivals 8 a day decaying to 2, willingness to pay as a multiple of 80 times the flat price, rating insensitive | median 0.84, 21 percent at 1.2 or more, max 1.32 |
+| credit sellers | uniform scores 80 to 800, flat ask per credit with lognormal spread 0.27, top tier premium above 740, 150 offers an hour, 5 percent leave an hour, more offers when the bid is above market, a float of 96,800 credits | median 0.0089 eth, p10 0.0069, p90 0.0138 |
+| doors | the sell door pays the bid for any credit whose ceiling clears its ask, cheapest ask per bid point first. CreditStrategy listings clear through the listing door with the tip | 13,132 listings at median 0.036 eth |
+| statement buyers | arrivals 8 a day decaying to 2, willingness to pay as a multiple of 80 times the flat price, rating insensitive. each buyer bids once, the minimum the house accepts, on the cheapest auction that fits (`stmtPick` random takes any that fits) | median 0.84, 21 percent at 1.2 or more, max 1.32, from fixed price sales. no data on auctions |
 | engine to market feedback | engine spend lifts the flat price, elasticity 0.12, half life 48 hours, cap 3x | assumption |
-| phase 2 | exitModule pays rating times unitPerPoint, exit lane, exitToken bid, dutch auction, takers fill at a set discount | assumption |
+| phase 2 | exitModule pays rating times unitPerPoint, exit lane, exitToken bid by score, dutch auction with takers at a set discount, a keeper exits every eligible listing | assumption |
 
-port checks: node engine.test.mjs runs 86 numeric checks against hand computed Core values (climb tiers 1, 2, 4, 8 percent an hour, the funded clamp, drop on fill, hourly cap, auction curve 4x to 1.2x, exit auction half life, tip rule, pool round trip) and an eth accounting identity over whole runs.
+## 1. the launch configuration as built
 
-## 1. does the phase 1 loop turn
-
-| preset | day | eth into pot (fees) | credits bought | composed | sold | stuck at floor | eth returned to pot | eth to buyback | coin burned (m) | percent of supply | eth locked | pot now |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| comparable decay | 30 | 292 | 17,520 | 219 | 30.2 | 187 | 12.8 | 12.8 | 40.6 | 4.06% | 284 | 0.0352 |
-|  | 60 | 293 | 18,270 | 228 | 39.6 | 187 | 15.7 | 15.7 | 49.1 | 4.91% | 283 | 0.0822 |
-|  | 90 | 295 | 19,080 | 238 | 49.6 | 187 | 18.9 | 18.9 | 57.9 | 5.79% | 283 | 0.0675 |
-| sustained 17 eth a day | 30 | 303 | 20,620 | 257 | 38.8 | 208 | 15.8 | 15.8 | 28.0 | 2.80% | 292 | 1.00 |
-|  | 60 | 352 | 28,240 | 353 | 62.8 | 280 | 24.3 | 24.3 | 40.6 | 4.06% | 336 | 0.845 |
-|  | 90 | 402 | 35,660 | 445 | 82.0 | 354 | 31.1 | 31.1 | 49.5 | 4.95% | 380 | 0.652 |
-| sustained 50 eth a day | 30 | 394 | 26,880 | 336 | 36.4 | 278 | 15.6 | 15.6 | 27.8 | 2.78% | 382 | 1.87 |
-|  | 60 | 537 | 43,270 | 540 | 49.4 | 470 | 21.1 | 21.1 | 36.1 | 3.61% | 521 | 2.11 |
-|  | 90 | 680 | 59,660 | 745 | 61.6 | 663 | 26.2 | 26.2 | 43.2 | 4.32% | 661 | 2.05 |
-| dead after week one | 30 | 285 | 16,990 | 212 | 26.8 | 185 | 11.5 | 11.5 | 34.5 | 3.44% | 278 | 0.0328 |
-|  | 60 | 286 | 17,330 | 216 | 31.2 | 185 | 13.0 | 13.0 | 38.5 | 3.85% | 278 | 0.0221 |
-|  | 90 | 287 | 17,630 | 220 | 35.0 | 184 | 14.3 | 14.3 | 41.8 | 4.18% | 278 | 0.0241 |
-
-no. under every preset it stalls. the loop is: fees fill the pot, the pot buys credits, 80 credits become a statement, the statement sells for at least 1.2x cost, half returns to the pot and half buys coin. it breaks at the sale step. the pot is under 1 eth by day 11.6 (comparable) to 12.4 (sustained 50), and everything it held is now in statements nobody buys at the floor.
-
-why it stalls, in order of weight:
-
-1. price. the engine's cost per credit is 1.43x the flat price (1.17x under sustained volume where the market lifts), so a statement costs 1.32 eth against a parts market cost of 0.71 eth. buyers pay a median 0.84x of parts cost, 0.6 eth. the floor is 1.2x cost, 1.58 eth. no observed buyer paid more than 1.32x of parts cost, so the floor clears for none of them.
-2. pace. 255 of the 295 eth arrive in the first day (sniper window plus launch volume). the bid climbs 1 percent an hour from 4e12, reaches the market around day 7, and the pot is spent between day 7 and day 12: about 16,000 credits in six days. buyers absorb 5 to 8 statements a day. the engine composes 40 a day.
-3. demand is a hard ceiling. 271 statement buyers arrive in 90 days under the base case and 221 of them find no price they accept. even a free floor cannot sell more statements than there are buyers.
-4. sustained volume does not fix it. at 17 eth a day fees reach 402 eth but stuck statements reach 354, because sales stay near 80. at 50 eth a day 663 statements are stuck and 661 eth is locked.
-
-burn: 19 eth to buyback (comparable) buys 58m coin, 5.8 percent of supply, because the pool price sits near 3e-7. the percent of supply depends on the coin price path more than on the engine (section 8). burn only ever comes from statement sales, so no sales means no burn.
-
-eth recycled: sales return 0.12 eth per eth spent on credits.
-
-## 2. the starting rate
-
-at today's flat price of 0.0089 eth. m is rateStart times 800 over the flat price in wei, so m = 1 is the rate at which an 800 point credit clears at the flat price.
-
-| rateStart | m | hours to first fill | hours to first 80 credits | first 80 cost over market | average score of first 80 | statements sold by day 90 | percent of supply burned | all credits cost over market |
-|---|---|---|---|---|---|---|---|---|
-| 1.00e12 | 0.0899 | 70.0 | 127 | 0.608 | 695 | 51.0 | 6.06 | 1.42 |
-| 2.00e12 | 0.18 | 52.3 | 111 | 0.601 | 691 | 46.0 | 5.39 | 1.42 |
-| 3.00e12 | 0.27 | 38.0 | 92.0 | 0.604 | 692 | 46.3 | 5.58 | 1.44 |
-| 4.00e12 | 0.36 | 22.3 | 74.3 | 0.609 | 703 | 50.7 | 5.93 | 1.43 |
-| 6.00e12 | 0.539 | 0.0333 | 37.7 | 0.615 | 694 | 48.0 | 5.40 | 1.42 |
-| 8.00e12 | 0.719 | 0.0333 | 10.0 | 0.643 | 693 | 58.0 | 6.26 | 1.40 |
-| 1.00e13 | 0.899 | 0.0333 | 0.0333 | 0.768 | 687 | 63.7 | 6.67 | 1.38 |
-| 1.50e13 | 1.35 | 0.0333 | 0.0333 | 1.15 | 687 | 57.7 | 6.18 | 1.40 |
-| 2.00e13 | 1.80 | 0.0333 | 2.00 | 1.53 | 686 | 54.0 | 5.86 | 1.43 |
-| 3.00e13 | 2.70 | 0.0333 | 2.00 | 2.30 | 688 | 62.3 | 6.53 | 1.48 |
-
-reading it:
-
-1. the first fills are the cheapest sellers at the highest scores. the engine pays score times rate, so an 800 point credit with an ask 40 percent under the median clears first, and the engine pays about 0.6x of market for its first 80 credits at an average score of 693. below m = 0.5 that price is the same and only the wait grows (22 hours at 4e12, 70 hours at 1e12).
-2. above m = 0.75 the engine starts paying full price. at m = 1 the first 80 cost 0.85x, at m = 1.35 they cost 1.15x, at 3e13 they cost 2.3x. a rate above the market buys the first 80 credits in two minutes but at a premium to the flat price.
-3. downstream results do not depend on it. statements sold by day 90 range 46 to 64 and percent burned 5.4 to 6.7 across the whole sweep, within seed noise. rateStart sets only how soon the pot starts working, because the pot is large either way.
-4. at m = 0.5 the first fill lands inside the anti sniper window and the first 80 credits are done after 45 hours.
-
-recommendation: **rateStart = 5.6e12 for launch at 0.0089.** rule for launch day: rateStart = flat credit price in wei divided by 1600, which is m = 0.5, half the rate at which an 800 point credit clears at the flat price. the flat price is the median over the last 24 hours of seaport fills. never go above price over 800 (m = 1). the sweep was repeated at flat prices of 0.0045, 0.018 and 0.03 and the same m gives the same first 80 cost ratio at the first three prices (0.61, 0.61, 0.61 at m = 0.5), 0.54 at 0.03, so the rule scales with price. the current default 4e12 is m = 0.36 and also safe, it only waits 22 hours.
-
-## 3. per point bid against the flat market
-
-the market prices a credit flat in score. the engine pays score times rate. the model has sellers who clear when score times rate reaches their flat ask, so the cheapest ask per point sells first, which means high scores.
-
-| metric | per point bid (the Core) | flat per credit counterfactual | per point, no price impact | per point, half the offers are listings | per point, declining market |
-|---|---|---|---|---|---|
-| average score bought (population 440) | 594 | 428 | 580 | 594 | 589 |
-| cost per credit over flat price | 1.43 | 1.09 | 1.51 | 1.22 | 1.53 |
-| cost per point over market per point | 1.06 | 1.12 | 1.15 | 0.903 | 1.14 |
-| cost over what sellers asked | 1.50 | 1.28 | 1.64 | 1.28 | 1.60 |
-| average statement cost basis, eth | 1.32 | 1.00 | 1.09 | 1.12 | 1.07 |
-| average statement rating, points | 47,470 | 34,240 | 46,400 | 47,480 | 47,090 |
-| statements composed | 238 | 327 | 291 | 285 | 286 |
-| statements sold | 49.6 | 98.6 | 65.2 | 68.2 | 54.4 |
-| stuck at floor | 187 | 226 | 225 | 215 | 230 |
-| percent of supply burned | 5.79 | 8.90 | 6.81 | 7.15 | 3.69 |
-| first 80 cost over market | 0.608 | 0.519 | 0.605 | 0.597 | 0.605 |
-
-who sells, by score bin, whole run (comparable decay):
-
-| score bin | credits bought | average price paid, eth |
-|---|---|---|
-| 80 to 152 | 0.8 | 0.00553 |
-| 152 to 224 | 35.0 | 0.00745 |
-| 224 to 296 | 325 | 0.00937 |
-| 296 to 368 | 969 | 0.0114 |
-| 368 to 440 | 1,685 | 0.0132 |
-| 440 to 512 | 2,351 | 0.0143 |
-| 512 to 584 | 2,886 | 0.0154 |
-| 584 to 656 | 3,329 | 0.0168 |
-| 656 to 728 | 3,867 | 0.0175 |
-| 728 to 800 | 3,636 | 0.0199 |
-
-the score frontier (the lowest score a median ask seller can sell at) and the average score bought:
-
-| day | frontier score | average score bought that day | bid over market (440 point credit) |
-|---|---|---|---|
-| 1 | 900 | 726 | 0.251 |
-| 3 | 900 | 700 | 0.404 |
-| 5 | 691 | 666 | 0.637 |
-| 7 | 468 | 608 | 0.94 |
-| 10 | 339 | 563 | 1.30 |
-| 12 | 426 | 600 | 1.03 |
-| 14 | 548 | 672 | 0.803 |
-| 20 | 859 | 520 | 0.512 |
-| 30 | 900 | 505 | 0.476 |
-
-what it says:
-
-1. adverse selection is real and expensive. the engine's average credit scores 594 against 440 in the population and it pays 1.43x the flat price per credit. a 728 to 800 point credit costs 0.0199 eth, a 152 to 224 credit 0.0074. the market pays the same for both.
-2. it wins early and loses later. the first 80 credits cost 0.61x of market because only cheap asks clear. once the cheap tail is gone the bid has to climb to the ask of a typical seller, and every seller above 440 points is overpaid by score over 440.
-3. per point it roughly breaks even (1.06x market per point). but a point is worth nothing in phase 1: statement price is flat in rating (r2 0.03). so the engine buys points it cannot sell. its statements rate 47,500 against 35,200 for a random 80, and sell for the same price.
-4. a flat per credit bid (pay 433 points of rate for any credit) costs 1.09x instead of 1.43x, composes 327 statements and sells 99 instead of 50, burn 8.9 percent instead of 5.8. statement cost basis falls from 1.32 to 1.00 eth.
-5. the cost of that: a flat bid stops accumulating rating, 34,200 per statement against 47,500. that rating matters only if the exitModule pays by rating, which it does in phase 2 (rating times unitPerPoint). so the per point bid is a phase 2 asset bought with phase 1 eth. decide with the exitToken price in hand (section 7).
-6. if half the offers are visible listings that keepers take through buyListing at the ask, cost per credit drops to 1.22x and sold rises to 68. the listing door is the cheaper door, and keepers will route to it where they can. the model's default (listed share 0) is the sell door only, as specified.
-
-## 4. statement auction parameters
-
-what the current setting does with the observed 0.84 median. the price starts at 4x of cost and falls linearly to 1.2x over 72 hours, then stays at 1.2x. a buyer who values the statement at w times its parts market cost buys at the first moment the price is at or under w times parts cost. so the statement clears only when w is at least 1.2 times the engine's cost basis over parts cost, and the 4x start matters for no buyer (none above 1.32). share of observed buyers that clear, by the engine's cost basis as a multiple of the parts market cost:
-
-| cost basis over market | floor 1.2x | floor 1.0x | floor 0.8x | floor 0.6x | start 4x |
-|---|---|---|---|---|---|
-| 0.6 | 73% | 82% | 90% | 95% | 0% |
-| 0.7 | 50% | 76% | 85% | 93% | 0% |
-| 0.8 | 37% | 58% | 80% | 90% | 0% |
-| 0.9 | 25% | 43% | 73% | 86% | 0% |
-| 1 | 21% | 33% | 58% | 82% | 0% |
-| 1.2 | 0% | 21% | 37% | 73% | 0% |
-| 1.4 | 0% | 0% | 23% | 50% | 0% |
-| 1.6 | 0% | 0% | 4% | 37% | 0% |
-
-at cost basis equal to the market, 1.2x clears for 21 percent of buyers, which matches the observed 21 percent that reached 1.2x. at the median buyer (0.84) the engine would need a cost basis of 0.70x of market. at the sim's cost basis of 1.43x it clears for nobody, which is the 187 stuck statements.
-
-sweep of start multiple and floor multiple, 72 hours, 90 days:
-
-| start | floor | composed | sold | stuck | eth locked | eth returned to pot | coin burned (m) | percent of supply | sale price over cost | pot |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 4 | 1.2 | 239 | 50.7 | 187 | 283 | 19.5 | 59.3 | 5.93 | 1.25 | 0.0953 |
-| 4 | 1 | 254 | 75.3 | 177 | 274 | 26.1 | 75.3 | 7.53 | 1.10 | 0.0317 |
-| 4 | 0.8 | 264 | 105 | 158 | 257 | 32.6 | 89.0 | 8.90 | 0.905 | 0.071 |
-| 4 | 0.6 | 276 | 141 | 133 | 226 | 36.9 | 97.7 | 9.77 | 0.69 | 0.0283 |
-| 3 | 1.2 | 243 | 53.3 | 188 | 284 | 20.0 | 61.0 | 6.10 | 1.28 | 0.135 |
-| 3 | 1 | 252 | 74.0 | 177 | 275 | 25.7 | 74.2 | 7.42 | 1.11 | 0.0749 |
-| 3 | 0.8 | 272 | 114 | 157 | 255 | 36.3 | 96.2 | 9.62 | 0.935 | 0.0673 |
-| 3 | 0.6 | 278 | 143 | 133 | 227 | 39.2 | 101 | 10.1 | 0.717 | 0.0496 |
-| 2.5 | 1.2 | 244 | 53.7 | 189 | 284 | 20.6 | 62.3 | 6.23 | 1.32 | 0.0376 |
-| 2.5 | 1 | 255 | 77.0 | 177 | 275 | 27.2 | 77.4 | 7.74 | 1.14 | 0.0364 |
-| 2.5 | 0.8 | 269 | 110 | 158 | 257 | 35.8 | 94.9 | 9.49 | 0.952 | 0.145 |
-| 2.5 | 0.6 | 282 | 152 | 129 | 222 | 41.4 | 106 | 10.6 | 0.717 | 0.166 |
-| 2 | 1.2 | 249 | 57.7 | 190 | 285 | 22.4 | 66.9 | 6.69 | 1.37 | 0.0431 |
-| 2 | 1 | 254 | 76.0 | 177 | 275 | 27.6 | 77.6 | 7.76 | 1.15 | 0.0292 |
-| 2 | 0.8 | 271 | 112 | 158 | 257 | 37.0 | 97.0 | 9.71 | 0.965 | 0.0675 |
-| 2 | 0.6 | 276 | 139 | 136 | 231 | 38.7 | 100 | 10.0 | 0.742 | 0.0473 |
-| 1.5 | 1.2 | 248 | 60.7 | 187 | 283 | 23.4 | 68.2 | 6.82 | 1.30 | 0.101 |
-| 1.5 | 1 | 259 | 80.0 | 179 | 275 | 28.7 | 80.2 | 8.02 | 1.18 | 0.302 |
-| 1.5 | 0.8 | 270 | 106 | 163 | 261 | 34.9 | 92.6 | 9.26 | 0.991 | 0.0634 |
-| 1.5 | 0.6 | 276 | 137 | 139 | 234 | 39.4 | 101 | 10.1 | 0.777 | 0.336 |
-
-length sweep, two settings:
-
-| length hours | start and floor | composed | sold | stuck | eth locked | percent burned |
-|---|---|---|---|---|---|---|
-| 12 | 4x and 1.2x | 237 | 51.0 | 186 | 282 | 5.71 |
-| 12 | 2x and 0.8x | 256 | 103 | 153 | 252 | 8.46 |
-| 24 | 4x and 1.2x | 237 | 47.0 | 190 | 284 | 5.22 |
-| 24 | 2x and 0.8x | 264 | 111 | 153 | 252 | 9.23 |
-| 72 | 4x and 1.2x | 239 | 50.7 | 187 | 283 | 5.93 |
-| 72 | 2x and 0.8x | 271 | 112 | 158 | 257 | 9.71 |
-| 168 | 4x and 1.2x | 249 | 54.7 | 192 | 285 | 6.39 |
-| 168 | 2x and 0.8x | 269 | 100 | 166 | 265 | 9.37 |
-| 336 | 4x and 1.2x | 255 | 53.3 | 193 | 286 | 6.31 |
-| 336 | 2x and 0.8x | 271 | 91.7 | 175 | 272 | 9.07 |
-
-reading it:
-
-1. the floor is the lever, the start is not. start 4x to 1.5x moves sold from 51 to 61. floor 1.2x to 1.0x to 0.8x to 0.6x moves sold 51, 75, 105, 141 and burn 5.9, 7.5, 8.9, 9.8 percent.
-2. no setting clears the inventory. the best cell (floor 0.6x) still leaves 133 stuck and 226 eth locked, because 271 buyers arrive in 90 days and the engine composes 276. clearing needs fewer statements, not a lower price (section 9).
-3. a floor under 1.0x sells below cost basis. at 0.8x the average sale is 0.9x of cost, at 0.6x it is 0.69x. what it buys is recycling: eth returned to the pot goes 19.5, 26.1, 32.6, 36.9 eth, buyback the same. the unsold alternative returns nothing.
-4. length is nearly irrelevant. 12 hours to 336 hours moves sold within 47 to 55 at 4x and 1.2x, 92 to 112 at 2x and 0.8x. a long auction slightly delays recycling.
-5. with floor under 1.0 the invariant in SPEC section 10 (no statement sold under 1.2x cost) is gone. that is a deliberate change of a Core constant and its invariant test.
-
-## 5. the funded rule
-
-old rule: the pot affords one average credit, no clamp on the climb. new rule: 20 percent of the pot affords one average credit, climb clamped where it stops. overshoot is the peak of bid rate over the market rate for a 440 point credit.
-
-| scenario | rule | peak bid over market | hours above 1.5x | credits bought | sold | longest stall, hours | hours at the clamp |
+| preset | day | credits acquired | statements created | sold | eth spent buying coin | percent of supply burned | waiting for phase 2 |
 |---|---|---|---|---|---|---|---|
-| base case | old | 17.4 | 882 | 18,070 | 38.0 | 30.3 | 0 |
-|  | new | 1.30 | 0 | 19,130 | 50.7 | 11.3 | 1.67 |
-| small pot (volume x0.03) | old | 7.50 | 1,241 | 3,465 | 42.3 | 408 | 0 |
-|  | new | 0.596 | 0 | 3,799 | 46.7 | 117 | 199 |
-| tiny pot (17 eth a day x0.005) | old | 10.8 | 1,827 | 476 | 4.67 | 126 | 0 |
-|  | new | 0.57 | 0 | 954 | 11.0 | 56.0 | 24.0 |
-| credit price recovery | old | 3.68 | 286 | 16,870 | 93.0 | 22.7 | 0 |
-|  | new | 1.08 | 0 | 17,770 | 102 | 17.7 | 6.33 |
-| continued decline | old | 1.45 | 0 | 23,040 | 56.7 | 12.0 | 0 |
-|  | new | 1.45 | 0 | 22,930 | 54.3 | 12.0 | 0 |
-| sustained 50 eth a day | old | 1.30 | 0 | 59,590 | 61.0 | 9.67 | 0 |
-|  | new | 1.30 | 0 | 59,590 | 61.0 | 9.67 | 0 |
-| rateStart 1e12 | old | 17.4 | 1,363 | 17,550 | 31.0 | 25.7 | 0 |
-|  | new | 1.30 | 0 | 19,170 | 51.0 | 12.3 | 2.67 |
-| no engine price impact | old | 1.72 | 41.0 | 23,050 | 60.3 | 10.3 | 0 |
-|  | new | 1.72 | 41.0 | 23,160 | 62.7 | 10.3 | 0 |
+| comparable decay | 30 | 24,350 | 304 | 77 | 21.0 | 5.6% | 227 |
+|  | 60 | 25,740 | 321 | 100 | 26.3 | 6.9% | 221 |
+|  | 90 | 27,110 | 339 | 121 | 31.3 | 8.1% | 216 |
+| sustained 17 eth a day | 30 | 28,610 | 357 | 108 | 29.0 | 4.7% | 247 |
+|  | 60 | 38,240 | 478 | 164 | 42.0 | 6.2% | 312 |
+|  | 90 | 47,430 | 592 | 209 | 52.6 | 7.3% | 382 |
+| sustained 50 eth a day | 30 | 37,180 | 464 | 100 | 29.3 | 4.7% | 364 |
+|  | 60 | 57,680 | 720 | 149 | 42.8 | 6.3% | 570 |
+|  | 90 | 78,160 | 976 | 196 | 55.5 | 7.6% | 778 |
+| dead after week one | 30 | 23,460 | 293 | 72 | 20.1 | 5.2% | 220 |
+|  | 60 | 24,800 | 310 | 96 | 25.8 | 6.4% | 213 |
+|  | 90 | 25,990 | 324 | 117 | 30.8 | 7.4% | 207 |
 
-1. the old rule overshoots wherever the pot is small against the credit price: peak 17x market in the base case once the pot has drained (882 hours above 1.5x), 7.5x with a small pot, 3.7x if the credit price recovers. the new rule peaks at 1.3x, 0.6x and 1.1x.
-2. the mechanism: with the pot at 0.02 eth the old rule still calls it funded, the rate climbs to 8 percent an hour with no fill, and the hourly cap (20 percent of the pot) then blocks every credit above a cheap one. the bid is far above the market and nothing can sell into it. the new clamp holds the bid where 20 percent of the pot affords an average credit.
-3. new rule costs: in a small pot regime the bid sits at 0.6x of market and the engine buys only the cheap tail. that is not a defect. it paid 0.75x of market and sold 47 of 47 statements (burn 33 percent of supply, because the pot was small and the coin price low).
-4. with a rich pot (sustained 50, decline) the two rules give the same result. the new rule is never worse. keep it.
-
-## 6. hourly cap, climb and drop constants
-
-base case: the hourly cap blocked at least one clearing sale in 1,775 of 2,160 hours, but only 4.20 of those hours had a pot above 5 eth. longest stretch with no purchase after the first fill: 11.2 hours. the rate makes 955 direction changes in 90 days with a mean move of 0.86 percent an hour.
-
-1. the cap is a small pot effect. while the pot is rich (days 1 to 12) it never binds: 150 offers an hour at 0.015 eth is 2 eth an hour against a cap of 50 eth. once the pot is 0.02 eth the cap is 0.004 eth and sits under the price of one credit, so a clearing sale waits for fees to arrive. that is design item 8 in ARCHITECTURE and it behaves as described.
-2. CLIMB_MAX_BPS_PER_HOUR never binds. after the first fill the doubling clock restarts every hour a purchase happens, and no stall in the base case reaches 72 hours. sweeping it from 200 to 1600 changes nothing. it only matters in a dead market, where it governs how fast the bid finds the first seller.
-3. DROP_BPS scales with the share of the pot spent. with a pot of 250 eth a 0.015 eth purchase drops the rate by 0.0006 percent. the bid is undamped until the pot is nearly gone. that is why the engine spends the whole pot in about six days and why the rate rides up to 1.3x of market. the drop works only when the pot is small.
-4. oscillation is a small sawtooth: a 1 percent climb against drop, about 0.9 percent an hour, with no growth. no limit cycle of any size.
-5. the constants sit at the edge of a stable region. a weaker drop (500), faster climb (200 bps) or lower cap (1000) each push the bid to 3.5x of market and cut sales roughly in half. a stronger drop (2000) or a higher cap (4000) improve cost and sales.
-
-DROP_BPS:
-
-| value | peak bid over market | cap hours | clamp hours | direction changes | sold | stuck | percent burned | cost over market | longest stall h |
-|---|---|---|---|---|---|---|---|---|---|
-| 250 | 3.64 | 1,842 | 21.7 | 42.7 | 27.0 | 180 | 3.71 | 1.56 | 26.0 |
-| 500 | 3.48 | 1,853 | 34.3 | 96.3 | 30.7 | 181 | 4.18 | 1.54 | 26.3 |
-| 1000 | 1.30 | 1,767 | 1.67 | 958 | 50.7 | 187 | 5.93 | 1.43 | 11.3 |
-| 2000 | 1.26 | 68.7 | 0 | 518 | 65.7 | 194 | 7.05 | 1.34 | 9.67 |
-| 4000 | 1.19 | 0 | 0 | 623 | 65.7 | 209 | 7.09 | 1.29 | 9.67 |
-
-CLIMB_BASE_BPS_PER_HOUR:
-
-| value | peak bid over market | cap hours | clamp hours | direction changes | sold | stuck | percent burned | cost over market | longest stall h |
-|---|---|---|---|---|---|---|---|---|---|
-| 50 | 1.14 | 229 | 0.333 | 291 | 62.7 | 223 | 6.84 | 1.27 | 23.3 |
-| 100 | 1.30 | 1,767 | 1.67 | 958 | 50.7 | 187 | 5.93 | 1.43 | 11.3 |
-| 200 | 3.48 | 1,956 | 70.0 | 177 | 24.0 | 157 | 3.19 | 1.71 | 25.7 |
-| 400 | 10.8 | 2,077 | 158 | 148 | 19.7 | 134 | 2.68 | 1.97 | 27.3 |
-
-SPEND_CAP_BPS_PER_HOUR:
-
-| value | peak bid over market | cap hours | clamp hours | direction changes | sold | stuck | percent burned | cost over market | longest stall h |
-|---|---|---|---|---|---|---|---|---|---|
-| 500 | 3.79 | 1,479 | 121 | 38.3 | 26.7 | 181 | 3.66 | 1.58 | 38.3 |
-| 1000 | 3.49 | 1,731 | 87.3 | 122 | 24.0 | 188 | 3.27 | 1.53 | 38.3 |
-| 2000 | 1.30 | 1,767 | 1.67 | 958 | 50.7 | 187 | 5.93 | 1.43 | 11.3 |
-| 4000 | 1.30 | 318 | 0.333 | 486 | 74.3 | 184 | 7.85 | 1.36 | 10.7 |
-| 10000 | 1.30 | 0 | 0 | 476 | 67.0 | 187 | 7.13 | 1.37 | 15.7 |
-
-small pot (volume x0.03), SPEND_CAP_BPS_PER_HOUR:
-
-| cap | credits bought | sold | cost over market | longest stall h |
-|---|---|---|---|---|
-| 500 | 1,487 | 13.3 | 1.04 | 451 |
-| 1000 | 3,048 | 37.3 | 0.888 | 155 |
-| 2000 | 3,799 | 46.7 | 0.747 | 117 |
-| 5000 | 4,065 | 50.0 | 0.728 | 93.0 |
-
-## 7. phase 2
-
-setup: module set on day 14, 182 statements are already past their auction by then. xp is the eth value of the exitToken paid per point of rating, so a statement of rating 47,500 exits for 47,500 times xp. exit is automatic once the auction has run its length. credit sellers choose the better of the eth bid and the exitToken bid.
-
-where exiting beats the floor. exit value is rating times xp. the floor price is 1.2 times cost. exit wins when xp is above 1.2 times cost over rating.
-
-| engine cost per statement | rating | xp where exit beats the floor | xp where exit just repays cost |
-|---|---|---|---|
-| 1.32 eth, per point bid base case | 47,500 | 3.3e-5 | 2.8e-5 |
-| 1.00 eth, flat bid | 34,200 | 3.5e-5 | 2.9e-5 |
-| 0.80 eth | 47,500 | 2.0e-5 | 1.7e-5 |
-| 0.70 eth, cheap tail buying | 34,200 | 2.5e-5 | 2.0e-5 |
-
-but the floor is a price only if a buyer shows up. in the base case it clears for 0 to 21 percent of buyers, so the expected floor value of the stuck inventory is near zero and exit wins at any xp. the comparison that binds is on credit buying: a median ask seller (0.0089 eth) takes the exitToken bid only when xRate times 440 times xp reaches the ask. that needs xp of 2.1e-5 at the 97 percent cap, 3.4e-5 at the 60 percent start, 6.7e-5 at the 30 percent floor.
-
-full sweep, exit always on against never exiting:
-
-| xp | eth lane sold | exited at the floor | stuck | eth locked | credits bought with exitToken | exit lane statements | bid pot end | waiting for dutch | burned by dutch (m) | percent burned | percent burned if never exit |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 5.00e-06 | 34.3 | 196 | 0 | 0.146 | 5.33 | 0 | 22.7 | 10.3 | 28.6 | 7.25% | 5.93% |
-| 1.00e-05 | 34.7 | 299 | 0 | 0.328 | 8,501 | 106 | 47.2 | 19.8 | 52.5 | 9.59% | 5.93% |
-| 1.50e-05 | 31.0 | 309 | 0 | 0.32 | 9,105 | 113 | 101 | 30.6 | 72.9 | 11.3% | 5.93% |
-| 2.00e-05 | 31.3 | 311 | 0 | 0.503 | 9,182 | 114 | 156 | 41.4 | 89.6 | 13.0% | 5.93% |
-| 3.00e-05 | 31.3 | 315 | 0 | 0.352 | 9,263 | 115 | 267 | 64.7 | 116 | 15.6% | 5.93% |
-| 4.00e-05 | 29.3 | 584 | 0 | 0.376 | 31,080 | 388 | 763 | 81.1 | 137 | 17.6% | 6.01% |
-| 6.00e-05 | 26.7 | 1,183 | 0 | 0.753 | 79,480 | 993 | 2,330 | 112 | 168 | 20.4% | 6.42% |
-| 1.00e-04 | 26.7 | 1,188 | 0 | 1.78 | 79,610 | 995 | 3,507 | 197 | 201 | 23.8% | 6.54% |
-
-1. below xp of about 1e-5 phase 2 does little. exits return 0.2 to 0.5 eth of value per statement against a cost of 1.3, the exit bid cannot buy credits (only 5 bought at 5e-6), and burn rises from 5.9 to 7.2 percent only because the 196 stuck statements feed the dutch auction.
-2. between 1e-5 and 3e-5 the stuck inventory clears (locked eth falls from 283 to under 1) and burn reaches 9.6 to 15.6 percent. the exit lane starts: 106 to 115 exit lane statements built from 8,500 to 9,300 credits bought with exitToken.
-3. above 4e-5 the exit bid runs at its floor of 30 percent, buys 31,000 to 80,000 credits and the bid pot compounds: an exit lane statement costs xRate times its rating in exitToken and returns the full rating, so every cycle grows the pot by 1 over xRate, 3.3x at the floor. the bid pot reaches 760 to 3,500 eth of value. that is a supply of exitToken the exitModule has to honour, so check unitPerPoint against exitToken supply before choosing the module.
-4. the eth side is dead after exit. the eth pot stays under 0.2 eth, because exit returns no eth. phase 2 turns a locked eth inventory into exitToken claims, it does not refill the eth bid.
-5. exiting also pre empts floor sales. eth lane sold falls from 51 to 27 to 35 because statements exit at 72 hours rather than waiting for a buyer. a keeper rule that exits only when rating times xp is at least the floor price keeps the floor option. that rule is an off chain policy because exitStatement is permissionless, so any caller can exit.
-
-exit token bid dynamics (seed 1):
-
-| xp | day | xRate bps | bid pot | waiting for dutch | credits bought | statements exited | percent burned | dutch fills |
-|---|---|---|---|---|---|---|---|---|
-| 1.00e-05 | 14.5 | 7,200 | 41.6 | 41.6 | 0 | 181 | 3.97 | 0 |
-| 1.00e-05 | 15 | 8,340 | 41.8 | 41.9 | 3.00 | 182 | 3.97 | 0 |
-| 1.00e-05 | 16 | 9,560 | 41.7 | 42.1 | 62.0 | 183 | 3.97 | 0 |
-| 1.00e-05 | 18 | 9,620 | 42.2 | 42.6 | 231 | 187 | 3.99 | 1 |
-| 1.00e-05 | 20 | 9,520 | 42.6 | 42.1 | 454 | 191 | 4.17 | 9 |
-| 1.00e-05 | 25 | 9,560 | 42.7 | 40.4 | 1,033 | 198 | 4.59 | 29 |
-| 1.00e-05 | 30 | 9,540 | 43.4 | 38.9 | 1,626 | 207 | 5.00 | 49 |
-| 1.00e-05 | 45 | 9,320 | 43.7 | 33.6 | 3,334 | 228 | 6.43 | 109 |
-| 1.00e-05 | 60 | 9,400 | 45.2 | 28.9 | 5,126 | 253 | 7.50 | 169 |
-| 1.00e-05 | 90 | 9,660 | 47.1 | 19.3 | 8,644 | 300 | 9.55 | 288 |
-| 3.00e-05 | 14.5 | 4,120 | 125 | 125 | 154 | 182 | 3.97 | 0 |
-| 3.00e-05 | 15 | 3,840 | 127 | 126 | 228 | 184 | 3.97 | 0 |
-| 3.00e-05 | 16 | 3,500 | 130 | 126 | 365 | 187 | 3.97 | 0 |
-| 3.00e-05 | 18 | 3,380 | 134 | 127 | 611 | 192 | 4.17 | 3 |
-| 3.00e-05 | 20 | 3,320 | 138 | 126 | 854 | 196 | 4.67 | 11 |
-| 3.00e-05 | 25 | 3,200 | 148 | 121 | 1,460 | 204 | 5.95 | 31 |
-| 3.00e-05 | 30 | 3,120 | 155 | 116 | 2,064 | 211 | 7.08 | 50 |
-| 3.00e-05 | 45 | 3,120 | 183 | 102 | 3,864 | 237 | 10.1 | 110 |
-| 3.00e-05 | 60 | 3,260 | 209 | 88.5 | 5,657 | 261 | 12.4 | 170 |
-| 3.00e-05 | 90 | 3,120 | 265 | 62.4 | 9,269 | 312 | 15.9 | 289 |
-
-the bid does not saturate against its cap when xp is high. at xp 3e-5 it starts at 6,000, falls 20 bps per credit at 120 to 150 credits a day, is at 3,500 on day 16 and sits at 3,100 to 3,300 from day 20, close to its floor of 3,000, with the pot still growing. at xp 1e-5 demand is thin, the 100 bps an hour climb wins and the bid sits at 9,300 to 9,700 near the cap. the per credit drop is what makes both behave. a drop scaled to the pot would pin the rate at the cap, as the spec said.
-
-dutch auction. the price asks the whole supply for a slice at the start and halves every 6 hours. the first fill arrives about 3.4 days after the module is set (hour 418 against hour 336). after that a fill restarts the price at twice the clearing price, so the next fill is one half life later, and the cadence is one slice per 6.03 hours (289 fills in 76 days) whatever the taker threshold. a slice is 20 average credits, 0.26 eth of value at xp 3e-5, so the throughput is about 1.04 eth of value a day. that is slower than the inflow: the waiting amount grows to 65 eth of value at day 90, 62 days of backlog.
-
-realised discount equals the taker's threshold because takers wait for it:
-
-| taker threshold | fills | median hours between fills | realised all in discount | waiting at day 90 (value) | coin burned by dutch (m) | percent of supply burned |
-|---|---|---|---|---|---|---|
-| 0.02 | 289 | 6.03 | 1.9% | 65.7 | 126 | 16.6 |
-| 0.05 | 289 | 6.03 | 4.9% | 65.3 | 124 | 16.4 |
-| 0.1 | 289 | 6.03 | 9.9% | 64.8 | 120 | 16.0 |
-| 0.15 | 289 | 6.03 | 14.9% | 64.7 | 116 | 15.6 |
-| 0.25 | 289 | 6.03 | 24.9% | 63.9 | 108 | 14.7 |
-| 0.4 | 289 | 6.02 | 39.9% | 62.5 | 93.5 | 13.3 |
-
-a taker threshold of 2 percent against 40 percent changes burn from 126m to 93m coin (a 26 percent cut) and nothing else. the discount is not a cost to the engine in eth. it is coin the engine does not burn. the all in discount includes the 10 percent skim the taker pays on the coin it buys. against the pool price alone the discount is larger (22.7 percent at a 14.8 percent all in threshold).
-
-## 8. sensitivity
-
-each input moved from a low to a high value with everything else at base, 3 seeds each. base: coin burned 57.9m (5.79 percent of supply), eth sent to buyback 18.9, stuck statements 187. locked eth is not ranked: it is almost constant at 283 eth because the engine always spends the pot, so it follows fee income (volume x0.25 gives 64, x4 gives 1,151).
-
-ranked by coin burned, millions of coin:
-
-| input | low | high | result at low | result at high | swing |
-|---|---|---|---|---|---|
-| volScale | 0.25 | 4 | 196 | 14.7 | 182 |
-| buyShareLate | 0.42 | 0.52 | 131 | 26.7 | 104 |
-| pricePath | decline | recovery | 37.3 | 141 | 104 |
-| wtpMult | 0.7 | 1.3 | 27.2 | 115 | 87.6 |
-| priceP0 | 0.0045 | 0.018 | 42.4 | 90.8 | 48.4 |
-| offersPerHour | 60 | 400 | 43.9 | 91.6 | 47.7 |
-| askSigma | 0.15 | 0.4 | 32.4 | 78.5 | 46.1 |
-| SPEND_CAP_BPS_PER_HOUR | 1000 | 4000 | 32.7 | 78.5 | 45.8 |
-| CLIMB_BASE_BPS_PER_HOUR | 50 | 200 | 68.4 | 31.9 | 36.5 |
-| bidMode | flat | perPoint | 91.3 | 59.3 | 32.1 |
-| AUCTION_FLOOR_X | 8000 | 12000 | 89.0 | 59.3 | 29.7 |
-| DROP_BPS | 500 | 2000 | 41.8 | 70.5 | 28.6 |
-
-ranked by eth sent to buyback (the economic driver of burn):
-
-| input | low | high | result at low | result at high | swing |
-|---|---|---|---|---|---|
-| pricePath | decline | recovery | 11.2 | 65.3 | 54.1 |
-| wtpMult | 0.7 | 1.3 | 7.77 | 47.2 | 39.5 |
-| volScale | 0.25 | 4 | 18.0 | 40.3 | 22.4 |
-| priceP0 | 0.0045 | 0.018 | 13.1 | 34.1 | 21.0 |
-| offersPerHour | 60 | 400 | 13.4 | 33.9 | 20.4 |
-| askSigma | 0.15 | 0.4 | 9.96 | 27.6 | 17.6 |
-| SPEND_CAP_BPS_PER_HOUR | 1000 | 4000 | 10.2 | 27.5 | 17.3 |
-| bidMode | flat | perPoint | 33.3 | 19.5 | 13.9 |
-| AUCTION_FLOOR_X | 8000 | 12000 | 32.6 | 19.5 | 13.1 |
-| CLIMB_BASE_BPS_PER_HOUR | 50 | 200 | 22.3 | 10.7 | 11.6 |
-
-ranked by unsold statements stuck at the floor:
-
-| input | low | high | result at low | result at high | swing |
-|---|---|---|---|---|---|
-| volScale | 0.25 | 4 | 64.3 | 426 | 362 |
-| priceP0 | 0.0045 | 0.018 | 326 | 107 | 220 |
-| pricePath | decline | recovery | 230 | 119 | 111 |
-| impactElast | 0 | 0.3 | 225 | 144 | 80.4 |
-| offersPerHour | 60 | 400 | 150 | 230 | 80.0 |
-| CLIMB_BASE_BPS_PER_HOUR | 50 | 200 | 223 | 157 | 66.3 |
-| sniperVolShare | 0.2 | 0.6 | 165 | 210 | 44.7 |
-| bidMode | flat | perPoint | 225 | 187 | 38.0 |
-| AUCTION_FLOOR_X | 8000 | 12000 | 158 | 187 | 29.0 |
-| wtpMult | 0.7 | 1.3 | 201 | 173 | 28.3 |
+| preset | fees in | launch pot spent on day | steady credits a day | steady statements a day | steady sold a day | price paid over market | average score bought |
+|---|---|---|---|---|---|---|---|
+| comparable decay | 296 | 6.5 | 46 | 0.57 | 0.71 | 1.05x | 428 |
+| sustained 17 | 403 | 6.3 | 306 | 3.8 | 1.5 | 0.92x | 425 |
+| sustained 50 | 683 | 6.5 | 683 | 8.5 | 1.6 | 0.91x | 425 |
+| dead after week one | 288 | 6.5 | 40 | 0.48 | 0.69 | 1.07x | 429 |
 
 reading it:
 
-1. the outside world dominates: fee volume, the credit price path, statement buyer willingness to pay and the net buy share of the coin (which sets the coin price and therefore burn per eth). none of those are engine settings.
-2. the engine inputs that matter are the bid shape (flat against per point), the auction floor, the climb and drop constants and the spend cap. start multiple, auction length, rateStart, CLIMB_MAX and the tip and gas constants are all in the noise: rateStart swings burn by 2m coin of 58m and stuck statements by 2 of 187.
-3. burn in percent of supply swings with the coin price path more than with anything the engine does. sell heavy flow (0.42 buy share) drags the price to the launch tick and the same 19 eth burns 13 percent of supply. read burn in eth to buyback when comparing designs.
+1. the pot is spent in 6 to 7 days under every preset, because 255 of the 296 eth arrive on day one. by day 7 the engine holds 21,000 credits, 77 percent of what it will have at day 90 on comparable volume.
+2. unsold statements do not slow anything. 216 statements wait at day 90 and the engine bought 1,360 credits in days 60 to 90 regardless. with no statement buyer at all (stmtPerDay 0) credits acquired at day 30 stay within 10 percent of the base run (a test checks it).
+3. after the pot is gone the flow is set by income: coin fees plus sale proceeds that go to the pot (half of every sale at launch values). at the comparable floor of 0.5 eth a day of coin volume that is 46 credits a day, at 17 eth a day 306, at 50 eth a day 683 (section 7).
+4. statements sold are limited by buyers, not by the engine. 281 buyers arrive in 90 days, 106 find no price they accept. sustained volume makes more statements (592 at 17 eth a day) and sells about the same (209), so the waiting stock grows 3 a day.
+5. 31 eth of buyback burns 8.1 percent of supply because the pool price sits near 3e-7. the percent depends on the coin price more than on the engine.
+6. the engine bids above the market in days 2 to 6 (up to 1.26x the market price of a 440 point credit) while the pot is large, then falls to about 60 percent of it. all credits cost 1.05x the flat price on comparable volume.
 
-## 9. what to change, ranked by impact
+## 2. the opening limit
 
-combinations, comparable decay, 90 days (sustained 17 and credit price recovery are in results/q9.json and agree in direction):
+`rateStart` as a share of the market price of a credit (0.0089 eth, so 75 percent is 1.54e13).
 
-| name | what is changed |
-|---|---|
-| base | the Core as built, rateStart 4e12 |
-| rule | rateStart 5.6e12 |
-| constants | rule plus start 2x, floor 0.8x, DROP_BPS 2000 |
-| floor06 | constants with floor 0.6x |
-| flatBid | constants plus a flat per credit bid (design change) |
-| gate20 | rule plus an inventory gate: no buying or climbing while 20 statements are unsold. implemented in the Core as the deploy input `INVENTORY_GATE` (eth lane statements held for sale, the simulator checks it once per step, the Core at every change) |
-| gate20constants | gate plus constants. the same four values are `script/config/mainnet.recommended.json`: `AUCTION_START_X` 20000, `AUCTION_FLOOR_X` 8000, `DROP_BPS` 2000, `INVENTORY_GATE` 20 |
-| gate20flat | gate plus constants plus flat bid |
+| share | rateStart | hours to first buy | credits day 1 | day 3 | day 7 | day 14 | day 30 | first 80 cost over market | all credits over market |
+|---|---|---|---|---|---|---|---|---|---|
+| 25% | 5.14e12 | 33.2 | 0 | 70 | 7,062 | 21,910 | 23,450 | 0.52 | 1.06 |
+| 40% | 8.22e12 | 0.11 | 22 | 1,047 | 13,400 | 22,290 | 23,760 | 0.53 | 1.06 |
+| 50% | 1.03e13 | 0.03 | 177 | 2,660 | 17,130 | 22,540 | 24,030 | 0.54 | 1.06 |
+| 60% | 1.23e13 | 0.03 | 617 | 4,431 | 19,610 | 22,710 | 24,170 | 0.60 | 1.05 |
+| **75%** | 1.54e13 | 0.03 | 1,561 | 6,991 | 20,960 | 22,910 | 24,430 | 0.74 | 1.05 |
+| 90% | 1.85e13 | 0.03 | 2,683 | 9,425 | 20,970 | 22,920 | 24,290 | 0.89 | 1.06 |
+| 100% | 2.06e13 | 0.03 | 3,440 | 10,860 | 20,810 | 22,810 | 24,230 | 0.99 | 1.06 |
+| 125% | 2.57e13 | 0.03 | 5,295 | 13,530 | 20,330 | 22,480 | 23,970 | 1.23 | 1.08 |
 
-| config | composed | sold | stuck | eth locked | pot idle | eth to buyback | percent burned | cost over market |
+1. the opening limit changes the first three days and nothing after day 7. credits at day 14 and day 30 are flat from 50 to 100 percent (22,500 to 22,900 and 24,000 to 24,400), the pot is spent in the same week.
+2. below 40 percent the engine waits: at 25 percent nothing is bought for 33 hours and day 7 holds a third of the credits.
+3. the first fills are the cheapest sellers. the first 80 credits cost 0.74x market at 75 percent and 0.99x at 100 percent. the engine pays its bid to every seller that clears, not their ask, so a higher limit pays more for the same credits.
+4. the price paid over all credits does not move (1.05 to 1.06) because the climb and the drop take over within two days.
+5. rising market (price recovers to 2.2x): a higher limit is better, day 7 holds 18,980 credits at 100 percent against 17,370 at 75. falling market: 60 to 75 percent is best at day 7 (22,400). the rule scales with price: at flat prices of 0.0045, 0.018 and 0.03 the same 75 percent buys within the first hour. what the pot then buys depends on the price (38,750, 15,220 and 12,670 credits by day 30).
+
+confirm 75 percent. it sits on the plateau for total credits, buys at once, and pays 0.74x for the first fills. 90 percent is the dial for a faster first three days: it buys 35 percent more by day 3 (9,425 against 6,991) for 15 points more on the first 80 and nothing different at day 7. launch day rule: rateStart = share times market price of a credit in wei times 1e4 over `avgScore`, market price the median of the last 24 hours of seaport fills.
+
+## 3. flat, blended or per point
+
+`flatBps` 10000 prices every credit as an average one (433 points), 0 prices it by its own score. comparable volume, 90 days.
+
+| flatBps | credits acquired | price paid over market | price per point over market | average score bought | statements created | sold | credits day 7 |
+|---|---|---|---|---|---|---|---|
+| 10000 flat | 27,110 | 1.05x | 1.08x | 428 | 339 | 121 | 20,970 |
+| 7500 | 26,760 | 1.08x | 0.95x | 501 | 334 | 125 | 20,560 |
+| 5000 | 24,870 | 1.15x | 0.92x | 551 | 310 | 112 | 19,370 |
+| 2500 | 23,070 | 1.25x | 0.93x | 587 | 288 | 103 | 17,910 |
+| 0 per point | 21,350 | 1.33x | 0.97x | 606 | 266 | 91 | 16,810 |
+
+sustained 17 eth a day: 47,430 / 45,670 / 42,900 / 40,840 / 39,070 credits at 10000 / 7500 / 5000 / 2500 / 0, average score 425 / 523 / 586 / 620 / 639, price paid 0.92x / 0.95x / 1.01x / 1.07x / 1.12x.
+
+1. flat buys the most credits and the most statements. going from flat to per point loses 21 percent of the credits and 21 percent of the statements, and pays 28 points more per credit.
+2. the market prices credits flat in score (notes.md fact 1), so a per point bid pays the same ask for a low score credit and clears the high score ones first. that is why the average score rises from 428 to 606.
+3. score is bought at a price: from flat to 7500 the average score rises 73 points (17 percent) for 2.4 points of price and 1.3 percent of credits. past 7500 each step loses more credits than it gains in score.
+4. the switch on day 30 does little. the pot is gone by day 7, so the bid has little to buy with. flat to 5000 on day 30: credits 27,190 (27,110 unchanged), average score 453, steady flow 44 a day (46). flat to 0: 27,100, score 457, steady flow 38. in sustained 17 eth a day a switch to 5000 costs 4 percent of credits (45,520 against 47,430) and a switch to 0 costs 6 percent (44,610). if score matters later, a blend of 7500 is the cheap step.
+
+## 4. the reserve and the auction duration
+
+reserve sweep, comparable volume, 90 days (reserve as bps of statement cost).
+
+| reserveBps | statements sold | eth recycled by sales | eth spent buying coin | waiting for phase 2 | credits acquired | sale price over cost | auctions with a second bidder |
+|---|---|---|---|---|---|---|---|
+| 5000 | 179 | 60.0 | 30.0 | 161 | 27,390 | 0.51 | 29% |
+| 6000 | 164 | 62.5 | 31.2 | 179 | 27,550 | 0.61 | 32% |
+| 7000 | 145 | 61.7 | 30.9 | 195 | 27,320 | 0.71 | 33% |
+| 8000 | 131 | 61.9 | 31.0 | 207 | 27,150 | 0.81 | 32% |
+| 9000 | 121 | 62.6 | 31.3 | 216 | 27,110 | 0.92 | 34% |
+| 10000 | 123 | 69.1 | 34.6 | 220 | 27,570 | 1.02 | 36% |
+| 11000 | 112 | 65.9 | 33.0 | 230 | 27,460 | 1.12 | 30% |
+| 12000 | 108 | 67.7 | 33.8 | 236 | 27,580 | 1.22 | 28% |
+
+sustained 17 eth a day: sold 249 / 248 / 229 / 209 / 195 / 156 / 130 at 5000 / 6000 / 7000 / 9000 / 10000 / 11000 / 12000, eth recycled 69 / 83 / 90 / 105 / 109 / 94 / 85, eth spent buying coin 35 / 41 / 45 / 53 / 54 / 47 / 43.
+
+how often an auction gets a second bidder. one third of the sold auctions at 8 buyers a day (1.43 bids a sale), 8 percent in sustained 17 eth a day (more statements, same buyers), 61 percent at 20 buyers a day. buyers arrive one at a time and take the cheapest bid that fits their willingness to pay, so cheap statements attract second bids. if buyers pick any statement that fits instead (`stmtPick` random), the share is 7 percent at 8 buyers a day (1.07 bids a sale) and 27 percent at 20. the average sale price is 1.8 percent over the reserve (1.004 to 1.02 across presets), because a second bid raises the price only 5 percent. a bid in the last 15 minutes happened 1 time in 90 days. what it implies: **the english auction is a fixed price sale at the reserve.** `reserveBps` is the price. the auction duration matters little (below). nobody bids against the reserve to find a higher price in any quantity that moves eth recycled.
+
+duration, comparable volume (cheapest pick): 1 hour 161 sold, 6 hours 152, 24 hours 121, 3 days 110, 7 days 90, with eth recycled 86 / 81 / 63 / 54 / 43. under random pick the same sweep is flat: 225 / 218 / 215 / 205 sold, recycled 131 / 124 / 123 / 117. the long duration loss under cheapest pick is a pile on of buyers onto one live auction, which the real house may or may not show. keep 24 hours: it costs nothing under either assumption beyond a few percent.
+
+1. credits acquired and statements created do not depend on the reserve at all (27,100 to 27,600 across the sweep, seed noise). the reserve only moves how many statements sell and how much eth they bring back.
+2. statements sold fall by a quarter from a reserve of 6000 to 9000 (164 to 121), but eth recycled and eth to burn are flat (62 to 63 eth, 31 eth). demand is close to unit elastic in the observed willingness to pay quantiles, so a lower price sells more units for the same eth. under comparable volume a lower reserve is free for the headline metrics and sells 35 percent more statements at 6000.
+3. under sustained volume a lower reserve costs burn: 6000 recycles 83 eth against 105 at 9000 (minus 21 percent) and sells 19 percent more statements.
+4. under random pick the same holds more strongly: 6000 sells 263 against 215 at 9000 and recycles 124 against 123.
+5. a cut on day 14 beats a lower reserve from launch. reserve 6000 from day 14 (repriced listings): sold 161, recycled 71, burn 35.5 eth, waiting 186. reserve 6000 from launch: sold 164, recycled 62.5, burn 31.2. a day 7 cut gives 160 sold and 33 eth burned, a day 30 cut 152 and 35. early sales at 90 percent bring more eth when buyers are plentiful, the old stock then clears at the lower price. repriced listings keep their `listedAt` (the Core only moves the reserve).
+6. willingness to pay is the real input: 0.7x median sells 80, 1.0x sells 124, 1.6x sells 191 (the reserve at 9000).
+
+## 5. the proceeds split
+
+`saleToBuybackBps` is the share of collected proceeds that goes to the coin buyback, the rest to the pot.
+
+| saleToBuybackBps | credits day 7 | credits day 30 | credits day 90 | statements created | sold | eth spent buying coin | percent of supply burned | steady credits a day |
 |---|---|---|---|---|---|---|---|---|
-| base | 238 | 49.6 | 187 | 283 | 0.0675 | 18.9 | 5.79 | 1.43 |
-| rule | 241 | 51.2 | 189 | 284 | 0.0852 | 18.9 | 5.73 | 1.42 |
-| constants | 284 | 115 | 169 | 257 | 0.276 | 36.1 | 9.48 | 1.30 |
-| floor06 | 299 | 160 | 137 | 222 | 0.36 | 44.6 | 11.0 | 1.28 |
-| flatBid | 358 | 151 | 206 | 253 | 0.348 | 42.7 | 10.6 | 1.04 |
-| gate20 | 46.4 | 21.6 | 24.8 | 21.2 | 267 | 8.84 | 2.89 | 1.04 |
-| gate20constants | 131 | 96.4 | 29.4 | 38.3 | 210 | 33.7 | 9.02 | 1.25 |
-| gate20flat | 160 | 119 | 41.4 | 37.8 | 207 | 37.3 | 9.71 | 1.08 |
+| 0 | 21,200 | 27,680 | 34,670 | 433 | 186 | 0 | 0 | 113 |
+| 2500 | 21,090 | 25,930 | 30,210 | 377 | 149 | 18.3 | 5.4% | 68 |
+| 5000 | 20,970 | 24,350 | 27,110 | 339 | 121 | 31.3 | 8.1% | 46 |
+| 7500 | 20,860 | 23,200 | 25,160 | 314 | 113 | 46.9 | 10.5% | 32 |
+| 10000 | 20,700 | 22,230 | 23,270 | 291 | 104 | 63.1 | 12.6% | 16 |
 
-same for sustained 17 eth a day:
+sustained 17 eth a day: credits at day 90 53,240 / 50,280 / 47,430 / 44,560 / 41,660, eth spent buying coin 0 / 26.8 / 52.6 / 76.4 / 95.9, steady credits a day 355 / 331 / 306 / 285 / 264. sustained 50: 82,230 to 73,300 credits, 0 to 108 eth burned.
 
-| config | composed | sold | stuck | eth locked | pot idle | eth to buyback | percent burned | cost over market |
+1. the split has no effect on the first week (21,200 to 20,700 credits on day 7). it acts only after the launch pot is gone, when sale proceeds are the pot's main income.
+2. the price of burn in credits: from 0 to 100 percent the engine gives up 11,400 credits (33 percent) for 63 eth of burn. one eth of burn costs about 180 credits at comparable volume, 120 at 17 eth a day.
+3. the burn side is weak: 100 percent buys 12.6 percent of the supply, 0 buys none. the steady credit flow falls from 113 to 16 a day. with the owner's order of goals (credits first, burn fifth) the split is the first thing to move toward the pot if credits per day matter more than burn.
+4. launch at 5000 is safe because the first week is unaffected. decide at day 7 to 14 when the pot is gone and the steady flow is visible.
+
+## 6. dropBps, climbBaseBps, spendCapBps
+
+comparable volume, 90 days, launch values 2000 / 100 / 2000.
+
+| dropBps | credits day 3 | day 14 | day 90 | price paid over market | launch pot spent on day | peak bid over market |
+|---|---|---|---|---|---|---|
+| 0 | 8,164 | 19,600 | 20,050 | 1.35x | 5.1 | 14x |
+| 500 | 7,819 | 20,430 | 21,250 | 1.28x | 5.4 | 2.8x |
+| 1000 | 7,556 | 21,950 | 26,090 | 1.09x | 5.7 | 1.30x |
+| **2000** | 6,979 | 22,970 | 27,110 | 1.05x | 6.5 | 1.26x |
+| 3000 | 6,428 | 23,570 | 28,030 | 1.03x | 7.4 | 1.23x |
+| 5000 | 5,524 | 24,820 | 29,800 | 1.00x | 9.5 | 1.18x |
+
+| climbBaseBps | credits day 3 | day 7 | day 14 | day 30 | day 90 | price paid over market | launch pot spent on day |
+|---|---|---|---|---|---|---|---|
+| 25 | 2,289 | 7,276 | 20,890 | 31,480 | 34,670 | 0.93x | 18.4 |
+| 50 | 3,657 | 13,330 | 25,840 | 27,360 | 30,330 | 0.99x | 11.1 |
+| **100** | 6,979 | 20,970 | 22,970 | 24,350 | 27,110 | 1.05x | 6.5 |
+| 200 | 13,320 | 18,670 | 20,660 | 22,100 | 25,130 | 1.12x | 3.7 |
+| 400 | 14,480 | 15,350 | 15,850 | 16,180 | 17,710 | 1.47x | 2.2 |
+
+| spendCapBps | credits day 7 | day 30 | day 90 | price paid over market | hours the cap blocked a sale |
+|---|---|---|---|---|---|
+| 500 | 20,190 | 21,940 | 22,530 | 1.24x | 1,853 |
+| 1000 | 20,830 | 24,140 | 27,000 | 1.06x | 367 |
+| **2000** | 20,970 | 24,350 | 27,110 | 1.05x | 18 |
+| 4000 | 20,890 | 24,490 | 27,690 | 1.05x | 0 |
+| 10000 | 20,890 | 24,490 | 27,690 | 1.05x | 0 |
+
+1. the climb and the drop together set how fast the pot is spent and what the engine pays. when the engine buys every hour, the climb per hour equals the drop per hour at a spend of `climbBaseBps / dropBps` of the pot an hour: 5 percent at launch values, a pot half life of about 14 hours. that is why the pot is gone in a week whatever the opening limit is.
+2. `climbBaseBps` is the strongest dial. faster is earlier and dearer: at 400 the engine has 14,480 credits by day 3 and 17,700 at day 90, paying 1.47x with a bid up to 3.3x market. slower is later and cheaper: at 25 it has 2,290 by day 3 and 34,700 at day 90 (28 percent more), paying 0.93x. the crossing with the launch value is on day 10 to 20.
+3. `dropBps` is the price discipline. at 0 the bid never comes back and the engine pays 1.35x with a bid up to 14x market. 1000 to 3000 is flat in credits and price within 8 percent. raising it from 2000 to 3000 gives 3 percent more credits by day 14 and day 90 and costs 8 percent of day 3 credits. 5000 is slower still.
+4. `spendCapBps` is a guard, not a dial. at 4000 and 10000 it never blocks a sale. at 2000 it blocks 18 hours in 90 days. at 1000 it blocks 367 hours and costs nothing in credits by day 90. at 500 it blocks 1,853 hours, the engine pays 1.24x and ends 17 percent lower. it also clamps the climb through the funded rule, so a low cap clamps the bid early.
+5. hard cases (opening limit 40 percent with a market that doubles, or a falling market) give the same ranking: no drop and a low cap lose, the climb sets the pace.
+
+recommendation: **keep 2000 / 100 / 2000.** the launch values sit mid curve for pace and price. what changes the answer is the goal: earlier credits at a higher price (raise `climbBaseBps` to 200 gives 13,300 by day 3, loses 7 percent of day 90 credits and pays 1.12x), or more credits later at a lower price (50 gives 12 percent more by day 14 and by day 90 and cuts day 7 by a third). since the goal is early credits, keep. watch price paid over market: above 1.15x, raise `dropBps` or lower `climbBaseBps`.
+
+## 7. after the launch pot: credits and statements per day against coin volume
+
+coin volume that decays from day two to the stated constant by about day 10 (custom preset), last 30 days of a 90 day run, launch values.
+
+| coin volume, eth a day | fees a day, eth | launch pot spent on day | steady credits a day | steady statements a day | steady sold a day | eth a day buying coin | credits acquired by day 90 | waiting for phase 2 at day 90 |
 |---|---|---|---|---|---|---|---|---|
-| base | 444 | 78.7 | 357 | 381 | 0.736 | 29.6 | 4.76 | 1.16 |
-| rule | 450 | 84.7 | 356 | 380 | 0.548 | 32.0 | 5.08 | 1.16 |
-| constants | 485 | 189 | 286 | 328 | 1.55 | 50.9 | 7.16 | 1.12 |
-| floor06 | 477 | 213 | 253 | 302 | 1.60 | 45.9 | 6.66 | 1.13 |
-| flatBid | 572 | 195 | 366 | 337 | 1.56 | 45.6 | 6.62 | 0.926 |
-| gate20 | 44.0 | 19.3 | 24.7 | 20.9 | 373 | 7.79 | 1.48 | 1.03 |
-| gate20constants | 129 | 99.0 | 22.0 | 33.1 | 319 | 34.5 | 5.38 | 1.24 |
-| gate20flat | 152 | 112 | 40.0 | 36.0 | 317 | 34.5 | 5.38 | 1.06 |
+| 1 | 0.095 | 6.4 | 52 | 0.65 | 0.75 | 0.16 | 27,290 | 213 |
+| 5 | 0.48 | 6.4 | 143 | 1.8 | 1.6 | 0.33 | 34,450 | 237 |
+| 17 | 1.6 | 6.5 | 314 | 3.9 | 1.7 | 0.39 | 48,330 | 400 |
+| 50 | 4.75 | 6.6 | 678 | 8.5 | 1.5 | 0.41 | 78,540 | 785 |
+| 150 | 14.25 | 7.1 | 430 | 5.4 | 1.0 | 0.35 | 109,700 | 1,223 |
 
-recommendations, ranked by impact on stuck inventory and recycling:
+1. sale proceeds carry about 45 credits a day at any volume, and coin fees add to that, about 16 credits a day per eth of daily volume at 17 eth a day and 13 at 50 (fees are 9.5 percent of volume, a credit costs 0.0089 eth). the flow grows with volume up to 50 eth a day.
+2. statements a day are credits over 80. sold a day saturates at 1 to 2 whatever the volume, because buyers do not grow with supply (8 a day decaying to 2, 25 percent of them find no price). the waiting stock grows by the difference.
+3. at 150 eth a day the model hits the float: the engine has bought 109,700 credits, about all of the 110,000 live credits, and falls to 430 a day with a price of 1.28x. a bigger float limit is a hard cap on credits acquired. at 50 eth a day it holds 71 percent of the live credits by day 90.
+4. five times more statement buyers (40 a day decaying to 10) lifts steady flow at 17 eth a day from 314 to 459 credits a day (sale proceeds) and sold from 202 to 581 in 90 days. the sale side is the lever below 17 eth a day.
+5. the buyback spends 0.16 to 0.41 eth a day after the launch pot.
 
-1. **design change: an inventory gate on credit buying.** stop buying and stop the climb while about 20 statements are unsold, resume when they sell. at the base market it keeps 207 to 267 eth in the pot instead of locking 283 eth in statements nobody buys, and with constants it still sells 96 statements against 50 and burns 9.0 percent against 5.8. the eth is not burned, it is kept: the pot is the only asset that works in phase 2 and in a recovery. locked statements are worth 0.6 eth each at observed prices. cost: slower credit buying, less rating accumulated for phase 2.
-2. **constant change in Core: AUCTION_FLOOR_X 1.2 to 0.8 and AUCTION_START_X 4 to 2.** sold 50 to 115, eth returned to the pot 19.5 to 36, burn 5.8 to 9.5 percent in the same run (constants row). it sells some statements under cost (0.9x), which retires invariant 3 of SPEC section 10, so the invariant test and the architecture note change with it. the start multiple alone is worth 10 sales. the floor is the lever.
-3. **constant change in Core: DROP_BPS 1000 to 2000.** cost per credit 1.43 to 1.34, sold 51 to 66. it moves the engine away from the 3.5x overshoot region that begins at a drop of 500. a spend cap of 4000 is also better (sold 74) but is second order.
-4. **design change: a flat per credit bid or a blend.** cost per credit 1.43 to 1.09 and sold 50 to 99 on its own, but it forgoes rating, which phase 2 pays for. decide after the exitToken price is known. at an xp under 3e-5 rating is worth less than the credits cost and flat wins. at 5e-5 and above rating is worth more than the premium and the per point bid wins.
-5. **config only: rateStart 5.6e12 (flat price in wei over 1600).** first 80 credits at 0.61x of market, first fill inside the anti sniper window, no waiting 22 hours. impact on day 90 outcomes is zero within noise, so this is hygiene.
-6. **phase 2 policy, off chain: exit only when rating times xp is at least the floor price.** keeps floor sales (eth lane sold 51 against 31 with automatic exit) and avoids dumping statements into an exitToken worth less than the floor.
+## 8. phase 2
 
-what i would not change:
+the exitModule is set through the 7 day timelock on day 14, 30 or 60. the keeper exits every eligible unbid listing (older than `exitAfter`, 72 hours) at once. an exit pays `rating * unitPerPoint` of exitToken, so the value in eth is the rating times the exitToken price per point (`xp`). a typical statement rates 35,200 points and costs 1.18 eth, so the break even exitToken price is about 3.3e-5 eth per point.
 
-1. the new funded rule. the old rule is 17x overshoot in the base case. keep it exactly.
-2. CLIMB_MAX_BPS_PER_HOUR, CLIMB_DOUBLE_EVERY, BONUS_CAP_BPS. never binding in any run.
-3. SPEND_CAP_BPS_PER_HOUR at 2000. it only binds on a small pot and a lower value is worse.
-4. AUCTION_LENGTH at 72 hours. 12 to 336 hours moves sold by under 10 percent.
-5. TIP and gas reimbursement constants. tips total 0.002 eth and reimbursement 3 eth over 90 days, 1 percent of fees.
-6. the XAUCTION_HALF_LIFE and restart rule. they give a clean one slice per half life with no mispricing. the only note is that the cadence is slow against exit inflow (about 1 eth of value a day at 3e-5), so a large exit batch waits weeks. a larger slice or a shorter half life is a later knob, not a fix.
-7. rateStart bounds, buyback constants.
+| module on day | exitToken price per point | stock waiting before | statements exited by day 90 | exit value over cost | exit bid pot after 7 days | exit bid rate after 7 days, bps of score | credits bought through the exit bid by day 90 | credits acquired by day 90 | percent of supply burned |
+|---|---|---|---|---|---|---|---|---|---|
+| 14 | 5e-6 | 229 | 228 | 0.15 | 20 | 9,700 | 0 | 25,610 | 8.4% |
+| 14 | 1e-5 | 229 | 333 | 0.29 | 39 | 9,607 | 8,467 | 33,820 | 10.1% |
+| 14 | 2e-5 | 229 | 342 | 0.59 | 85 | 4,827 | 9,180 | 35,140 | 13.4% |
+| 14 | 3e-5 | 229 | 343 | 0.88 | 131 | 3,240 | 9,263 | 35,830 | 15.8% |
+| 14 | 5e-5 | 229 | 702 | 1.47 | 277 | 3,000 | 38,020 | 63,850 | 19.0% |
+| 14 | 1e-4 | 229 | 1,146 | 2.88 | 907 | 3,000 | 73,120 | 97,210 | 23.1% |
+| 30 | 1e-5 | 224 | 308 | 0.29 | 39 | 9,520 | 6,732 | 32,580 | 9.8% |
+| 30 | 3e-5 | 224 | 315 | 0.88 | 129 | 3,087 | 7,345 | 34,100 | 14.6% |
+| 30 | 5e-5 | 224 | 600 | 1.46 | 272 | 3,000 | 30,190 | 56,420 | 17.5% |
+| 60 | 1e-5 | 219 | 259 | 0.29 | 38 | 9,560 | 3,304 | 29,890 | 8.8% |
+| 60 | 3e-5 | 219 | 264 | 0.87 | 126 | 3,167 | 3,747 | 30,670 | 11.4% |
+| 60 | 5e-5 | 219 | 406 | 1.45 | 265 | 3,000 | 15,070 | 41,700 | 13.4% |
 
-## what the model cannot tell us, and its weakest assumptions
+1. the stock is the same whenever the module arrives: 229, 224, 219 unbid statements, because the stock stops growing once the pot is gone (day 7) and about one a day sells. the exit takes the whole stock at the first hour.
+2. what it is worth depends on the exitToken price only. exit value over cost is 0.15 at 5e-6, 0.59 at 2e-5, 0.88 at 3e-5 and 1.47 at 5e-5. below 3.3e-5 the exit gives back less than the 90 percent reserve.
+3. the exit feeds the engine. an exit puts 50 percent of the exitToken in the exit bid pot (`exitToBuybackBps`), which buys credits through the exit lane. at 1e-5 that bought 8,467 credits by day 90 when the module arrives on day 14 (the exit bid pays by score, so it buys the high score credits first) and lifted credits acquired from 27,100 to 33,800, 25 percent. at 5e-5 and 1e-4 the pot is so large the bid sits at its floor and still buys 38,000 to 73,000 credits, more than the float, so read these as an upper bound. later arrival gives less because less time remains: 9,263 at day 14, 7,345 at day 30, 3,747 at day 60 for 3e-5.
+4. exit bid pace: the bid climbs 100 bps an hour while its pot affords one average credit, so it reaches 9,700 bps in a day or two when the price is low (5e-6, 1e-5) and sits near its 3,000 floor when the pot is large against the price (3e-5 and up), where each credit bought drops it 20 bps.
+5. the exitToken dutch auction runs at a pace of one slice per half life by design: about 270 fills in 76 days at 6 hours each, mean 15 percent all in discount to the pool price at the taker threshold. a slice is 20 average credits of exitToken, 0.26 eth of value at 3e-5. one slice per 6 hours is about 1 eth of exitToken a day. the exit of 229 statements puts about 118 eth of exitToken in the auction pot at 3e-5, and 46 eth of it is still waiting at day 90. a large exit batch waits months for the auction. a larger `exitSliceCredits` or a shorter `xAuctionHalfLife` is the dial.
+6. a keeper that exits only when the module pays at least the reserve (instead of at once) exits nothing at 1e-5 and sells 124 statements by day 90 against 98 when it exits at once. `exitStatement` is permissionless, so at a low exitToken price anyone can force the exit of listings that a buyer would still have bought. the owner controls this only through `exitAfter` and the moment the exitModule is set.
 
-1. the ask distribution. only fills are visible, not asks. the cheap tail of sellers (lognormal spread 0.27) sets how cheap the engine's first 80 credits are (0.61x) and how fast cost climbs. a thinner tail means the engine overpays from the first fill.
-2. statement demand. 42 priced sales over 5 days, arrivals 8 a day decaying to 2. a doubling to 20 a day lifts sold by 11 and burn by 18m coin. statement buyers may also respond to the engine's own supply (80 credits of known provenance, auction price) in ways the secondary data cannot show. the willingness to pay is rating insensitive in phase 1 and that may change once the exitModule pays by rating.
-3. the coin net flow. buy share after day one (0.46) drives the coin price and so percent of supply burned. the model holds volume exogenous, so engine buybacks do not draw volume.
-4. the engine's own footprint. price impact elasticity 0.12 is a guess. at 0 the engine pays 1.51x, at 0.3 about the same, so cost per credit is not very sensitive, but the lift also raises statement willingness to pay in the model.
-5. seller supply: 150 offers an hour, 5 percent leave an hour, more when the bid is above market. no whale seller, no strategy relist at 1.2x, no competing protocol bid like the fwa hub at 0.029 flat.
-6. the anti sniper volume (40 percent of hour one volume inside 30 minutes) is inferred from the comparable's implied 406 eth against 194 eth at a flat 10 percent. 86 percent of fees come on day one, so the starting pot is the biggest input and it is the least observed. stuck statements swing by 45 across 20 to 60 percent.
-7. phase 2 is parametric. the exitToken price per point is a constant, the exit bid supply is assumed to be honoured by the module, takers fill exactly at their threshold, and credit sellers compare bids with no friction.
-8. no adversaries. keepers are always on, buyback runs every 25 blocks, no sandwiching of the 1 eth buyback, no wash volume (71 percent of the comparable's pool volume was churn and the model treats it as organic fee base).
+## 9. sensitivity ranking
+
+low and high value of each input against the base case (27,110 credits and 339 statements at day 90, 121 sold, 31 eth burned). statements created move by the same share as credits, because 80 credits make one statement. ranked by the swing in credits.
+
+| rank | input | low | high | credits low | credits high | swing | statements sold low | statements sold high |
+|---|---|---|---|---|---|---|---|---|
+| 1 | coin volume scale | 0.25 | 4 | 13,970 | 54,830 | 151% | 126 | 152 |
+| 2 | flat credit price | 0.0045 | 0.018 | 40,230 | 17,670 | 83% | 130 | 116 |
+| 3 | seller offers an hour | 60 | 400 | 21,280 | 33,610 | 45% | 94 | 162 |
+| 4 | `saleToBuybackBps` | 0 | 10000 | 34,920 | 23,280 | 43% | 189 | 105 |
+| 5 | engine price impact | 0 | 0.3 | 31,340 | 22,450 | 33% | 134 | 113 |
+| 6 | `dropBps` | 500 | 4000 | 21,260 | 28,920 | 28% | 82 | 131 |
+| 7 | `flatBps` | 0 | 10000 | 21,350 | 27,160 | 21% | 91 | 124 |
+| 8 | buyer pick rule | cheapest | random | 27,160 | 32,230 | 19% | 124 | 220 |
+| 9 | `climbBaseBps` | 50 | 200 | 30,310 | 25,340 | 18% | 131 | 132 |
+| 10 | anti sniper volume share | 0.2 | 0.6 | 24,970 | 29,420 | 16% | 128 | 124 |
+| 11 | credit price path | decline | recovery | 28,940 | 25,420 | 13% | 112 | 168 |
+| 12 | statement willingness to pay | 0.7x | 1.3x | 25,300 | 28,700 | 13% | 80 | 156 |
+| 13 | seller book churn | 0.02 | 0.15 | 29,440 | 26,110 | 12% | 149 | 112 |
+| 14 | statement buyers a day | 3 | 20 | 26,280 | 29,410 | 12% | 96 | 178 |
+| 15 | listed share of offers | 0 | 0.5 | 27,160 | 29,730 | 9% | 124 | 135 |
+| 16 | seller ask spread | 0.15 | 0.4 | 26,220 | 28,180 | 7% | 108 | 138 |
+| 17 | `auctionDuration` | 6h | 72h | 28,200 | 26,910 | 5% | 151 | 110 |
+| 18 | `spendCapBps` | 1000 | 4000 | 26,970 | 27,730 | 3% | 122 | 135 |
+| 19 | `reserveBps` | 5000 | 12000 | 27,320 | 27,460 | 1% | 178 | 106 |
+| 20 | `rateStart` | 25% | 100% | 26,770 | 27,020 | 1% | 117 | 128 |
+| 21 | `exitAfter`, net coin flow | any | any | 27,160 | 27,160 | 0% | 124 | 124 |
+
+1. credits acquired follow the money (coin volume), the price of a credit and the supply of sellers. these are not settings.
+2. of the settings only four matter for credits: `saleToBuybackBps`, `dropBps`, `flatBps`, `climbBaseBps`. `saleToBuybackBps` is the biggest, and it is the owner's choice between burn and credits.
+3. for statements sold the order is different: the buyer rules, willingness to pay, buyers a day, `saleToBuybackBps` (through credits), then `reserveBps` (178 to 106) and `auctionDuration`.
+4. `rateStart`, `reserveBps`, `spendCapBps` and `exitAfter` do not move credits acquired or statements created at day 90.
+
+## 10. what the model cannot tell us, and its weakest assumptions
+
+1. the ask distribution. only fills are visible, not asks. the cheap tail of sellers (lognormal spread 0.27) sets how cheap the first credits are and how fast the price climbs. a thinner tail means the engine overpays from the first fill. the engine pays its bid to every seller that clears, so the first fill price is a bid, not an ask.
+2. statement demand and buyer behaviour. 42 priced sales over 5 days, all at fixed prices, none at auction. arrivals are fixed at 8 a day decaying to 2 and **do not respond to the reserve**, so a lower reserve in the model only sells to the same buyers. in reality a cheaper statement may draw more. buyers bid once, at the minimum, with no sniping and no defence bids, and the pick rule decides the second bidder share (7 percent when buyers pick any, 34 percent when they pick the cheapest). willingness to pay is rating insensitive in phase 1 and that may change once the exitModule pays by rating.
+3. the coin net flow. buy share after day one (0.46) drives the coin price and so the percent of supply burned. volume is exogenous, so buybacks and statement sales do not draw volume.
+4. the engine's own footprint. price impact elasticity 0.12 is a guess. credits acquired swing 33 percent between no impact and 0.3. the lift also raises statement willingness to pay in the model.
+5. seller supply and the float. 150 offers an hour, 5 percent leave an hour, more when the bid is above market, a float of 96,800 credits that credits burned into statements never come back to. no whale seller, no strategy relist at 1.2x, no competing protocol bid like the fwa hub at 0.029 flat. at 50 eth a day the engine buys 71 percent of the float and at 150 eth a day all of it.
+6. the anti sniper volume (40 percent of hour one volume inside 30 minutes) is inferred from the comparable's implied 406 eth against 194 eth at a flat 10 percent. 86 percent of fees come on day one, so the starting pot is the biggest input and the least observed. credits acquired swing 16 percent across 20 to 60 percent.
+7. phase 2 is parametric. the exitToken price per point is a constant, the module pays exactly `rating * unitPerPoint`, a keeper exits every eligible listing at once, takers fill exactly at their threshold, credit sellers compare exit bids with no friction, and the exit bid buying 38,000 to 73,000 credits at high prices ignores the float.
+8. keepers. `collectSales` runs every hour, `endAuction` is called the moment an auction ends, `repriceStatement` is called on every unbid listing when `reserveBps` changes, the buyback keeper runs every 25 blocks, nobody sandwiches the 1 eth buyback, no wash volume (71 percent of the comparable's pool volume was churn and the model treats it as organic fee base). a house delivery failure (30 day unwind) is not modelled.
+9. the launch day market price. the opening limit is a share of the market price on launch day. the model holds that price at 0.0089 eth (or its path). a different price on the day moves the rate with it, which is why the limit is set on launch day.
+10. the owner. the model has one change at a time at a known day. a real owner reacts to signals and may change several settings at once, which the Core allows.
+
+## recommended launch settings
+
+| setting | launch value | recommendation | why |
+|---|---|---|---|
+| `rateStart` | 1.54e13 (75% of market) | keep | on the plateau for total credits, buys at once, first 80 cost 0.74x. 90% gets 35% more by day 3 for 15 points on the first 80 |
+| `flatBps` | 10000 | keep | most credits and statements. a blend of 7500 later buys 17% more score for 1% of credits |
+| `avgScore` | 4,330,000 | keep | the population mean is 440 points, flat buys 428 |
+| `reserveBps` | 9000 | keep, cut on day 7 to 14 | credits unaffected. at launch volume 6000 sells 35% more statements at the same burn. a cut on day 14 beats a cut at launch |
+| `auctionDuration` | 24 hours | keep | no effect under random pick, a few percent under cheapest pick |
+| `saleToBuybackBps` | 5000 | keep for the first week | no effect on week one. decide on day 7 to 14, it is the largest lever left |
+| `dropBps` | 2000 | keep | 3000 gives 3% more credits by day 14 and 8% fewer on day 3 |
+| `climbBaseBps` | 100 | keep | the biggest pace dial. 200 is earlier and dearer, 50 later and cheaper |
+| `spendCapBps` | 2000 | keep | a guard. blocks 18 hours in 90 days |
+| `exitAfter` | 72 hours | keep | no effect before phase 2 |
+| `exitToBuybackBps` and exitToken settings | as launched | keep | phase 2 only. the auction pace is slow (1 slice per 6 hours) |
+
+## settings the owner should expect to adjust, and the signal
+
+| setting | expected move | signal to watch |
+|---|---|---|
+| `reserveBps` | 9000 to 6000 or 7000, then `repriceStatement` on the backlog | unbid listings older than 3 days above 100 and fewer than one sale a day |
+| `saleToBuybackBps` | toward the pot if credits matter more than burn, toward the buyback if burn does | credits a day after the pot is spent under 50 at launch volume, eth spent buying coin per day |
+| `climbBaseBps`, `dropBps` | raise `dropBps` or lower `climbBaseBps` | price paid over market above 1.15x, the bid above 130% of market for more than a day |
+| `setRate` | reset the limit | the market price of a credit moves 30% from the launch day value in week one, or the pot sits unspent for days with the bid under market |
+| `flatBps` | 7500 | credits flowing steadily and the average score bought below the population mean of 440 |
+| `exitSliceCredits`, `xAuctionHalfLife` | larger slice or shorter half life | exitToken waiting for the auction above 30 days of slices after phase 2 |
+| `exitAfter` | longer, if the exitToken price is below the break even of about 3.3e-5 per point | exitToken price per point against 1.18 eth over a 35,200 point statement |
+| `auctionDuration` | longer | second bids above 40 percent of sales with prices over the reserve |
 
 ## files
 
-sim/engine.js (model), sim/engine.test.mjs (86 checks), sim/run.mjs (batches, node run.mjs q1 to q9), sim/results/*.json, sim/build.mjs and the page parts (page.css, page.body.html, page.ui1.js to page.ui4.js), sim/index.html (built, single file).
+sim/engine.js (model, the single source), sim/engine.test.mjs (235 checks), sim/run.mjs (batches, node run.mjs q1 to q11), sim/results/*.json, sim/build.mjs and the page parts (page.css, page.body.html, page.ui1.js to page.ui4.js), sim/index.html (built, single file).

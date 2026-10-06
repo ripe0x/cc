@@ -6,7 +6,8 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Core} from "../../src/Core.sol";
-import {Lane, ICreditScore, ICreditStrategy, Mainnet, Econ} from "../../src/interfaces/Interfaces.sol";
+import {Lane, ICreditScore, ICreditStrategy, Mainnet} from "../../src/interfaces/Interfaces.sol";
+import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {Fixture} from "../utils/Fixture.sol";
 import {CreditIds} from "../utils/CreditIds.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
@@ -14,7 +15,10 @@ import {MockExitToken} from "../standins/MockExitToken.sol";
 import {ProbeTarget} from "../attackers/ProbeTarget.sol";
 import {FuzzController} from "../attackers/FuzzController.sol";
 import {TestLiquidityHelper} from "../utils/TestLiquidityHelper.sol";
-import {Handler, Wiring} from "./Handler.sol";
+import {Handler} from "./Handler.sol";
+import {Wiring, HandlerBase} from "./HandlerBase.sol";
+import {HandlerHouse} from "./HandlerHouse.sol";
+import {HandlerOwner} from "./HandlerOwner.sol";
 
 /// @notice builds the real system on the fork for the invariant suites on top of the single real stack `Fixture`:
 /// the real Core and ControllerV1 deployed through the deploy path, the coin launched through the live artcoins
@@ -25,6 +29,10 @@ import {Handler, Wiring} from "./Handler.sol";
 /// pre filled with real credits so that composes happen, and the clock is moved so that the rate has climbed far
 /// enough for the real CreditStrategy listings to fit under the ceiling.
 ///
+/// every statement of the prefill is listed on the real pnd auction house the core owns, and two of them are sold
+/// before the run (outside the sniper window variant, where an auction cannot finish in time): one collected and
+/// one not, neither synced, so the run starts with a stale record and with proceeds owed by the house.
+///
 /// two start states: after the sniper window (the owner setup needs the seven day timelock, so everything that
 /// needs the owner has run) and inside it (the run starts a few seconds after launch, the owner actions are only
 /// queued and the handler executes them once the timelock has run, the skim is 90 percent).
@@ -33,31 +41,14 @@ abstract contract InvariantFixture is Fixture {
     uint256 internal constant FUND_ETH = 40 ether;
     /// credits that stay in the eth pile after the pre filled composes, so two more fill it to 80
     uint256 internal constant LEFT_IN_PILE = 78;
+    /// statements composed and listed before the run
+    uint256 internal constant COMPOSES = 4;
     /// real listings are read from this index of the strategy list, after the credits that move
     uint256 internal constant CANDIDATE_START = 600;
 
-    /// @dev the economic dials the suites run with, picked by the env var INVARIANT_ECON: `default` (the engine as
-    /// specified, the unset value), `recommended` (script/config/mainnet.recommended.json, gate 20) or `gate5` (the
-    /// defaults with the gate at its smallest value, 5, and four statements held at the start, so the fuzz reaches
-    /// the gate within a few actions). the handler's model reads every dial from the core, so all three are checked
-    /// against the same invariants
-    function _econ() internal view virtual override returns (Econ memory e) {
-        string memory which = vm.envOr("INVARIANT_ECON", string("default"));
-        bytes32 h = keccak256(bytes(which));
-        if (h == keccak256("recommended")) return loadConfig("script/config/mainnet.recommended.json").econ;
-        e = Mainnet.defaultEcon();
-        if (h == keccak256("gate5")) e.inventoryGate = 5;
-        else require(h == keccak256("default"), "INVARIANT_ECON is default, recommended or gate5");
-    }
-
-    /// @dev gate5 seeds four statements instead of three and keeps the first, so the next compose closes the gate. the
-    /// credit budget (the first 600 of the 640 ids) is kept in the phase 2 suites, which also sell 80 credits into
-    /// the exit lane, by giving the four actors 25 credits instead of 40
-    bool internal _phase2Build;
-
-    function _gateSeeded() internal view returns (bool) {
-        return core.INVENTORY_GATE() == 5;
-    }
+    /// @dev the credit budget (the first 600 of the 640 ids) is kept in the phase 2 suites, which also sell 80 credits
+    /// into the exit lane, by giving the four actors 25 credits each
+    uint256 internal constant ACTOR_CREDITS = 25;
 
     FuzzController internal fuzz;
     ProbeTarget internal probeTarget;
@@ -70,7 +61,6 @@ abstract contract InvariantFixture is Fixture {
     /// @dev the suites differ in the exit phase, the controller, the start state and the tag of their counters.
     function _build(bool phase2, bool hostile, bool canSwapController, bool inWindow, string memory tag) internal {
         Fixture.setUp();
-        _phase2Build = phase2;
         filler = _user("inv.filler");
         whale = _user("inv.whale");
         fuzz = new FuzzController(address(core));
@@ -91,6 +81,7 @@ abstract contract InvariantFixture is Fixture {
 
         Wiring memory w = Wiring({
             core: core,
+            house: house,
             coin: coin,
             router: router,
             launchKey: launchKey,
@@ -113,7 +104,7 @@ abstract contract InvariantFixture is Fixture {
             handler.seedPendingController(address(fuzz), controllerEta);
         }
         _actors();
-        _prefill(phase2);
+        _prefill(phase2, inWindow);
         _holders();
         _candidates();
         if (hostile) {
@@ -197,16 +188,24 @@ abstract contract InvariantFixture is Fixture {
             coin.approve(address(router), type(uint256).max);
             _buyCoin(a, 2 ether);
             handler.addActor(a);
-            handler.giveCredits(a, _credits(a, _gateSeeded() && _phase2Build ? 25 : 40));
+            handler.giveCredits(a, _credits(a, ACTOR_CREDITS));
         }
     }
 
-    /// real credits sold into the piles, three composes so statements exist for the auction, the exit and the
-    /// overprint, and one statement bought, so the buyback pot is not empty when the run starts. in phase 2 the exit
-    /// token bid is funded and 80 more credits are sold into it, so the exit lane has a full page
-    function _prefill(bool phase2) internal {
-        uint256 composes = _gateSeeded() ? 4 : 3;
-        uint256 ethN = composes * 80 + LEFT_IN_PILE;
+    /// the statements the prefill sold on the house before the run, with the price. the first was collected, the second
+    /// was not, and neither was synced
+    uint256 internal sold1;
+    uint256 internal sold2;
+    uint256 internal price1;
+    uint256 internal price2;
+
+    /// real credits sold into the piles, four composes so statements exist for the auction, the exit and the overprint,
+    /// all listed on the house. outside the sniper window two of them are sold: the whale bids the reserve, the
+    /// auction runs out and is settled by a stranger, the first is collected so the buyback pot is not empty when the
+    /// run starts, the second is left owed by the house. in phase 2 the exit token bid is funded and 80 more credits are
+    /// sold into it, so the exit lane has a full page
+    function _prefill(bool phase2, bool inWindow) internal {
+        uint256 ethN = COMPOSES * 80 + LEFT_IN_PILE;
         uint256[] memory ids = _credits(filler, ethN + (phase2 ? 80 : 0));
         vm.fee(1 gwei);
         uint256[] memory ethIds = new uint256[](ethN);
@@ -216,19 +215,17 @@ abstract contract InvariantFixture is Fixture {
         vm.prank(filler);
         core.sellForEth(ethIds);
         uint256 firstStatement = STATEMENTS.supply() + 1;
-        for (uint256 i; i < composes; ++i) {
+        for (uint256 i; i < COMPOSES; ++i) {
             vm.prank(keeper);
             core.compose();
         }
         assertEq(core.pileSize(Lane.Eth), LEFT_IN_PILE);
-        if (_gateSeeded()) {
-            assertEq(core.ethHeld(), 4, "one statement below the gate");
-        } else {
-            uint256 price = core.priceOf(firstStatement);
-            vm.deal(whale, whale.balance + price);
-            vm.prank(whale);
-            core.buyStatement{value: price}(firstStatement);
+        if (!inWindow) {
+            (sold1, price1) = _saleOf(firstStatement);
+            assertGt(_collectSales(), 0);
             assertGt(core.ethToBuyback(), 0);
+            (sold2, price2) = _saleOf(firstStatement + 1);
+            assertGt(_owedByHouse(), 0, "the second sale is left uncollected");
         }
         if (phase2) {
             // the exit token bid is funded the way the module would: exit token arrives and skim books it
@@ -244,13 +241,23 @@ abstract contract InvariantFixture is Fixture {
         }
     }
 
+    /// the whale bids the reserve on `sid`, the auction runs out and a stranger settles it
+    function _saleOf(uint256 sid) internal returns (uint256, uint256) {
+        uint256 price = _live(sid).reserve;
+        _bid(whale, sid, price);
+        _endAuction(sid);
+        assertEq(STATEMENTS.ownerOf(sid), whale);
+        return (sid, price);
+    }
+
     /// credits held by the hostile target
     function _holders() internal {
         handler.setProbeIds(_credits(address(probeTarget), 16));
         vm.deal(address(probeTarget), 100 ether);
     }
 
-    /// the real listings with the most score per eth, so the ceiling reaches them first.
+    /// the cheapest real listings, so the ceiling reaches them first. the bid is flat per credit by default, so the
+    /// price alone decides, whatever the score
     function _candidates() internal {
         uint256 n = 40;
         uint256[] memory ids = new uint256[](n);
@@ -260,8 +267,8 @@ abstract contract InvariantFixture is Fixture {
             ids[i] = id;
             uint256 price = ICreditStrategy(Mainnet.CREDIT_STRATEGY).nftForSale(id);
             uint256 score = ICreditScore(Mainnet.CREDIT_SCORE).scoreOf(CREDITS.seedOf(id), CREDITS.timestampOf(id));
-            // price per point, larger is worse. unlisted ids sort last
-            key[i] = price == 0 ? type(uint256).max : price * 1e4 / score;
+            // the price, larger is worse. unlisted ids sort last. the score is read to keep the candidate real
+            key[i] = price == 0 || score == 0 ? type(uint256).max : price;
         }
         // keep the best 12 by selection
         uint256 keep = 12;
@@ -287,8 +294,9 @@ abstract contract InvariantFixture is Fixture {
         if (phase2) _seedLane(Lane.Exit);
         uint256[] memory held = core.heldStatements();
         for (uint256 i; i < held.length; ++i) {
-            (, Lane lane, uint256 cost,) = core.statementInfo(held[i]);
-            handler.seedGhostStatement(held[i], uint8(lane), cost);
+            if (held[i] == sold1 && sold1 != 0) handler.seedGhostStatement(held[i], whale, price1, true);
+            else if (held[i] == sold2 && sold2 != 0) handler.seedGhostStatement(held[i], whale, price2, false);
+            else handler.seedGhostStatement(held[i], address(0), 0, false);
         }
         handler.seedGhostWindow(_windowStart(), _windowPot(), _windowSpent());
     }
@@ -315,38 +323,57 @@ abstract contract InvariantFixture is Fixture {
         return uint256(vm.load(address(core), bytes32(uint256(12))));
     }
 
-    /// the actions the fuzzer may call. the setters of the handler are left out.
+    /// how many times each owner action appears in the fuzzer's list. the hostile owner suite raises it
+    function _ownerWeight() internal pure virtual returns (uint256) {
+        return 1;
+    }
+
+    /// the actions the fuzzer may call. the setters of the handler are left out. an action listed twice is called
+    /// twice as often
     function _targets(bool phase2) internal virtual {
-        bytes4[] memory s = new bytes4[](40);
+        bytes4[] memory s = new bytes4[](160);
         uint256 n;
-        s[n++] = Handler.buyCoin.selector;
-        s[n++] = Handler.buyCoin.selector;
-        s[n++] = Handler.sellCoin.selector;
-        s[n++] = Handler.sideBuy.selector;
-        s[n++] = Handler.sellForEth.selector;
-        s[n++] = Handler.sellForEth.selector;
-        s[n++] = Handler.listingStrategy.selector;
-        s[n++] = Handler.listingHostile.selector;
-        s[n++] = Handler.warp.selector;
-        s[n++] = Handler.warp.selector;
-        s[n++] = Handler.roll.selector;
-        s[n++] = Handler.compose.selector;
-        s[n++] = Handler.buyStatement.selector;
-        s[n++] = Handler.buyback.selector;
-        s[n++] = Handler.skim.selector;
-        s[n++] = Handler.donate.selector;
-        s[n++] = Handler.controllerSeed.selector;
-        s[n++] = Handler.controllerSwap.selector;
-        s[n++] = Handler.overprint.selector;
-        s[n++] = Handler.probeController.selector;
+        s[n++] = HandlerBase.buyCoin.selector;
+        s[n++] = HandlerBase.buyCoin.selector;
+        s[n++] = HandlerBase.sellCoin.selector;
+        s[n++] = HandlerBase.sideBuy.selector;
+        s[n++] = HandlerBase.sellForEth.selector;
+        s[n++] = HandlerBase.sellForEth.selector;
+        s[n++] = HandlerBase.listingStrategy.selector;
+        s[n++] = HandlerBase.listingHostile.selector;
+        s[n++] = HandlerBase.warp.selector;
+        s[n++] = HandlerBase.warp.selector;
+        s[n++] = HandlerBase.roll.selector;
+        s[n++] = HandlerBase.compose.selector;
+        s[n++] = HandlerHouse.bid.selector;
+        s[n++] = HandlerHouse.bid.selector;
+        s[n++] = HandlerHouse.endAuction.selector;
+        s[n++] = HandlerHouse.collectSales.selector;
+        s[n++] = HandlerHouse.syncStatement.selector;
+        s[n++] = HandlerHouse.repriceStatement.selector;
+        s[n++] = HandlerBase.buyback.selector;
+        s[n++] = HandlerBase.skim.selector;
+        s[n++] = HandlerBase.donate.selector;
+        s[n++] = HandlerBase.controllerSeed.selector;
+        s[n++] = HandlerBase.controllerSwap.selector;
+        s[n++] = HandlerBase.overprint.selector;
+        s[n++] = HandlerBase.probeController.selector;
         // the exit module is set in the phase 2 suites before the run starts, so the exit actions are listed only there
         if (phase2) {
-            s[n++] = Handler.sellForExit.selector;
-            s[n++] = Handler.composeExit.selector;
-            s[n++] = Handler.exitStatement.selector;
-            s[n++] = Handler.buybackExit.selector;
-            s[n++] = Handler.buybackExit.selector;
-            s[n++] = Handler.moduleMode.selector;
+            s[n++] = HandlerBase.sellForExit.selector;
+            s[n++] = HandlerBase.composeExit.selector;
+            s[n++] = HandlerBase.exitStatement.selector;
+            s[n++] = HandlerBase.buybackExit.selector;
+            s[n++] = HandlerBase.buybackExit.selector;
+            s[n++] = HandlerBase.moduleMode.selector;
+        }
+        // the owner as an adversary: settings anywhere in the bounds, rates, invalid calls, the other owner doors
+        for (uint256 k; k < _ownerWeight(); ++k) {
+            s[n++] = HandlerOwner.setSettings.selector;
+            s[n++] = HandlerOwner.setSettingsInvalid.selector;
+            s[n++] = HandlerOwner.setRate.selector;
+            s[n++] = HandlerOwner.setXRate.selector;
+            s[n++] = HandlerOwner.ownerMisc.selector;
         }
         bytes4[] memory sel = new bytes4[](n);
         for (uint256 i; i < n; ++i) {

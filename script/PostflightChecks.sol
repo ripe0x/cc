@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {console} from "forge-std/console.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -76,6 +77,18 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START(), core.settings());
     }
 
+    /// @notice prints what etherscan verification needs: the library address and the exact `--libraries` flag, the
+    /// constructor arguments of the Core (read back from the chain) and of the controller. docs/DEPLOY.md section 3
+    function printVerifyInputs(Core core) internal view {
+        address lib = findLibrary(address(core).code);
+        console.log("verify: library CoreLib at", lib);
+        console.log(string.concat("verify: flag  --libraries src/lib/CoreLib.sol:CoreLib:", vm.toString(lib)));
+        console.log("verify: core constructor args");
+        console.logBytes(coreConstructorArgs(core));
+        console.log("verify: controller constructor args");
+        console.logBytes(abi.encode(address(core)));
+    }
+
     function _postCore(LaunchConfig memory c, Core core) private {
         _eq("core: owner", core.OWNER(), c.owner);
         _eq("core: SUPPLY constant equals the config supply", core.SUPPLY(), c.supply);
@@ -129,17 +142,28 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         );
     }
 
-    /// @dev the settings are owner adjustable after launch, so the rows check the bounds and print the live values. a
-    /// difference from the config is a warning, not a failure
+    /// @notice the operator says the owner changed the settings since launch (SETTINGS_CHANGED=1). a test overrides it
+    function _settingsChanged() internal view virtual returns (bool) {
+        return vm.envOr("SETTINGS_CHANGED", uint256(0)) == 1;
+    }
+
+    /// @dev the settings are owner adjustable after launch. right after the deploy they must equal the config field by
+    /// field, so a Core built with other values fails. once the owner has called `setSettings` the live values differ
+    /// on purpose: run with SETTINGS_CHANGED=1 and the row turns into a warning that prints the difference
     function _postSettings(LaunchConfig memory c, Core core) private {
         Settings memory live = core.settings();
         bytes32 bad = SettingsBounds.firstViolation(live);
         _check("core: settings inside the bounds", bad == 0, bad == 0 ? "all fields" : string(abi.encodePacked(bad)));
-        _warn(
-            "warn: settings equal the config",
-            keccak256(abi.encode(live)) == keccak256(abi.encode(c.settings)),
-            "the owner changed a setting since launch, or the wrong config file is loaded"
-        );
+        bool same = keccak256(abi.encode(live)) == keccak256(abi.encode(c.settings));
+        if (_settingsChanged()) {
+            _warn("warn: settings equal the config", same, "SETTINGS_CHANGED=1, the owner changed them since launch");
+        } else {
+            _check(
+                "core: settings equal the config",
+                same,
+                "set SETTINGS_CHANGED=1 only after the owner called setSettings"
+            );
+        }
         _info(
             "core: flat share and average score",
             string.concat("flatBps ", vm.toString(live.flatBps), " avgScore ", vm.toString(live.avgScore))
@@ -170,7 +194,13 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         address house = address(core.HOUSE());
         _code("code: house", house);
         if (house.code.length == 0) return;
-        _eq("house: factory houseOf(core)", IAuctionFactory(c.stack.auctionFactory).houseOf(address(core)), house);
+        (bool okh, uint256 recorded) =
+            _word(c.stack.auctionFactory, abi.encodeCall(IAuctionFactory.houseOf, (address(core))));
+        _check(
+            "house: factory houseOf(core)",
+            okh && address(uint160(recorded)) == house,
+            string.concat("got ", vm.toString(address(uint160(recorded))), " want ", vm.toString(house))
+        );
         _eq("house: owner is the core", IAuctionHouse(house).owner(), address(core));
         (bool ok, uint256 fee) = _word(house, abi.encodeCall(IAuctionHouse.protocolFeeBps, ()));
         _check("house: protocol fee is zero", ok && fee == 0, string.concat("protocolFeeBps ", vm.toString(fee)));
@@ -184,27 +214,31 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     /// @dev the Core is linked against `CoreLib`. its address sits in the Core runtime code as a push20. the row finds
     /// a push20 operand whose code is the compiled library (its own address masked out)
     function _postLibrary(Core core) private {
-        bytes memory expected = vm.getDeployedCode("CoreLib.sol:CoreLib");
-        bytes memory code = address(core).code;
-        address found;
+        address found = findLibrary(address(core).code);
+        _check(
+            "core: linked library is the compiled CoreLib",
+            found != address(0),
+            string.concat("library at ", vm.toString(found))
+        );
+    }
+
+    /// @notice the address of the compiled `CoreLib` inside a Core runtime code (a push20 whose target has the library
+    /// runtime code, own address masked out), zero when there is none
+    function findLibrary(bytes memory code) internal view returns (address found) {
         for (uint256 i; i + 21 <= code.length; ++i) {
             if (code[i] != 0x73) continue;
             address cand;
             assembly ("memory-safe") {
                 cand := shr(96, mload(add(add(code, 0x21), i)))
             }
-            bytes memory lc = cand.code;
-            if (lc.length != expected.length || lc.length < 39) continue;
-            if (_tailHash(lc) == _tailHash(expected)) {
-                found = cand;
-                break;
-            }
+            if (isCompiledLibrary(cand.code)) return cand;
         }
-        _check(
-            "core: linked library is the compiled CoreLib",
-            found != address(0),
-            string.concat("library at ", vm.toString(found))
-        );
+    }
+
+    /// @notice whether `lc` is the runtime code of the compiled `CoreLib`, its own address masked out
+    function isCompiledLibrary(bytes memory lc) internal view returns (bool) {
+        bytes memory expected = vm.getDeployedCode("CoreLib.sol:CoreLib");
+        return lc.length == expected.length && lc.length >= 39 && _tailHash(lc) == _tailHash(expected);
     }
 
     /// @dev hash of library runtime code with its own address masked out. a library starts with

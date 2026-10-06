@@ -78,12 +78,14 @@ contract ProbeTarget {
     function _reenter() internal {
         uint256[] memory ids = new uint256[](1);
         ids[0] = 1;
-        bytes[6] memory calls = [
+        bytes[8] memory calls = [
             abi.encodeWithSignature("sellForEth(uint256[])", ids),
             abi.encodeWithSignature("compose()"),
             abi.encodeWithSignature("skim()"),
             abi.encodeWithSignature("buyback()"),
-            abi.encodeWithSignature("buyStatement(uint256)", uint256(1)),
+            abi.encodeWithSignature("collectSales()"),
+            abi.encodeWithSignature("syncStatement(uint256)", uint256(1)),
+            abi.encodeWithSignature("repriceStatement(uint256)", uint256(1)),
             abi.encodeWithSignature(
                 "buyListing(uint256,bytes,uint256,address)", uint256(1), bytes(""), uint256(1), address(this)
             )

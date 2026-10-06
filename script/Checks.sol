@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {VmSafe} from "forge-std/Vm.sol";
 import {Stack, Mainnet, ICredits, ICreditScore, IStatements} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsLocker, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
@@ -14,7 +15,7 @@ interface ISupply {
 /// @notice the read only checks run before a launch (`preflight`) and after it (`postflight`). they only read state,
 /// so they are safe to run against mainnet at any time
 abstract contract LaunchChecks is PostflightChecks {
-    /// @dev gas units of the six deploy transactions (the library, controller, core, launch, lock, handover: about 12.0M measured on a fork) plus margin
+    /// @dev gas units of the six deploy transactions (the library, controller, core, launch, lock, handover: about 12.3M measured on a fork) plus margin
     uint256 internal constant DEPLOY_GAS_ESTIMATE = 13_500_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
     uint256 internal constant CORE_SUPPLY = 1_000_000_000e18;
@@ -37,6 +38,34 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev supplies at block 26127622. both only grow
     uint256 internal constant CREDITS_SUPPLY_MIN = 122_154;
     uint256 internal constant STATEMENTS_SUPPLY_MIN = 148;
+    /// @dev the deterministic deployer that `forge script` sends the library through (CREATE2, salt zero)
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+
+    /// @notice true when running under `forge script`. a test overrides it to rehearse the script behaviour
+    function _scriptContext() internal view virtual returns (bool) {
+        return vm.isContext(VmSafe.ForgeContext.ScriptGroup);
+    }
+
+    /// @notice the address `forge script` gives the linked library `CoreLib`: CREATE2 through the deterministic deployer,
+    /// salt zero, the creation code of the compiled library. it depends on the compiler output only
+    function libraryAddress() internal view returns (address) {
+        return vm.computeCreate2Address(bytes32(0), keccak256(vm.getCode("CoreLib.sol:CoreLib")), CREATE2_DEPLOYER);
+    }
+
+    /// @notice whether the broadcast will send a library transaction before the controller. the library goes through the
+    /// deterministic deployer as an ordinary transaction FROM THE DEPLOYER, so it takes one deployer nonce, but only
+    /// when no code sits at its address yet (a deployed library is skipped). a test run deploys no library through
+    /// the deterministic deployer, so it never takes a nonce there
+    function _libraryTxPending() internal view returns (bool) {
+        return _scriptContext() && libraryAddress().code.length == 0;
+    }
+
+    /// @notice the deployer nonce the controller will be created at: the live nonce plus the library transaction that
+    /// still precedes it. inside `Deploy` the library is already on chain by the time `run` starts, so the live nonce
+    /// already counts it. the core is created at this nonce plus one
+    function _controllerNonce(address deployer) internal view returns (uint64) {
+        return vm.getNonce(deployer) + (_libraryTxPending() ? 1 : 0);
+    }
 
     /// @notice runs every preflight check and records it in the report
     function preflight(LaunchConfig memory c, address deployer) internal {
@@ -44,6 +73,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _preConfig(c);
         _preRules(c, deployer);
         _preCode(c);
+        _preLibrary();
         _preFactory(c, deployer);
         _preStack(c);
         _prePredictions(c, deployer);
@@ -169,7 +199,8 @@ abstract contract LaunchChecks is PostflightChecks {
             address a = who[i];
             if (a == address(0)) continue; // the placeholder row reports it
             bad = bad || a == Mainnet.DEAD || a == c.stack.poolManager || a == c.stack.hook || a == c.stack.factory
-                || a == c.stack.locker || a == c.stack.escrow || a == c.mevModule || a == c.factoryOwner;
+                || a == c.stack.locker || a == c.stack.escrow || a == c.stack.auctionFactory || a == c.mevModule
+                || a == c.factoryOwner;
         }
         _check(
             "rule: owner and creator are not dead or stack addresses", !bad, "dead, stack, mev module, factory owner"
@@ -251,8 +282,26 @@ abstract contract LaunchChecks is PostflightChecks {
         _check(name, ok && got == want, string.concat("got ", vm.toString(got), " want ", vm.toString(want)));
     }
 
+    /// @dev the linked library. a deployed copy at the create2 address is the compiled code by construction (the address
+    /// is the hash of the creation code), the row says so and reads the code anyway
+    function _preLibrary() private {
+        _code("code: deterministic deployer", CREATE2_DEPLOYER);
+        address lib = libraryAddress();
+        bool deployed = lib.code.length != 0;
+        _check(
+            "library: CoreLib at its create2 address is the compiled code or absent",
+            !deployed || isCompiledLibrary(lib.code),
+            string.concat(
+                vm.toString(lib),
+                deployed
+                    ? " on chain, the broadcast skips it and takes no deployer nonce"
+                    : " not deployed, the first transaction deploys it and takes one deployer nonce"
+            )
+        );
+    }
+
     function _prePredictions(LaunchConfig memory c, address deployer) private {
-        uint64 nonce = vm.getNonce(deployer);
+        uint64 nonce = _controllerNonce(deployer);
         address controllerAt = vm.computeCreateAddress(deployer, nonce);
         address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
         _noCode("predicted controller is empty", controllerAt);
@@ -278,17 +327,27 @@ abstract contract LaunchChecks is PostflightChecks {
 
     /// @dev the Core creates its auction house in its constructor, one house per owner address, so a house must not
     /// exist yet for the predicted core address. the factory default fee is fixed at the factory: it is paid out of
-    /// every sale, so a non zero fee is a loud warning
+    /// every sale, so a non zero fee is a loud warning here, and the deploy stops at its postflight (house: protocol fee is zero)
     function _preHouse(LaunchConfig memory c, address coreAt) private {
         address f = c.stack.auctionFactory;
         (bool ok1, uint256 existing) = _word(f, abi.encodeCall(IAuctionFactory.houseOf, (coreAt)));
         _check("auction factory: no house yet for the predicted core", ok1 && existing == 0, "houseOf(core)");
+        (bool okp, uint256 predicted) = _word(f, abi.encodeCall(IAuctionFactory.predictHouseAddress, (coreAt)));
+        _check(
+            "auction factory: the house address of the core is free",
+            okp && address(uint160(predicted)).code.length == 0,
+            string.concat("predictHouseAddress(core) ", vm.toString(address(uint160(predicted))))
+        );
         (bool ok2, uint256 fee) = _word(f, abi.encodeCall(IAuctionFactory.defaultProtocolFeeBps, ()));
         _check("auction factory: default fee readable", ok2, vm.toString(fee));
         _warn(
             "warn: auction factory default fee is zero",
             ok2 && fee == 0,
-            string.concat("fee ", vm.toString(fee), " bps is taken from every statement sale and cannot be changed")
+            string.concat(
+                "fee ",
+                vm.toString(fee),
+                " bps is taken from every statement sale. the deploy stops at postflight: house fee"
+            )
         );
     }
 
@@ -307,7 +366,7 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev the table the owner signs. every row restates one launch input in the words of what it does, then the hash
     /// of the whole config is the single value the deploy needs back in CONFIG_HASH
     function _preSignoff(LaunchConfig memory c, address deployer) private {
-        address core = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        address core = vm.computeCreateAddress(deployer, _controllerNonce(deployer) + 1);
         _info("signoff: owner (core owner and token admin)", vm.toString(c.owner));
         _info("signoff: creator (0.5 point leg and lp rewards)", vm.toString(c.creator));
         _info("signoff: deployer (sends the six transactions)", vm.toString(deployer));

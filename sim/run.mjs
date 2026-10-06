@@ -1,44 +1,41 @@
 // scenario batches. usage: node run.mjs [q1 q2 ...]. writes results/*.json
 import fs from 'node:fs';
-import { simulate, WTP_Q, interp, W } from './engine.js';
+import { simulate, summary, WTP_Q, interp, W } from './engine.js';
 
 const OUT = new URL('./results/', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
 const SEEDS5 = [1, 2, 3, 4, 5], SEEDS3 = [1, 2, 3];
+// rateStart as a share of the market price of a credit (0.0089 eth, 433 average points): 0.75 gives the launch default 1.54e13
+export const rateAt = (share, price = 0.0089) => (share * price * W) / 433;
 
 // flat numeric metrics of one run
 export function metrics(res) {
   const m = {}, S = res.S, T = res.T, st = res.stats, H = res.H;
-  for (const d of [30, 60, 90]) {
+  for (const d of [1, 3, 7, 14, 30, 60, 90]) {
     if (d * 24 > H) continue;
-    const a = res.at(d);
+    const a = summary(res, d);
     Object.assign(m, {
-      ['fees' + d]: a.cumFees, ['bought' + d]: a.bought, ['composed' + d]: a.composed, ['sold' + d]: a.sold, ['held' + d]: a.held,
-      ['floor' + d]: a.heldFloor, ['locked' + d]: a.locked, ['toPot' + d]: a.saleToPot, ['toBB' + d]: a.saleToBuyback,
-      ['burnM' + d]: a.burned / 1e6, ['burnPct' + d]: a.burnedPct, ['pot' + d]: a.pot, ['exited' + d]: a.exited,
+      ['credits' + d]: a.credits, ['stmts' + d]: a.statements, ['sold' + d]: a.sold, ['burnEth' + d]: a.burnEth, ['burnPct' + d]: a.burnPct,
+      ['waiting' + d]: a.waiting, ['exited' + d]: a.exited, ['locked' + d]: a.locked, ['pot' + d]: a.pot, ['recycled' + d]: a.recycled,
     });
   }
-  // stall diagnostics
-  let potGone = NaN, lastBuy = 0, maxGap = 0, gap = 0, stall = 0, over = 0, started = false;
-  for (let h = 1; h <= H; h++) {
-    if (isNaN(potGone) && S.pot[h] < 1 && S.cumFees[h] > 20 && h > 24) potGone = h / 24;
-    const bought = S.bought[h] > S.bought[h - 1];
-    if (bought) { started = true; lastBuy = h / 24; gap = 0; } else if (started) { gap++; stall++; maxGap = Math.max(maxGap, gap); }
-    if (started && S.bidRatio[h] > 1.5) over++;
-  }
+  const s = summary(res);
   Object.assign(m, {
-    potGoneDay: potGone, lastBuyDay: lastBuy, stallHours: stall, maxStallHours: maxGap, hoursBidOver15x: over,
+    potGoneDay: s.potGoneDay == null ? NaN : s.potGoneDay, steadyCredits: s.steadyCredits == null ? NaN : s.steadyCredits,
+    steadyStatements: s.steadyStatements == null ? NaN : s.steadyStatements, steadySold: s.steadySold == null ? NaN : s.steadySold,
+    steadyBurnEth: s.steadyBurnEth == null ? NaN : s.steadyBurnEth,
     firstFillHour: st.firstFillHour, costVsMarket: st.costVsMarket, costPerPointVsMarket: st.costPerPointVsMarket, costVsAsk: st.costVsAsk,
-    avgScoreBought: st.avgScoreBought, capSteps: st.capSteps, capStepsRich: st.capStepsRich, potBlockedSteps: st.potBlockedSteps, clampSteps: st.clampSteps, rateMaxBidRatio: st.rateMaxBidRatio,
-    rateSignChanges: st.rateSignChanges, rateMeanAbsMove: st.rateMeanAbsMove, saleOverCost: st.saleOverCost,
-    stmtArrivals: st.stmtArrivals, stmtMiss: st.stmtMiss, xFills: st.xFills, xMedianIntervalH: st.xMedianIntervalH, xMeanDiscount: st.xMeanDiscount,
+    avgScoreBought: st.avgScoreBought, capSteps: st.capSteps, clampSteps: st.clampSteps, rateMaxBidRatio: st.rateMaxBidRatio,
+    saleOverCost: st.saleOverCost, saleOverReserve: st.saleOverReserve, bidsPerSale: st.bidsPerSale, contestedShare: st.contestedShare,
+    stmtArrivals: st.stmtArrivals, stmtMiss: st.stmtMiss, rebids: T.rebids, extended: T.extended,
+    xFills: st.xFills, xMedianIntervalH: st.xMedianIntervalH, xMeanDiscount: st.xMeanDiscount,
     boughtX: T.boughtX, exitedX: T.exitedX, burnEthM: T.burned / 1e6, burnXM: T.burnedX / 1e6, tips: T.tips, reimb: T.reimb, spent: T.spent,
     stCost: T.composed ? T.stCost / T.composed : NaN, stRating: T.composed ? T.stRating / T.composed : NaN,
     xPotEnd: res.core.xPot, xToBuybackEnd: res.core.xToBuyback, potEnd: res.core.ethPot, toBuybackEnd: res.core.ethToBuyback,
-    recycled: T.spent ? T.saleGross / T.spent : 0, buybackEth: T.buybackSpent + T.buybackTips,
-    f80hours: st.first80 ? st.first80.hours : NaN, f80cost: st.first80 ? st.first80.cost : NaN, f80ratio: st.first80 ? st.first80.ratio : NaN,
-    f80score: st.first80 ? st.first80.avgScore : NaN, sumM: T.bought ? T.sumM / T.bought : NaN,
-    stratBought: T.stratBought, listBought: T.listBought, xValue: T.xValue, xCoinM: T.xCoin / 1e6,
+    recycledRatio: T.spent ? T.saleGross / T.spent : 0, fees: S.cumFees[H], saleToPot: T.saleToPot, saleToBuyback: T.saleToBuyback,
+    f80hours: st.first80 ? st.first80.hours : NaN, f80ratio: st.first80 ? st.first80.ratio : NaN, f80score: st.first80 ? st.first80.avgScore : NaN,
+    exitedValue: T.exitedValue, exitedCost: T.exitedCost, exitedValueOverCost: T.exitedCost ? T.exitedValue / T.exitedCost : NaN,
+    exitedAgeDays: T.exited ? T.exitedAge / T.exited / 86400 : NaN, xValue: T.xValue, xCoinM: T.xCoin / 1e6, stratBought: T.stratBought,
   });
   return m;
 }
@@ -63,185 +60,174 @@ export function wtpSurvival(x) {
   for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (interp(WTP_Q, mid) < x) lo = mid; else hi = mid; }
   return 1 - lo;
 }
+const sweep = (key, vals, base = {}, seeds = SEEDS3) => vals.map((v) => Object.assign({ [key]: v }, many(Object.assign({}, base, { [key]: v }), seeds)));
 const batches = {};
+const PRESETS = ['comparable', 'sustained17', 'sustained50', 'deadWeek1'];
 
-// ---- q1: does the phase 1 loop turn, per volume preset
+// ---- q1: the launch configuration as built, 30 60 90 days under each volume preset
 batches.q1 = () => {
-  const out = { presets: {}, series: {} };
-  for (const v of ['comparable', 'sustained17', 'sustained50', 'deadWeek1']) {
-    out.presets[v] = many({ volPreset: v }, SEEDS5);
-  }
-  // daily series of the base case, seed 1
+  const out = { presets: {}, series: [] };
+  for (const v of PRESETS) out.presets[v] = many({ volPreset: v }, SEEDS5);
   const r = simulate({ seed: 1 });
-  const rows = [];
-  for (let d = 0; d <= 90; d += d < 20 ? 1 : 5) {
+  for (const d of [0, 1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60, 90]) {
     const a = r.at(d);
-    rows.push({ day: d, pot: a.pot, fees: a.cumFees, bought: a.bought, composed: a.composed, sold: a.sold, floor: a.heldFloor, locked: a.locked, burnPct: a.burnedPct, rate: a.rate, bid: a.bidRatio, mkt: a.mktPerCredit, price: a.coinPrice });
+    out.series.push({ day: d, credits: a.credits, composed: a.composed, sold: a.sold, waiting: a.waiting, pot: a.pot, bid: a.bidRatio, burnPct: a.burnedPct, price: a.coinPrice });
   }
-  out.series.comparable = rows;
-  out.wtpSurvival = Object.fromEntries([0.6, 0.84, 1.0, 1.2, 1.5, 2, 4].map((x) => [x, wtpSurvival(x)]));
+  out.wtpSurvival = Object.fromEntries([0.6, 0.84, 0.9, 1.0, 1.2, 1.5].map((x) => [x, wtpSurvival(x)]));
   return out;
 };
 
-// ---- q2: the starting rate
+// ---- q2: the opening limit as a share of the market price of a credit
 batches.q2 = () => {
-  const out = { today: [], rule: [] };
-  for (const rs of [1e12, 2e12, 3e12, 4e12, 6e12, 8e12, 1e13, 1.5e13, 2e13, 3e13]) {
-    out.today.push(Object.assign({ rateStart: rs, m: (rs * 800) / (0.0089 * W) }, many({ rateStart: rs }, SEEDS3)));
+  const out = { share: [], decline: [], recovery: [] };
+  for (const sh of [0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.25]) {
+    out.share.push(Object.assign({ share: sh, rateStart: rateAt(sh) }, many({ rateStart: rateAt(sh) }, SEEDS5)));
+    out.decline.push(Object.assign({ share: sh }, many({ rateStart: rateAt(sh), pricePath: 'decline' }, SEEDS3)));
+    out.recovery.push(Object.assign({ share: sh }, many({ rateStart: rateAt(sh), pricePath: 'recovery' }, SEEDS3)));
   }
-  // the rule: rateStart as a multiple m of the rate at which an 800 point credit clears at the flat price (price * 1e18 / 800)
-  for (const p0 of [0.0045, 0.0089, 0.018, 0.03]) {
-    for (const m of [0.1, 0.2, 0.35, 0.5, 0.75, 1, 1.5, 2.5]) {
-      const rs = (m * p0 * W) / 800;
-      out.rule.push(Object.assign({ p0, m, rateStart: rs }, many({ priceP0: p0, rateStart: rs }, [1, 2])));
-    }
-  }
+  // the same share at other market prices: the rule scales with price
+  out.price = [];
+  for (const p0 of [0.0045, 0.018, 0.03]) out.price.push(Object.assign({ p0 }, many({ priceP0: p0, rateStart: rateAt(0.75, p0) }, SEEDS3)));
   return out;
 };
 
-// ---- q3: per point bid versus the flat market
+// ---- q3: flat, blended and per point bids, and a switch on day 30
 batches.q3 = () => {
-  const out = {};
-  out.perPoint = many({}, SEEDS5);
-  out.flatBid = many({ bidMode: 'flat' }, SEEDS5);
-  out.perPointNoImpact = many({ impactElast: 0 }, SEEDS5);
-  out.flatBidNoImpact = many({ impactElast: 0, bidMode: 'flat' }, SEEDS5);
-  out.perPointListings = many({ listedShare: 0.5 }, SEEDS5);
-  out.perPointDecline = many({ pricePath: 'decline' }, SEEDS5);
-  out.flatDecline = many({ pricePath: 'decline', bidMode: 'flat' }, SEEDS5);
-  // who sells, by score bin, averaged over seeds
-  const bins = new Array(10).fill(0), cost = new Array(10).fill(0);
-  let frontier = [];
-  for (const s of SEEDS5) {
-    const r = simulate({ seed: s });
-    r.histPts.forEach((x, i) => { bins[i] += x / 5; cost[i] += r.histCost[i] / 5; });
-    if (s === 1) {
-      for (const d of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 20, 30]) {
-        const a = r.at(d);
-        frontier.push({ day: d, frontier: a.frontier, avgScoreDay: a.avgScoreDay, bid: a.bidRatio, costPerCredit: a.costPerCredit, mkt: a.mktPerCredit });
-      }
-    }
+  const out = { flat: {}, switch: {}, bins: {} };
+  for (const v of ['comparable', 'sustained17']) {
+    out.flat[v] = sweep('flatBps', [10000, 7500, 5000, 2500, 0], { volPreset: v }, SEEDS5);
+    out.switch[v] = [5000, 0].map((f) => Object.assign({ to: f }, many({ volPreset: v, schedule: [{ day: 30, patch: { flatBps: f } }] }, SEEDS5)));
   }
-  out.bins = bins.map((n, i) => ({ lo: 80 + i * 72, hi: 152 + i * 72, credits: n, avgCost: n ? cost[i] / n : 0 }));
-  out.frontier = frontier;
+  for (const f of [10000, 5000, 0]) {
+    const bins = new Array(10).fill(0), cost = new Array(10).fill(0);
+    for (const s of SEEDS5) { const r = simulate({ seed: s, flatBps: f }); r.histPts.forEach((x, i) => { bins[i] += x / 5; cost[i] += r.histCost[i] / 5; }); }
+    out.bins[f] = bins.map((c, i) => ({ lo: 80 + i * 72, credits: c, avgCost: c ? cost[i] / c : 0 }));
+  }
   return out;
 };
 
-// ---- q4: statement auction parameters
+// ---- q4: reserve and auction duration
 batches.q4 = () => {
-  const out = { grid: [], length: [], clearing: [], current: {} };
-  for (const start of [4, 3, 2.5, 2, 1.5]) {
-    for (const floor of [1.2, 1.0, 0.8, 0.6]) {
-      if (floor > start) continue;
-      out.grid.push(Object.assign({ start, floor }, many({ AUCTION_START_X: start * 1e4, AUCTION_FLOOR_X: floor * 1e4 }, SEEDS3)));
-    }
-  }
-  for (const hours of [12, 24, 72, 168, 336]) {
-    for (const [start, floor] of [[4, 1.2], [2, 0.8]]) {
-      out.length.push(Object.assign({ hours, start, floor }, many({ AUCTION_LENGTH: hours * 3600, AUCTION_START_X: start * 1e4, AUCTION_FLOOR_X: floor * 1e4 }, SEEDS3)));
-    }
-  }
-  // share of observed buyers that clear a given floor, by the engine's cost basis as a multiple of the parts' market cost
-  for (const c of [0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.4, 1.6]) {
-    out.clearing.push({ cost: c, floor1_2: wtpSurvival(1.2 * c), floor1_0: wtpSurvival(1.0 * c), floor0_8: wtpSurvival(0.8 * c), floor0_6: wtpSurvival(0.6 * c), start4: wtpSurvival(4 * c) });
-  }
-  out.current = many({}, SEEDS5);
-  out.currentNoImpact = many({ impactElast: 0 }, SEEDS5);
-  out.currentFlatBid = many({ bidMode: 'flat' }, SEEDS5);
+  const out = { reserve: {}, duration: [], pick: [], wtp: [], change: [] };
+  for (const v of ['comparable', 'sustained17']) out.reserve[v] = sweep('reserveBps', [5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000], { volPreset: v }, SEEDS5);
+  for (const d of [3600, 6 * 3600, 24 * 3600, 72 * 3600, 7 * 86400]) out.duration.push(Object.assign({ auctionDuration: d }, many({ auctionDuration: d }, SEEDS5)));
+  for (const pick of ['cheapest', 'random']) for (const per of [8, 20]) out.pick.push(Object.assign({ pick, stmtPerDay: per }, many({ stmtPick: pick, stmtPerDay: per }, SEEDS5)));
+  for (const w of [0.7, 0.84, 1, 1.3, 1.6]) out.wtp.push(Object.assign({ wtpMult: w }, many({ wtpMult: w }, SEEDS3)));
+  for (const [day, rb] of [[14, 6000], [14, 7500], [30, 6000], [7, 6000]]) out.change.push(Object.assign({ day, reserveBps: rb }, many({ schedule: [{ day, patch: { reserveBps: rb } }] }, SEEDS5)));
+  out.base = many({}, SEEDS5);
   return out;
 };
 
-// ---- q5: the funded rule
+// ---- q5: the proceeds split
 batches.q5 = () => {
   const out = {};
-  const scenarios = {
-    base: {}, smallPot: { volScale: 0.03 }, tinyPot: { volScale: 0.005, volPreset: 'sustained17' }, recovery: { pricePath: 'recovery' },
-    decline: { pricePath: 'decline' }, sustained50: { volPreset: 'sustained50' }, lowStart: { rateStart: 1e12 }, noImpact: { impactElast: 0 },
-  };
-  for (const [name, o] of Object.entries(scenarios)) {
-    out[name] = { new: many(Object.assign({ fundedRule: 'new' }, o), SEEDS3), old: many(Object.assign({ fundedRule: 'old' }, o), SEEDS3) };
-  }
+  for (const v of ['comparable', 'sustained17', 'sustained50']) out[v] = sweep('saleToBuybackBps', [0, 2500, 5000, 7500, 10000], { volPreset: v }, SEEDS5);
   return out;
 };
 
-// ---- q6: hourly cap, climb and drop constants
+// ---- q6: dropBps, climbBaseBps, spendCapBps
 batches.q6 = () => {
-  const out = { base: many({}, SEEDS5), sweeps: {} };
-  const sweeps = {
-    DROP_BPS: [250, 500, 1000, 2000, 4000], CLIMB_BASE_BPS_PER_HOUR: [50, 100, 200, 400], CLIMB_MAX_BPS_PER_HOUR: [200, 400, 800, 1600],
-    SPEND_CAP_BPS_PER_HOUR: [500, 1000, 2000, 4000, 10000],
+  const out = { base: many({}, SEEDS5), sweeps: {}, small: {} };
+  out.sweeps.dropBps = sweep('dropBps', [0, 500, 1000, 2000, 3000, 5000], {}, SEEDS5);
+  out.sweeps.climbBaseBps = sweep('climbBaseBps', [25, 50, 100, 200, 400], {}, SEEDS5);
+  out.sweeps.spendCapBps = sweep('spendCapBps', [500, 1000, 2000, 4000, 10000], {}, SEEDS5);
+  // a hard case: a low opening limit and a falling market, where the climb and the drop have work to do
+  const hard = { rateStart: rateAt(0.4), pricePath: 'recovery' };
+  out.hardRecovery = {
+    dropBps: sweep('dropBps', [0, 1000, 2000, 5000], hard), climbBaseBps: sweep('climbBaseBps', [25, 100, 400], hard), spendCapBps: sweep('spendCapBps', [500, 2000, 10000], hard),
   };
-  for (const [k, vals] of Object.entries(sweeps)) out.sweeps[k] = vals.map((v) => Object.assign({ value: v }, many({ [k]: v }, SEEDS3)));
-  out.smallPotCap = {};
-  for (const cap of [500, 1000, 2000, 5000]) out.smallPotCap[cap] = many({ SPEND_CAP_BPS_PER_HOUR: cap, volScale: 0.03 }, SEEDS3);
+  const dec = { pricePath: 'decline' };
+  out.decline = { dropBps: sweep('dropBps', [0, 1000, 2000, 5000], dec), spendCapBps: sweep('spendCapBps', [500, 2000, 10000], dec) };
   return out;
 };
 
-// ---- q7: phase 2
+// ---- q7: after the launch pot, per day as a function of daily coin volume (constant volume after day one)
 batches.q7 = () => {
-  const out = { xp: [], never: [], taker: [], bid: [], base: many({}, SEEDS3) };
-  const p2 = { phase2Day: 14 };
-  for (const xp of [5e-6, 1e-5, 1.5e-5, 2e-5, 3e-5, 4e-5, 6e-5, 1e-4]) {
-    out.xp.push(Object.assign({ xp }, many(Object.assign({ xp }, p2), SEEDS3)));
-    out.never.push(Object.assign({ xp }, many(Object.assign({ xp, exitMinRatio: 1e9 }, p2), SEEDS3)));
+  const out = { volume: [], stmtDemand: [], wtp: [] };
+  for (const v of [1, 5, 17, 50, 150]) {
+    const o = { volPreset: 'custom', volTail: v, volHalfLifeDays: 2 };
+    out.volume.push(Object.assign({ ethPerDay: v, feesPerDay: v * 0.095 }, many(o, SEEDS5)));
+    // statement demand 5 times higher, to see what the sale side can do when the buyers are there
+    out.stmtDemand.push(Object.assign({ ethPerDay: v }, many(Object.assign({ stmtPerDay: 40, stmtFloorPerDay: 10 }, o), SEEDS3)));
   }
-  for (const th of [0.02, 0.05, 0.1, 0.15, 0.25, 0.4]) {
-    out.taker.push(Object.assign({ th }, many(Object.assign({ xp: 3e-5, takerThreshold: th }, p2), SEEDS3)));
+  return out;
+};
+
+// ---- q8: phase 2 arrives on day 14, 30 or 60, for a range of exitToken prices
+batches.q8 = () => {
+  const out = { grid: [], bid: [], fills: [], noModule: many({}, SEEDS3) };
+  const XPS = [5e-6, 1e-5, 1.5e-5, 2e-5, 3e-5, 5e-5, 1e-4];
+  for (const day of [14, 30, 60]) {
+    for (const xp of XPS) {
+      const runs = SEEDS3.map((seed) => {
+        const r = simulate({ seed, phase2Day: day, xp, days: 90 });
+        const m = metrics(r), b = r.at(day - 1 / 24), p7 = r.at(Math.min(90, day + 7)), p30 = r.at(Math.min(90, day + 30));
+        return Object.assign(m, { waitBefore: b.waiting, exitedAt7: p7.exited, xPotAt7: p7.xPot, xRateAt7: p7.xRate, xBoughtAt7: p7.xBought, xBoughtAt30: p30.xBought, xToBuybackAt30: p30.xToBuyback });
+      });
+      out.grid.push(Object.assign({ day, xp }, mean(runs)));
+    }
   }
   for (const xp of [1e-5, 3e-5]) {
     const r = simulate({ xp, phase2Day: 14, seed: 1 });
-    const rows = [];
-    for (const d of [14.5, 15, 16, 18, 20, 25, 30, 45, 60, 90]) {
-      const a = r.at(d);
-      rows.push({ xp, day: d, xRate: a.xRate, xPot: a.xPot, xToBuyback: a.xToBuyback, xBought: a.xBought, exited: a.exited, burnPct: a.burnedPct, xFills: a.xFills, disc: a.xDisc });
-    }
-    out.bid.push(...rows);
+    for (const d of [14.5, 15, 16, 18, 21, 30, 45, 60, 90]) { const a = r.at(d); out.bid.push({ xp, day: d, xRate: a.xRate, xPot: a.xPot, xToBuyback: a.xToBuyback, xBought: a.xBought, exited: a.exited, burnPct: a.burnedPct, xFills: a.xFills }); }
   }
-  // first fills of the dutch auction in one run
   const r = simulate({ xp: 3e-5, phase2Day: 14, seed: 1 });
-  out.fills = r.xFillLog.slice(0, 12).map(([h, slice, coinIn, gross, disc, spotDisc]) => ({ hour: h, sliceValue: slice, coinIn, ethCost: gross, allInDiscount: disc, spotDiscount: spotDisc }));
+  out.fills = r.xFillLog.slice(0, 10).map(([hour, sliceValue, coinIn, ethCost, disc]) => ({ day: hour / 24, sliceValue, coinIn, ethCost, disc }));
   out.fillCount = r.xFillLog.length;
+  // a keeper that exits only when the module pays at least the reserve
+  out.keeper = [0, 1].map((ratio) => Object.assign({ exitMinRatio: ratio }, many({ phase2Day: 30, xp: 1e-5, exitMinRatio: ratio }, SEEDS3)));
   return out;
 };
 
-// ---- q8: sensitivity, low and high values of each input against the base case
-batches.q8 = () => {
+// ---- q9: sensitivity, low and high values of each input against the base case (credits acquired and statements created at day 90)
+batches.q9 = () => {
   const base = many({}, SEEDS5);
   const tests = [
     ['volScale', 0.25, 4], ['priceP0', 0.0045, 0.018], ['pricePath', 'decline', 'recovery'], ['askSigma', 0.15, 0.4], ['impactElast', 0, 0.3],
     ['offersPerHour', 60, 400], ['supplyElast', 0.5, 3], ['bookChurn', 0.02, 0.15], ['stmtPerDay', 3, 20], ['wtpMult', 0.7, 1.3],
-    ['buyShareLate', 0.42, 0.52], ['rateStart', 1e12, 2e13], ['AUCTION_START_X', 20000, 40000], ['AUCTION_FLOOR_X', 8000, 12000],
-    ['AUCTION_LENGTH', 24 * 3600, 168 * 3600], ['gasGwei', 0.5, 10], ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7],
-    ['SPEND_CAP_BPS_PER_HOUR', 1000, 4000], ['DROP_BPS', 500, 2000], ['CLIMB_BASE_BPS_PER_HOUR', 50, 200], ['bidMode', 'flat', 'perPoint'],
+    ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.0)], ['flatBps', 0, 10000], ['reserveBps', 5000, 12000], ['auctionDuration', 6 * 3600, 72 * 3600],
+    ['saleToBuybackBps', 0, 10000], ['dropBps', 500, 4000], ['spendCapBps', 1000, 4000], ['climbBaseBps', 50, 200], ['gasGwei', 0.5, 10],
+    ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7], ['exitAfter', 24 * 3600, 7 * 86400], ['stmtPick', 'cheapest', 'random'],
   ];
   const out = { base, rows: [] };
   for (const [k, lo, hi] of tests) {
     const a = many({ [k]: lo }, SEEDS3), b = many({ [k]: hi }, SEEDS3);
+    const pick = (m) => ({ credits90: m.credits90, stmts90: m.stmts90, sold90: m.sold90, burnEth90: m.burnEth90, burnPct90: m.burnPct90, waiting90: m.waiting90, costVsMarket: m.costVsMarket, credits7: m.credits7, steadyCredits: m.steadyCredits });
     out.rows.push({ key: k, lo, hi, loRes: pick(a), hiRes: pick(b) });
   }
   return out;
 };
-const pick = (m) => ({ burnPct90: m.burnPct90, burnM90: m.burnM90, locked90: m.locked90, sold90: m.sold90, floor90: m.floor90, composed90: m.composed90, toBB90: m.toBB90, costVsMarket: m.costVsMarket });
 
-// ---- q9: recommended combinations against the base case, three volume presets
-export const COMBOS = {
-  base: {},
-  rule: { rateStart: 5.6e12 },
-  constants: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 8000, DROP_BPS: 2000 },
-  constantsSlow: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 8000, DROP_BPS: 2000, CLIMB_BASE_BPS_PER_HOUR: 50 },
-  floor06: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 6000, DROP_BPS: 2000 },
-  floor10: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 10000, DROP_BPS: 2000 },
-  flatBid: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 8000, DROP_BPS: 2000, bidMode: 'flat' },
-  flatBidFloor10: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 10000, DROP_BPS: 2000, bidMode: 'flat' },
-  gate20: { rateStart: 5.6e12, inventoryGate: 20 },
-  gate20constants: { rateStart: 5.6e12, inventoryGate: 20, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 8000, DROP_BPS: 2000 },
-  gate20flat: { rateStart: 5.6e12, inventoryGate: 20, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 8000, DROP_BPS: 2000, bidMode: 'flat' },
-  flatBidFloor12: { rateStart: 5.6e12, AUCTION_START_X: 20000, AUCTION_FLOOR_X: 12000, DROP_BPS: 2000, bidMode: 'flat' },
+// ---- q11: does the reserve and duration result hold when buyers pick any auction that fits instead of the cheapest
+batches.q11 = () => {
+  const out = { reserve: [], duration: [], change: [] };
+  const R = { stmtPick: 'random' };
+  out.reserve = sweep('reserveBps', [5000, 6000, 7000, 9000, 10000, 12000], R, SEEDS5);
+  out.duration = sweep('auctionDuration', [3600, 6 * 3600, 24 * 3600, 72 * 3600], R, SEEDS5);
+  for (const rb of [6000, 7500]) out.change.push(Object.assign({ day: 14, reserveBps: rb }, many(Object.assign({ schedule: [{ day: 14, patch: { reserveBps: rb } }] }, R), SEEDS5)));
+  out.base = many(R, SEEDS5);
+  return out;
 };
-batches.q9 = () => {
+
+// ---- q10: named scenarios (the page presets) and the owner adapts later cases, three volume presets
+export const COMBOS = {
+  asLaunched: {},
+  flat5000at30: { schedule: [{ day: 30, patch: { flatBps: 5000 } }] },
+  reserve6000at14: { schedule: [{ day: 14, patch: { reserveBps: 6000 } }] },
+  reserve6000: { reserveBps: 6000 },
+  reserve5000: { reserveBps: 5000 },
+  split0: { saleToBuybackBps: 0 },
+  split10000: { saleToBuybackBps: 10000 },
+  open50: { rateStart: rateAt(0.5) },
+  open100: { rateStart: rateAt(1.0) },
+  blend5000: { flatBps: 5000 },
+  perPoint: { flatBps: 0 },
+  drop5000: { dropBps: 5000 },
+};
+batches.q10 = () => {
   const out = {};
   for (const [name, o] of Object.entries(COMBOS)) {
-    out[name] = { comparable: many(o, SEEDS5), sustained17: many(Object.assign({ volPreset: 'sustained17' }, o), SEEDS3), recovery: many(Object.assign({ pricePath: 'recovery' }, o), SEEDS3) };
+    out[name] = { comparable: many(o, SEEDS5), sustained17: many(Object.assign({ volPreset: 'sustained17' }, o), SEEDS3), deadWeek1: many(Object.assign({ volPreset: 'deadWeek1' }, o), SEEDS3) };
   }
   return out;
 };

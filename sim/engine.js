@@ -1,53 +1,94 @@
 // credits engine economic simulator. plain es module, no dependencies, runs in node 22 and in a browser.
-// core rules are ported from src/Core.sol. units: eth for pots and prices, wei per whole point for the rate,
+// core rules are ported from src/Core.sol on branch flow. units: eth for pots and prices, wei per whole point for the rate,
 // seconds for time, whole coins for coin amounts. exitModule and exitToken are the only names for phase 2.
 
 export const W = 1e18;
 export const BPS = 10000;
 
-// every engine constant, with the Core's names
+// the Core's Settings struct, same field names, launch values from script/config/mainnet.json.
+// durations in seconds, buybackSlice in eth (the Core holds wei). every one can change mid run through `schedule`
+export const SETTINGS = {
+  flatBps: 10000, // share of the bid priced flat per credit as avgScore, the rest by the credit's own score
+  avgScore: 4330000, // 1e4 scale, 433 points
+  climbBaseBps: 100, // per hour
+  climbDoubleEvery: 24 * 3600,
+  climbMaxBps: 800, // per hour
+  dropBps: 2000,
+  spendCapBps: 2000, // per hour window
+  bonusCapBps: 2500, // the controller pays no bonus, so no effect
+  tipSavingsBps: 1000,
+  tipCapBps: 200,
+  reimburseBps: 11000,
+  reimburseCapBps: 500,
+  reserveBps: 9000, // auction reserve as bps of statement cost
+  auctionDuration: 24 * 3600, // runs from the first bid
+  exitAfter: 72 * 3600, // an unbid listing may be redeemed in phase 2 after this long
+  saleToBuybackBps: 5000, // share of collected sale proceeds to the coin buyback, rest to the pot
+  exitToBuybackBps: 5000,
+  buybackSlice: 1,
+  buybackDelay: 25, // blocks, 12 s each
+  keeperTipBps: 50,
+  xRateCap: 9700,
+  xRateFloor: 3000,
+  xRateClimbPerHour: 100,
+  xRateDropPerCredit: 20,
+  xAuctionHalfLife: 6 * 3600,
+  exitSliceCredits: 20,
+};
+export const SETTING_KEYS = Object.keys(SETTINGS);
+
+// src/lib/SettingsBounds.sol: the name of the first field out of bounds, or null
+export function firstViolation(s) {
+  const h = 3600, d = 86400;
+  if (s.flatBps > 10000) return 'flatBps';
+  if (s.avgScore < 800000 || s.avgScore > 8000000) return 'avgScore';
+  if (s.climbBaseBps > 1000) return 'climbBaseBps';
+  if (s.climbDoubleEvery < h || s.climbDoubleEvery > 30 * d) return 'climbDoubleEvery';
+  if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2000) return 'climbMaxBps';
+  if (s.dropBps > 5000) return 'dropBps';
+  if (s.spendCapBps < 100 || s.spendCapBps > 10000) return 'spendCapBps';
+  if (s.bonusCapBps > 5000) return 'bonusCapBps';
+  if (s.tipSavingsBps > 2500) return 'tipSavingsBps';
+  if (s.tipCapBps > 500) return 'tipCapBps';
+  if (s.reimburseBps > 15000) return 'reimburseBps';
+  if (s.reimburseCapBps > 1000) return 'reimburseCapBps';
+  if (s.reserveBps < 1000 || s.reserveBps > 40000) return 'reserveBps';
+  if (s.auctionDuration < h || s.auctionDuration > 30 * d) return 'auctionDuration';
+  if (s.exitAfter > 365 * d) return 'exitAfter';
+  if (s.saleToBuybackBps > 10000) return 'saleToBuybackBps';
+  if (s.exitToBuybackBps > 10000) return 'exitToBuybackBps';
+  if (s.buybackSlice < 0.01 || s.buybackSlice > 100) return 'buybackSlice';
+  if (s.buybackDelay < 1 || s.buybackDelay > 7200) return 'buybackDelay';
+  if (s.keeperTipBps > 500) return 'keeperTipBps';
+  if (s.xRateCap > 10000) return 'xRateCap';
+  if (s.xRateFloor > s.xRateCap) return 'xRateFloor';
+  if (s.xRateClimbPerHour > 1000) return 'xRateClimbPerHour';
+  if (s.xRateDropPerCredit > 1000) return 'xRateDropPerCredit';
+  if (s.xAuctionHalfLife < 600 || s.xAuctionHalfLife > 30 * d) return 'xAuctionHalfLife';
+  if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1000) return 'exitSliceCredits';
+  return null;
+}
+// the eth rate bounds of setRate and rateStart, wei per whole point (Interfaces.sol)
+export const RATE_MIN = 1e11, RATE_MAX = 1e15;
+
+// constants of the Core and of the pool that are not settings
 export const CORE_PARAMS = {
   SUPPLY: 1e9,
-  FEE_BPS: 1000,
-  CREATOR_BPS: 50,
-  AVG_SCORE: 4330000, // 1e4 scale, 433 points
-  CLIMB_BASE_BPS_PER_HOUR: 100,
-  CLIMB_DOUBLE_EVERY: 24 * 3600,
-  CLIMB_MAX_BPS_PER_HOUR: 800,
-  DROP_BPS: 1000,
-  SPEND_CAP_BPS_PER_HOUR: 2000,
-  BONUS_CAP_BPS: 2500,
-  TIP_SAVINGS_BPS: 1000,
-  TIP_CAP_BPS: 200,
-  AUCTION_START_X: 40000,
-  AUCTION_FLOOR_X: 12000,
-  AUCTION_LENGTH: 72 * 3600,
-  SALE_SPLIT: 5000,
-  EXIT_SPLIT: 5000,
-  BUYBACK_SLICE: 1,
-  BUYBACK_DELAY: 25, // blocks, 12 s each
-  KEEPER_TIP_BPS: 50,
   XRATE_START: 6000,
-  XRATE_CAP: 9700,
-  XRATE_FLOOR: 3000,
-  XRATE_CLIMB_PER_HOUR: 100,
-  XRATE_DROP_PER_CREDIT: 20,
-  XAUCTION_HALF_LIFE: 6 * 3600,
-  EXIT_SLICE_CREDITS: 20,
-  REIMBURSE_BPS: 11000,
-  REIMBURSE_CAP_BPS: 500,
-  COMPOSE_OVERHEAD_GAS: 50000,
   PAGE: 80,
+  COMPOSE_OVERHEAD_GAS: 50000,
+  LIST_GAS: 350000, // the listing on the house, eth lane only
+  BID_RAISE_BPS: 500, // the house: a later bid must beat the top bid by 5 percent
+  TIME_BUFFER: 15 * 60, // the house: a bid in the last 15 minutes pushes the end to 15 minutes from the bid
 };
 
 // launch config (script/config/mainnet.json) and simulator inputs
 export const SIM_DEFAULTS = {
   seed: 7,
   days: 90,
-  rateStart: 4e12,
-  inventoryGate: 0, // INVENTORY_GATE of the Core: while this many eth lane statements are held for sale the bid is closed and the rate does not climb, 0 is off
-  bidMode: 'perPoint', // 'perPoint' is the Core, 'flat' is a counterfactual that pays avg score for every credit
-  fundedRule: 'new', // 'new' = 20 percent of the pot affords one average credit, 'old' = the pot affords one
+  rateStart: 1.54e13, // 75 percent of the market price over avgScore: 0.75 * 0.0089e18 / 433
+  fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
+  schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
   baselineSkimBps: 10000, // of 100000
   bountyBps: 9500, // of the skim, to the engine
   sniperStartBps: 90000,
@@ -88,15 +129,18 @@ export const SIM_DEFAULTS = {
   stmtDecayDays: 21,
   stmtFloorPerDay: 2,
   wtpMult: 1,
+  stmtPick: 'cheapest', // a buyer takes the cheapest bid that fits its willingness to pay; 'random' picks any one that fits
+  keeperCollectHours: 1, // collectSales runs this often
   // phase 2 (exitModule and exitToken)
   phase2Day: null,
   xp: 2.5e-5, // eth value of the exitToken paid per point of rating
   takerThreshold: 0.15,
-  exitMinRatio: 0, // exit only when rating * xp is at least this times the floor price
+  exitMinRatio: 0, // a keeper exits only when rating * xp is at least this times the reserve
   keeperBuyback: true,
 };
 
-export const DEFAULTS = Object.assign({}, CORE_PARAMS, SIM_DEFAULTS);
+export const DEFAULTS = Object.assign({}, CORE_PARAMS, SETTINGS, SIM_DEFAULTS);
+
 
 // quantiles of statement willingness to pay as a multiple of the parts' market cost (data: p10 .48, p25 .71, p50 .84, p75 1.07, 21 percent at 1.2 or more, max 1.32)
 export const WTP_Q = [[0, 0.25], [0.1, 0.48], [0.25, 0.71], [0.5, 0.84], [0.75, 1.07], [0.79, 1.2], [0.9, 1.23], [1, 1.32]];
@@ -141,57 +185,80 @@ export function interp(table, u) {
 
 // ---------------------------------------------------------------- core port
 // the Core's state and rules. pots are in eth, the rate in wei per whole point, time in seconds.
+// `this.s` is the Settings struct and is read live by every rule, so `setSettings` takes effect at once.
 export class Core {
   constructor(p, t0 = 0) {
     this.p = p;
+    this.s = {};
+    for (const k of SETTING_KEYS) this.s[k] = p[k];
     this.ethPot = 0; this.ethToBuyback = 0; this.xPot = 0; this.xToBuyback = 0;
     this.rateAtCheckpoint = p.rateStart; this.checkpointTime = t0; this.lastFillTime = t0; this.funded = false;
     this.windowStart = -1e12; this.windowPot = 0; this.windowSpent = 0;
-    this.xRateAtCheckpoint = p.XRATE_START; this.xCheckpointTime = t0; this.xFunded = false;
+    this.xRateAtCheckpoint = Math.max(Math.min(p.XRATE_START, this.s.xRateCap), this.s.xRateFloor); this.xCheckpointTime = t0; this.xFunded = false;
     this.xp = 0; this.moduleSet = false; this.xStartPrice = 0; this.xStartTime = 0;
     this.lastBuybackTime = -1e12;
-    this.capHits = 0; this.clampTime = 0; this.gated = false; // gated: a proposed design change, no buying and no climb while unsold inventory is high
+    this.houseOwed = 0; // sale proceeds credited to the Core in the auction house, not in the pots until collectSales
+    this.capHits = 0; this.clampTime = 0;
   }
-  // the climb stops where 20 percent of the pot no longer buys one average credit (new rule); the old rule has no clamp
+  // the points a credit is priced as: the flat share as an average credit, the rest by its own score (no controller bonus)
+  epts(pts) {
+    const f = this.s.flatBps;
+    return (f * (this.s.avgScore / 1e4) + (BPS - f) * pts) / BPS;
+  }
+  // the climb stops where the hourly cap no longer buys one average credit (the funded rule as built); the old rule has no clamp
   clamp() {
-    const p = this.p;
-    if (p.fundedRule === 'old') return Infinity;
-    return (this.ethPot * W * p.SPEND_CAP_BPS_PER_HOUR) / p.AVG_SCORE;
+    const s = this.s;
+    if (this.p.fundedRule === 'old') return Infinity;
+    return (this.ethPot * W * s.spendCapBps) / s.avgScore;
   }
   ethRate(now) {
-    const p = this.p;
+    const s = this.s;
     let r = this.rateAtCheckpoint;
-    if (!this.funded || this.gated) return r;
+    if (!this.funded) return r;
     const cap = this.clamp();
-    if (cap <= r) return r;
+    if (cap <= r || s.climbBaseBps === 0) return r;
     const last = this.lastFillTime;
     let t = this.checkpointTime;
     while (t < now && r < cap) {
-      const k = Math.floor((t - last) / p.CLIMB_DOUBLE_EVERY);
-      const bps = Math.min(p.CLIMB_BASE_BPS_PER_HOUR * Math.pow(2, Math.min(k, 16)), p.CLIMB_MAX_BPS_PER_HOUR);
-      const end = Math.min(now, last + (k + 1) * p.CLIMB_DOUBLE_EVERY);
+      const k = t > last ? Math.floor((t - last) / s.climbDoubleEvery) : 0;
+      const bps = Math.min(s.climbBaseBps * Math.pow(2, Math.min(k, 16)), s.climbMaxBps);
+      const end = k >= 11 ? now : Math.min(now, last + (k + 1) * s.climbDoubleEvery);
       r *= Math.pow(1 + bps / BPS, (end - t) / 3600);
       t = end;
     }
     return Math.min(r, cap);
   }
   checkpoint(now) { this.rateAtCheckpoint = this.ethRate(now); this.checkpointTime = now; }
-  setGate(g, now) { if (g !== this.gated) { this.checkpoint(now); this.gated = g; } }
   syncFunded() {
-    const p = this.p;
-    if (p.fundedRule === 'old') this.funded = this.ethPot * W >= (p.AVG_SCORE * this.rateAtCheckpoint) / 1e4;
-    else this.funded = this.ethPot * W * p.SPEND_CAP_BPS_PER_HOUR >= p.AVG_SCORE * this.rateAtCheckpoint;
+    const s = this.s;
+    if (this.p.fundedRule === 'old') this.funded = this.ethPot * W >= (s.avgScore * this.rateAtCheckpoint) / 1e4;
+    else this.funded = this.ethPot * W * s.spendCapBps >= s.avgScore * this.rateAtCheckpoint;
+  }
+  // owner: setSettings. validates, checkpoints both rates first, then applies at once. patch.rate is setRate
+  setSettings(patch, now) {
+    const rate = patch.rate;
+    const next = Object.assign({}, this.s);
+    for (const k of SETTING_KEYS) if (patch[k] !== undefined) next[k] = patch[k];
+    const bad = firstViolation(next);
+    if (bad) throw new Error('BadSetting ' + bad);
+    if (rate !== undefined && !(rate >= RATE_MIN && rate <= RATE_MAX)) throw new Error('BadRate');
+    this.checkpoint(now); this.xCheckpoint(now);
+    const anchor = this.moduleSet && this.xToBuyback > 0, half = this.s.xAuctionHalfLife, price = anchor ? this.xAuctionPrice(now) : 0;
+    this.s = next;
+    if (anchor && next.xAuctionHalfLife !== half) { this.xStartPrice = Math.max(price, 1e-12); this.xStartTime = now; }
+    this.xRateAtCheckpoint = Math.max(Math.min(this.xRateAtCheckpoint, next.xRateCap), next.xRateFloor);
+    if (rate !== undefined) { this.rateAtCheckpoint = rate; this.checkpointTime = now; }
+    this.syncFunded();
+    if (this.moduleSet) this.syncXFunded();
   }
   // fixed window cap. returns the window state it would use, without committing
   room(x, now) {
-    const p = this.p;
     let ws = this.windowStart, wp = this.windowPot, wsp = this.windowSpent;
     if (now >= ws + 3600) { ws = now; wp = this.ethPot; wsp = 0; }
-    return { ok: wsp + x <= (wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS + 1e-18, ws, wp, wsp };
+    return { ok: wsp + x <= (wp * this.s.spendCapBps) / BPS + 1e-18, ws, wp, wsp };
   }
   // _spend: checkpoint, hourly cap, drop on fill. false means the Core would revert
   spend(x, now) {
-    const p = this.p;
     this.checkpoint(now);
     const pot = this.ethPot;
     if (!(x > 0) || x > pot + 1e-18) return false;
@@ -199,7 +266,7 @@ export class Core {
     if (!rm.ok) { this.capHits++; return false; }
     this.windowStart = rm.ws; this.windowPot = rm.wp; this.windowSpent = rm.wsp + x;
     let r = this.rateAtCheckpoint;
-    r -= (r * p.DROP_BPS * Math.min(x, pot)) / (BPS * pot);
+    r -= (r * this.s.dropBps * Math.min(x, pot)) / (BPS * pot);
     this.rateAtCheckpoint = r;
     this.lastFillTime = now;
     this.ethPot = pot - x;
@@ -211,7 +278,7 @@ export class Core {
     this.ethPot += amount;
     this.syncFunded();
   }
-  ceiling(pts, rate) { return (pts * rate) / W; }
+  ceiling(pts, rate) { return (this.epts(pts) * rate) / W; }
   // door one: sell into the bid at the ceiling. returns the price paid or 0
   sellForEth(pts, now) {
     const price = this.ceiling(pts, this.ethRate(now));
@@ -219,23 +286,22 @@ export class Core {
   }
   // door two: buy a listing at its ask. returns {cost, tip} or null
   buyListing(pts, ask, now) {
-    const p = this.p;
+    const s = this.s;
     this.checkpoint(now);
     const ceil = this.ceiling(pts, this.rateAtCheckpoint);
     if (ask > this.ethPot || ask > ceil) return null;
     if (!this.room(ask, now).ok) { this.capHits++; return null; }
-    const tip = Math.min((p.TIP_SAVINGS_BPS * (ceil - ask)) / BPS, (p.TIP_CAP_BPS * ask) / BPS);
+    const tip = Math.min((s.tipSavingsBps * (ceil - ask)) / BPS, (s.tipCapBps * ask) / BPS);
     if (!this.spend(ask + tip, now)) return null;
     return { cost: ask, tip };
   }
-  // compose 80 credits. cost is the sum of their costs. returns the statement
+  // compose 80 credits. cost is the sum of their costs. returns the statement (eth lane: listed on the house at the reserve)
   compose(costSum, lane, now, gasPriceGwei) {
-    const p = this.p;
-    const gasEth = ((p.composeGas + p.COMPOSE_OVERHEAD_GAS) * gasPriceGwei * 1e-9 * p.REIMBURSE_BPS) / BPS;
-    let cap;
-    if (lane === 'eth') cap = costSum;
-    else cap = (p.PAGE * p.AVG_SCORE * this.ethRate(now)) / 1e4 / W;
-    const reimb = Math.min(gasEth, (cap * p.REIMBURSE_CAP_BPS) / BPS, this.ethPot);
+    const p = this.p, s = this.s;
+    const gas = p.composeGas + p.COMPOSE_OVERHEAD_GAS + (lane === 'eth' ? p.LIST_GAS : 0);
+    const gasEth = (gas * gasPriceGwei * 1e-9 * s.reimburseBps) / BPS;
+    const cap = lane === 'eth' ? costSum : (p.PAGE * s.avgScore * this.ethRate(now)) / 1e4 / W;
+    const reimb = Math.min(gasEth, (cap * s.reimburseCapBps) / BPS, this.ethPot);
     let cost = costSum;
     if (reimb > 0) {
       this.checkpoint(now);
@@ -243,67 +309,85 @@ export class Core {
       this.syncFunded();
       if (lane === 'eth') cost += reimb;
     }
-    return { cost, reimb, t0: now, lane };
+    const st = { cost, reimb, t0: now, lane, bid: 0, bids: 0, end: 0, bidderWtp: 0 };
+    if (lane === 'eth') { st.reserve = (cost * s.reserveBps) / BPS; st.duration = s.auctionDuration; }
+    return st;
   }
-  priceOf(st, now) {
-    const p = this.p;
-    const el = Math.min(now - st.t0, p.AUCTION_LENGTH);
-    const factor = p.AUCTION_START_X * p.AUCTION_LENGTH - (p.AUCTION_START_X - p.AUCTION_FLOOR_X) * el;
-    return (st.cost * factor) / (p.AUCTION_LENGTH * BPS);
+  // repriceStatement: an unbid listing takes the reserve of the current settings
+  reprice(st) { if (!st.bid) st.reserve = (st.cost * this.s.reserveBps) / BPS; }
+  // the lowest bid the house accepts now: the reserve, or 5 percent over the top bid
+  minBid(st) {
+    if (!st.bid) return st.reserve;
+    return st.bid + Math.max((st.bid * this.p.BID_RAISE_BPS) / BPS, 1e-18);
   }
-  buyStatement(st, now) {
-    const p = this.p;
-    const price = this.priceOf(st, now);
-    const toBuyback = (price * p.SALE_SPLIT) / BPS;
+  // house createBid: first bid at or above the reserve starts the timer, later bids beat the top bid by 5 percent,
+  // a bid inside the last 15 minutes pushes the end to 15 minutes from the bid. returns false when the house would revert
+  bidOn(st, amount, now, wtp) {
+    if (st.bid && now >= st.end) return false;
+    if (amount < this.minBid(st) * (1 - 1e-12)) return false;
+    if (!st.bid) st.end = now + st.duration;
+    st.bid = amount; st.bids++; st.bidderWtp = wtp;
+    if (st.end - now < this.p.TIME_BUFFER) st.end = now + this.p.TIME_BUFFER;
+    return true;
+  }
+  // endAuction on a bid auction that ran out: the winner gets the statement, the proceeds are credited to the Core in the house
+  settle(st) { this.houseOwed += st.bid; return st.bid; }
+  // collectSales: pulls what the house owes and splits it by saleToBuybackBps
+  collectSales(now) {
+    const owed = this.houseOwed;
+    if (owed <= 0) return null;
+    this.houseOwed = 0;
+    const toBuyback = (owed * this.s.saleToBuybackBps) / BPS;
     this.ethToBuyback += toBuyback;
     this.checkpoint(now);
-    this.ethPot += price - toBuyback;
+    this.ethPot += owed - toBuyback;
     this.syncFunded();
-    return { price, toBuyback, toPot: price - toBuyback };
+    return { owed, toBuyback, toPot: owed - toBuyback };
   }
 
   // ---- phase 2: exitModule pays rating * unitPerPoint of exitToken. pots here hold the eth value of exitToken at xp per point
   setExitModule(now, xp) {
-    const p = this.p;
+    const p = this.p, s = this.s;
     this.moduleSet = true; this.xp = xp; this.xCheckpointTime = now;
-    this.xStartPrice = p.SUPPLY / (p.EXIT_SLICE_CREDITS * (p.AVG_SCORE / 1e4) * xp); // coin per eth of exitToken, asks the whole supply for a full slice
+    this.xStartPrice = p.SUPPLY / (s.exitSliceCredits * (s.avgScore / 1e4) * xp); // coin per eth of exitToken, asks the whole supply for a full slice
     this.xStartTime = now;
   }
   xRate(now) {
-    const p = this.p;
+    const s = this.s;
     const r = this.xRateAtCheckpoint;
     if (!this.xFunded) return r;
-    const cap = Math.min(p.XRATE_CAP, (this.xPot * BPS) / ((p.AVG_SCORE / 1e4) * this.xp));
+    const cap = Math.min(s.xRateCap, (this.xPot * BPS) / ((s.avgScore / 1e4) * this.xp));
     if (cap <= r) return r;
-    return Math.min(r + (p.XRATE_CLIMB_PER_HOUR * (now - this.xCheckpointTime)) / 3600, cap);
+    return Math.min(r + (s.xRateClimbPerHour * (now - this.xCheckpointTime)) / 3600, cap);
   }
   xCheckpoint(now) { this.xRateAtCheckpoint = this.xRate(now); this.xCheckpointTime = now; }
   syncXFunded() {
-    const p = this.p;
-    this.xFunded = this.xPot * BPS >= (p.AVG_SCORE / 1e4) * this.xRateAtCheckpoint * this.xp;
+    const s = this.s;
+    this.xFunded = this.xPot * BPS >= (s.avgScore / 1e4) * this.xRateAtCheckpoint * this.xp;
   }
   // price in exitToken value for one credit at the current exit bid (without moving state)
   xPrice(pts, now) { return (pts * this.xRate(now)) / BPS * this.xp; }
-  // sellForExitToken: pays pts * xRate of the credit's score in exitToken, drops xRate per credit
+  // sellForExitToken: pays pts * xRate of the credit's score in exitToken, drops xRate per credit. the exit bid stays per point
   xBuy(pts, now) {
-    const p = this.p;
+    const s = this.s;
     this.xCheckpoint(now);
     const r = this.xRateAtCheckpoint;
     const price = (pts * r * this.xp) / BPS;
     if (!(price > 0) || price > this.xPot + 1e-18) return 0;
     this.xPot -= price;
-    this.xRateAtCheckpoint = Math.max(Math.max(r - p.XRATE_DROP_PER_CREDIT, 0), p.XRATE_FLOOR);
+    this.xRateAtCheckpoint = Math.max(Math.max(r - s.xRateDropPerCredit, 0), s.xRateFloor);
     this.syncXFunded();
     return price;
   }
+  // exitStatement: a module is set, and an eth lane statement is listed with no bid for exitAfter. the exit lane exits at once
   exitReady(st, now) {
-    return this.moduleSet && (st.lane === 'exit' || now >= st.t0 + this.p.AUCTION_LENGTH);
+    return this.moduleSet && (st.lane === 'exit' || (!st.bid && now >= st.t0 + this.s.exitAfter));
   }
-  // exitStatement: the module hands back rating * unitPerPoint. eth lane splits EXIT_SPLIT, exit lane keeps all
+  // the module hands back rating * unitPerPoint. eth lane splits exitToBuybackBps, exit lane keeps all
   exitStatement(st, rating, now) {
-    const p = this.p;
+    const s = this.s;
     const received = rating * this.xp;
-    const toBuyback = st.lane === 'eth' ? (received * p.EXIT_SPLIT) / BPS : 0;
+    const toBuyback = st.lane === 'eth' ? (received * s.exitToBuybackBps) / BPS : 0;
     this.xCheckpoint(now);
     if (toBuyback > 0) {
       this.xStartPrice = Math.max(this.xAuctionPrice(now), this.xStartPrice / 4, 1e-12);
@@ -314,14 +398,14 @@ export class Core {
     this.syncXFunded();
     return { received, toBuyback, toPot: received - toBuyback };
   }
-  // dutch auction: coin per eth of exitToken, halves every XAUCTION_HALF_LIFE, the clock runs only while the pot is not empty
+  // dutch auction: coin per eth of exitToken, halves every xAuctionHalfLife, the clock runs only while the pot is not empty
   xAuctionPrice(now) {
     if (this.xToBuyback === 0) return this.xStartPrice;
     const el = now - this.xStartTime;
-    if (el / this.p.XAUCTION_HALF_LIFE >= 256) return 0;
-    return this.xStartPrice * Math.pow(0.5, el / this.p.XAUCTION_HALF_LIFE);
+    if (el / this.s.xAuctionHalfLife >= 256) return 0;
+    return this.xStartPrice * Math.pow(0.5, el / this.s.xAuctionHalfLife);
   }
-  xSlice() { return Math.min(this.xToBuyback, this.p.EXIT_SLICE_CREDITS * (this.p.AVG_SCORE / 1e4) * this.xp); }
+  xSlice() { return Math.min(this.xToBuyback, this.s.exitSliceCredits * (this.s.avgScore / 1e4) * this.xp); }
   // buybackExit: a taker burns coinIn coin and takes the slice. restart at max(2 * clearing, start / 4)
   xFill(now) {
     const slice = this.xSlice();
@@ -332,18 +416,19 @@ export class Core {
     this.xStartTime = now;
     return { slice, price, coinIn };
   }
-  // buyback(): one slice at most per BUYBACK_DELAY blocks, tip on the slice
+  // buyback(): one slice at most per buybackDelay blocks, tip on the slice
   takeBuybackSlice(now) {
-    const p = this.p;
+    const s = this.s;
     const pool = this.ethToBuyback;
-    if (pool <= 1e-15 || now < this.lastBuybackTime + p.BUYBACK_DELAY * 12) return null;
-    const slice = Math.min(pool, p.BUYBACK_SLICE);
+    if (pool <= 1e-15 || now < this.lastBuybackTime + s.buybackDelay * 12) return null;
+    const slice = Math.min(pool, s.buybackSlice);
     this.ethToBuyback = pool - slice;
     this.lastBuybackTime = now;
-    const tip = (slice * p.KEEPER_TIP_BPS) / BPS;
+    const tip = (slice * s.keeperTipBps) / BPS;
     return { slice, tip, budget: slice - tip };
   }
 }
+
 
 // ---------------------------------------------------------------- the launch position
 // one concentrated liquidity position, whole supply single sided in coin from the start tick up to the max tick.
@@ -458,45 +543,49 @@ function mergeDesc(a, b) {
 }
 
 // ---------------------------------------------------------------- the simulation
+// ---------------------------------------------------------------- the simulation
 export function simulate(userParams = {}) {
   const p = Object.assign({}, DEFAULTS, userParams);
   const rng = mulberry32(p.seed);
   const core = new Core(p, 0);
   const pool = new Pool(p);
   const H = Math.round(p.days * 24);
-  const avgPts = p.AVG_SCORE / 1e4;
   const bLate = p.buyShareLate != null ? p.buyShareLate : (p.volPreset === 'sustained17' || p.volPreset === 'sustained50') ? 0.5 : p.volPreset === 'custom' ? 0.49 : 0.46;
   const phase2At = p.phase2Day == null ? Infinity : p.phase2Day * 86400;
+  const sched = (p.schedule || []).map((e) => ({ at: e.day * 86400, patch: e.patch, done: false })).sort((a, b) => a.at - b.at);
 
   // state
-  let book = []; // resting market offers, ordered by descending key (ask multiple per point), smallest last
+  let book = []; // resting market offers, ordered by descending key (wei per point needed to clear, in units of the market price), smallest last
   let strat = []; // CreditStrategy listings, ordered by descending need (wei per point to clear)
   let holdPool = p.holders;
   const ethPile = [], xPile = [];
-  let stmts = []; // eth lane statements held for sale
+  let unbid = []; // eth lane statements listed on the house with no bid
+  let live = []; // statements with a bid and a running timer
   let lnM = 0, nextSid = 1;
   const T = { // totals
     fees: 0, feesBuyback: 0, feesTaker: 0, saleGross: 0, saleToPot: 0, saleToBuyback: 0, spent: 0, tips: 0, reimb: 0,
     bought: 0, boughtX: 0, pts: 0, cost: 0, mkt: 0, ask: 0, sumM: 0, composed: 0, composedX: 0, sold: 0, exited: 0, exitedX: 0,
-    soldPrice: 0, soldCost: 0, soldPts: 0, buybackSpent: 0, buybackTips: 0, burned: 0, burnedX: 0, bidSpendEth: 0, listBought: 0, stratBought: 0,
-    xFills: 0, xCoin: 0, xValue: 0, xGross: 0, xDiscSum: 0, xRecv: 0, xSpent: 0, firstFill: -1, capStepHits: 0, clampSteps: 0,
-    capBindSteps: 0, capBindRich: 0, potBindSteps: 0, vol: 0, stCost: 0, stRating: 0, stmtArrivals: 0, stmtMiss: 0, first80cost: 0, first80mkt: 0, first80pts: 0, first80n: 0, first80t: -1,
+    soldPrice: 0, soldCost: 0, soldPts: 0, soldReserve: 0, bidsOnSold: 0, contested: 0, rebids: 0, extended: 0, buybackSpent: 0, buybackTips: 0, burned: 0, burnedX: 0,
+    listBought: 0, stratBought: 0, xFills: 0, xCoin: 0, xValue: 0, xGross: 0, xDiscSum: 0, xRecv: 0, xSpent: 0, firstFill: -1,
+    capStepHits: 0, clampSteps: 0, capBindSteps: 0, capBindRich: 0, potBindSteps: 0, vol: 0, stCost: 0, stRating: 0, stmtArrivals: 0, stmtMiss: 0,
+    first80cost: 0, first80mkt: 0, first80pts: 0, first80n: 0, first80t: -1, exitedValue: 0, exitedCost: 0, exitedAge: 0, settingsChanges: 0,
   };
   const histPts = new Array(10).fill(0), histCost = new Array(10).fill(0);
   const xFillLog = [];
   const S = {}; // series, one entry per hour
-  const names = ['pot', 'toBuyback', 'cumFees', 'rate', 'mktPerPoint', 'frontier', 'bidRatio', 'bought', 'avgScoreCum', 'avgScoreDay',
-    'costPerCredit', 'mktPerCredit', 'composed', 'sold', 'held', 'heldFloor', 'locked', 'exited', 'buybackSpent', 'burned', 'burnedPct',
-    'coinPrice', 'xPot', 'xToBuyback', 'xRate', 'xFills', 'book', 'saleToPot', 'saleToBuyback', 'cumPts', 'cumCost', 'cumMkt', 'xBought', 'xDisc', 'volume', 'poolEth'];
+  const names = ['pot', 'toBuyback', 'cumFees', 'rate', 'mktPerPoint', 'bidRatio', 'bought', 'credits', 'creditsDay', 'avgScoreCum', 'avgScoreDay',
+    'costPerCredit', 'mktPerCredit', 'composed', 'sold', 'waiting', 'inAuction', 'pending', 'locked', 'exited', 'buybackSpent', 'burnEth', 'burned', 'burnedPct',
+    'coinPrice', 'xPot', 'xToBuyback', 'xRate', 'xFills', 'book', 'saleToPot', 'saleToBuyback', 'saleGross', 'cumPts', 'cumCost', 'cumMkt', 'xBought', 'xDisc',
+    'volume', 'poolEth', 'spent'];
   for (const n of names) S[n] = new Array(H + 1);
 
-  // initial resting book at steady state, and the CreditStrategy inventory
-  const flat = p.bidMode === 'flat';
+  // initial resting book at steady state, and the CreditStrategy inventory. a key is the ask as a multiple of the flat price over the points
+  // the engine prices the credit at, so a change of flatBps or avgScore re keys everything
   const newOffer = () => {
     const pts = 80 + 720 * rng();
     const m = Math.exp(p.askSigma * normal(rng));
     const prem = pts >= 790 ? 2.0 : pts >= 740 ? 1.12 : 1.0;
-    return { pts, m, prem, key: (m * prem) / (flat ? avgPts : pts), listed: rng() < p.listedShare };
+    return { pts, m, prem, key: (m * prem) / core.epts(pts), listed: rng() < p.listedShare };
   };
   const nBook0 = Math.round(p.offersPerHour / Math.max(p.bookChurn, 1e-3));
   for (let i = 0; i < nBook0; i++) book.push(newOffer());
@@ -505,31 +594,38 @@ export function simulate(userParams = {}) {
     for (const [price, count] of STRAT_LISTINGS) {
       for (let i = 0; i < count; i++) {
         const pts = interp(STRAT_SCORE_Q, rng());
-        strat.push({ pts, price, need: (price * W) / (flat ? avgPts : pts) });
+        strat.push({ pts, price, need: (price * W) / core.epts(pts) });
       }
     }
     strat.sort((a, b) => b.need - a.need);
   }
+  const rekey = () => {
+    for (const it of book) it.key = (it.m * it.prem) / core.epts(it.pts);
+    for (const it of strat) it.need = (it.price * W) / core.epts(it.pts);
+    book.sort((a, b) => b.key - a.key); strat.sort((a, b) => b.need - a.need);
+  };
 
   const peff = (t) => pathPrice(p, t) * Math.exp(lnM);
   let stepW = 1, peffNow = 0; // weight of the current step in hours, market price in the step
   let prevRate = p.rateStart, signChanges = 0, lastDir = 0, rateMaxRatio = 0, rateAbsMove = 0, rateMoves = 0;
 
-  // ---- the engine buys: market offers through the bid or a listing, CreditStrategy listings, exit token bid in phase 2
+  // ---- the engine buys: market offers through the bid or a listing, CreditStrategy listings, exitToken bid in phase 2.
+  // nothing here looks at unsold statements: the engine never stops buying because statements are unsold.
   // a seller whose credit does not fit the hourly cap or the pot waits, and another credit that fits sells instead
   function pickFrom(arr, isStrat, r, xPerPt, Pw, Pe, afford, xAfford) {
     const lim = Math.max(0, arr.length - 400);
-    const top = Math.max(r, xPerPt);
+    // the exitToken bid pays by the credit's own score, so with a flat eth bid its need is up to ep/pts (5.4 at most) times the eth need
+    const top = Math.max(r, xPerPt * 6);
     for (let i = arr.length - 1; i >= lim; i--) {
       const it = arr[i];
       const need = isStrat ? it.need : it.key * Pw;
       if (need > top) return null;
-      const ethOk = need <= r, xOk = !isStrat && need <= xPerPt;
+      const ep = core.epts(it.pts);
       const listing = isStrat || it.listed;
-      const ep = flat ? avgPts : it.pts;
-      const ask = isStrat ? it.price : it.key * ep * Pe;
-      const ethFits = ethOk && (listing ? ask * (1 + p.TIP_CAP_BPS / BPS) <= afford : (ep * r) / W <= afford);
-      const xFits = xOk && (ep * xPerPt) / W <= xAfford;
+      const ask = isStrat ? it.price : it.m * it.prem * Pe;
+      const ethOk = need <= r, xOk = !isStrat && (ask * W) / it.pts <= xPerPt;
+      const ethFits = ethOk && (listing ? ask * (1 + core.s.tipCapBps / BPS) <= afford : (ep * r) / W <= afford);
+      const xFits = xOk && (it.pts * xPerPt) / W <= xAfford;
       if (ethFits || xFits) return { i, need, ethFits, xFits, isStrat, it, ask, listing };
     }
     return null;
@@ -541,7 +637,7 @@ export function simulate(userParams = {}) {
       for (let i = arr.length - 1, n = 0; i >= 0 && n < 100; i--, n++) {
         const it = arr[i], need = isS ? it.need : it.key * Pw;
         if (need > Math.max(r, isS ? 0 : xPerPt) || (isS && need > r)) break;
-        const ep = flat ? avgPts : it.pts;
+        const ep = core.epts(it.pts);
         minPrice = Math.min(minPrice, isS || it.listed ? (isS ? it.price : it.key * ep * peffNow) : (ep * r) / W);
       }
     }
@@ -557,39 +653,39 @@ export function simulate(userParams = {}) {
       const p2 = core.moduleSet;
       const xPerPt = p2 ? (core.xRate(now) / BPS) * core.xp * W : 0;
       const rm = core.room(0, now);
-      const afford = Math.min(core.ethPot, (rm.wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS - rm.wsp);
+      const roomLeft = (rm.wp * core.s.spendCapBps) / BPS - rm.wsp;
+      const afford = Math.min(core.ethPot, roomLeft);
       const xAfford = p2 ? core.xPot : 0;
-      const roomLeft = (rm.wp * p.SPEND_CAP_BPS_PER_HOUR) / BPS - rm.wsp;
       if (afford <= 1e-15 && xAfford <= 0) { noteBind(r, xPerPt, Pw, roomLeft); break; }
       const a = pickFrom(book, false, r, xPerPt, Pw, Pe, afford, xAfford);
       const b = strat.length ? pickFrom(strat, true, r, 0, Pw, Pe, afford, 0) : null;
       const c = a && b ? (b.need < a.need ? b : a) : a || b;
       if (!c) { noteBind(r, xPerPt, Pw, roomLeft); break; }
-      const it = c.it, useS = c.isStrat, ep = flat ? avgPts : it.pts;
+      const it = c.it, useS = c.isStrat, ep = core.epts(it.pts);
       let door = c.ethFits && c.xFits ? (r >= xPerPt ? 'eth' : 'x') : c.ethFits ? 'eth' : 'x';
       let cost = 0, tip = 0, viaListing = false, ok = false;
       if (door === 'x') {
-        cost = core.xBuy(ep, now);
+        // the exitToken bid pays by the credit's own score (phase 2 pays by rating)
+        cost = core.xBuy(it.pts, now);
         ok = cost > 0;
         if (!ok && c.ethFits) door = 'eth';
       }
       if (door === 'eth') {
         if (c.listing) {
-          const res = core.buyListing(ep, c.ask, now);
+          const res = core.buyListing(it.pts, c.ask, now);
           if (res) { cost = res.cost; tip = res.tip; ok = true; viaListing = true; }
         } else {
-          cost = core.sellForEth(ep, now);
+          cost = core.sellForEth(it.pts, now);
           ok = cost > 0;
         }
       }
       if (!ok) break;
       if (useS) strat.splice(c.i, 1); else book.splice(c.i, 1);
       holdPool -= 1;
-      const askEth = c.ask;
       if (door === 'x') {
         T.boughtX++; T.xSpent += cost; xPile.push({ pts: it.pts });
       } else {
-        T.bought++; T.pts += it.pts; T.cost += cost + tip; T.mkt += Pe; T.ask += askEth; T.spent += cost + tip; T.tips += tip;
+        T.bought++; T.pts += it.pts; T.cost += cost + tip; T.mkt += Pe; T.ask += c.ask; T.spent += cost + tip; T.tips += tip;
         spentEth += cost + tip;
         if (viaListing) T.listBought++;
         if (useS) T.stratBought++;
@@ -607,7 +703,7 @@ export function simulate(userParams = {}) {
     return spentEth;
   }
 
-  // ---- compose when a lane pile holds 80. the oldest first
+  // ---- compose when a lane pile holds 80. the oldest first. an eth lane statement is listed on the house at its reserve
   function composeAll(now) {
     while (ethPile.length >= p.PAGE) {
       const page = ethPile.splice(0, p.PAGE);
@@ -616,7 +712,7 @@ export function simulate(userParams = {}) {
       const st = core.compose(cost, 'eth', now, p.gasGwei);
       st.rating = rating; st.id = nextSid++;
       T.reimb += st.reimb; T.composed++; T.stCost += st.cost; T.stRating += rating;
-      stmts.push(st);
+      unbid.push(st);
     }
     while (xPile.length >= p.PAGE && core.moduleSet) {
       const page = xPile.splice(0, p.PAGE);
@@ -629,45 +725,67 @@ export function simulate(userParams = {}) {
     }
   }
 
-  // ---- statement buyers meet the falling price auction
-  function statementBuyers(t0, now, Pe) {
-    const n = poisson(rng, (stmtArrivalsPerDay(p, now) * (now - t0)) / 86400);
-    for (let i = 0; i < n; i++) {
+  // ---- auctions that ran out are ended: the winner gets the statement and the house credits the proceeds to the Core
+  function settleEnded(upTo) {
+    if (!live.length) return;
+    const keep = [];
+    for (const st of live) {
+      if (st.end > upTo) { keep.push(st); continue; }
+      core.settle(st);
+      T.sold++; T.soldPrice += st.bid; T.soldCost += st.cost; T.soldPts += st.rating; T.soldReserve += st.reserve;
+      T.saleGross += st.bid; T.bidsOnSold += st.bids; if (st.bids > 1) T.contested++;
+    }
+    live = keep;
+  }
+  // ---- statement buyers meet the english auctions, one bid each. a buyer takes the cheapest bid that fits its willingness to pay
+  // (or any that fits, with stmtPick random). a later buyer must have a higher willingness to pay than the top bidder and beat it by 5 percent
+  function statementBuyers(t0, t1, Pe) {
+    const n = poisson(rng, (stmtArrivalsPerDay(p, t1) * (t1 - t0)) / 86400);
+    if (!n) return;
+    const times = [];
+    for (let i = 0; i < n; i++) times.push(t0 + rng() * (t1 - t0));
+    times.sort((a, b) => a - b);
+    for (const ta of times) {
+      settleEnded(ta);
       T.stmtArrivals++;
-      const budget = interp(WTP_Q, rng()) * p.wtpMult * p.PAGE * Pe;
-      let best = -1, bp = Infinity;
-      for (let j = 0; j < stmts.length; j++) {
-        const pr = core.priceOf(stmts[j], now);
-        if (pr <= budget && pr < bp) { bp = pr; best = j; }
-      }
-      if (best < 0) { T.stmtMiss++; continue; }
-      const st = stmts[best];
-      const res = core.buyStatement(st, now);
-      stmts.splice(best, 1);
-      T.sold++; T.soldPrice += res.price; T.soldCost += st.cost; T.soldPts += st.rating;
-      T.saleGross += res.price; T.saleToPot += res.toPot; T.saleToBuyback += res.toBuyback;
+      const wtp = interp(WTP_Q, rng()) * p.wtpMult * p.PAGE * Pe;
+      const opts = [];
+      for (const st of unbid) { const mb = core.minBid(st); if (mb <= wtp) opts.push({ st, mb, fresh: true }); }
+      for (const st of live) { const mb = core.minBid(st); if (ta < st.end && mb <= wtp && wtp > st.bidderWtp) opts.push({ st, mb, fresh: false }); }
+      if (!opts.length) { T.stmtMiss++; continue; }
+      let pick = opts[0];
+      if (p.stmtPick === 'random') pick = opts[Math.floor(rng() * opts.length)];
+      else for (const o of opts) if (o.mb < pick.mb) pick = o;
+      const wasEnd = pick.st.end;
+      if (!core.bidOn(pick.st, pick.mb, ta, wtp)) { T.stmtMiss++; continue; }
+      if (pick.fresh) { unbid.splice(unbid.indexOf(pick.st), 1); live.push(pick.st); } else T.rebids++;
+      if (pick.st.end > wasEnd && !pick.fresh) T.extended++;
     }
   }
 
-  // ---- phase 2: statements past the auction exit through the exitModule
+  // ---- phase 2: a keeper redeems listings that have had no bid for exitAfter through the exitModule
   function exits(now) {
-    if (!core.moduleSet) return;
+    if (!core.moduleSet || !unbid.length) return;
     const keep = [];
-    for (const st of stmts) {
-      const floor = (st.cost * p.AUCTION_FLOOR_X) / BPS;
-      if (core.exitReady(st, now) && st.rating * core.xp >= p.exitMinRatio * floor) {
+    for (const st of unbid) {
+      if (core.exitReady(st, now) && st.rating * core.xp >= p.exitMinRatio * st.reserve) {
         const res = core.exitStatement(st, st.rating, now);
-        T.exited++; T.xRecv += res.received;
+        T.exited++; T.xRecv += res.received; T.exitedValue += res.received; T.exitedCost += st.cost; T.exitedAge += now - st.t0;
       } else keep.push(st);
     }
-    stmts = keep;
+    unbid = keep;
+  }
+  // collectSales by a keeper: the proceeds move from the house into the pots only here
+  function collect(now) {
+    const res = core.collectSales(now);
+    if (res) { T.saleToPot += res.toPot; T.saleToBuyback += res.toBuyback; }
   }
 
   // ---- phase 2 dutch auction: takers fill when the all in discount to the pool price reaches the threshold
   function xAuction(stepStart, now) {
     for (let guard = 0; core.moduleSet && core.xToBuyback > 1e-12 && guard < 500; guard++) {
       const f = skimFraction(p, now), spot = pool.price, g = spot * (1 + f);
-      const tStar = core.xStartTime + p.XAUCTION_HALF_LIFE * Math.log2((core.xStartPrice * g) / (1 - p.takerThreshold));
+      const tStar = core.xStartTime + core.s.xAuctionHalfLife * Math.log2((core.xStartPrice * g) / (1 - p.takerThreshold));
       if (!(tStar <= now)) break;
       const tf = Math.max(tStar, stepStart, core.xStartTime);
       const slice = core.xSlice(), coinIn = slice * core.xAuctionPrice(tf);
@@ -684,10 +802,10 @@ export function simulate(userParams = {}) {
     }
   }
 
-  // ---- eth buyback keeper: one slice per BUYBACK_DELAY blocks, coin bought in the pool and burned
+  // ---- eth buyback keeper: one slice per buybackDelay blocks, coin bought in the pool and burned
   function buybacks(stepStart, now) {
     if (!p.keeperBuyback) return;
-    const delay = p.BUYBACK_DELAY * 12;
+    const delay = core.s.buybackDelay * 12;
     let tb = Math.max(stepStart, core.lastBuybackTime + delay), feeBack = 0;
     while (tb <= now && core.ethToBuyback > 1e-15) {
       const info = core.takeBuybackSlice(tb);
@@ -705,26 +823,41 @@ export function simulate(userParams = {}) {
   // ---- series snapshot at the end of hour index h
   function record(h, t) {
     const Pe = peff(t), r = core.ethRate(t);
-    const held = stmts.length;
-    let floorN = 0, locked = 0;
-    for (const s of stmts) { if (t - s.t0 >= p.AUCTION_LENGTH) floorN++; locked += s.cost; }
+    let locked = 0;
+    for (const s of unbid) locked += s.cost;
+    for (const s of live) locked += s.cost;
     S.pot[h] = core.ethPot; S.toBuyback[h] = core.ethToBuyback;
     S.cumFees[h] = T.fees + T.feesBuyback + T.feesTaker;
-    S.rate[h] = r; S.mktPerPoint[h] = (Pe * W) / 440; S.frontier[h] = Math.min(900, (Pe * W) / r);
-    S.bidRatio[h] = (r * 440) / (Pe * W);
+    S.rate[h] = r; S.mktPerPoint[h] = (Pe * W) / 440;
+    S.bidRatio[h] = (core.epts(440) * r) / (Pe * W);
     S.bought[h] = T.bought; S.cumPts[h] = T.pts; S.cumCost[h] = T.cost; S.cumMkt[h] = T.mkt;
+    S.credits[h] = T.bought + T.boughtX;
+    S.creditsDay[h] = S.credits[h] - S.credits[Math.max(0, h - 24)];
     S.avgScoreCum[h] = T.bought ? T.pts / T.bought : 0;
     const h24 = Math.max(0, h - 24);
     const dB = T.bought - S.bought[h24], dP = T.pts - S.cumPts[h24];
     S.avgScoreDay[h] = dB > 0 ? dP / dB : (h > 0 ? S.avgScoreDay[h - 1] : 0);
     S.costPerCredit[h] = T.bought ? T.cost / T.bought : 0; S.mktPerCredit[h] = Pe;
-    S.composed[h] = T.composed; S.sold[h] = T.sold; S.held[h] = held; S.heldFloor[h] = floorN; S.locked[h] = locked;
-    S.exited[h] = T.exited + T.exitedX; S.buybackSpent[h] = T.buybackSpent;
+    S.composed[h] = T.composed + T.composedX; S.sold[h] = T.sold; S.waiting[h] = unbid.length; S.inAuction[h] = live.length;
+    S.pending[h] = core.houseOwed; S.locked[h] = locked;
+    S.exited[h] = T.exited + T.exitedX; S.buybackSpent[h] = T.buybackSpent; S.burnEth[h] = T.buybackSpent + T.buybackTips;
     S.burned[h] = T.burned + T.burnedX; S.burnedPct[h] = ((T.burned + T.burnedX) / p.SUPPLY) * 100;
     S.coinPrice[h] = pool.price; S.xPot[h] = core.xPot; S.xToBuyback[h] = core.xToBuyback;
     S.xRate[h] = core.moduleSet ? core.xRate(t) : 0; S.xFills[h] = T.xFills; S.book[h] = book.length;
-    S.saleToPot[h] = T.saleToPot; S.saleToBuyback[h] = T.saleToBuyback; S.xBought[h] = T.boughtX;
+    S.saleToPot[h] = T.saleToPot; S.saleToBuyback[h] = T.saleToBuyback; S.saleGross[h] = T.saleGross; S.xBought[h] = T.boughtX;
     S.volume[h] = T.vol; S.xDisc[h] = T.xFills ? T.xDiscSum / T.xFills : 0; S.poolEth[h] = pool.ethInPool();
+    S.spent[h] = T.spent;
+  }
+
+  // ---- the owner changes settings on a day (schedule), at the start of the step that reaches it
+  function applySchedule(t0) {
+    for (const e of sched) {
+      if (e.done || e.at > t0) continue;
+      e.done = true; T.settingsChanges++;
+      core.setSettings(e.patch, t0);
+      if ('flatBps' in e.patch || 'avgScore' in e.patch) rekey();
+      if ('reserveBps' in e.patch) for (const st of unbid) core.reprice(st); // keepers call repriceStatement on listings with no bid
+    }
   }
 
   // ---- the main loop. hour 0 runs in 120 s sub steps for the anti sniper window, then hourly
@@ -732,9 +865,11 @@ export function simulate(userParams = {}) {
   for (let k = 0; k < 30; k++) steps.push([k * 120, (k + 1) * 120]);
   for (let h = 1; h < H; h++) steps.push([h * 3600, (h + 1) * 3600]);
   record(0, 0);
+  const collectEvery = Math.max(1, Math.round(p.keeperCollectHours)) * 3600;
   for (const [t0, t1] of steps) {
     const dt = t1 - t0, mid = (t0 + t1) / 2;
     stepW = dt / 3600;
+    applySchedule(t0);
     // coin market: volume, fees to the pot, price impact on the single position
     const V = stepVolume(p, t0, dt), f = skimFraction(p, mid), b = t0 < 86400 ? p.buyShare0 : bLate;
     const net = b * V - (1 - b) * V; // notional is the pool's own delta, the skim comes on top
@@ -747,7 +882,7 @@ export function simulate(userParams = {}) {
     lnM *= Math.pow(0.5, dt / (p.impactHalfLifeHours * 3600));
     const Pe = peff(t1), r0 = core.ethRate(t1);
     const xPay = core.moduleSet ? (core.xRate(t1) / BPS) * core.xp * W : 0;
-    const boost = Math.pow(Math.max(1, (Math.max(r0, xPay) * 440) / (Pe * W)), p.supplyElast);
+    const boost = Math.pow(Math.max(1, Math.max(core.epts(440) * r0, xPay * 440) / (Pe * W)), p.supplyElast);
     const nOff = Math.min(poisson(rng, (p.offersPerHour * dt * boost) / 3600), 1500, Math.floor(Math.max(holdPool, 0) * 0.05));
     if (p.bookChurn > 0) {
       const keepP = Math.pow(1 - p.bookChurn, dt / 3600);
@@ -760,17 +895,19 @@ export function simulate(userParams = {}) {
       book = mergeDesc(book, add);
       if (book.length > 6000) book = book.slice(book.length - 6000); // keep the cheapest to clear
     }
-    // the engine acts
-    if (p.inventoryGate > 0) core.setGate(stmts.length >= p.inventoryGate, t0); // INVENTORY_GATE in the Core: eth lane statements held for sale, nothing else counts
+    // the engine acts. there is no inventory gate: unsold statements never close the bid
     const capBefore = core.capHits;
     peffNow = Pe;
-    const spentEth = core.gated ? 0 : engineBuys(t1, Pe);
+    const spentEth = engineBuys(t1, Pe);
     if (core.capHits > capBefore) T.capStepHits++;
     if (core.funded && core.clamp() < Infinity && core.ethRate(t1) >= core.clamp() * (1 - 1e-9)) T.clampSteps++;
     lnM = Math.min(lnM + (p.impactElast * spentEth) / p.marketDailyEth, Math.log(p.impactCap));
-    composeAll(t1);
+    // statements already listed meet buyers during the step, then the engine composes and lists new ones
     statementBuyers(t0, t1, peff(t1));
+    settleEnded(t1);
+    composeAll(t1);
     exits(t1);
+    if (t1 % collectEvery === 0) collect(t1);
     xAuction(t0, t1);
     buybacks(t0, t1);
     // rate path statistics
@@ -782,7 +919,7 @@ export function simulate(userParams = {}) {
       if (dir !== 0) { if (lastDir !== 0 && dir !== lastDir) signChanges++; lastDir = dir; }
     }
     prevRate = rr;
-    rateMaxRatio = Math.max(rateMaxRatio, (rr * 440) / (peff(t1) * W));
+    rateMaxRatio = Math.max(rateMaxRatio, (core.epts(440) * rr) / (peff(t1) * W));
     if (t1 % 3600 === 0) record(t1 / 3600, t1);
   }
 
@@ -806,21 +943,40 @@ export function simulate(userParams = {}) {
     costVsAsk: T.ask ? T.cost / T.ask : 0,
     capSteps: T.capBindSteps, capStepsRich: T.capBindRich, potBlockedSteps: T.potBindSteps, clampSteps: T.clampSteps,
     rateMaxBidRatio: rateMaxRatio, rateSignChanges: signChanges, rateMeanAbsMove: rateMoves ? rateAbsMove / rateMoves : 0,
-    saleOverCost: T.soldCost ? T.soldPrice / T.soldCost : 0,
+    saleOverCost: T.soldCost ? T.soldPrice / T.soldCost : 0, saleOverReserve: T.soldReserve ? T.soldPrice / T.soldReserve : 0,
+    bidsPerSale: T.sold ? T.bidsOnSold / T.sold : 0, contestedShare: T.sold ? T.contested / T.sold : 0,
     stmtArrivals: T.stmtArrivals, stmtMiss: T.stmtMiss,
     xFills: T.xFills, xMedianIntervalH: med(intervals), xMeanDiscount: T.xFills ? T.xDiscSum / T.xFills : 0,
     potCheck: T.fees + T.feesBuyback + T.feesTaker + T.saleToPot - T.spent - T.reimb - core.ethPot,
     buybackCheck: T.saleToBuyback - core.ethToBuyback - T.buybackSpent - T.buybackTips,
+    houseCheck: T.saleGross - T.saleToPot - T.saleToBuyback - core.houseOwed,
     finalRate: core.ethRate(H * 3600), finalPot: core.ethPot,
   };
-  return { params: p, H, S, T, stats, at, histPts, histCost, xFillLog, core, pool };
+  return { params: p, H, S, T, stats, at, histPts, histCost, xFillLog, core, pool, unbid, live };
 }
 
-// headline numbers at day 30, 60, 90 and the one line verdict
-export function headline(res) {
-  const rows = [30, 60, 90].filter((d) => d * 24 <= res.H).map((d) => res.at(d));
-  const last = res.at(res.H / 24);
-  const stuck = last.heldFloor;
-  const loops = last.sold >= 0.5 * Math.max(1, last.composed) && last.sold > 10;
-  return { rows, last, stuck, loops, burnedPct: last.burnedPct, locked: last.locked };
+// the owner's metrics for one run: credits acquired, statements created, sold, eth to buy and burn the coin, statements waiting
+// for phase 2, the day the launch pot is spent, and the steady state per day after that (the last 30 days of the run, or the
+// days since the pot ran out when that is shorter, at least 10)
+export function summary(res, day) {
+  const S = res.S, T = res.T, H = res.H;
+  const h = Math.min(H, Math.round((day == null ? res.H / 24 : day) * 24));
+  let peak = 0, peakH = 0;
+  for (let i = 0; i <= Math.min(h, 72); i++) if (S.pot[i] > peak) { peak = S.pot[i]; peakH = i; }
+  let gone = null;
+  for (let i = peakH + 1; i <= H; i++) if (S.pot[i] < 0.05 * peak) { gone = i / 24; break; }
+  const a = res.at(h / 24);
+  const out = {
+    day: h / 24, credits: a.credits, statements: a.composed, sold: a.sold, burnEth: a.burnEth, burnPct: a.burnedPct, waiting: a.waiting, inAuction: a.inAuction,
+    exited: a.exited, potGoneDay: gone, pot: a.pot, locked: a.locked, recycled: a.saleGross, pending: a.pending, firstBuyDay: res.stats.firstFillHour < 0 ? null : res.stats.firstFillHour / 24,
+  };
+  if (gone != null && H / 24 - Math.max(gone, H / 24 - 30) >= 10) {
+    const fh = Math.round(Math.max(gone, H / 24 - 30) * 24), span = (H - fh) / 24;
+    out.steadyFromDay = fh / 24;
+    out.steadyCredits = (S.credits[H] - S.credits[fh]) / span;
+    out.steadyStatements = (S.composed[H] - S.composed[fh]) / span;
+    out.steadySold = (S.sold[H] - S.sold[fh]) / span;
+    out.steadyBurnEth = (S.burnEth[H] - S.burnEth[fh]) / span;
+  } else { out.steadyCredits = null; out.steadyStatements = null; out.steadySold = null; out.steadyBurnEth = null; }
+  return out;
 }

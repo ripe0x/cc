@@ -1,6 +1,6 @@
 # credits engine: build spec v1
 
-this is the original handoff spec. the branch `artcoin` implements it on the artcoins launcher; see docs/ARCHITECTURE.md for what differs.
+this is the original handoff spec. the branch `flow` is the current implementation and docs/ARCHITECTURE.md lists what differs.
 
 ## 0. what this is
 

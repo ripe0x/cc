@@ -40,6 +40,11 @@ abstract contract SystemResumer is SystemDeployer {
         Core core = Core(payable(core_));
         if (core.OWNER() != c.owner) revert CoreMismatch("owner");
         if (core.RATE_START() != c.rateStart) revert CoreMismatch("rateStart");
+        // the owner can call `setSettings` as soon as the core exists. a core whose settings differ from the signed config
+        // is finished only on purpose, with SETTINGS_CHANGED=1 (the postflight at the end warns and prints it)
+        if (!_settingsChanged() && keccak256(abi.encode(core.settings())) != keccak256(abi.encode(c.settings))) {
+            revert CoreMismatch("settings (SETTINGS_CHANGED=1 if the owner changed them)");
+        }
         if (
             address(core.MANAGER()) != c.stack.poolManager || core.HOOK() != c.stack.hook
                 || core.TICK_SPACING() != c.stack.tickSpacing || core.POOL_FEE() != c.stack.poolFee
@@ -97,6 +102,7 @@ contract Resume is Script, SystemResumer {
         address core = vm.envAddress("CORE");
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
+        _requireDeployer(vm.envOr("DEPLOYER", address(0)), deployer);
         (Stage from, Deployed memory d) = resumeSystem(deployer, c, core);
         vm.stopBroadcast();
         console.log("stage found", uint256(from));

@@ -97,33 +97,61 @@ contract RehearsalTest is Test, SystemDeployer {
         vm.startPrank(deployer);
         d = deploySystem(deployer, c);
         vm.stopPrank();
-        uint256 total;
-        for (uint256 i; i < 5; ++i) {
-            total += stepGas[i];
-        }
-        // intrinsic gas per transaction (21000) and calldata at 4 gas per zero byte and 16 per other byte
-        uint256 calldataGas = _calldataGas(type(Core).creationCode) + _calldataGas(type(ControllerV1).creationCode)
-            + _calldataGas(
-                abi.encodeCall(
-                    IArtCoinsFactory.deployTokenWithProtocolBpsAndTax,
-                    (buildConfig(c, deployer, d.core), 0, buildTaxConfig(c, d.core))
-                )
-            );
-        uint256 txs = 6 * 21_000;
+        // each transaction costs its execution gas, 21000 intrinsic and its calldata (4 gas per zero byte, 16 per other byte)
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
-        console.log("deploy gas, library CoreLib", libGas, "at", lib);
-        console.log("deploy gas, controller", stepGas[0], "core", stepGas[1]);
-        console.log("deploy gas, launch", stepGas[2], "lock extension", stepGas[3]);
-        console.log("deploy gas, update admin", stepGas[4]);
-        total += libGas;
-        calldataGas += _calldataGas(libCode);
-        console.log("execution gas of the six deploy transactions (library included)", total);
-        console.log("plus intrinsic 6 x 21000", txs);
-        console.log("plus calldata of the four large payloads about", calldataGas);
-        console.log("total deploy gas about", total + txs + calldataGas);
-        console.log("deployer paid wei (fee plus nothing else, gas price 0 here)", balBefore - deployer.balance);
+        uint256[6] memory txGas = [
+            libGas + 21_000 + _calldataGas(libCode) + 512,
+            stepGas[0] + 21_000 + _calldataGas(type(ControllerV1).creationCode) + 512,
+            stepGas[1] + 21_000 + _calldataGas(type(Core).creationCode) + 16_384,
+            stepGas[2] + 21_000
+                + _calldataGas(
+                    abi.encodeCall(
+                        IArtCoinsFactory.deployTokenWithProtocolBpsAndTax,
+                        (buildConfig(c, deployer, d.core), 0, buildTaxConfig(c, d.core))
+                    )
+                ),
+            stepGas[3] + 21_000 + 2_048,
+            stepGas[4] + 21_000 + 1_024
+        ];
+        string[6] memory names = [
+            "1 library CoreLib (create2 deployer)",
+            "2 controller",
+            "3 core (house creation inside)",
+            "4 launch through the factory",
+            "5 lock the extension slot",
+            "6 hand the token admin to the owner"
+        ];
+        uint256 total;
+        for (uint256 i; i < 6; ++i) {
+            total += txGas[i];
+            console.log(string.concat("deploy gas, tx ", names[i]), txGas[i]);
+        }
+        uint256 fee = IArtCoinsFactory(c.stack.factory).deployFee();
+        console.log("library at", lib);
+        console.log("total deploy gas, six transactions", total);
+        console.log("factory deploy fee (wei, sent as value of tx 4)", fee);
+        uint256[3] memory gwei_ = [uint256(1), 5, 20];
+        for (uint256 i; i < 3; ++i) {
+            uint256 cost = total * gwei_[i] * 1 gwei;
+            console.log(
+                string.concat("deployer needs at ", vm.toString(gwei_[i]), " gwei: gas ", _eth(cost), " eth, plus fee"),
+                _eth(cost + fee)
+            );
+        }
+        console.log("deployer paid wei (the fee only, the test gas price is 0)", balBefore - deployer.balance);
         console.log("core", d.core);
         console.log("coin", d.coin);
+    }
+
+    /// @dev wei as a decimal eth string with five places
+    function _eth(uint256 weiAmount) internal pure returns (string memory) {
+        uint256 whole = weiAmount / 1 ether;
+        uint256 frac = (weiAmount % 1 ether) / 1e13;
+        string memory f = vm.toString(frac);
+        while (bytes(f).length < 5) {
+            f = string.concat("0", f);
+        }
+        return string.concat(vm.toString(whole), ".", f);
     }
 
     function _calldataGas(bytes memory data) internal pure returns (uint256 g) {

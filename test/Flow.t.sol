@@ -1486,11 +1486,19 @@ contract FlowTest is Fixture {
         uint256 slice =
             core.ethToBuyback() < core.settings().buybackSlice ? core.ethToBuyback() : core.settings().buybackSlice;
         vm.startPrank(who);
-        if (pick == 0) try core.skim() {} catch {} else if (pick == 1) try core.collectSales() {}
-            catch {} else if (pick == 2) try core.syncStatement(sid) {} catch {} else if (pick == 3) try core.repriceStatement(
-            sid
-        ) {}
-            catch {} else if (pick == 4) try core.buyback() {} catch {} else try core.overprint() {} catch {}
+        if (pick == 0) {
+            try core.skim() {} catch {}
+        } else if (pick == 1) {
+            try core.collectSales() {} catch {}
+        } else if (pick == 2) {
+            try core.syncStatement(sid) {} catch {}
+        } else if (pick == 3) {
+            try core.repriceStatement(sid) {} catch {}
+        } else if (pick == 4) {
+            try core.buyback() {} catch {}
+        } else {
+            try core.overprint() {} catch {}
+        }
         vm.stopPrank();
         if (address(core).balance < before) {
             assertEq(pick, 4, "only the buyback spends eth here");

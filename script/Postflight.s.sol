@@ -29,12 +29,7 @@ contract Postflight is Script, LaunchChecks {
             _check("deployer still factory admin", !admin || !gate, admin ? "yes, revoke it (step 10)" : "no");
         }
         _print("postflight");
-        if (core.code.length != 0) {
-            console.log("core constructor args, for etherscan verification");
-            console.logBytes(coreConstructorArgs(Core(payable(core))));
-            console.log("controller constructor args");
-            console.logBytes(abi.encode(core));
-        }
+        if (core.code.length != 0) printVerifyInputs(Core(payable(core)));
         _require();
     }
 }

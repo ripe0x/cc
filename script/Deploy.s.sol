@@ -28,6 +28,9 @@ abstract contract SystemDeployer is LaunchChecks {
     error AddressMismatch(string what);
     /// @notice a placeholder of the config is unset, or rateStart or a setting is out of bounds
     error ConfigUnset(string what);
+    /// @notice the signer is not the address the operator named in DEPLOYER, the one the factory owner enabled and the
+    /// sign off table printed
+    error DeployerMismatch(address want, address got);
     /// @notice CONFIG_HASH is not the hash of the config the script loaded. `want` is the hash of this config
     error ConfigHashMismatch(bytes32 got, bytes32 want);
 
@@ -95,6 +98,11 @@ abstract contract SystemDeployer is LaunchChecks {
         IArtCoinsToken(coin).updateAdmin(c.owner);
     }
 
+    /// @notice reverts unless the signer is the deployer the operator named
+    function _requireDeployer(address want, address got) internal pure {
+        if (want == address(0) || want != got) revert DeployerMismatch(want, got);
+    }
+
     /// @notice the sign off value: reverts unless `given` is the hash of this config
     function _requireConfigHash(LaunchConfig memory c, bytes32 given) internal view {
         bytes32 want = configHash(c);
@@ -111,7 +119,8 @@ abstract contract SystemDeployer is LaunchChecks {
 }
 
 /// @notice `CONFIG_HASH=0x... forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --private-key $KEY`
-/// (or `--account` or `--ledger`). the signer comes from the flags only, no environment variable picks one. reads
+/// (or `--account` or `--ledger`), with DEPLOYER set to the address of that signer. the signer comes from the flags only,
+/// no environment variable picks one, DEPLOYER only has to agree with it. reads
 /// script/config/mainnet.json, or the file named by LAUNCH_CONFIG. refuses to run while owner, creator, name, symbol or
 /// salt is unset, and unless CONFIG_HASH is the hash that preflight printed for this config. the full runbook is
 /// docs/DEPLOY.md
@@ -127,6 +136,8 @@ contract Deploy is Script, SystemDeployer {
         _requireConfigHash(c, vm.envOr("CONFIG_HASH", bytes32(0)));
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
+        // the signer must be the address of the sign off table (DEPLOYER, the one the factory owner enabled)
+        _requireDeployer(vm.envOr("DEPLOYER", address(0)), deployer);
         // every preflight check runs first. a failed check reverts here, before anything is sent
         preflight(c, deployer);
         _print("preflight");

@@ -69,3 +69,31 @@ contract SwapMidExit is IExitModule {
 
     receive() external payable {}
 }
+
+interface ICollect {
+    function collectSales() external;
+}
+
+/// one transaction that swaps in the real pool (the skim hook pushes into the core's `receive`), collects the sale
+/// proceeds the house owes the core, and swaps again. the house delivers statements by plain transfer and never runs
+/// code of the winner, so this is the closest a stranger gets to interleaving the two
+contract SwapAroundCollect {
+    TestSwapRouter public immutable router;
+    ICollect public immutable core;
+    PoolKey internal key;
+
+    constructor(TestSwapRouter router_, address core_, PoolKey memory key_) {
+        router = router_;
+        core = ICollect(core_);
+        key = key_;
+    }
+
+    function run(uint256 swapEth) external payable {
+        router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        core.collectSales();
+        router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        core.collectSales();
+    }
+
+    receive() external payable {}
+}

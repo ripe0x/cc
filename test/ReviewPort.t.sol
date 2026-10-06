@@ -9,7 +9,7 @@ import {ControllerV1} from "../src/ControllerV1.sol";
 import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
-import {Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {TestSwapRouter} from "./utils/TestSwapRouter.sol";
 import {TestLiquidityHelper} from "./utils/TestLiquidityHelper.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
@@ -55,8 +55,8 @@ contract SwapOnReceive {
         c.compose();
     }
 
-    function buy(Core c, uint256 sid, uint256 pay) external {
-        c.buyStatement{value: pay}(sid);
+    function buyback(Core c) external {
+        c.buyback();
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
@@ -239,7 +239,7 @@ contract ReviewPort is Fixture {
         _buyCoin(taker, 5 ether);
         vm.warp(block.timestamp + 72 hours);
         core.exitStatement(c1.sid);
-        uint256 full = 20 * core.AVG_SCORE() * core.unitPerPoint();
+        uint256 full = uint256(core.settings().exitSliceCredits) * core.settings().avgScore * core.unitPerPoint();
         emit log_named_uint("xToBuyback after first exit, in slices x1000", core.xToBuyback() * 1000 / full);
         // the taker takes one full slice at an honest decayed price and the remainder stays unsold
         vm.warp(block.timestamp + 200 hours);
@@ -312,6 +312,19 @@ contract ReviewPort is Fixture {
         assertGe(core.xStartPrice(), 1e12);
     }
 
+    /// the bound moves with the slice of the settings: at 1000 credits a slice a unit that was fine is too large
+    function test_FIXED_theBoundFollowsTheSliceSetting() public {
+        Settings memory s = core.settings();
+        s.exitSliceCredits = 1000;
+        _setSettings(s);
+        // 1e45 / (1000 * 4.33e6 * 1e24) is 2.3e11, below 1e12
+        _setExitModuleReverts(1e24);
+        s.exitSliceCredits = 1;
+        _setSettings(s);
+        _phase2With(1e24);
+        assertGe(core.xStartPrice(), 1e12);
+    }
+
     // ------------------------------------------------------------------ P-5 forbidden targets
 
     /// regression for P-5: permit2, the v4 position manager and the universal router cannot become targets
@@ -344,7 +357,7 @@ contract ReviewPort is Fixture {
         address coinAt = predictCoin(deployer, coreAt, "Victim", "VIC", salt);
         vm.startPrank(deployer);
         ControllerV1 c2 = new ControllerV1(coreAt);
-        Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart, lc.econ);
+        Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart, lc.settings);
         vm.stopPrank();
         assertEq(address(core2), coreAt);
 
@@ -386,7 +399,7 @@ contract ReviewPort is Fixture {
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), what);
     }
 
-    /// a swap fired from the eth callback of a sell payout, a compose reimbursement and a statement refund. the
+    /// a swap fired from the eth callback of a sell payout, a compose reimbursement and the keeper tip of the coin buyback. the
     /// hook pushes into `receive()` mid door, it is booked in full, and the books stay exact
     function test_held_swapInsidePayoutCallbacks() public {
         _stockPool();
@@ -415,14 +428,17 @@ contract ReviewPort is Fixture {
         assertGt(core.ethPot(), potC - 1, "bounty booked");
         _assertClean("after compose");
 
-        uint256 sid = STATEMENTS.supply();
-        uint256 price = core.priceOf(sid);
+        // the keeper tip of the coin buyback is paid to the caller, who swaps from inside it
+        _forceBuyback(1 ether);
+        vm.roll(block.number + 30);
         actor.arm(1 ether);
         uint256 potB = core.ethPot();
-        actor.buy(core, sid, price + 3 ether);
-        assertTrue(actor.fired(), "swap fired inside the refund");
-        assertGt(core.ethPot(), potB, "bounty and sale booked");
-        _assertClean("after statement refund");
+        uint256 tipBefore = address(actor).balance;
+        actor.buyback(core);
+        assertTrue(actor.fired(), "swap fired inside the keeper tip");
+        assertGt(address(actor).balance + 1 ether, tipBefore, "the tip was paid");
+        assertGt(core.ethPot(), potB, "bounty booked");
+        _assertClean("after buyback tip");
     }
 
     function _slice(uint256[] memory a, uint256 from, uint256 n) internal pure returns (uint256[] memory r) {

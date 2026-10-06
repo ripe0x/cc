@@ -1,14 +1,19 @@
 
 // ================================================================= page: calibration, scenarios, theme, start
 const SCENARIOS = [
-  { id: 'sc-base', label: 'calibrated base case', set: {} },
-  { id: 'sc-rec', label: 'recommended constants', set: { rateStart: 5.6e12, startX: 2, floorX: 0.8, DROP_BPS: 2000 } },
-  { id: 'sc-rec2', label: 'recommended plus design changes', set: { rateStart: 5.6e12, startX: 2, floorX: 0.8, DROP_BPS: 2000, bidMode: 'flat', inventoryGate: 20 } },
+  { id: 'sc-base', label: 'as launched', set: {} },
+  { id: 'sc-open100', label: 'opening limit 100%', set: { openPct: 100 } },
+  { id: 'sc-open40', label: 'opening limit 40%', set: { openPct: 40 } },
+  { id: 'sc-flat30', label: 'blend half per point on day 30', set: { chgOn: true, chgDay: 30, chgKey: 'flatBps', chgValue: 5000 } },
+  { id: 'sc-perpoint', label: 'per point bid from day 0', set: { flatBps: 0 } },
+  { id: 'sc-res14', label: 'reserve 60% on day 14', set: { chgOn: true, chgDay: 14, chgKey: 'reserveBps', chgValue: 6000 } },
+  { id: 'sc-res60', label: 'reserve 60% from launch', set: { reserveBps: 6000 } },
+  { id: 'sc-burn100', label: 'all proceeds to burn', set: { saleToBuybackBps: 10000 } },
+  { id: 'sc-burn0', label: 'no proceeds to burn', set: { saleToBuybackBps: 0 } },
   { id: 'sc-s17', label: 'sustained 17 eth a day', set: { volPreset: 'sustained17' } },
   { id: 'sc-dead', label: 'dead after week one', set: { volPreset: 'deadWeek1' } },
   { id: 'sc-recov', label: 'credit price recovery', set: { pricePath: 'recovery' } },
-  { id: 'sc-p2', label: 'phase 2 from day 14', set: { phase2On: true, phase2Day: 14, xp: 3e-5 } },
-  { id: 'sc-old', label: 'old funded rule, small pot', set: { fundedRule: 'old', volScale: 0.03 } },
+  { id: 'sc-p2', label: 'phase 2 on day 30', set: { phase2On: true, phase2Day: 30, xp: 2e-5 } },
   { id: 'sc-noimp', label: 'engine never moves the market', set: { impactElast: 0 } },
 ];
 function applyScenario(sc) { state = Object.assign({}, BASE_STATE, sc.set); syncControls(); run(); }
@@ -33,6 +38,7 @@ function buildCalibration() {
     ['comparable coin volume', 'day one 1,557 eth, 912 in hour one, then 81, 42, 46, 57, 13, 28, 58, 12, 41, 5, 2, 3', 'fit 123 exp(-0.286 d), floor 0.5 eth a day'],
     ['coin buys against sells', 'day one 819 to 738 eth, net 80 eth moves price 2.5e-8 to 4.4e-7', 'model reproduces 4.48e-7 on day one'],
     ['CreditStrategy inventory', '13,132 credits listed at median 0.036 eth, mean score 371', 'static, cleared through buyListing when the ceiling passes the ask'],
+    ['statement auction', 'listed at compose on the house, reserve reserveBps of cost, first bid at the reserve starts the timer, later bids 5% higher, 15 minute extension, proceeds reach the pots when collectSales runs (hourly keeper)', 'src/Core.sol, docs/reference/pnd'],
     ['launch position', 'tick -175000 to 887200, whole supply, 10% skim of which 9.5 points to the engine, 90% falling to 10% over 30 minutes', 'script/config/mainnet.json'],
   ];
   $('calTbl').innerHTML = '<thead><tr><th>input</th><th>value in the model</th><th>source</th></tr></thead><tbody>' + rows.map((r) => '<tr><td>' + r[0] + '</td><td style="white-space:normal;text-align:left">' + r[1] + '</td><td style="white-space:normal;text-align:left">' + r[2] + '</td></tr>').join('') + '</tbody>';

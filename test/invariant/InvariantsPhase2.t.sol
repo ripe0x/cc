@@ -50,3 +50,33 @@ contract InvariantsHostileControllerDeep is InvariantsHostileController {
         super.setUp();
     }
 }
+
+/// invariant 8 as the hard rule, under an adversarial owner. the exit module is set and the owner's calls are as
+/// frequent as any: `setSettings` with random valid settings over the whole bounds (every corner: flat bid at 0 and
+/// 10_000, a spend cap of 100 and 10_000, the reserve at both ends, the sale split at 0 and 10_000, a zero climb, the
+/// largest drop, the smallest and the largest buyback slice, no wait before an exit, every tip at zero and at its
+/// ceiling), `setRate` and `setXRate` anywhere in their bounds, invalid settings that must revert, and strangers
+/// trying the owner's doors. the public actions keep running under whatever the owner chose. neither the owner nor
+/// any controller may end the campaign holding more eth, coin, credits, statements or exit token than it began with,
+/// and every other invariant holds under every setting.
+/// forge-config: default.invariant.runs = 24
+/// forge-config: default.invariant.depth = 80
+/// forge-config: default.invariant.fail-on-revert = false
+contract InvariantsHostileOwner is InvariantsBase {
+    function setUp() public virtual override {
+        _build(true, false, true, false, "ho");
+    }
+
+    /// five owner actions each six times in the list, against about thirty public ones
+    function _ownerWeight() internal pure override returns (uint256) {
+        return 6;
+    }
+}
+
+/// the same suite for deep runs. no inline config, skipped unless INVARIANT_DEEP is set.
+contract InvariantsHostileOwnerDeep is InvariantsHostileOwner {
+    function setUp() public override {
+        vm.skip(!vm.envOr("INVARIANT_DEEP", false));
+        super.setUp();
+    }
+}

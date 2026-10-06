@@ -3,11 +3,12 @@ pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Core} from "../src/Core.sol";
-import {Lane} from "../src/interfaces/Interfaces.sol";
+import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 
 /// regressions and attack tests for docs/REVIEW-core.md, on the real stack. the exit token buyback is the dutch
-/// auction inside the core, so its attacks are written against that: nobody gets exit token for less coin than the
+/// auction inside the core (unchanged by the flow rework, its half life and slice are settings now), so its attacks
+/// are written against that: nobody gets exit token for less coin than the
 /// quote, nothing but the clock lowers the price, a fill never takes more than `xToBuyback`, and every fill restarts
 /// the price at max(2 * clearing, previous start / 4)
 contract ReviewCoreTest is Fixture {
@@ -36,7 +37,8 @@ contract ReviewCoreTest is Fixture {
         mod.setUnitPerPoint(1);
         vm.expectRevert(Core.Underpaid.selector);
         core.exitStatement(c.sid);
-        assertEq(STATEMENTS.ownerOf(c.sid), address(core), "the statement never left");
+        assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the statement never left: its listing is intact");
+        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
         assertEq(core.unitPerPoint(), UNIT, "the stored unit did not move");
         _solvent();
     }
@@ -75,14 +77,15 @@ contract ReviewCoreTest is Fixture {
         vm.prank(keeper);
         core.compose();
         sid2 = STATEMENTS.supply();
-        vm.warp(block.timestamp + core.AUCTION_LENGTH() + 2 hours);
+        vm.warp(block.timestamp + core.settings().exitAfter + 2 hours);
         core.exitStatement(sid1);
         core.exitStatement(sid2);
         assertGt(core.xToBuyback(), 3 * _fullSlice(), "about four slices for sale");
     }
 
     function _fullSlice() internal view returns (uint256) {
-        return 20 * core.AVG_SCORE() * UNIT;
+        Settings memory s = core.settings();
+        return uint256(s.exitSliceCredits) * s.avgScore * UNIT;
     }
 
     /// @dev `who` buys coin in the real pool and approves the core
@@ -190,7 +193,7 @@ contract ReviewCoreTest is Fixture {
 
         // exiting another statement while the pot is not empty adds supply and re anchors the curve at
         // max(price now, start / 4), restarting the clock
-        vm.warp(core.AUCTION_LENGTH() + block.timestamp);
+        vm.warp(core.settings().exitAfter + block.timestamp);
         uint256 pricePlain = core.exitAuctionPrice();
         uint256 slices = core.xToBuyback();
         core.exitStatement(sid3);
@@ -203,7 +206,7 @@ contract ReviewCoreTest is Fixture {
         // the price is the halving of the stored start price, to the wei on whole half lives
         startPrice = anchored;
         startTime = core.xStartTime();
-        uint256 hl = core.XAUCTION_HALF_LIFE();
+        uint256 hl = core.settings().xAuctionHalfLife;
         uint256 halvings = (block.timestamp - startTime) / hl;
         vm.warp(startTime + (halvings + 1) * hl);
         assertEq(core.exitAuctionPrice(), startPrice >> (halvings + 1));
@@ -287,7 +290,7 @@ contract ReviewCoreTest is Fixture {
         _equip(attacker, 40 ether);
         uint256 start = core.xStartPrice();
         uint64 t0 = core.xStartTime();
-        uint256 hl = core.XAUCTION_HALF_LIFE();
+        uint256 hl = core.settings().xAuctionHalfLife;
         uint256 bits;
         for (uint256 v = start; v != 0; v >>= 1) {
             ++bits;
@@ -323,6 +326,34 @@ contract ReviewCoreTest is Fixture {
         _solvent();
     }
 
+    /// the slice and the half life are settings: the next quote takes the slice of the new setting, the price at the
+    /// moment of the change is kept and then halves at the new half life, and a fill burns the quoted coin
+    function test_attack_sliceSizeAndHalfLifeAreSettings() public {
+        _auction();
+        Settings memory s = core.settings();
+        s.exitSliceCredits = 5;
+        s.xAuctionHalfLife = 2 hours;
+        _setSettings(s);
+        (uint256 slice,) = core.exitAuctionQuote();
+        assertEq(slice, 5 * s.avgScore * UNIT, "five average credits");
+        uint256 price = core.exitAuctionPrice();
+        vm.warp(block.timestamp + 2 hours);
+        assertEq(core.exitAuctionPrice(), price >> 1, "halves at the new half life");
+        vm.warp(block.timestamp + 4 hours);
+        assertEq(core.exitAuctionPrice(), price >> 3);
+
+        _equip(attacker, 30 ether);
+        uint256 coinIn;
+        (slice, coinIn) = _waitUntilCheap(attacker, 8);
+        assertEq(slice, 5 * s.avgScore * UNIT);
+        uint256 supply = coin.totalSupply();
+        vm.prank(attacker);
+        core.buybackExit(coinIn);
+        assertEq(xt.balanceOf(attacker), slice);
+        assertEq(supply - coin.totalSupply(), coinIn);
+        _solvent();
+    }
+
     // ------------------------------------------------------------------ attempts that held
 
     /// the core approved Statements for all its credits. a third party cannot use that approval.
@@ -352,7 +383,7 @@ contract ReviewCoreTest is Fixture {
         uint256 g = gasleft();
         uint256 r = core.ethRate();
         g -= gasleft();
-        assertEq(r, pot * 2000 / core.AVG_SCORE(), "clamped at the funded threshold");
+        assertEq(r, pot * 2000 / core.settings().avgScore, "clamped at the funded threshold");
         assertLt(g, 400_000, "gas of the read");
         emit log_named_uint("gas of a ten year read", g);
         // a checkpointing call after the gap still works
