@@ -41,14 +41,10 @@ abstract contract SystemResumer is SystemDeployer {
         if (core.OWNER() != c.owner) revert CoreMismatch("owner");
         if (core.RATE_START() != c.rateStart) revert CoreMismatch("rateStart");
         if (
-            core.AUCTION_START_X() != c.econ.auctionStartX || core.AUCTION_FLOOR_X() != c.econ.auctionFloorX
-                || core.DROP_BPS() != c.econ.dropBps || core.INVENTORY_GATE() != c.econ.inventoryGate
-        ) revert CoreMismatch("econ");
-        if (
             address(core.MANAGER()) != c.stack.poolManager || core.HOOK() != c.stack.hook
                 || core.TICK_SPACING() != c.stack.tickSpacing || core.POOL_FEE() != c.stack.poolFee
                 || core.FACTORY() != c.stack.factory || core.LOCKER() != c.stack.locker
-                || core.ESCROW() != c.stack.escrow
+                || core.ESCROW() != c.stack.escrow || core.AUCTION_FACTORY() != c.stack.auctionFactory
         ) revert CoreMismatch("stack");
         if (predictCoin(c, deployer, core_) != core.COIN()) {
             revert CoreMismatch("coin prediction (config or deployer)");

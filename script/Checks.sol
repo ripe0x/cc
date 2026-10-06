@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Stack, Mainnet, ICredits, ICreditScore, IStatements} from "../src/interfaces/Interfaces.sol";
+import {IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsLocker, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {PostflightChecks} from "./PostflightChecks.sol";
@@ -13,8 +14,8 @@ interface ISupply {
 /// @notice the read only checks run before a launch (`preflight`) and after it (`postflight`). they only read state,
 /// so they are safe to run against mainnet at any time
 abstract contract LaunchChecks is PostflightChecks {
-    /// @dev gas units of the five deploy transactions (about 10.1M measured by test/Rehearsal.t.sol) plus margin
-    uint256 internal constant DEPLOY_GAS_ESTIMATE = 11_000_000;
+    /// @dev gas units of the six deploy transactions (the library, controller, core, launch, lock, handover: about 12.0M measured on a fork) plus margin
+    uint256 internal constant DEPLOY_GAS_ESTIMATE = 13_500_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
     uint256 internal constant CORE_SUPPLY = 1_000_000_000e18;
     /// @dev credit 1 exists and its score is a pure function of its seed and timestamp
@@ -73,24 +74,11 @@ abstract contract LaunchChecks is PostflightChecks {
             "placeholders filled", unset.length == 0, unset.length == 0 ? "owner creator name symbol salt set" : names
         );
         _check("rateStart in bounds", rateInBounds(c), string.concat("rateStart ", vm.toString(c.rateStart)));
+        bytes32 bad = settingsViolation(c);
         _check(
-            "AUCTION_START_X and AUCTION_FLOOR_X in bounds, floor below start",
-            auctionInBounds(c),
-            string.concat(
-                "start ",
-                vm.toString(c.econ.auctionStartX),
-                " floor ",
-                vm.toString(c.econ.auctionFloorX),
-                " bps of cost"
-            )
-        );
-        _check("DROP_BPS in bounds", dropInBounds(c), string.concat("DROP_BPS ", vm.toString(c.econ.dropBps)));
-        _check(
-            "INVENTORY_GATE in bounds",
-            gateInBounds(c),
-            c.econ.inventoryGate == 0
-                ? "0, gate off"
-                : string.concat("gate on at ", vm.toString(c.econ.inventoryGate), " statements")
+            "settings inside the bounds",
+            bad == 0,
+            bad == 0 ? "every field of the settings block" : string(abi.encodePacked("out of bounds: ", bad))
         );
         _eq("supply equals the Core SUPPLY constant", c.supply, CORE_SUPPLY);
         _check("token code file exists", vm.exists(c.tokenCodeFile), c.tokenCodeFile);
@@ -198,6 +186,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _code("code: factory", c.stack.factory);
         _code("code: locker", c.stack.locker);
         _code("code: escrow", c.stack.escrow);
+        _code("code: auction factory", c.stack.auctionFactory);
         _code("code: mev module", c.mevModule);
         _code("code: Credits", Mainnet.CREDITS);
         _code("code: Statements", Mainnet.STATEMENTS);
@@ -268,6 +257,7 @@ abstract contract LaunchChecks is PostflightChecks {
         address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
         _noCode("predicted controller is empty", controllerAt);
         _noCode("predicted core is empty", coreAt);
+        _preHouse(c, coreAt);
         if (!vm.exists(c.tokenCodeFile)) return;
         address coinAt = predictCoin(c, deployer, coreAt);
         _noCode("predicted coin is empty", coinAt);
@@ -283,6 +273,22 @@ abstract contract LaunchChecks is PostflightChecks {
                 " initcode ",
                 vm.toString(keccak256(coinInitcode(c, deployer, coreAt)))
             )
+        );
+    }
+
+    /// @dev the Core creates its auction house in its constructor, one house per owner address, so a house must not
+    /// exist yet for the predicted core address. the factory default fee is fixed at the factory: it is paid out of
+    /// every sale, so a non zero fee is a loud warning
+    function _preHouse(LaunchConfig memory c, address coreAt) private {
+        address f = c.stack.auctionFactory;
+        (bool ok1, uint256 existing) = _word(f, abi.encodeCall(IAuctionFactory.houseOf, (coreAt)));
+        _check("auction factory: no house yet for the predicted core", ok1 && existing == 0, "houseOf(core)");
+        (bool ok2, uint256 fee) = _word(f, abi.encodeCall(IAuctionFactory.defaultProtocolFeeBps, ()));
+        _check("auction factory: default fee readable", ok2, vm.toString(fee));
+        _warn(
+            "warn: auction factory default fee is zero",
+            ok2 && fee == 0,
+            string.concat("fee ", vm.toString(fee), " bps is taken from every statement sale and cannot be changed")
         );
     }
 
@@ -304,7 +310,7 @@ abstract contract LaunchChecks is PostflightChecks {
         address core = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
         _info("signoff: owner (core owner and token admin)", vm.toString(c.owner));
         _info("signoff: creator (0.5 point leg and lp rewards)", vm.toString(c.creator));
-        _info("signoff: deployer (sends the five transactions)", vm.toString(deployer));
+        _info("signoff: deployer (sends the six transactions)", vm.toString(deployer));
         _info("signoff: skim bounty and referral payout point to the core", vm.toString(core));
         _info("signoff: skim protocol leg and locker rewards point to the creator", vm.toString(c.creator));
         _info("signoff: tax and burn address", vm.toString(c.taxBurn));
@@ -313,9 +319,9 @@ abstract contract LaunchChecks is PostflightChecks {
             string.concat(
                 "rateStart ",
                 vm.toString(c.rateStart),
-                " wei per point, flat price about ",
-                vm.toString(c.rateStart * 1600),
-                " wei"
+                " wei per point, a flat credit opens at about ",
+                vm.toString(c.rateStart * c.settings.avgScore / 1e4),
+                " wei (launch day rule: 0.75 times the market price of a credit)"
             )
         );
         _info(
@@ -337,30 +343,60 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.taxBpsMax)
             )
         );
+        _preSettingsRows(c);
+        _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
+    }
+
+    /// @dev the settings are adjustable by the owner after launch, so these rows print them for sign off
+    function _preSettingsRows(LaunchConfig memory c) private {
         _info(
-            "signoff: auction",
+            "signoff: bid",
             string.concat(
-                "AUCTION_START_X ",
-                vm.toString(c.econ.auctionStartX),
-                " AUCTION_FLOOR_X ",
-                vm.toString(c.econ.auctionFloorX),
-                " bps of cost, no statement sells below the floor"
+                "flatBps ",
+                vm.toString(c.settings.flatBps),
+                " avgScore ",
+                vm.toString(c.settings.avgScore),
+                " spendCapBps ",
+                vm.toString(c.settings.spendCapBps),
+                " dropBps ",
+                vm.toString(c.settings.dropBps)
             )
         );
         _info(
-            "signoff: rate drop",
-            string.concat("DROP_BPS ", vm.toString(c.econ.dropBps), " of the rate when a whole pot is spent")
+            "signoff: climb",
+            string.concat(
+                "base ",
+                vm.toString(c.settings.climbBaseBps),
+                " max ",
+                vm.toString(c.settings.climbMaxBps),
+                " bps per hour, doubling every ",
+                vm.toString(c.settings.climbDoubleEvery),
+                "s"
+            )
         );
         _info(
-            "signoff: inventory gate",
-            c.econ.inventoryGate == 0
-                ? "INVENTORY_GATE 0, off: the eth bid never closes"
-                : string.concat(
-                    "INVENTORY_GATE ",
-                    vm.toString(c.econ.inventoryGate),
-                    ": the eth bid closes and the rate stops climbing while the core holds this many eth lane statements"
-                )
+            "signoff: statement auction",
+            string.concat(
+                "reserveBps ",
+                vm.toString(c.settings.reserveBps),
+                " duration ",
+                vm.toString(c.settings.auctionDuration),
+                "s exitAfter ",
+                vm.toString(c.settings.exitAfter),
+                "s"
+            )
         );
-        _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
+        _info(
+            "signoff: splits",
+            string.concat(
+                "sale to buyback ",
+                vm.toString(c.settings.saleToBuybackBps),
+                " exit to buyback ",
+                vm.toString(c.settings.exitToBuybackBps),
+                " buyback slice ",
+                vm.toString(c.settings.buybackSlice)
+            )
+        );
+        _info("signoff: settings are adjustable", "the owner can change every setting at once after launch");
     }
 }

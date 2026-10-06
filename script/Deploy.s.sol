@@ -26,7 +26,7 @@ struct Deployed {
 abstract contract SystemDeployer is LaunchChecks {
     /// @notice a created contract did not land at its predicted address
     error AddressMismatch(string what);
-    /// @notice a placeholder of the config is unset, or rateStart or an economic dial is out of bounds
+    /// @notice a placeholder of the config is unset, or rateStart or a setting is out of bounds
     error ConfigUnset(string what);
     /// @notice CONFIG_HASH is not the hash of the config the script loaded. `want` is the hash of this config
     error ConfigHashMismatch(bytes32 got, bytes32 want);
@@ -49,7 +49,7 @@ abstract contract SystemDeployer is LaunchChecks {
         d.controller = address(new ControllerV1(coreAt));
         stepGas[0] = g - gasleft();
         g = gasleft();
-        d.core = address(new Core(c.owner, coinAt, d.controller, c.stack, c.rateStart, c.econ));
+        d.core = address(new Core(c.owner, coinAt, d.controller, c.stack, c.rateStart, c.settings));
         stepGas[1] = g - gasleft();
         if (d.controller != controllerAt) revert AddressMismatch("controller");
         if (d.core != coreAt) revert AddressMismatch("core");
@@ -101,14 +101,12 @@ abstract contract SystemDeployer is LaunchChecks {
         if (given != want) revert ConfigHashMismatch(given, want);
     }
 
-    /// @notice reverts when a placeholder is unset or rateStart or an economic dial is out of bounds
+    /// @notice reverts when a placeholder is unset or rateStart or a setting is out of bounds
     function _requireConfig(LaunchConfig memory c) internal pure {
         string[] memory unset = unsetFields(c);
         if (unset.length != 0) revert ConfigUnset(unset[0]);
         if (!rateInBounds(c)) revert ConfigUnset("rateStart");
-        if (!auctionInBounds(c)) revert ConfigUnset("AUCTION_START_X, AUCTION_FLOOR_X");
-        if (!dropInBounds(c)) revert ConfigUnset("DROP_BPS");
-        if (!gateInBounds(c)) revert ConfigUnset("INVENTORY_GATE");
+        if (settingsViolation(c) != 0) revert ConfigUnset("settings");
     }
 }
 

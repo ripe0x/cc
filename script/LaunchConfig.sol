@@ -2,24 +2,11 @@
 pragma solidity ^0.8.28;
 
 import {CommonBase} from "forge-std/Base.sol";
-import {
-    Stack,
-    Econ,
-    Mainnet,
-    RATE_START_MIN_WEI,
-    RATE_START_MAX_WEI,
-    AUCTION_START_X_MIN,
-    AUCTION_START_X_MAX,
-    AUCTION_FLOOR_X_MIN,
-    AUCTION_FLOOR_X_MAX,
-    DROP_BPS_MIN,
-    DROP_BPS_MAX,
-    INVENTORY_GATE_MIN,
-    INVENTORY_GATE_MAX
-} from "../src/interfaces/Interfaces.sol";
+import {Stack, Settings, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
+import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
-/// memory by the tests. nothing here is read by `src/`: the Core takes `stack`, `rateStart` and `econ` as constructor
+/// memory by the tests. nothing here is read by `src/`: the Core takes `stack`, `rateStart` and `settings` as constructor
 /// arguments
 struct LaunchConfig {
     // the artcoins stack. the only block that changes when a new artcoins version ships
@@ -34,8 +21,8 @@ struct LaunchConfig {
     bytes32 salt;
     // core
     uint256 rateStart;
-    /// the four economic dials: auction start and floor, rate drop, inventory gate
-    Econ econ;
+    /// every economic setting at launch. owner adjustable afterwards, so the launch rules only check bounds
+    Settings settings;
     // launch parameters
     uint256 supply;
     int24 startTick;
@@ -78,8 +65,8 @@ abstract contract ConfigReader is CommonBase {
         c.stack = Mainnet.defaultStack();
         c.mevModule = Mainnet.MEV_LINEAR_SKIM;
         c.factoryOwner = Mainnet.ARTCOINS_FACTORY_OWNER;
-        c.rateStart = 5_600_000_000_000;
-        c.econ = Mainnet.defaultEcon();
+        c.rateStart = 15_400_000_000_000;
+        c.settings = Mainnet.defaultSettings();
         c.supply = 1_000_000_000e18;
         c.startTick = -175_000;
         c.positionLower = -175_000;
@@ -112,7 +99,8 @@ abstract contract ConfigReader is CommonBase {
             poolFee: _u24(j, ".stack.poolFee"),
             factory: vm.parseJsonAddress(j, ".stack.factory"),
             locker: vm.parseJsonAddress(j, ".stack.locker"),
-            escrow: vm.parseJsonAddress(j, ".stack.escrow")
+            escrow: vm.parseJsonAddress(j, ".stack.escrow"),
+            auctionFactory: vm.parseJsonAddress(j, ".stack.auctionFactory")
         });
         c.mevModule = vm.parseJsonAddress(j, ".stack.mevModule");
         c.factoryOwner = vm.parseJsonAddress(j, ".factoryOwner");
@@ -122,17 +110,43 @@ abstract contract ConfigReader is CommonBase {
         c.symbol = vm.parseJsonString(j, ".symbol");
         c.salt = vm.parseJsonBytes32(j, ".salt");
         c.rateStart = vm.parseJsonUint(j, ".rateStart");
-        c.econ = Econ({
-            auctionStartX: vm.parseJsonUint(j, ".econ.AUCTION_START_X"),
-            auctionFloorX: vm.parseJsonUint(j, ".econ.AUCTION_FLOOR_X"),
-            dropBps: vm.parseJsonUint(j, ".econ.DROP_BPS"),
-            inventoryGate: vm.parseJsonUint(j, ".econ.INVENTORY_GATE")
-        });
+        _loadSettings(c, j);
         _loadLaunch(c, j);
         // the overrides are optional, a missing key means false
         c.allowBounty = _flag(j, ".overrides.bounty");
         c.allowTaxBurn = _flag(j, ".overrides.taxBurn");
         c.allowOpenFactory = _flag(j, ".overrides.openFactory");
+    }
+
+    function _loadSettings(LaunchConfig memory c, string memory j) private pure {
+        Settings memory s = c.settings;
+        s.flatBps = _u16(j, ".settings.flatBps");
+        s.avgScore = _u32(j, ".settings.avgScore");
+        s.climbBaseBps = _u16(j, ".settings.climbBaseBps");
+        s.climbDoubleEvery = _u32(j, ".settings.climbDoubleEvery");
+        s.climbMaxBps = _u16(j, ".settings.climbMaxBps");
+        s.dropBps = _u16(j, ".settings.dropBps");
+        s.spendCapBps = _u16(j, ".settings.spendCapBps");
+        s.bonusCapBps = _u16(j, ".settings.bonusCapBps");
+        s.tipSavingsBps = _u16(j, ".settings.tipSavingsBps");
+        s.tipCapBps = _u16(j, ".settings.tipCapBps");
+        s.reimburseBps = _u16(j, ".settings.reimburseBps");
+        s.reimburseCapBps = _u16(j, ".settings.reimburseCapBps");
+        s.reserveBps = _u16(j, ".settings.reserveBps");
+        s.auctionDuration = _u32(j, ".settings.auctionDuration");
+        s.exitAfter = _u32(j, ".settings.exitAfter");
+        s.saleToBuybackBps = _u16(j, ".settings.saleToBuybackBps");
+        s.exitToBuybackBps = _u16(j, ".settings.exitToBuybackBps");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        s.buybackSlice = uint128(_uint(j, ".settings.buybackSlice", type(uint128).max));
+        s.buybackDelay = _u16(j, ".settings.buybackDelay");
+        s.keeperTipBps = _u16(j, ".settings.keeperTipBps");
+        s.xRateCap = _u16(j, ".settings.xRateCap");
+        s.xRateFloor = _u16(j, ".settings.xRateFloor");
+        s.xRateClimbPerHour = _u16(j, ".settings.xRateClimbPerHour");
+        s.xRateDropPerCredit = _u16(j, ".settings.xRateDropPerCredit");
+        s.xAuctionHalfLife = _u32(j, ".settings.xAuctionHalfLife");
+        s.exitSliceCredits = _u16(j, ".settings.exitSliceCredits");
     }
 
     function _loadLaunch(LaunchConfig memory c, string memory j) private pure {
@@ -205,25 +219,8 @@ abstract contract ConfigReader is CommonBase {
         return c.rateStart >= RATE_START_MIN && c.rateStart <= RATE_START_MAX;
     }
 
-    /// @notice the four economic dials sit inside the bounds the Core enforces, the floor strictly below the start
-    function auctionInBounds(LaunchConfig memory c) internal pure returns (bool) {
-        Econ memory e = c.econ;
-        return e.auctionStartX >= AUCTION_START_X_MIN && e.auctionStartX <= AUCTION_START_X_MAX
-            && e.auctionFloorX >= AUCTION_FLOOR_X_MIN && e.auctionFloorX <= AUCTION_FLOOR_X_MAX
-            && e.auctionFloorX < e.auctionStartX;
-    }
-
-    function dropInBounds(LaunchConfig memory c) internal pure returns (bool) {
-        return c.econ.dropBps >= DROP_BPS_MIN && c.econ.dropBps <= DROP_BPS_MAX;
-    }
-
-    /// @notice zero means the gate is off
-    function gateInBounds(LaunchConfig memory c) internal pure returns (bool) {
-        uint256 g = c.econ.inventoryGate;
-        return g == 0 || (g >= INVENTORY_GATE_MIN && g <= INVENTORY_GATE_MAX);
-    }
-
-    function econInBounds(LaunchConfig memory c) internal pure returns (bool) {
-        return auctionInBounds(c) && dropInBounds(c) && gateInBounds(c);
+    /// @notice the name of the first launch setting outside the bounds the Core enforces, zero when all are inside
+    function settingsViolation(LaunchConfig memory c) internal pure returns (bytes32) {
+        return SettingsBounds.firstViolation(c.settings);
     }
 }

@@ -7,7 +7,10 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {Core} from "../src/Core.sol";
 import {ControllerV1} from "../src/ControllerV1.sol";
-import {Mainnet, Stack, Econ} from "../src/interfaces/Interfaces.sol";
+import {Mainnet, Stack, Settings, IStatements} from "../src/interfaces/Interfaces.sol";
+import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
+import {CoreLib} from "../src/lib/CoreLib.sol";
+import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 import {
     IArtCoinsFactory,
     IArtCoinsToken,
@@ -57,7 +60,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     }
 
     /// @notice the constructor arguments of a deployed core, read back from its immutables, in the encoding etherscan
-    /// wants for verification: `(owner, coin, controller, stack, rateStart, econ)`
+    /// wants for verification: `(owner, coin, controller, stack, rateStart, settings)`. the settings are the launch values, the owner may
+    /// have changed them since, so verify against the config's `settings` block
     function coreConstructorArgs(Core core) internal view returns (bytes memory) {
         Stack memory s = Stack({
             poolManager: address(core.MANAGER()),
@@ -66,25 +70,20 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             poolFee: core.POOL_FEE(),
             factory: core.FACTORY(),
             locker: core.LOCKER(),
-            escrow: core.ESCROW()
+            escrow: core.ESCROW(),
+            auctionFactory: core.AUCTION_FACTORY()
         });
-        Econ memory e = Econ({
-            auctionStartX: core.AUCTION_START_X(),
-            auctionFloorX: core.AUCTION_FLOOR_X(),
-            dropBps: core.DROP_BPS(),
-            inventoryGate: core.INVENTORY_GATE()
-        });
-        return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START(), e);
+        return abi.encode(core.OWNER(), core.COIN(), core.controller(), s, core.RATE_START(), core.settings());
     }
 
     function _postCore(LaunchConfig memory c, Core core) private {
         _eq("core: owner", core.OWNER(), c.owner);
         _eq("core: SUPPLY constant equals the config supply", core.SUPPLY(), c.supply);
         _eq("core: RATE_START", core.RATE_START(), c.rateStart);
-        _eq("core: AUCTION_START_X", core.AUCTION_START_X(), c.econ.auctionStartX);
-        _eq("core: AUCTION_FLOOR_X", core.AUCTION_FLOOR_X(), c.econ.auctionFloorX);
-        _eq("core: DROP_BPS", core.DROP_BPS(), c.econ.dropBps);
-        _eq("core: INVENTORY_GATE", core.INVENTORY_GATE(), c.econ.inventoryGate);
+        _eq("core: auction factory", core.AUCTION_FACTORY(), c.stack.auctionFactory);
+        _postSettings(c, core);
+        _postHouse(c, core);
+        _postLibrary(core);
         _eq("core: pool manager", address(core.MANAGER()), c.stack.poolManager);
         _eq("core: hook", core.HOOK(), c.stack.hook);
         _eq("core: tick spacing", uint256(int256(core.TICK_SPACING())), uint256(int256(c.stack.tickSpacing)));
@@ -95,8 +94,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _check(
             "code: stack addresses",
             c.stack.poolManager.code.length != 0 && c.stack.hook.code.length != 0 && c.stack.factory.code.length != 0
-                && c.stack.locker.code.length != 0 && c.stack.escrow.code.length != 0,
-            "pool manager, hook, factory, locker, escrow"
+                && c.stack.locker.code.length != 0 && c.stack.escrow.code.length != 0
+                && c.stack.auctionFactory.code.length != 0,
+            "pool manager, hook, factory, locker, escrow, auction factory"
         );
         address ctl = core.controller();
         _code("code: controller", ctl);
@@ -106,7 +106,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             core.allowedTarget(Mainnet.SEAPORT) && core.allowedTarget(Mainnet.CREDIT_STRATEGY)
                 && !core.allowedTarget(c.stack.hook) && !core.allowedTarget(c.stack.factory)
                 && !core.allowedTarget(c.stack.locker) && !core.allowedTarget(c.stack.escrow)
-                && !core.allowedTarget(c.stack.poolManager) && !core.allowedTarget(core.COIN()),
+                && !core.allowedTarget(c.stack.poolManager) && !core.allowedTarget(core.COIN())
+                && !core.allowedTarget(address(core.HOUSE())) && !core.allowedTarget(c.stack.auctionFactory),
             "seaport and CreditStrategy only"
         );
         _check(
@@ -119,13 +120,101 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             core.ethPot() + core.ethToBuyback() <= address(core).balance,
             string.concat("balance ", vm.toString(address(core).balance))
         );
-        // the live rate moves once the pot is funded or a credit is bought, so it is exact only while the pot is empty
-        if (core.ethPot() == 0) {
-            _eq("core: ethRate is rateStart", core.ethRate(), c.rateStart);
-        } else {
-            _check(
-                "core: ethRate is rateStart", core.ethRate() != 0, "pot not empty, rate has moved, immutable checked"
-            );
+        // the live rate moves once the pot is funded or a credit is bought, and the owner may reset it with `setRate`, so
+        // it is exact only at launch: a difference is a warning
+        _warn(
+            "warn: ethRate is rateStart",
+            core.ethPot() != 0 || core.ethRate() == c.rateStart,
+            string.concat("ethRate ", vm.toString(core.ethRate()), " rateStart ", vm.toString(c.rateStart))
+        );
+    }
+
+    /// @dev the settings are owner adjustable after launch, so the rows check the bounds and print the live values. a
+    /// difference from the config is a warning, not a failure
+    function _postSettings(LaunchConfig memory c, Core core) private {
+        Settings memory live = core.settings();
+        bytes32 bad = SettingsBounds.firstViolation(live);
+        _check("core: settings inside the bounds", bad == 0, bad == 0 ? "all fields" : string(abi.encodePacked(bad)));
+        _warn(
+            "warn: settings equal the config",
+            keccak256(abi.encode(live)) == keccak256(abi.encode(c.settings)),
+            "the owner changed a setting since launch, or the wrong config file is loaded"
+        );
+        _info(
+            "core: flat share and average score",
+            string.concat("flatBps ", vm.toString(live.flatBps), " avgScore ", vm.toString(live.avgScore))
+        );
+        _info(
+            "core: reserve and auction",
+            string.concat(
+                "reserveBps ", vm.toString(live.reserveBps), " duration ", vm.toString(live.auctionDuration), "s"
+            )
+        );
+        _info(
+            "core: splits",
+            string.concat(
+                "sale to buyback ",
+                vm.toString(live.saleToBuybackBps),
+                " exit to buyback ",
+                vm.toString(live.exitToBuybackBps),
+                " exitAfter ",
+                vm.toString(live.exitAfter),
+                "s"
+            )
+        );
+    }
+
+    /// @dev the auction house the core created in its constructor: the factory knows it, the core owns it, its fee is
+    /// zero and it may take statements
+    function _postHouse(LaunchConfig memory c, Core core) private {
+        address house = address(core.HOUSE());
+        _code("code: house", house);
+        if (house.code.length == 0) return;
+        _eq("house: factory houseOf(core)", IAuctionFactory(c.stack.auctionFactory).houseOf(address(core)), house);
+        _eq("house: owner is the core", IAuctionHouse(house).owner(), address(core));
+        (bool ok, uint256 fee) = _word(house, abi.encodeCall(IAuctionHouse.protocolFeeBps, ()));
+        _check("house: protocol fee is zero", ok && fee == 0, string.concat("protocolFeeBps ", vm.toString(fee)));
+        _check(
+            "house: approved for all statements of the core",
+            IStatements(Mainnet.STATEMENTS).isApprovedForAll(address(core), house),
+            "Statements.isApprovedForAll(core, house)"
+        );
+    }
+
+    /// @dev the Core is linked against `CoreLib`. its address sits in the Core runtime code as a push20. the row finds
+    /// a push20 operand whose code is the compiled library (its own address masked out)
+    function _postLibrary(Core core) private {
+        bytes memory expected = vm.getDeployedCode("CoreLib.sol:CoreLib");
+        bytes memory code = address(core).code;
+        address found;
+        for (uint256 i; i + 21 <= code.length; ++i) {
+            if (code[i] != 0x73) continue;
+            address cand;
+            assembly ("memory-safe") {
+                cand := shr(96, mload(add(add(code, 0x21), i)))
+            }
+            bytes memory lc = cand.code;
+            if (lc.length != expected.length || lc.length < 39) continue;
+            if (_tailHash(lc) == _tailHash(expected)) {
+                found = cand;
+                break;
+            }
+        }
+        _check(
+            "core: linked library is the compiled CoreLib",
+            found != address(0),
+            string.concat("library at ", vm.toString(found))
+        );
+    }
+
+    /// @dev hash of library runtime code with its own address masked out. a library starts with
+    /// `PUSH1 0x80 PUSH1 0x40 MSTORE ADDRESS PUSH32 <its own address>` (the guard against a direct call), the 32 bytes
+    /// at offset 7 differ between the compiled code and a deployed copy
+    function _tailHash(bytes memory b) private pure returns (bytes32 h) {
+        bytes memory c = bytes.concat(b);
+        assembly ("memory-safe") {
+            mstore(add(add(c, 0x20), 7), 0)
+            h := keccak256(add(c, 0x20), mload(c))
         }
     }
 

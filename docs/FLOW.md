@@ -1,0 +1,93 @@
+# flow rework: director brief
+
+binding for branch `flow`. where it conflicts with SPEC.md or docs/ARCHITECTURE.md, this file wins. the owner's goal changed: the engine exists to keep credits flowing into statements. statement sales do not need to profit. unsold statements are fine: they wait for phase 2 and are redeemed through the exitModule.
+
+naming rule: only `exitModule` and `exitToken`. never name or describe them.
+
+## 1. owner decisions (all confirmed by the owner)
+
+| # | decision |
+|---|---|
+| 1 | buy credits at one limit per credit (flat), not per score point. a dial lets the owner blend score back in later |
+| 2 | never stop buying because statements are unsold. remove the inventory gate entirely |
+| 3 | every economic setting is adjustable by the owner after deploy, effective at once. nothing economic is a constant or an immutable |
+| 4 | statements are sold by english auction on the live pnd auction house, reserve 90% of the statement's cost |
+| 5 | the opening limit is set on launch day at about 75% of the market price of a credit |
+| 6 | the split of sale proceeds between the pot and the buyback is an adjustable setting |
+| 7 | the controller, the exit module and the allowed targets keep the 7 day timelock |
+| 8 | the owner can never move eth, credits, statements, coin or exit token out directly. this stays a hard rule and must stay true under every combination of settings |
+
+## 2. settings
+
+one `Settings` struct in Core storage, one owner function `setSettings(Settings)` that validates sanity bounds and emits the whole struct, plus `settings()` view. bounds are wide and exist only to stop typos and to keep rule 8 true (tips, reimbursements and keeper rewards stay capped so settings cannot become a withdrawal path). every function that depends on a setting reads storage. a settings change checkpoints the eth rate and the exit rate first so no climb is credited under the wrong numbers.
+
+| setting | launch value | bounds | meaning |
+|---|---|---|---|
+| flatBps | 10_000 | 0 to 10_000 | share of the bid that is flat per credit. price = rate * (flatBps * avgScore + (10_000 - flatBps) * score) / 10_000 / 1e4, before the controller bonus |
+| avgScore | 4_330_000 | 800_000 to 8_000_000 | the score a flat credit is priced as, and the "average credit" in the funded rule |
+| climbBaseBps | 100 | 0 to 1_000 | per hour |
+| climbDoubleEvery | 24 hours | 1 hour to 30 days | |
+| climbMaxBps | 800 | climbBaseBps to 2_000 | per hour |
+| dropBps | 2_000 | 0 to 5_000 | |
+| spendCapBps | 2_000 | 100 to 10_000 | per hour window |
+| bonusCapBps | 2_500 | 0 to 5_000 | |
+| tipSavingsBps | 1_000 | 0 to 2_500 | |
+| tipCapBps | 200 | 0 to 500 | |
+| reimburseBps | 11_000 | 0 to 15_000 | of gas cost |
+| reimburseCapBps | 500 | 0 to 1_000 | of statement cost |
+| reserveBps | 9_000 | 1_000 to 40_000 | auction reserve as bps of statement cost |
+| auctionDuration | 24 hours | 1 hour to 30 days | runs from the first bid |
+| exitAfter | 72 hours | 0 to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
+| saleToBuybackBps | 5_000 | 0 to 10_000 | share of sale proceeds to the coin buyback, rest to the pot |
+| exitToBuybackBps | 5_000 | 0 to 10_000 | share of exit token from eth lane exits to the coin buyback |
+| buybackSlice | 1 ether | 0.01 to 100 ether | |
+| buybackDelay | 25 | 1 to 7_200 blocks | |
+| keeperTipBps | 50 | 0 to 500 | |
+| xRateCap / xRateFloor | 9_700 / 3_000 | floor <= cap <= 10_000 | |
+| xRateClimbPerHour | 100 | 0 to 1_000 | |
+| xRateDropPerCredit | 20 | 0 to 1_000 | |
+| xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
+| exitSliceCredits | 20 | 1 to 1_000 | |
+
+also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
+
+the skim split (9.5 points to the engine, 0.5 to the creator) is fixed inside the artcoins pool at launch and cannot be made adjustable here. say so in the docs.
+
+## 3. flat bid
+
+`_ceiling(id)` uses the blended score above, then the controller bonus as before. with flatBps 10_000 the score contract is not read on the eth doors (save the gas). the exit token bid stays per point (phase 2 pays by rating). cost basis, piles, compose are unchanged. launch day rule for docs/DEPLOY.md: rateStart = 0.75 * (market price of one credit in wei) * 1e4 / avgScore, default in config 1.54e13 (0.0089 eth market).
+
+## 4. statement sales on the pnd auction house
+
+live factory: `SovereignAuctionHouseV2Factory` 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 (verified; source saved under docs/reference/pnd/). facts read from the source:
+* `createAuctionHouse()` deploys a non upgradeable clone owned forever by msg.sender. one per address. fee is fixed at the factory default (0 now).
+* `createAuction(tokenId, tokenContract, duration, reservePrice, listingExpiry)` is owner only, pulls the token into the house with transferFrom (needs approval), returns an auction id. `getAuctionFor(token, id)` and `getAuction(id)` read it.
+* before the first bid the token owner can `cancelAuction` (token returns) or `setAuctionReservePrice`. after the first bid neither is possible.
+* bids: first bid at or above reserve starts the timer (duration), later bids need +5%, a bid in the last 15 minutes extends 15 minutes, the previous bidder is refunded in the same call (30k gas, else credited).
+* `endAuction` is permissionless after the end: delivers the token to the winner, then pays the seller. a seller that is a CONTRACT is never pushed eth: the proceeds are added to `pendingRefunds[seller]` and the seller pulls them with `withdrawRefund()`.
+* if delivery to the winner fails it is deferred; after 30 days anyone can unwind: the winner is refunded and the token goes back to the seller with a plain transferFrom.
+
+design:
+* the Core owns its own house: it calls `factory.createAuctionHouse()` in its constructor, stores the house address, and approves the house for all on Statements.
+* compose (eth lane): after minting, the Core lists the statement: `createAuction(sid, Statements, auctionDuration, cost * reserveBps / 10_000, 0)` and records the auction id on the statement. the dutch auction (`priceOf`, `buyStatement`, AUCTION_START_X, AUCTION_FLOOR_X, AUCTION_LENGTH) is deleted.
+* `collectSales()`, permissionless, guarded: if `house.pendingRefunds(core) > 0`, call `withdrawRefund()`, measure the eth balance delta under the measuring flag, split it by `saleToBuybackBps` into `ethToBuyback` and `ethPot` (checkpoint first). the Core never bids, so everything credited to it in the house is sale proceeds. `buyback()` calls the same collection first so proceeds are never stranded.
+* statement state is settled lazily and permissionlessly with `syncStatement(sid)`: if the Core's record says listed but the house has no auction for it and neither the house nor the Core owns it, it was sold: clear the record (emit `StatementSold`). if the Core owns it and it has no auction (unwound sale, or returned), relist it at the current reserve. `heldStatements()` may include sold statements until synced; add a view that reports the live status.
+* phase 2 exit of an eth lane statement: allowed when the module is set, the statement is listed, has no bid, and `now >= listedAt + exitAfter`. the Core cancels the listing (this reverts if a bid arrived) and then exits exactly as before (balance delta check against `rating * unitPerPoint`). the exit lane is unchanged (immediate exit, never listed).
+* overprint: both statements must be listed with no bid; cancel both, overprint, relist the base with the summed cost.
+* reserve changes: `repriceStatement(sid)` permissionless: sets the listing's reserve to `cost * reserveBps / 10_000` if it has no bid (so a settings change can be applied to old listings).
+* a bidder interacts with the house directly (`createBid`, `endAuction`). nothing in the Core is needed to buy.
+* SPEC invariant 3 becomes: a statement only leaves the Core's control by a house auction that cleared at or above its reserve at listing time, by an exit that returned at least `rating * unitPerPoint`, or as the top of an overprint. invariant 5 gains: eth owed to the Core by the house is not counted in the pots until collected.
+* forbidden `buyListing` targets gain the house and the auction factory.
+* the stack config gains `auctionFactory`. preflight checks it has code, that its default fee is 0 (warn loudly otherwise) and that no house exists yet for the predicted core address.
+
+## 5. removed
+
+the inventory gate and its counter, the `Econ` immutables (now settings), the dutch statement auction, the recommended config file (one config again), every constant that is now a setting.
+
+## 6. size
+
+the Core is at the limit. make room in this order: delete what section 5 removes, then move view helpers and settings validation into one external linked library under src/lib/ (a deployed library is allowed; proxies are not). if a library is added, the deploy script, nonce based address predictions, preflight, postflight, resume script, rehearsal and docs/DEPLOY.md must account for it. report the final margin; aim for at least 500 bytes.
+
+## 7. tests and docs
+
+real contracts only on the fork (Credits, Statements, CreditScore, CreditStrategy, Seaport, pool manager, artcoins stack, the pnd factory and house). the two exit stand ins and attacker contracts are the only doubles. everything in SPEC section 10 and 11 still needs coverage, adapted to the above. the simulator (sim/engine.js, sim/index.html, docs/SIMULATION.md) must model the same rules and names.

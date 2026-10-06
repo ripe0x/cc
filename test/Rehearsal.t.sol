@@ -90,6 +90,10 @@ contract RehearsalTest is Test, SystemDeployer {
 
     function _deploy() internal {
         uint256 balBefore = deployer.balance;
+        // the linked library is deployed before the core, once, by the same deployer
+        uint256 lg = gasleft();
+        address lib = deployCode("CoreLib.sol:CoreLib");
+        uint256 libGas = lg - gasleft();
         vm.startPrank(deployer);
         d = deploySystem(deployer, c);
         vm.stopPrank();
@@ -105,13 +109,17 @@ contract RehearsalTest is Test, SystemDeployer {
                     (buildConfig(c, deployer, d.core), 0, buildTaxConfig(c, d.core))
                 )
             );
-        uint256 txs = 5 * 21_000;
+        uint256 txs = 6 * 21_000;
+        bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
+        console.log("deploy gas, library CoreLib", libGas, "at", lib);
         console.log("deploy gas, controller", stepGas[0], "core", stepGas[1]);
         console.log("deploy gas, launch", stepGas[2], "lock extension", stepGas[3]);
         console.log("deploy gas, update admin", stepGas[4]);
-        console.log("execution gas of the five deploy transactions", total);
-        console.log("plus intrinsic 5 x 21000", txs);
-        console.log("plus calldata of the three large payloads about", calldataGas);
+        total += libGas;
+        calldataGas += _calldataGas(libCode);
+        console.log("execution gas of the six deploy transactions (library included)", total);
+        console.log("plus intrinsic 6 x 21000", txs);
+        console.log("plus calldata of the four large payloads about", calldataGas);
         console.log("total deploy gas about", total + txs + calldataGas);
         console.log("deployer paid wei (fee plus nothing else, gas price 0 here)", balBefore - deployer.balance);
         console.log("core", d.core);

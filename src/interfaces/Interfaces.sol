@@ -66,9 +66,12 @@ interface IStatements {
     function overprint(uint256 baseId, uint256 topId) external;
     function creditScoreOf(uint256 statementId) external view returns (uint256);
     function creditsOf(uint256 statementId) external view returns (uint256);
+    function balanceOf(address owner) external view returns (uint256);
     function overprintsOf(uint256 statementId) external view returns (uint256);
     function supply() external view returns (uint256);
     function ownerOf(uint256 id) external view returns (address);
+    function setApprovalForAll(address operator, bool approved) external;
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
     function transferFrom(address from, address to, uint256 id) external;
     function safeTransferFrom(address from, address to, uint256 id) external;
 }
@@ -82,24 +85,53 @@ interface ICreditStrategy {
 uint256 constant RATE_START_MIN_WEI = 1e11;
 uint256 constant RATE_START_MAX_WEI = 1e15;
 
-// bounds of the four economic constructor arguments of the Core (`Econ`). one definition for the Core and the scripts
-uint256 constant AUCTION_START_X_MIN = 15_000;
-uint256 constant AUCTION_START_X_MAX = 40_000;
-uint256 constant AUCTION_FLOOR_X_MIN = 6_000;
-uint256 constant AUCTION_FLOOR_X_MAX = 12_000;
-uint256 constant DROP_BPS_MIN = 1_000;
-uint256 constant DROP_BPS_MAX = 4_000;
-uint256 constant INVENTORY_GATE_MIN = 5;
-uint256 constant INVENTORY_GATE_MAX = 200;
-
-/// the economic dials of a launch, fixed at deploy. the defaults (40_000, 12_000, 1_000, 0) are the engine as specified.
-/// start and floor are bps of a statement's cost, the floor is strictly below the start. `inventoryGate` is a count of
-/// eth lane statements held for sale: 0 is off, otherwise [5, 200]
-struct Econ {
-    uint256 auctionStartX;
-    uint256 auctionFloorX;
-    uint256 dropBps;
-    uint256 inventoryGate;
+/// every economic setting of the Core. one struct in Core storage, owner settable at once through `setSettings`, bounds
+/// in `src/lib/SettingsBounds.sol`. the types are narrow so the whole struct packs into three storage slots
+/// (a hot path reads it with a handful of loads). docs/FLOW.md section 2 has the meaning of every field
+struct Settings {
+    /// share of a bid priced flat per credit, bps. 10_000 is flat, 0 is per score point
+    uint16 flatBps;
+    /// the score a flat credit is priced as and the "average credit" of the funded rule, 1e4 scale
+    uint32 avgScore;
+    /// eth rate climb per hour at the start of a climb, bps
+    uint16 climbBaseBps;
+    /// the climb per hour doubles every this many seconds since the last fill
+    uint32 climbDoubleEvery;
+    uint16 climbMaxBps;
+    /// fall of the eth rate when the whole pot is spent, bps
+    uint16 dropBps;
+    /// share of the pot that may be spent per hour window, bps
+    uint16 spendCapBps;
+    uint16 bonusCapBps;
+    uint16 tipSavingsBps;
+    uint16 tipCapBps;
+    /// compose gas reimbursement, bps of gas cost
+    uint16 reimburseBps;
+    /// cap of the reimbursement, bps of the statement cost
+    uint16 reimburseCapBps;
+    /// auction reserve, bps of the statement cost
+    uint16 reserveBps;
+    /// seconds an auction runs from its first bid
+    uint32 auctionDuration;
+    /// seconds an eth lane statement must have been listed without a bid before phase 2 may redeem it
+    uint32 exitAfter;
+    /// share of sale proceeds that goes to the coin buyback, bps
+    uint16 saleToBuybackBps;
+    /// share of exit token from eth lane exits that goes to the coin buyback, bps
+    uint16 exitToBuybackBps;
+    uint128 buybackSlice;
+    /// blocks between two coin buybacks
+    uint16 buybackDelay;
+    uint16 keeperTipBps;
+    /// exit rate cap and floor, bps of score
+    uint16 xRateCap;
+    uint16 xRateFloor;
+    uint16 xRateClimbPerHour;
+    uint16 xRateDropPerCredit;
+    /// seconds
+    uint32 xAuctionHalfLife;
+    /// credits worth of exit token per exit buyback slice
+    uint16 exitSliceCredits;
 }
 
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
@@ -112,6 +144,8 @@ struct Stack {
     address factory;
     address locker;
     address escrow;
+    /// the pnd auction house factory. the Core creates its own house through it in the constructor
+    address auctionFactory;
 }
 
 library Mainnet {
@@ -140,9 +174,39 @@ library Mainnet {
     uint24 internal constant POOL_FEE = 0x800000;
     int24 internal constant TICK_SPACING = 200;
 
-    /// the default economics: the engine as specified, gate off
-    function defaultEcon() internal pure returns (Econ memory) {
-        return Econ({auctionStartX: 40_000, auctionFloorX: 12_000, dropBps: 1_000, inventoryGate: 0});
+    /// the pnd auction house factory, live and verified (docs/reference/pnd)
+    address internal constant AUCTION_FACTORY = 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63;
+
+    /// the launch values of docs/FLOW.md section 2
+    function defaultSettings() internal pure returns (Settings memory) {
+        return Settings({
+            flatBps: 10_000,
+            avgScore: 4_330_000,
+            climbBaseBps: 100,
+            climbDoubleEvery: 24 hours,
+            climbMaxBps: 800,
+            dropBps: 2_000,
+            spendCapBps: 2_000,
+            bonusCapBps: 2_500,
+            tipSavingsBps: 1_000,
+            tipCapBps: 200,
+            reimburseBps: 11_000,
+            reimburseCapBps: 500,
+            reserveBps: 9_000,
+            auctionDuration: 24 hours,
+            exitAfter: 72 hours,
+            saleToBuybackBps: 5_000,
+            exitToBuybackBps: 5_000,
+            buybackSlice: 1 ether,
+            buybackDelay: 25,
+            keeperTipBps: 50,
+            xRateCap: 9_700,
+            xRateFloor: 3_000,
+            xRateClimbPerHour: 100,
+            xRateDropPerCredit: 20,
+            xAuctionHalfLife: 6 hours,
+            exitSliceCredits: 20
+        });
     }
 
     /// the default stack: the live artcoins deployment
@@ -154,7 +218,8 @@ library Mainnet {
             poolFee: POOL_FEE,
             factory: ARTCOINS_FACTORY,
             locker: LP_LOCKER,
-            escrow: FEE_ESCROW
+            escrow: FEE_ESCROW,
+            auctionFactory: AUCTION_FACTORY
         });
     }
 }

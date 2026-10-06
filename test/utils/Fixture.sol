@@ -6,7 +6,8 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Core} from "../../src/Core.sol";
 import {ControllerV1} from "../../src/ControllerV1.sol";
-import {Lane, ICredits, IStatements, Mainnet, Econ} from "../../src/interfaces/Interfaces.sol";
+import {Lane, ICredits, IStatements, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
+import {IAuctionHouse, IAuctionFactory} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
 import {LaunchConfig} from "../../script/LaunchConfig.sol";
@@ -38,6 +39,8 @@ abstract contract Fixture is Test, SystemDeployer {
 
     /// @dev exit token base units per 1e4 scaled score point reported by the stand in exit module
     uint256 internal constant UNIT = 1e10;
+    /// @dev the real house is called with at least this gas by `_endAuction` (it needs 580k to honor its delivery stipend)
+    uint256 internal constant END_GAS = 2_000_000;
     /// @dev the sniper window of the launch, seconds
     uint256 internal constant SNIPER_WINDOW = 1800;
     bytes32 internal constant FIXTURE_SALT = keccak256("credits-engine fixture coin");
@@ -68,6 +71,8 @@ abstract contract Fixture is Test, SystemDeployer {
     Core internal core;
     IArtCoinsToken internal coin;
     ControllerV1 internal ctl;
+    /// @dev the pnd auction house the core created in its constructor, through the real live factory
+    IAuctionHouse internal house;
     PoolKey internal launchKey;
     bytes32 internal poolId;
     TestSwapRouter internal router;
@@ -112,10 +117,10 @@ abstract contract Fixture is Test, SystemDeployer {
     /// @notice state right before the compose, valid while `isComposed`. revert to it to compose again
     uint256 internal preComposeSnap;
 
-    /// @notice the economic dials the fixture core is deployed with. the default is the engine as specified. a suite
-    /// that tests another set overrides this
-    function _econ() internal view virtual returns (Econ memory) {
-        return Mainnet.defaultEcon();
+    /// @notice the settings the fixture core is deployed with. the default is the launch values of docs/FLOW.md. a
+    /// suite that tests another set overrides this
+    function _settings() internal view virtual returns (Settings memory) {
+        return Mainnet.defaultSettings();
     }
 
     function setUp() public virtual {
@@ -137,7 +142,7 @@ abstract contract Fixture is Test, SystemDeployer {
         lc = defaultConfig();
         // the core tests are written against this opening bid, whatever the launch default is
         lc.rateStart = 4e12;
-        lc.econ = _econ();
+        lc.settings = _settings();
         lc.owner = owner;
         lc.creator = creator;
         lc.name = "Fixture Coin";
@@ -149,6 +154,7 @@ abstract contract Fixture is Test, SystemDeployer {
         core = Core(payable(d.core));
         coin = IArtCoinsToken(d.coin);
         ctl = ControllerV1(d.controller);
+        house = core.HOUSE();
         launchKey = d.launchKey;
         poolId = d.poolId;
         launchTime = block.timestamp;
@@ -321,6 +327,76 @@ abstract contract Fixture is Test, SystemDeployer {
         isComposed = true;
     }
 
+    // ------------------------------------------------------------------ statement auctions on the real house
+
+    /// @notice the live status of a statement as the core reads it from the house
+    struct Live {
+        Core.StatementStatus status;
+        uint256 auctionId;
+        uint256 reserve;
+        uint256 bid;
+        uint64 endTime;
+    }
+
+    /// @notice the live status of a statement (see `Core.statementStatus`)
+    function _live(uint256 sid) internal view returns (Live memory l) {
+        (l.status, l.auctionId, l.reserve, l.bid, l.endTime) = core.statementStatus(sid);
+    }
+
+    /// @notice the raw auction record of a statement on the house, empty when there is none
+    function _auctionOf(uint256 sid) internal view returns (IAuctionHouse.Auction memory) {
+        return house.getAuction(_live(sid).auctionId);
+    }
+
+    /// @notice `who` bids `amount` eth on the auction of statement `sid`, directly on the house. `who` is funded for it
+    function _bid(address who, uint256 sid, uint256 amount) internal {
+        uint256 id = _live(sid).auctionId;
+        vm.deal(who, who.balance + amount);
+        vm.prank(who);
+        house.createBid{value: amount}(id);
+    }
+
+    /// @notice warps to the end of the auction of statement `sid` and settles it as a stranger on the house. the
+    /// statement goes to the winner, the proceeds are credited to the core on the house until `collectSales`
+    function _endAuction(uint256 sid) internal {
+        Live memory l = _live(sid);
+        vm.warp(l.endTime);
+        vm.prank(address(0xE4D));
+        house.endAuction{gas: END_GAS}(l.auctionId);
+    }
+
+    /// @notice the eth the house owes the core: sale proceeds not yet collected
+    function _owedByHouse() internal view returns (uint256) {
+        return house.pendingRefunds(address(core));
+    }
+
+    /// @notice a stranger collects the sale proceeds. returns the eth the house owed
+    function _collectSales() internal returns (uint256 owed) {
+        owed = _owedByHouse();
+        vm.prank(address(0xC011));
+        core.collectSales();
+    }
+
+    /// @notice the reserve a statement of `cost` gets under the settings now
+    function _reserveFor(uint256 cost) internal view returns (uint256) {
+        return cost * core.settings().reserveBps / 10_000;
+    }
+
+    /// @notice the owner changes the settings
+    function _setSettings(Settings memory s) internal {
+        vm.prank(owner);
+        core.setSettings(s);
+    }
+
+    /// @notice composes, bids the reserve with `bidder`, ends the auction and returns the statement id. the winner now
+    /// holds the statement, the proceeds sit in the house
+    function _sellStatement(address bidder) internal returns (uint256 sid, uint256 price) {
+        sid = _composeOnce().sid;
+        price = _live(sid).reserve;
+        _bid(bidder, sid, price);
+        _endAuction(sid);
+    }
+
     // ------------------------------------------------------------------ owner actions
 
     function _timelock(Core.Action action, bytes memory data) internal {
@@ -351,7 +427,7 @@ abstract contract Fixture is Test, SystemDeployer {
     /// exit token into `xToBuyback`. needs phase 2. returns the exit token the core received
     function _fillExitBuyback() internal returns (uint256 received) {
         Composed memory c = _composeOnce();
-        vm.warp(block.timestamp + core.AUCTION_LENGTH());
+        vm.warp(block.timestamp + core.settings().exitAfter);
         uint256 before = xt.balanceOf(address(core));
         core.exitStatement(c.sid);
         received = xt.balanceOf(address(core)) - before;

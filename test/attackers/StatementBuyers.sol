@@ -2,26 +2,30 @@
 pragma solidity ^0.8.28;
 
 import {Core} from "../../src/Core.sol";
+import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 
-/// a buyer that cannot receive statements, so the core's transfer to it must revert.
-contract DeafBuyer {
-    function buy(Core c, uint256 sid) external payable {
-        c.buyStatement{value: msg.value}(sid);
+/// a bidder that cannot receive statements and cannot receive eth, so an outbid refund to it is credited on the house.
+/// it has no `onERC721Received`, no `receive` and no fallback
+contract DeafBidder {
+    function bid(IAuctionHouse house, uint256 auctionId) external payable {
+        house.createBid{value: msg.value}(auctionId);
     }
 
-    receive() external payable {}
+    function pull(IAuctionHouse house, address payable to) external {
+        house.withdrawRefundTo(to);
+    }
 }
 
-/// tries to re enter the core while it receives the statement.
-contract ReentrantBuyer {
+/// bids on a statement auction and tries to re enter the core when it receives a statement or eth
+contract ReentrantBidder {
     Core internal core;
 
     constructor(Core c) {
         core = c;
     }
 
-    function buy(uint256 sid) external payable {
-        core.buyStatement{value: address(this).balance}(sid);
+    function bid(IAuctionHouse house, uint256 auctionId) external payable {
+        house.createBid{value: msg.value}(auctionId);
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external returns (bytes4) {
@@ -29,5 +33,8 @@ contract ReentrantBuyer {
         return this.onERC721Received.selector;
     }
 
-    receive() external payable {}
+    receive() external payable {
+        try core.collectSales() {} catch {}
+        try core.skim() {} catch {}
+    }
 }
