@@ -260,12 +260,14 @@ contract ReviewMatrixConfigTest is ReviewHarness {
         } else if (i == 5) {
             m = _m("rateStart 1.54e14 (10x the launch day value, in bounds)", Class.Hash);
             m.c.rateStart = 1.54e14;
+            m.c.settings.rateCap = 1.54e14;
         } else if (i == 6) {
             m = _m("rateStart 1e11 (the lowest edge)", Class.Hash);
             m.c.rateStart = 1e11;
         } else if (i == 7) {
             m = _m("rateStart 1e15 (the highest edge)", Class.Hash);
             m.c.rateStart = 1e15;
+            m.c.settings.rateCap = 1e15;
         } else if (i == 8) {
             m = _m("token creation code, one byte changed", Class.Revert);
             m.c.tokenCodeFile = MUT_TOKEN;
@@ -372,10 +374,10 @@ contract ReviewMatrixConfigTest is ReviewHarness {
 contract ReviewMatrixSettingsTest is ReviewHarness {
     // ------------------------------------------------------------------ group C: every settings field
 
-    uint256 internal constant N_SETTINGS = 130;
+    uint256 internal constant N_SETTINGS = 135;
 
     /// @dev a plausible value that is not the launch value, inside the bounds, for each field
-    function _wrong() internal pure returns (uint256[26] memory) {
+    function _wrong() internal pure returns (uint256[27] memory) {
         return [
             uint256(5000),
             3_000_000,
@@ -402,7 +404,8 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             200,
             40,
             12 hours,
-            40
+            40,
+            100_000_000_000_000
         ];
     }
 
@@ -419,10 +422,10 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// @dev kinds: 0 above the top, 1 below the bottom, 2 a plausible wrong value, 3 the top edge, 4 the bottom edge.
     /// an empty label means the field has no such case
     function _mutSettings(uint256 k) internal view returns (Mut memory m) {
-        uint256 f = k % 26;
-        uint256 kind = k / 26;
-        uint256[26] memory lo = SettingsFields.lo();
-        uint256[26] memory hi = SettingsFields.hi();
+        uint256 f = k % 27;
+        uint256 kind = k / 27;
+        uint256[27] memory lo = SettingsFields.lo();
+        uint256[27] memory hi = SettingsFields.hi();
         string memory nm = _trim(SettingsFields.names()[f]);
         m = _m("", kind <= 1 ? Class.Pre : Class.Hash);
         Settings memory s = m.c.settings;
@@ -447,6 +450,8 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             if (lo[f] == 0 && f != 4 && f != 20) return m;
             if (f == 4) s.climbMaxBps = s.climbBaseBps;
             else if (f == 20) s.xRateCap = s.xRateFloor;
+            // the lowest rate cap that still holds the launch rate
+            else if (f == 26) s.rateCap = uint64(base.rateStart);
             else SettingsFields.set(s, f, lo[f]);
             m.label = string.concat("settings.", nm, " the bottom edge");
         }
@@ -461,19 +466,19 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// the settings group in parts: every field above the top and below the bottom, a plausible wrong value for every
     /// field, then the edges that must still be accepted
     function test_matrix_settingsViolations() public {
-        _matrix(2, 0, 52);
+        _matrix(2, 0, 54);
     }
 
     function test_matrix_settingsWrongValues() public {
-        _matrix(2, 52, 78);
+        _matrix(2, 54, 81);
     }
 
     function test_matrix_settingsTopEdges() public {
-        _matrix(2, 78, 104);
+        _matrix(2, 81, 108);
     }
 
     function test_matrix_settingsBottomEdges() public {
-        _matrix(2, 104, N_SETTINGS);
+        _matrix(2, 108, N_SETTINGS);
     }
 }
 

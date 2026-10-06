@@ -121,7 +121,12 @@ contract ReviewDeployTest is ReviewHarness {
     }
 
     function _newCore(LaunchConfig memory c, address coinAt, address controller) private returns (address) {
-        return address(new Core(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings));
+        return address(_make(c, coinAt, controller));
+    }
+
+    /// @dev a frame of its own for the constructor call: the 27 field settings struct leaves no room for more locals
+    function _make(LaunchConfig memory c, address coinAt, address controller) private returns (Core) {
+        return new Core(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings);
     }
 
     function _launchTx(LaunchConfig memory c, address coreAt) private returns (address) {
@@ -523,7 +528,10 @@ contract ReviewFundedTest is Fixture {
     function _newCore(uint256 rate) internal returns (Core c) {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
         ControllerV1 ctl2 = new ControllerV1(predicted);
-        c = new Core(owner, address(coin), address(ctl2), Mainnet.defaultStack(), rate, Mainnet.defaultSettings());
+        Settings memory s = Mainnet.defaultSettings();
+        // any opening rate in the bounds needs a rate cap at or above it
+        s.rateCap = uint64(1e15);
+        c = _make(rate, address(ctl2), s);
         assertEq(address(c), predicted);
     }
 
@@ -532,6 +540,10 @@ contract ReviewFundedTest is Fixture {
         vm.prank(Mainnet.SKIM_HOOK);
         (bool ok,) = address(c).call{value: amt}("");
         assertTrue(ok);
+    }
+
+    function _make(uint256 rate, address controller, Settings memory s) internal returns (Core) {
+        return new Core(owner, address(coin), controller, Mainnet.defaultStack(), rate, s);
     }
 
     function _check(Core c) internal view {
@@ -596,8 +608,13 @@ contract ReviewFundedTest is Fixture {
         new Core(owner, address(coin), predicted, st, 1e11 - 1, Mainnet.defaultSettings());
         vm.expectRevert(Core.BadRate.selector);
         new Core(owner, address(coin), predicted, st, 1e15 + 1, Mainnet.defaultSettings());
-        Core lo = new Core(owner, address(coin), predicted, st, 1e11, Mainnet.defaultSettings());
-        Core hi = new Core(owner, address(coin), address(1), st, 1e15, Mainnet.defaultSettings());
+        // the opening rate may not sit above the rate cap (1.232e14 at the launch values)
+        vm.expectRevert(Core.BadRate.selector);
+        new Core(owner, address(coin), predicted, st, 1.233e14, Mainnet.defaultSettings());
+        Settings memory top = Mainnet.defaultSettings();
+        top.rateCap = uint64(1e15);
+        Core lo = new Core(owner, address(coin), predicted, st, 1e11, top);
+        Core hi = new Core(owner, address(coin), address(1), st, 1e15, top);
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.ethRate(), 1e15);
         // funded thresholds: five average credits at the rate

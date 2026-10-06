@@ -42,28 +42,28 @@ the coin is an `ArtCoinsToken` launched through the factory, not our code. toolc
 
 ## 2. settings
 
-one `Settings` struct in Core storage (a fixed slot shared with `CoreLib`, three packed words), one owner function `setSettings(Settings)` and the `settings()` view. every economic number is a setting. nothing economic is a constant or an immutable, except what the artcoins pool fixes at launch (below). the bounds are wide: they stop typos and keep the hard rule of section 10 true, because every tip, reimbursement and keeper reward stays capped. `setSettings` checkpoints the eth rate and the exit rate first, so no climb is credited under the wrong numbers, then validates every field, stores them at once and emits the whole struct. `setRate(uint256)` resets the current eth limit within [1e11, 1e15] wei per point and `setXRate(uint256)` the exit rate within its floor and cap, each with its own event. `rateStart` is the constructor input and the opening value.
+one `Settings` struct in Core storage (a fixed slot shared with `CoreLib`, three packed words), one owner function `setSettings(Settings)` and the `settings()` view. every economic number is a setting. nothing economic is a constant or an immutable, except what the artcoins pool fixes at launch (below). the bounds stop typos and keep every tip, reimbursement and keeper reward capped (section 10). they are also tightened where a wider range had no honest use: the spend cap is at most 5_000, the drop at least 500, the average score at most 6_000_000, the reserve at least 3_000, the auction at least 6 hours, `exitAfter` at least 1 hour and the buyback slice at most 5 ether. they do not bound the price the owner sets for credits (section 10). `setSettings` checkpoints the eth rate and the exit rate first, so no climb is credited under the wrong numbers, then validates every field, stores them at once and emits the whole struct. `setRate(uint256)` resets the current eth limit within [1e11, 1e15] wei per point and at most `rateCap` and `setXRate(uint256)` the exit rate within its floor and cap, each with its own event. `rateStart` is the constructor input and the opening value.
 
 | setting | launch value | bounds | meaning |
 |---|---|---|---|
 | `flatBps` | 10_000 | 0 to 10_000 | share of the bid priced flat per credit. 10_000 is flat, 0 is per score point |
-| `avgScore` | 4_330_000 | 800_000 to 8_000_000 | the score a flat credit is priced as, and the "average credit" of the funded rule (1e4 scale, 433 points) |
+| `avgScore` | 4_330_000 | 800_000 to 6_000_000 | the score a flat credit is priced as, and the "average credit" of the funded rule (1e4 scale, 433 points) |
 | `climbBaseBps` | 100 | 0 to 1_000 | rate climb per hour at the start of the tiers |
 | `climbDoubleEvery` | 24 hours | 1 hour to 30 days | the climb doubles every this long without a fill |
 | `climbMaxBps` | 800 | `climbBaseBps` to 2_000 | the climb per hour is capped here |
-| `dropBps` | 2_000 | 0 to 5_000 | drop of the rate for a spend of the whole pot |
-| `spendCapBps` | 2_000 | 100 to 10_000 | share of the pot spendable per hour window |
+| `dropBps` | 2_000 | 500 to 5_000 | drop of the rate for a spend of the whole pot |
+| `spendCapBps` | 2_000 | 100 to 5_000 | share of the pot spendable per hour window |
 | `bonusCapBps` | 2_500 | 0 to 5_000 | cap of the controller bonus on a credit's price |
 | `tipSavingsBps` | 1_000 | 0 to 2_500 | keeper tip as a share of the savings on a listing |
 | `tipCapBps` | 200 | 0 to 500 | cap of that tip as a share of the cost |
 | `reimburseBps` | 11_000 | 0 to 15_000 | compose reimbursement as a share of gas cost |
 | `reimburseCapBps` | 500 | 0 to 1_000 | cap of the reimbursement as a share of statement cost |
-| `reserveBps` | 9_000 | 1_000 to 40_000 | auction reserve as bps of statement cost |
-| `auctionDuration` | 24 hours | 1 hour to 30 days | runs from the first bid |
-| `exitAfter` | 72 hours | 0 to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
+| `reserveBps` | 9_000 | 3_000 to 40_000 | auction reserve as bps of statement cost |
+| `auctionDuration` | 24 hours | 6 hours to 30 days | runs from the first bid |
+| `exitAfter` | 72 hours | 1 hour to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
 | `saleToBuybackBps` | 5_000 | 0 to 10_000 | share of sale proceeds that goes to the coin buyback, the rest to the pot |
 | `exitToBuybackBps` | 5_000 | 0 to 10_000 | share of exitToken from eth lane exits that goes to the exit auction |
-| `buybackSlice` | 1 ether | 0.01 to 100 ether | eth per buyback |
+| `buybackSlice` | 1 ether | 0.01 to 5 ether | eth per buyback |
 | `buybackDelay` | 25 | 1 to 7_200 blocks | blocks between buybacks |
 | `keeperTipBps` | 50 | 0 to 500 | buyback keeper tip as a share of the slice |
 | `xRateCap` / `xRateFloor` | 9_700 / 3_000 | floor at most cap at most 10_000 | bounds of the exit bid in bps of score |
@@ -71,6 +71,7 @@ one `Settings` struct in Core storage (a fixed slot shared with `CoreLib`, three
 | `xRateDropPerCredit` | 20 | 0 to 1_000 | exit bid drop per credit bought |
 | `xAuctionHalfLife` | 6 hours | 10 minutes to 30 days | exitToken auction price halving time |
 | `exitSliceCredits` | 20 | 1 to 1_000 | exitToken auction slice, in average credits |
+| `rateCap` | 123_200_000_000_000 (8 * `rateStart`) | 1e11 to 1e15, the rate bounds | the most the eth rate can ever be, wei per point. the climb stops at the lower of the funded clamp and `rateCap`, `setRate` refuses a value above it, and a lower cap pulls the rate down to it at the checkpoint. "never pay more than this per credit" |
 
 other numbers. `SUPPLY` (1,000,000,000e18, read by the exit auction opening price and checked against the launch supply), `XRATE_START` (6000 bps), `TIMELOCK` (7 days) and `OVERPRINT_CAP_PER_DAY` (8) are constants. the skim split of the pool (9.5 points to the engine, 0.5 to the creator, anti sniper 90 to 10 over 30 minutes) is fixed inside the artcoins pool at launch and cannot be made adjustable here. the 5 percent raise and the 15 minute extension of an auction are fixed in the house.
 
@@ -86,10 +87,10 @@ rate rules, as built:
 
 | rule | what it does |
 |---|---|
-| opening | `RATE_START`, constructor input in [1e11, 1e15], 75 percent of the market price of a credit on launch day: `rateStart = 0.75 * price in wei * 1e4 / avgScore`, default 1.54e13 for a market price of 0.0089 eth |
+| opening | `RATE_START`, constructor input in [1e11, 1e15] and at most `rateCap` (the constructor reverts `BadRate` otherwise), 75 percent of the market price of a credit on launch day: `rateStart = 0.75 * price in wei * 1e4 / avgScore`, default 1.54e13 for a market price of 0.0089 eth |
 | climb | lazy and checkpointed. `climbBaseBps` per hour, doubling every `climbDoubleEvery` since the last fill, at most `climbMaxBps`. at launch values 100, 200, 400, 800 bps per hour in 24 hour tiers |
 | funded | the hourly cap can afford one average credit at the stored rate: `ethPot * spendCapBps >= avgScore * rate`. unfunded, the rate does not climb |
-| clamp | the climb stops at `ethPot * spendCapBps / avgScore`, the point where the hourly cap no longer buys one average credit, so the bid never climbs where nobody can sell into |
+| clamp | the climb stops at `min(ethPot * spendCapBps / avgScore, rateCap)`: the point where the hourly cap no longer buys one average credit, so the bid never climbs where nobody can sell into, and never above the owner's `rateCap`. a lower `rateCap` pulls the stored rate down to it in `setSettings`, `setRate` refuses a value above it |
 | drop | every spend of `x` from pot `p` drops the rate by `rate * dropBps / 10_000 * min(x, p) / p` and sets `lastFillTime`. for `buyListing`, `x = cost + tip` |
 | hourly cap | a fixed window. the first spend after `windowStart + 1 hour` opens a new window with `windowPot = ethPot`. a spend needs `windowSpent + x <= windowPot * spendCapBps / 10_000`. tips count, gas reimbursements do not |
 | gate | none. unsold statements never close the bid, stop the climb or slow a fill |
@@ -122,7 +123,7 @@ forbidden targets, checked when a target is added and again at call time: Credit
 
 ## 6. compose and listing
 
-`compose()` (eth lane) and `composeExit()` (exit lane, phase 2) ask the controller for a page, pull 80 credits and build a Statement through the live Statements contract. the returned id must equal `Statements.supply()` and be owned by the core. anyone may call and is repaid `min(gasUsed * basefee * reimburseBps, reimburseCapBps of cost, ethPot)`, gas measured from entry plus 50,000 for the work after, plus 350,000 for the listing on the eth lane. the exit lane has no eth cost basis, so its cap is notional (`80 * avgScore * ethRate / 1e4`) and nothing is added to the statement cost.
+`compose()` (eth lane) and `composeExit()` (exit lane, phase 2) ask the controller for a page, pull 80 credits and build a Statement through the live Statements contract. the returned id must equal `Statements.supply()` and be owned by the core. anyone may call and is repaid `min(gasUsed * basefee * reimburseBps, reimburseCapBps of cost, ethPot)`, gas measured from entry plus 50,000 for the work after, plus 350,000 for the listing on the eth lane. the exit lane has no eth cost basis, so its cap is notional (`80 * avgScore * RATE_START / 1e4`, at the immutable opening rate, not the live eth rate the owner can set) and nothing is added to the statement cost. the controller's `nextPage` read gets a fixed gas cap (500,000, in both lanes; ControllerV1 uses about 73,000 for a full page, measured), so a gas burning controller cannot inflate the reimbursement.
 
 an eth lane statement is listed at once, in the same transaction. `createAuction(sid, Statements, auctionDuration, cost * reserveBps / 10_000, 0)` on the Core's house pulls the statement with `transferFrom` (approved at construction) and returns an auction id that the Core records with `listedAt`. an exit lane statement is held and never listed. the statement record holds cost, auction id, `listedAt`, lane, `held` and `listed`.
 
@@ -189,7 +190,9 @@ the restart rule means the next auction can never start more than 4x below the s
 | freeze | `Freeze` under the 7 day timelock: no controller change after it |
 | queue, execute, cancel | `queue(action, data)`, `execute`, `cancel`, owner only, keyed by `keccak256(abi.encode(action, data))` |
 
-the owner is immutable. **the hard rule: the owner can never move eth, credits, statements, coin or exitToken out of the Core.** there is no function that sends them to the owner or to an address the owner chooses. it holds under every combination of settings, because every outflow is capped by a bound: tips by `tipCapBps` (500 at most) and `tipSavingsBps`, the compose reimbursement by `reimburseCapBps` (1,000 at most) of statement cost, the buyback keeper tip by `keeperTipBps` (500 at most), and credit purchases only pay sellers of real credits at the bid price, and the credits stay in the Core. the controller is read only for the Core: it names credits to compose and a bonus capped by `bonusCapBps`, and the Core enforces every limit itself. what the timelock covers is trust, not custody: a module set by the owner receives statements, and must return at least `rating * unitPerPoint` of a token the owner chose.
+the owner is immutable. **the hard rule: the owner cannot transfer eth, credits, statements, coin or exitToken out of the Core directly.** there is no function that sends them to the owner or to an address the owner chooses. that holds under every combination of settings, because every direct outflow is capped by a bound: tips by `tipCapBps` (500 at most) and `tipSavingsBps`, the compose reimbursement by `reimburseCapBps` (1,000 at most) of statement cost, the buyback keeper tip by `keeperTipBps` (500 at most), and credit purchases only pay sellers of real credits at the bid price, and the credits stay in the Core. the controller is read only for the Core: it names credits to compose and a bonus capped by `bonusCapBps`, and the Core enforces every limit itself. what the timelock covers is trust, not custody: a module set by the owner receives statements, and must return at least `rating * unitPerPoint` of a token the owner chose.
+
+**what the rule does not say.** the owner sets the price the engine pays for a credit, and the owner may sell credits to the engine. so a dishonest owner, or a stolen owner key, can drain the eth pot without transferring anything out: it raises the limit (`setRate` up to 1e15, `rateCap` up to 1e15, `avgScore` up to 6_000_000, `spendCapBps` up to 5_000, `dropBps` down to 500) and sells credits to the engine at an inflated price through a seller it controls. the credits stay in the Core but are worth a small part of what was paid. the bounds limit the pace, not the price. measured on the fork with the tightened bounds (`test_ACCEPTED_ownerCanOverpayAnAccompliceSeller`, `test_ACCEPTED_ownerPerDayWorstCase`): per transaction (one block, every lever at its loosest, rate 1e15, `avgScore` 6_000_000): 47.4 percent of a 10 eth pot paid out (the spend cap allows 50 percent) for credits worth 0.07 eth, 0.6 eth paid per credit; per day (the owner acting every hour for 24 hours, loosest settings): 99.99 percent of the pot; at the launch settings with only `setRate` under the launch `rateCap` (no `setSettings`): 19.3 percent in the first window and 98.96 percent in 24 hours, for credits worth 1.69 eth against 9.9 eth paid. after that every eth of fee inflow can be taken the same way. holders therefore trust the owner key, the same trust as for the token admin. the owner accepted this (no timelock and no raise guard on the settings, they are adjustable at once). a multisig owner and public `SettingsSet` and `RateSet` events are the mitigation.
 
 what the owner can do at once is change every economic number: the bid, the reserve, the split of proceeds, the pace. holders trust the owner not to do so against them, the same trust as for the token admin. every change is one event with the whole struct, so it can be watched.
 
@@ -233,7 +236,7 @@ SPEC section 10 invariants hold, with these changes.
 |---|---|
 | 3 | a statement only leaves the Core's control by a house auction that cleared at or above its reserve at listing time, by an exit that returned at least `rating * unitPerPoint`, or as the top of an overprint |
 | 5 | pots never exceed what the Core holds, and eth owed to the Core by the house is not counted in the pots until `collectSales` books it |
-| new | the owner cannot move assets out (section 10), under every setting inside the bounds |
+| new | the owner cannot transfer assets out directly (section 10), under every setting inside the bounds. the owner can still overpay a seller of credits it controls, at a bounded pace (section 10, item 28 of section 14) |
 | new | no state of the statement stock closes the bid, stops the climb or stops a fill |
 
 ## 14. accepted properties and risks for the owner to confirm
@@ -242,8 +245,8 @@ none of these is a code change in this repo. each is a deliberate departure from
 
 | # | item | what it means |
 |---|---|---|
-| 1 | the owner can change every economic number at once | the bid, the reserve, the split of proceeds, the buyback slice, the exit bid, the exit auction. no timelock, no delay. holders trust the owner. only the bounds limit it, and the hard rule of section 10 holds under all of them |
-| 2 | `reserveBps` can be set as low as 1,000 | anyone can then buy statements at a tenth of their cost. selling below cost is the stated goal, but the floor of the bound is far below any sane value. `repriceStatement` moves old listings, so a cut reaches the whole stock at the price of one call each |
+| 1 | the owner can change every economic number at once | the bid, the reserve, the split of proceeds, the buyback slice, the exit bid, the exit auction. no timelock, no delay. holders trust the owner. only the bounds limit it. the owner cannot transfer assets out directly under any of them, but it can overpay a seller it controls (item 28) |
+| 2 | `reserveBps` can be set as low as 3,000 | anyone can then buy statements at 30 percent of their cost, and a stranger has at least 6 hours (`auctionDuration` minimum) to bid over the first bid. selling below cost is the stated goal. `repriceStatement` moves old listings, so a cut reaches the whole stock at the price of one call each. a raise reaches a listing only through `repriceStatement`, so reprice in the same batch (docs/DEPLOY.md) |
 | 3 | the 5 percent raise and the 15 minute extension are fixed in the house | the Core cannot change them. the owner cannot change the house, it is non upgradeable. the house fee is fixed at the factory default at creation (0 at the pin) |
 | 4 | sale proceeds sit in the house until someone calls `collectSales` | they are in no pot, so they do not fund buying or the buyback until then. `buyback()` collects first. a keeper should call `collectSales` regularly |
 | 5 | the english auction is in practice a fixed price at the reserve | the simulation finds a second bidder in about a third of sold auctions at most, and the price is on average 2 percent over the reserve. the reserve is the price |
@@ -258,14 +261,15 @@ none of these is a code change in this repo. each is a deliberate departure from
 | 14 | referral cap is 0, `notify` is a no op | eth received that way is booked later by `skim`, so a raised cap can never revert a swap |
 | 15 | hourly cap is a fixed window | two adjacent windows can spend twice the share across a boundary. tips count against it, gas reimbursements do not |
 | 16 | funded clamp equals the hourly cap | the bid cannot climb above what the cap lets anyone sell into. with a pot under one average credit over the cap the rate does not climb at all |
-| 17 | eth buyback has no min out | the swap is exact in with no price floor. the launch liquidity is locked, and the slice and the delay bound the exposure |
+| 17 | eth buyback has no min out | the swap is exact in with no price floor. the launch liquidity is locked, and the slice (at most 5 ether) and the delay bound the exposure: a sandwich of a 1 or 5 eth slice loses money for the attacker after both skims |
 | 18 | exit auction sells at a discount | the opening price asks the whole supply for a slice and falls by half every `xAuctionHalfLife`. buyers take exitToken below its market value whenever they wait. the restart rule keeps each start at least a quarter of the last, and the pace is one slice per half life, so a large exit batch waits months |
 | 19 | `unitPerPoint` is fixed | read once when the exitModule is set. the module cannot change what the Core requires afterwards |
 | 20 | fee on transfer or rebasing exitToken unsupported | pot accounting and the balance delta checks assume the amount sent is the amount received |
 | 21 | credits sent to the Core outside the doors are stuck | they are in no pile. same for eth from a non hook sender until `skim` books it |
-| 22 | the stack is a deploy input | the Core stores the stack it launched on and cannot be repointed. a launch on a new artcoins version is a new Core. `rateStart` is a deploy input in [1e11, 1e15] |
+| 22 | the stack is a deploy input | the Core stores the stack it launched on and cannot be repointed. a launch on a new artcoins version is a new Core. `rateStart` is a deploy input in [1e11, 1e15], at most `rateCap` |
 | 23 | SPEC sections on the Coin, FeeHook and Launcher do not apply | replaced by the live artcoins token, skim hook and factory |
 | 24 | third party fee income | eth pushed by the hook from any open pool that names the core as bounty recipient is booked as fee income. it is a donation by the sender, so `FeesAdded` is not proof of organic volume |
 | 25 | cost basis in `buyListing` | a hook push that lands inside the target call lowers the measured cost, so the stored basis and the reserve are understated by it. the books stay exact |
 | 26 | venue tax bypass | the venue tax can be bypassed with a flash liquidity add and remove in the canonical pool, so model fee income on canonical pool volume only |
 | 27 | the library | `CoreLib` is a deployed contract the Core links against. it is stateless and its address depends only on its bytecode. a proxy is not used anywhere |
+| 28 | the owner can overpay a seller of credits it controls | see section 10. accepted by the owner. at most `spendCapBps` (5,000) of the pot per hour window, one window per hour. measured worst case 47.4 percent of the pot per transaction (bound 50 percent) and 99.99 percent per day with every setting loosened (98.96 percent per day with only `setRate` at the launch settings). mitigations are social: a multisig owner, `SettingsSet` and `RateSet` events, and `rateCap` as the owner's own visible ceiling on the price per credit |

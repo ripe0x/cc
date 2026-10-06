@@ -34,6 +34,7 @@ export const SETTINGS = {
   xRateDropPerCredit: 20,
   xAuctionHalfLife: 6 * 3600,
   exitSliceCredits: 20,
+  rateCap: 123200000000000, // wei per whole point, 8 times rateStart: the eth rate never passes it (climb clamp, setRate)
 };
 export const SETTING_KEYS = Object.keys(SETTINGS);
 
@@ -41,23 +42,23 @@ export const SETTING_KEYS = Object.keys(SETTINGS);
 export function firstViolation(s) {
   const h = 3600, d = 86400;
   if (s.flatBps > 10000) return 'flatBps';
-  if (s.avgScore < 800000 || s.avgScore > 8000000) return 'avgScore';
+  if (s.avgScore < 800000 || s.avgScore > 6000000) return 'avgScore';
   if (s.climbBaseBps > 1000) return 'climbBaseBps';
   if (s.climbDoubleEvery < h || s.climbDoubleEvery > 30 * d) return 'climbDoubleEvery';
   if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2000) return 'climbMaxBps';
-  if (s.dropBps > 5000) return 'dropBps';
-  if (s.spendCapBps < 100 || s.spendCapBps > 10000) return 'spendCapBps';
+  if (s.dropBps < 500 || s.dropBps > 5000) return 'dropBps';
+  if (s.spendCapBps < 100 || s.spendCapBps > 5000) return 'spendCapBps';
   if (s.bonusCapBps > 5000) return 'bonusCapBps';
   if (s.tipSavingsBps > 2500) return 'tipSavingsBps';
   if (s.tipCapBps > 500) return 'tipCapBps';
   if (s.reimburseBps > 15000) return 'reimburseBps';
   if (s.reimburseCapBps > 1000) return 'reimburseCapBps';
-  if (s.reserveBps < 1000 || s.reserveBps > 40000) return 'reserveBps';
-  if (s.auctionDuration < h || s.auctionDuration > 30 * d) return 'auctionDuration';
-  if (s.exitAfter > 365 * d) return 'exitAfter';
+  if (s.reserveBps < 3000 || s.reserveBps > 40000) return 'reserveBps';
+  if (s.auctionDuration < 6 * h || s.auctionDuration > 30 * d) return 'auctionDuration';
+  if (s.exitAfter < h || s.exitAfter > 365 * d) return 'exitAfter';
   if (s.saleToBuybackBps > 10000) return 'saleToBuybackBps';
   if (s.exitToBuybackBps > 10000) return 'exitToBuybackBps';
-  if (s.buybackSlice < 0.01 || s.buybackSlice > 100) return 'buybackSlice';
+  if (s.buybackSlice < 0.01 || s.buybackSlice > 5) return 'buybackSlice';
   if (s.buybackDelay < 1 || s.buybackDelay > 7200) return 'buybackDelay';
   if (s.keeperTipBps > 500) return 'keeperTipBps';
   if (s.xRateCap > 10000) return 'xRateCap';
@@ -66,9 +67,10 @@ export function firstViolation(s) {
   if (s.xRateDropPerCredit > 1000) return 'xRateDropPerCredit';
   if (s.xAuctionHalfLife < 600 || s.xAuctionHalfLife > 30 * d) return 'xAuctionHalfLife';
   if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1000) return 'exitSliceCredits';
+  if (s.rateCap < RATE_MIN || s.rateCap > RATE_MAX) return 'rateCap';
   return null;
 }
-// the eth rate bounds of setRate and rateStart, wei per whole point (Interfaces.sol)
+// the eth rate bounds of setRate, rateStart and rateCap, wei per whole point (Interfaces.sol)
 export const RATE_MIN = 1e11, RATE_MAX = 1e15;
 
 // constants of the Core and of the pool that are not settings
@@ -205,11 +207,12 @@ export class Core {
     const f = this.s.flatBps;
     return (f * (this.s.avgScore / 1e4) + (BPS - f) * pts) / BPS;
   }
-  // the climb stops where the hourly cap no longer buys one average credit (the funded rule as built); the old rule has no clamp
+  // the climb stops where the hourly cap no longer buys one average credit (the funded rule as built) or at rateCap,
+  // whichever is lower; the old rule is a counterfactual with no clamp
   clamp() {
     const s = this.s;
     if (this.p.fundedRule === 'old') return Infinity;
-    return (this.ethPot * W * s.spendCapBps) / s.avgScore;
+    return Math.min((this.ethPot * W * s.spendCapBps) / s.avgScore, s.rateCap);
   }
   ethRate(now) {
     const s = this.s;
@@ -241,12 +244,13 @@ export class Core {
     for (const k of SETTING_KEYS) if (patch[k] !== undefined) next[k] = patch[k];
     const bad = firstViolation(next);
     if (bad) throw new Error('BadSetting ' + bad);
-    if (rate !== undefined && !(rate >= RATE_MIN && rate <= RATE_MAX)) throw new Error('BadRate');
+    if (rate !== undefined && !(rate >= RATE_MIN && rate <= RATE_MAX && rate <= next.rateCap)) throw new Error('BadRate');
     this.checkpoint(now); this.xCheckpoint(now);
     const anchor = this.moduleSet && this.xToBuyback > 0, half = this.s.xAuctionHalfLife, price = anchor ? this.xAuctionPrice(now) : 0;
     this.s = next;
     if (anchor && next.xAuctionHalfLife !== half) { this.xStartPrice = Math.max(price, 1e-12); this.xStartTime = now; }
     this.xRateAtCheckpoint = Math.max(Math.min(this.xRateAtCheckpoint, next.xRateCap), next.xRateFloor);
+    this.rateAtCheckpoint = Math.min(this.rateAtCheckpoint, next.rateCap); // a lower cap pulls the rate down now
     if (rate !== undefined) { this.rateAtCheckpoint = rate; this.checkpointTime = now; }
     this.syncFunded();
     if (this.moduleSet) this.syncXFunded();
@@ -300,7 +304,7 @@ export class Core {
     const p = this.p, s = this.s;
     const gas = p.composeGas + p.COMPOSE_OVERHEAD_GAS + (lane === 'eth' ? p.LIST_GAS : 0);
     const gasEth = (gas * gasPriceGwei * 1e-9 * s.reimburseBps) / BPS;
-    const cap = lane === 'eth' ? costSum : (p.PAGE * s.avgScore * this.ethRate(now)) / 1e4 / W;
+    const cap = lane === 'eth' ? costSum : (p.PAGE * s.avgScore * p.rateStart) / 1e4 / W; // notional at the immutable rateStart, not the live rate (FC-4)
     const reimb = Math.min(gasEth, (cap * s.reimburseCapBps) / BPS, this.ethPot);
     let cost = costSum;
     if (reimb > 0) {

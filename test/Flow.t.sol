@@ -17,7 +17,7 @@ import {MockExitToken} from "./standins/MockExitToken.sol";
 contract FlowTest is Fixture {
     using FixedPointMathLib for uint256;
 
-    uint256 internal constant N = 26;
+    uint256 internal constant N = 27;
 
     // ------------------------------------------------------------------ helpers
 
@@ -40,7 +40,7 @@ contract FlowTest is Fixture {
 
     /// @dev field i of the settings struct, in declaration order
     function _get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[26] memory f = [
+        uint256[27] memory f = [
             uint256(s.flatBps),
             s.avgScore,
             s.climbBaseBps,
@@ -66,7 +66,8 @@ contract FlowTest is Fixture {
             s.xRateClimbPerHour,
             s.xRateDropPerCredit,
             s.xAuctionHalfLife,
-            s.exitSliceCredits
+            s.exitSliceCredits,
+            s.rateCap
         ];
         return f[i];
     }
@@ -99,29 +100,30 @@ contract FlowTest is Fixture {
         else if (i == 22) s.xRateClimbPerHour = uint16(v);
         else if (i == 23) s.xRateDropPerCredit = uint16(v);
         else if (i == 24) s.xAuctionHalfLife = uint32(v);
-        else s.exitSliceCredits = uint16(v);
+        else if (i == 25) s.exitSliceCredits = uint16(v);
+        else s.rateCap = uint64(v);
         // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// @dev the documented lower bound of every field. climbMaxBps is bounded below by climbBaseBps and xRateFloor and
     /// xRateCap by each other, those three are handled by the callers
-    function _lo() internal pure returns (uint256[26] memory) {
+    function _lo() internal pure returns (uint256[27] memory) {
         return [
             uint256(0),
             800_000,
             0,
             1 hours,
             0,
-            0,
+            500,
             100,
             0,
             0,
             0,
             0,
             0,
-            1_000,
+            3_000,
+            6 hours,
             1 hours,
-            0,
             0,
             0,
             0.01 ether,
@@ -132,19 +134,20 @@ contract FlowTest is Fixture {
             0,
             0,
             10 minutes,
-            1
+            1,
+            1e11
         ];
     }
 
-    function _hi() internal pure returns (uint256[26] memory) {
+    function _hi() internal pure returns (uint256[27] memory) {
         return [
             uint256(10_000),
-            8_000_000,
+            6_000_000,
             1_000,
             30 days,
             2_000,
             5_000,
-            10_000,
+            5_000,
             5_000,
             2_500,
             500,
@@ -155,7 +158,7 @@ contract FlowTest is Fixture {
             365 days,
             10_000,
             10_000,
-            100 ether,
+            5 ether,
             7_200,
             500,
             10_000,
@@ -163,11 +166,12 @@ contract FlowTest is Fixture {
             1_000,
             1_000,
             30 days,
-            1_000
+            1_000,
+            1e15
         ];
     }
 
-    function _names() internal pure returns (bytes32[26] memory) {
+    function _names() internal pure returns (bytes32[27] memory) {
         return [
             bytes32("flatBps"),
             "avgScore",
@@ -194,14 +198,15 @@ contract FlowTest is Fixture {
             "xRateClimbPerHour",
             "xRateDropPerCredit",
             "xAuctionHalfLife",
-            "exitSliceCredits"
+            "exitSliceCredits",
+            "rateCap"
         ];
     }
 
     /// @dev a valid settings struct derived from a seed, inside every bound and the two orderings
     function _valid(uint256 seed) internal pure returns (Settings memory s) {
-        uint256[26] memory lo = _lo();
-        uint256[26] memory hi = _hi();
+        uint256[27] memory lo = _lo();
+        uint256[27] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             uint256 x = uint256(keccak256(abi.encode(seed, i)));
             uint256 a = lo[i];
@@ -243,6 +248,7 @@ contract FlowTest is Fixture {
         assertEq(s.xRateDropPerCredit, 20);
         assertEq(s.xAuctionHalfLife, 6 hours);
         assertEq(s.exitSliceCredits, 20);
+        assertEq(s.rateCap, 123_200_000_000_000);
     }
 
     /// @dev write then read of random valid settings: the packed layout the library unpacks matches the compiler's
@@ -255,8 +261,8 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundEdgeIsAccepted() public {
-        uint256[26] memory lo = _lo();
-        uint256[26] memory hi = _hi();
+        uint256[27] memory lo = _lo();
+        uint256[27] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             for (uint256 k; k < 2; ++k) {
                 Settings memory s = Mainnet.defaultSettings();
@@ -274,9 +280,9 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundViolationReverts() public {
-        uint256[26] memory lo = _lo();
-        uint256[26] memory hi = _hi();
-        bytes32[26] memory names = _names();
+        uint256[27] memory lo = _lo();
+        uint256[27] memory hi = _hi();
+        bytes32[27] memory names = _names();
         for (uint256 i; i < N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top
@@ -329,11 +335,12 @@ contract FlowTest is Fixture {
     }
 
     function test_setRate_boundsEventAndReset() public {
+        uint256 cap = core.settings().rateCap;
         vm.startPrank(owner);
         vm.expectRevert(Core.BadRate.selector);
         core.setRate(1e11 - 1);
         vm.expectRevert(Core.BadRate.selector);
-        core.setRate(1e15 + 1);
+        core.setRate(cap + 1);
         vm.expectEmit(address(core));
         emit Core.RateSet(2e13);
         core.setRate(2e13);
@@ -341,6 +348,15 @@ contract FlowTest is Fixture {
         assertEq(core.rateAtCheckpoint(), 2e13);
         assertEq(core.checkpointTime(), block.timestamp);
         core.setRate(1e11);
+        core.setRate(cap);
+        vm.stopPrank();
+        // the top of the rate bounds needs the rate cap raised to it, and nothing passes the bounds
+        Settings memory s = core.settings();
+        s.rateCap = 1e15;
+        _owner(s);
+        vm.startPrank(owner);
+        vm.expectRevert(Core.BadRate.selector);
+        core.setRate(1e15 + 1);
         core.setRate(1e15);
         vm.stopPrank();
     }
@@ -348,6 +364,9 @@ contract FlowTest is Fixture {
     function test_setRate_resyncsFundedFlag() public {
         _potTo(1e16);
         assertTrue(core.funded(), "funded at the opening rate");
+        Settings memory cs = core.settings();
+        cs.rateCap = 1e15;
+        _owner(cs);
         vm.prank(owner);
         core.setRate(1e15);
         assertFalse(core.funded(), "a pot of five average credits at 4e12 cannot fund 1e15");
@@ -427,9 +446,9 @@ contract FlowTest is Fixture {
         _warp(5 hours);
         uint256 old = _climbed(4e12, 100, 5);
         Settings memory s = core.settings();
-        s.avgScore = 8_000_000;
+        s.avgScore = 6_000_000;
         _owner(s);
-        // the pot of 1e16 cannot afford one 8M credit at 4e12 under a 20 percent cap: 2e19 is below 3.2e19
+        // the pot of 1e16 cannot afford one 6M credit at 4e12 under a 20 percent cap: 2e19 is below 2.4e19
         assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
         assertEq(core.ethRate(), old, "unfunded, flat");
@@ -1076,10 +1095,10 @@ contract FlowTest is Fixture {
         vm.prank(alice);
         vm.expectRevert(IAuctionHouse.BidBelowReserve.selector);
         house.createBid{value: old}(id);
-        s.reserveBps = 2_000;
+        s.reserveBps = 3_000;
         _owner(s);
         core.repriceStatement(sid);
-        assertEq(_live(sid).reserve, cost * 2_000 / 10_000, "and down again");
+        assertEq(_live(sid).reserve, cost * 3_000 / 10_000, "and down again");
     }
 
     function test_reprice_refusedWithABidOrWithoutAListing() public {
@@ -1167,7 +1186,7 @@ contract FlowTest is Fixture {
         vm.warp(block.timestamp + 100 days);
         vm.expectRevert(Core.TooEarly.selector);
         core.exitStatement(sid);
-        s.exitAfter = 0;
+        s.exitAfter = 1 hours;
         _owner(s);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(mod));
@@ -1344,6 +1363,11 @@ contract FlowTest is Fixture {
         s.avgScore = 799_999;
         vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, bytes32("avgScore")));
         this.newCoreExternal(s, Mainnet.AUCTION_FACTORY);
+        // the opening rate (4e12) may not sit above the rate cap
+        Settings memory capped = Mainnet.defaultSettings();
+        capped.rateCap = 3.9e12;
+        vm.expectRevert(Core.BadRate.selector);
+        this.newCoreExternal(capped, Mainnet.AUCTION_FACTORY);
         vm.expectRevert(Core.ZeroAddress.selector);
         this.newCoreExternal(Mainnet.defaultSettings(), address(0));
         vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, address(0xBEEF)));
@@ -1462,7 +1486,7 @@ contract FlowTest is Fixture {
         if (kind == 0) {
             core.setSettings(_valid(r));
         } else if (kind == 1) {
-            core.setRate(bound(r >> 8, 1e11, 1e15));
+            core.setRate(bound(r >> 8, 1e11, core.settings().rateCap));
         } else if (kind == 2) {
             Settings memory s = core.settings();
             core.setXRate(bound(r >> 8, s.xRateFloor, s.xRateCap));

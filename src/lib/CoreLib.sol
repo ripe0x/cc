@@ -57,6 +57,7 @@ library CoreLib {
         s.xRateDropPerCredit = ns.xRateDropPerCredit;
         s.xAuctionHalfLife = ns.xAuctionHalfLife;
         s.exitSliceCredits = ns.exitSliceCredits;
+        s.rateCap = ns.rateCap;
         emit SettingsSet(ns);
     }
 
@@ -91,6 +92,7 @@ library CoreLib {
         s.xRateDropPerCredit = uint16(c >> 48);
         s.xAuctionHalfLife = uint32(c >> 64);
         s.exitSliceCredits = uint16(c >> 96);
+        s.rateCap = uint64(c >> 112);
         // forge-lint: disable-end(unsafe-typecast)
     }
 

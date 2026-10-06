@@ -203,6 +203,10 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 private constant COMPOSE_OVERHEAD_GAS = 50_000;
     uint256 private constant LIST_GAS = 350_000;
     uint256 private constant READ_GAS = 200_000;
+    /// gas the controller's `nextPage` may use, in both lanes. a full page of ControllerV1 costs about 73,000 (measured
+    /// in test/ReviewFlowCore.t.sol), so this is about 7 times that. a gas burning controller cannot inflate the
+    /// compose reimbursement past it
+    uint256 private constant PAGE_GAS = 500_000;
     address private constant DEAD = Mainnet.DEAD;
     // word positions in the house's auction record
     uint256 private constant W_FIRST = 2;
@@ -305,7 +309,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (stack_.locker.code.length == 0) revert NoCode(stack_.locker);
         if (stack_.escrow.code.length == 0) revert NoCode(stack_.escrow);
         if (stack_.auctionFactory.code.length == 0) revert NoCode(stack_.auctionFactory);
-        if (!SettingsBounds.rateInBounds(rateStart_)) revert BadRate();
+        if (!SettingsBounds.rateInBounds(rateStart_) || rateStart_ > settings_.rateCap) revert BadRate();
         OWNER = owner_;
         COIN = coin_;
         RATE_START = rateStart_;
@@ -389,14 +393,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// wei per whole point right now, climbed lazily from the checkpoint. it stops climbing where the hourly cap
-    /// (`spendCapBps` of the pot) no longer buys one average credit: `ethPot * spendCap = avgScore * rate`.
+    /// (`spendCapBps` of the pot) no longer buys one average credit: `ethPot * spendCap = avgScore * rate`, and never
+    /// above `rateCap`.
     function ethRate() public view returns (uint256 r) {
         r = rateAtCheckpoint;
         if (!funded) return r;
         Settings storage s = _st();
         return CoreLib.climb(
             r,
-            ethPot * s.spendCapBps / s.avgScore,
+            (ethPot * s.spendCapBps / s.avgScore).min(s.rateCap),
             lastFillTime,
             checkpointTime,
             block.timestamp,
@@ -511,7 +516,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     function _nextPage(Lane lane) private view returns (bool ready, uint256[80] memory ids, uint256 format) {
         (bool ok, bytes memory out) =
-            _ask(controller, abi.encodeCall(IController.nextPage, (lane)), gasleft(), (PAGE + 2) * 32);
+            _ask(controller, abi.encodeCall(IController.nextPage, (lane)), PAGE_GAS, (PAGE + 2) * 32);
         if (!ok) return (false, ids, 0);
         uint256 flag;
         (flag, ids, format) = abi.decode(out, (uint256, uint256[80], uint256));
@@ -708,7 +713,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         }
 
         Settings storage s = _st();
-        uint256 cap = lane == Lane.Eth ? cost : PAGE * s.avgScore * ethRate() / 1e4;
+        uint256 cap = lane == Lane.Eth ? cost : PAGE * s.avgScore * RATE_START / 1e4;
         uint256 gasUsed = gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0);
         uint256 reimbursement =
             (gasUsed * block.basefee * s.reimburseBps / BPS).min(cap * s.reimburseCapBps / BPS).min(ethPot);
@@ -800,8 +805,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         address holder = _holderOf(sid);
         if (holder == address(this)) {
             _list(sid);
-        } else if (holder == address(HOUSE)) {
-            revert BadAuction();
         } else {
             emit StatementSold(sid, st.auctionId, holder);
             _unhold(sid);
@@ -1071,12 +1074,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         address lib = address(CoreLib);
         bytes4 sel = CoreLib.setSettings.selector;
         assembly ("memory-safe") {
-            // the same arguments under the library's selector (a library names a struct in its signature)
-            mstore(0, sel)
-            calldatacopy(4, 4, sub(calldatasize(), 4))
-            if iszero(delegatecall(gas(), lib, 0, calldatasize(), 0, 0)) {
-                returndatacopy(0, 0, returndatasize())
-                revert(0, returndatasize())
+            // the same arguments under the library's selector (a library names a struct in its signature), built above
+            // the free memory pointer
+            let p := mload(0x40)
+            mstore(p, sel)
+            calldatacopy(add(p, 4), 4, sub(calldatasize(), 4))
+            if iszero(delegatecall(gas(), lib, p, calldatasize(), 0, 0)) {
+                returndatacopy(p, 0, returndatasize())
+                revert(p, returndatasize())
             }
         }
         if (anchor && s.xAuctionHalfLife != half) {
@@ -1084,13 +1089,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             xStartTime = uint64(block.timestamp);
         }
         xRateAtCheckpoint = xRateAtCheckpoint.min(s.xRateCap).max(s.xRateFloor);
+        // a lower rate cap pulls the rate down to it now (the checkpoint above is this block)
+        rateAtCheckpoint = rateAtCheckpoint.min(s.rateCap);
         _syncFunded();
         if (module) _syncXFunded();
     }
 
     /// resets the eth limit (wei per whole point) to `rate`, within the rate bounds. the climb restarts from it now
     function setRate(uint256 rate) external onlyOwner nonReentrant {
-        if (!SettingsBounds.rateInBounds(rate)) revert BadRate();
+        if (!SettingsBounds.rateInBounds(rate) || rate > _st().rateCap) revert BadRate();
         rateAtCheckpoint = rate;
         checkpointTime = uint64(block.timestamp);
         _syncFunded();

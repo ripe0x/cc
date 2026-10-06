@@ -280,11 +280,16 @@ contract SeaportTest is SeaportBase {
 
     /// the pot is large enough that the hourly cap clears every ceiling the tests use
     uint256 internal constant POT = 30 ether;
-    /// wei per whole point. a flat credit then costs 0.00087 ether, the highest scoring one at flat 0 near 1.5 ether
-    uint256 internal constant TARGET_RATE = 2e15;
+    /// wei per whole point, the top of the rate bounds. a flat credit then costs 0.433 ether, the highest scoring one at
+    /// flat 0 near 0.75 ether
+    uint256 internal constant TARGET_RATE = 1e15;
 
     function setUp() public override {
         super.setUp();
+        // the launch rate cap (8 times the opening rate) is far below the rate the cases need: raise it to the bounds
+        Settings memory cs = core.settings();
+        cs.rateCap = uint64(TARGET_RATE);
+        _setSettings(cs);
         _fundPot(POT);
         for (uint256 i; i < 900 && core.ethRate() < TARGET_RATE; ++i) {
             _warp(1 hours);

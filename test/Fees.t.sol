@@ -351,11 +351,8 @@ contract ReceiveTest is FeeBase {
         assertTrue(ok);
         emit log_named_uint("receive gas, 20 years, rate 1, pot 1e8 eth", g);
         assertLt(g, 400_000);
-        assertEq(
-            core.rateAtCheckpoint(),
-            (core.ethPot() - 1 ether) * 2000 / uint256(core.settings().avgScore),
-            "climbed to the cap"
-        );
+        uint256 clamp = (core.ethPot() - 1 ether) * 2000 / uint256(core.settings().avgScore);
+        assertEq(core.rateAtCheckpoint(), clamp < core.settings().rateCap ? clamp : core.settings().rateCap, "cap");
     }
 
     function test_receiveGasRoutine() public {
@@ -513,13 +510,14 @@ contract ReceiveSettingsTest is FeeBase {
         s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
         s.flatBps = uint16(_pick(seed, 0, 0, 10_000));
-        s.avgScore = uint32(_pick(seed, 1, 800_000, 8_000_000));
+        s.avgScore = uint32(_pick(seed, 1, 800_000, 6_000_000));
         s.climbBaseBps = uint16(_pick(seed, 2, 0, 1_000));
         s.climbDoubleEvery = uint32(_pick(seed, 3, 1 hours, 30 days));
         s.climbMaxBps = uint16(_pick(seed, 4, s.climbBaseBps, 2_000));
-        s.dropBps = uint16(_pick(seed, 5, 0, 5_000));
-        s.spendCapBps = uint16(_pick(seed, 6, 100, 10_000));
+        s.dropBps = uint16(_pick(seed, 5, 500, 5_000));
+        s.spendCapBps = uint16(_pick(seed, 6, 100, 5_000));
         s.saleToBuybackBps = uint16(_pick(seed, 7, 0, 10_000));
+        s.rateCap = uint64(_pick(seed, 8, 1e11, 1e15));
         // forge-lint: disable-end(unsafe-typecast)
     }
 
@@ -535,8 +533,9 @@ contract ReceiveSettingsTest is FeeBase {
         for (uint256 i; i < 3; ++i) {
             _setSettings(_randomSettings(uint256(keccak256(abi.encode(seed, i)))));
             if (i == 1) {
+                uint256 newRate = _pick(seed, 99, 1e11, core.settings().rateCap);
                 vm.prank(owner);
-                core.setRate(_pick(seed, 99, 1e11, 1e15));
+                core.setRate(newRate);
             }
             vm.warp(block.timestamp + gaps[i]);
             uint256 rate = core.ethRate();
@@ -559,7 +558,7 @@ contract ReceiveSettingsTest is FeeBase {
         s.climbBaseBps = 1_000;
         s.climbMaxBps = 2_000;
         s.climbDoubleEvery = 1 hours;
-        s.spendCapBps = 10_000;
+        s.spendCapBps = 5_000;
         s.avgScore = 800_000;
         _setSettings(s);
         _warp(100 * 365 days);
@@ -573,7 +572,7 @@ contract ReceiveSettingsTest is FeeBase {
     /// by the receive that runs inside the unlock, and the spend, the tip and the pot stay exact
     function test_receiveMidBuybackAcrossSettings() public {
         _stock();
-        uint256[3] memory slice = [uint256(0.02 ether), 0.05 ether, 100 ether];
+        uint256[3] memory slice = [uint256(0.02 ether), 0.05 ether, 5 ether];
         uint256[3] memory tips = [uint256(0), 200, 500];
         for (uint256 i; i < 3; ++i) {
             Settings memory s = core.settings();
@@ -747,8 +746,9 @@ contract ReceiveSettingsTest is FeeBase {
                 vm.prank(trader);
                 router.swap{value: 1 ether}(launchKey, true, -1 ether, trader);
             } else {
+                uint256 newRate = _pick(r, 5, 1e11, core.settings().rateCap);
                 vm.prank(owner);
-                core.setRate(_pick(r, 5, 1e11, 1e15));
+                core.setRate(newRate);
             }
             uint256 pot = core.ethPot();
             assertTrue(_hookSend(0.1 ether), "the push is accepted");
@@ -952,7 +952,7 @@ contract BuybackSettingsTest is FeeBase {
         _buyback();
 
         // a slice above the pot takes the whole pot
-        _configure(100 ether, 7_200, 50);
+        _configure(5 ether, 7_200, 50);
         vm.roll(block.number + 7_200);
         uint256 rest = core.ethToBuyback();
         assertEq(_buyback(), rest);
@@ -970,7 +970,7 @@ contract BuybackSettingsTest is FeeBase {
     /// any slice, delay and tip inside the bounds: one buyback burns, tips and books exactly
     /// forge-config: default.fuzz.runs = 16
     function testFuzz_buybackAnySettings(uint256 slice, uint256 delay, uint256 tip) public {
-        _configure(bound(slice, 0.01 ether, 100 ether), bound(delay, 1, 7_200), bound(tip, 0, 500));
+        _configure(bound(slice, 0.01 ether, 5 ether), bound(delay, 1, 7_200), bound(tip, 0, 500));
         _fillEthBuyback();
         _buyback();
     }
@@ -1476,15 +1476,15 @@ contract AuctionTest is FeeBase {
         assertEq(slice, 3 * uint256(core.settings().avgScore) * UNIT);
         // the average credit is a setting too
         Settings memory s = core.settings();
-        s.avgScore = 8_000_000;
+        s.avgScore = 6_000_000;
         _setSettings(s);
         (slice,) = core.exitAuctionQuote();
-        assertEq(slice, 3 * 8_000_000 * UNIT);
+        assertEq(slice, 3 * 6_000_000 * UNIT);
         (, uint256 coinIn) = _waitUntilAffordable();
         uint256 pool = core.xToBuyback();
         _fill(coinIn);
-        assertEq(core.xToBuyback(), pool - 3 * 8_000_000 * UNIT);
-        assertEq(xt.balanceOf(taker), 3 * 8_000_000 * UNIT);
+        assertEq(core.xToBuyback(), pool - 3 * 6_000_000 * UNIT);
+        assertEq(xt.balanceOf(taker), 3 * 6_000_000 * UNIT);
         _solvent();
     }
 

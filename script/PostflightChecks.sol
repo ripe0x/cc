@@ -166,8 +166,16 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         }
         _info(
             "core: flat share and average score",
-            string.concat("flatBps ", vm.toString(live.flatBps), " avgScore ", vm.toString(live.avgScore))
+            string.concat(
+                "flatBps ",
+                vm.toString(live.flatBps),
+                " avgScore ",
+                vm.toString(live.avgScore),
+                " rateCap ",
+                vm.toString(live.rateCap)
+            )
         );
+        _check("core: ethRate at most rateCap", core.ethRate() <= live.rateCap, vm.toString(core.ethRate()));
         _info(
             "core: reserve and auction",
             string.concat(

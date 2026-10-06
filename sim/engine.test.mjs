@@ -33,9 +33,9 @@ const R0 = 1.54e13;
   ok(!/inventoryGate|setGate|gated|AUCTION_START|AUCTION_FLOOR|AUCTION_LENGTH|priceOf|buyStatement|bidMode/.test(src), 'no trace of the gate or the dutch auction');
   ok(DEFAULTS.inventoryGate === undefined && Core.prototype.setGate === undefined, 'no gate in the defaults or the Core');
 }
-// climb tiers: 100 bps an hour, doubling every 24 hours without a fill, capped at 800
+// climb tiers: 100 bps an hour, doubling every 24 hours without a fill, capped at 800 (rateCap raised above its bounds so it does not clamp)
 {
-  const c = fresh();
+  const c = fresh({ rateCap: 1e17 }); // the climb function alone, above the bounds
   near(c.ethRate(1 * H), R0 * 1.01, 1e-12, 'one hour at 1 percent');
   near(c.ethRate(24 * H), R0 * Math.pow(1.01, 24), 1e-12, '24h at 1 percent');
   near(c.ethRate(48 * H), R0 * Math.pow(1.01, 24) * Math.pow(1.02, 24), 1e-12, '48h: 24h at 1 percent then 24h at 2 percent');
@@ -70,7 +70,7 @@ const R0 = 1.54e13;
 {
   const c = fresh({}, 0.1);
   near(c.ethRate(10000 * H), 46189376443418.016, 1e-12, 'clamp at pot 0.1 eth');
-  near(fresh({}, 1000).clamp(), 4.6189376443418016e17, 1e-12, 'clamp at pot 1000 eth');
+  near(fresh({}, 1000).clamp(), 123200000000000, 1e-12, 'clamp at pot 1000 eth is the rate cap, 8 times rateStart');
   assert.equal(fresh({ fundedRule: 'old' }, 0.1).clamp(), Infinity); n++;
   near(fresh({ spendCapBps: 1000 }, 0.1).clamp(), 46189376443418.016 / 2, 1e-12, 'clamp follows spendCapBps');
 }
@@ -80,11 +80,11 @@ const R0 = 1.54e13;
   ok(c.spend(0.1, 0)); // inside the 20 percent cap
   near(c.rateAtCheckpoint, 1e13 * (1 - 0.2 * 0.1), 1e-12, 'drop for a tenth of the pot');
   near(c.ethPot, 0.9, 1e-12, 'pot after the spend');
-  const w = fresh({ rateStart: 1e13, spendCapBps: 10000 }, 1);
-  ok(w.spend(1, 0));
-  near(w.rateAtCheckpoint, 8e12, 1e-12, 'a whole pot spent drops 20 percent');
-  const z = fresh({ rateStart: 1e13, dropBps: 0 }, 1);
-  ok(z.spend(0.1, 0)); near(z.rateAtCheckpoint, 1e13, 1e-12, 'dropBps 0 never drops');
+  const w = fresh({ rateStart: 1e13, spendCapBps: 5000 }, 1);
+  ok(w.spend(0.5, 0));
+  near(w.rateAtCheckpoint, 9e12, 1e-12, 'half the pot spent drops 10 percent');
+  const z = fresh({ rateStart: 1e13, dropBps: 500 }, 1);
+  ok(z.spend(0.1, 0)); near(z.rateAtCheckpoint, 1e13 * (1 - 0.05 * 0.1), 1e-12, 'dropBps 500 is the least drop');
 }
 // hourly cap: spendCapBps of the pot when the window opened, fixed window
 {
@@ -150,9 +150,9 @@ const R0 = 1.54e13;
   near(s2.reserve, 0.9 * s2.cost, 1e-12, 'a settings change does not move a live listing by itself');
   c.reprice(s2);
   near(s2.reserve, 0.5 * s2.cost, 1e-12, 'repriceStatement applies the new reserve');
-  ok(c.bidOn(s2, s2.reserve, 20, 1)); c.setSettings({ reserveBps: 2000 }, 30); c.reprice(s2);
+  ok(c.bidOn(s2, s2.reserve, 20, 1)); c.setSettings({ reserveBps: 3000 }, 30); c.reprice(s2);
   near(s2.reserve, 0.5 * s2.cost, 1e-12, 'a listing with a bid cannot be repriced');
-  ok(!c.bidOn(c.compose(1, 'eth', 0, 0), 0.2 - 1e-9, 0, 1), 'a bid under the reserve reverts');
+  ok(!c.bidOn(c.compose(1, 'eth', 0, 0), 0.3 - 1e-9, 0, 1), 'a bid under the reserve reverts');
 }
 // the english auction as the house runs it: first bid at the reserve starts the timer, +5 percent, 15 minute extension
 {
@@ -181,10 +181,10 @@ const R0 = 1.54e13;
   near(c.houseOwed, 0.945 * 1.06, 1e-12, 'credited to the Core in the house');
   // a duration change applies to new listings, not to one already listed
   const st3 = c.compose(1, 'eth', 0, 0);
-  c.setSettings({ auctionDuration: 2 * H }, 5);
+  c.setSettings({ auctionDuration: 6 * H }, 5);
   c.bidOn(st3, 0.9, 10, 1);
   assert.equal(st3.end, 10 + 24 * H); n++;
-  assert.equal(c.compose(1, 'eth', 0, 0).duration, 2 * H); n++;
+  assert.equal(c.compose(1, 'eth', 0, 0).duration, 6 * H); n++;
 }
 // the proceeds split: nothing reaches the pots before collectSales, then saleToBuybackBps to the buyback
 {
@@ -216,9 +216,38 @@ const R0 = 1.54e13;
   c.setSettings({ rate: 2e13, spendCapBps: 100 }, 20 * H);
   near(c.ethRate(20 * H), 2e13, 1e-12, 'setRate resets the limit'); near(c.s.spendCapBps, 100, 1e-12, 'spend cap changed');
   // a lower hourly cap lowers the clamp at once
-  near(c.clamp(), (1000 * W * 100) / 4330000, 1e-12, 'clamp reads the live spend cap');
+  const d = fresh({}, 0.1); d.setSettings({ spendCapBps: 1000 }, 0);
+  near(d.clamp(), 46189376443418.016 / 2, 1e-12, 'clamp reads the live spend cap');
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { exitAfter: 366 * 86400 })), 'exitAfter'); n++;
+  // the tightened bounds of the audit fixes (FC-1 accepted with bounds, FC-2, FC-3, FC-7) and the rate cap (FC-5)
+  const bad = (patch, name) => { assert.equal(firstViolation(Object.assign({}, SETTINGS, patch)), name); n++; };
+  bad({ spendCapBps: 5001 }, 'spendCapBps'); bad({ dropBps: 499 }, 'dropBps'); bad({ avgScore: 6000001 }, 'avgScore');
+  bad({ reserveBps: 2999 }, 'reserveBps'); bad({ auctionDuration: 6 * 3600 - 1 }, 'auctionDuration');
+  bad({ buybackSlice: 5.01 }, 'buybackSlice'); bad({ exitAfter: 3599 }, 'exitAfter');
+  bad({ rateCap: 1e11 - 1 }, 'rateCap'); bad({ rateCap: 1e15 + 1 }, 'rateCap');
+  assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, reserveBps: 3000, auctionDuration: 6 * 3600, buybackSlice: 5, exitAfter: 3600, rateCap: 1e15 })), null); n++;
+  assert.equal(SETTINGS.rateCap, 8 * DEFAULTS.rateStart); n++;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { xRateFloor: 9800 })), 'xRateFloor'); n++;
+}
+// rateCap: the climb clamps at it, setRate refuses above it, a lower cap pulls the rate down at the checkpoint
+{
+  const c = fresh({}, 1000);
+  near(c.ethRate(10000 * H), 123200000000000, 1e-12, 'the climb stops at rateCap with a huge pot');
+  assert.throws(() => c.setSettings({ rate: 123200000000001 }, 0), /BadRate/); n++;
+  c.setSettings({ rate: 123200000000000 }, 10000 * H);
+  near(c.ethRate(10000 * H), 123200000000000, 1e-12, 'setRate to the cap');
+  c.setSettings({ rateCap: 5e13 }, 10000 * H);
+  near(c.rateAtCheckpoint, 5e13, 1e-12, 'a lower cap pulls the rate down now');
+  near(c.ethRate(11000 * H), 5e13, 1e-12, 'and the climb clamps there');
+  c.setSettings({ rateCap: 2e14 }, 11000 * H);
+  near(c.ethRate(12000 * H), 2e14, 1e-12, 'a higher cap lets the climb go on');
+}
+// the exit lane reimbursement cap is notional at rateStart, not at the live rate (FC-4)
+{
+  const c = fresh({ rateStart: 1e13, reimburseBps: 15000, reimburseCapBps: 1000 }, 3);
+  c.setSettings({ rateCap: 1e15, rate: 1e15 }, 0);
+  const st = c.compose(0, 'exit', 0, 1000);
+  near(st.reimb, (80 * 4330000 * 1e13) / 1e4 / W * 0.1, 1e-12, 'capped by the notional cost at rateStart');
 }
 // phase 2 exit eligibility: a listing without a bid for exitAfter, the exit lane at once, never with a bid
 {

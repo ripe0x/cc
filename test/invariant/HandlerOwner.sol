@@ -41,23 +41,23 @@ abstract contract HandlerOwner is HandlerHouse {
     function _genSettings(uint256 seed, uint256 corner, Settings memory c) internal pure returns (Settings memory s) {
         // forge-lint: disable-start(unsafe-typecast)
         s.flatBps = uint16(_f(_r(seed, 0), 0, 10_000, c.flatBps));
-        s.avgScore = uint32(_f(_r(seed, 1), 800_000, 8_000_000, c.avgScore));
+        s.avgScore = uint32(_f(_r(seed, 1), 800_000, 6_000_000, c.avgScore));
         s.climbBaseBps = uint16(_f(_r(seed, 2), 0, 1_000, c.climbBaseBps));
         s.climbDoubleEvery = uint32(_f(_r(seed, 3), 1 hours, 30 days, c.climbDoubleEvery));
         s.climbMaxBps = uint16(_f(_r(seed, 4), s.climbBaseBps, 2_000, c.climbMaxBps));
-        s.dropBps = uint16(_f(_r(seed, 5), 0, 5_000, c.dropBps));
-        s.spendCapBps = uint16(_f(_r(seed, 6), 100, 10_000, c.spendCapBps));
+        s.dropBps = uint16(_f(_r(seed, 5), 500, 5_000, c.dropBps));
+        s.spendCapBps = uint16(_f(_r(seed, 6), 100, 5_000, c.spendCapBps));
         s.bonusCapBps = uint16(_f(_r(seed, 7), 0, 5_000, c.bonusCapBps));
         s.tipSavingsBps = uint16(_f(_r(seed, 8), 0, 2_500, c.tipSavingsBps));
         s.tipCapBps = uint16(_f(_r(seed, 9), 0, 500, c.tipCapBps));
         s.reimburseBps = uint16(_f(_r(seed, 10), 0, 15_000, c.reimburseBps));
         s.reimburseCapBps = uint16(_f(_r(seed, 11), 0, 1_000, c.reimburseCapBps));
-        s.reserveBps = uint16(_f(_r(seed, 12), 1_000, 40_000, c.reserveBps));
-        s.auctionDuration = uint32(_f(_r(seed, 13), 1 hours, 30 days, c.auctionDuration));
-        s.exitAfter = uint32(_f(_r(seed, 14), 0, 365 days, c.exitAfter));
+        s.reserveBps = uint16(_f(_r(seed, 12), 3_000, 40_000, c.reserveBps));
+        s.auctionDuration = uint32(_f(_r(seed, 13), 6 hours, 30 days, c.auctionDuration));
+        s.exitAfter = uint32(_f(_r(seed, 14), 1 hours, 365 days, c.exitAfter));
         s.saleToBuybackBps = uint16(_f(_r(seed, 15), 0, 10_000, c.saleToBuybackBps));
         s.exitToBuybackBps = uint16(_f(_r(seed, 16), 0, 10_000, c.exitToBuybackBps));
-        s.buybackSlice = uint128(_f(_r(seed, 17), 0.01 ether, 100 ether, c.buybackSlice));
+        s.buybackSlice = uint128(_f(_r(seed, 17), 0.01 ether, 5 ether, c.buybackSlice));
         s.buybackDelay = uint16(_f(_r(seed, 18), 1, 7_200, c.buybackDelay));
         s.keeperTipBps = uint16(_f(_r(seed, 19), 0, 500, c.keeperTipBps));
         s.xRateCap = uint16(_f(_r(seed, 20), 0, 10_000, c.xRateCap));
@@ -66,6 +66,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.xRateDropPerCredit = uint16(_f(_r(seed, 23), 0, 1_000, c.xRateDropPerCredit));
         s.xAuctionHalfLife = uint32(_f(_r(seed, 24), 10 minutes, 30 days, c.xAuctionHalfLife));
         s.exitSliceCredits = uint16(_f(_r(seed, 25), 1, 1_000, c.exitSliceCredits));
+        s.rateCap = uint64(_f(_r(seed, 26), 1e11, 1e15, c.rateCap));
         _corner(s, corner);
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -79,9 +80,9 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 2) {
             s.flatBps = 10_000;
         } else if (k == 3) {
-            s.spendCapBps = 10_000;
+            s.spendCapBps = 5_000;
         } else if (k == 4) {
-            s.reserveBps = 1_000;
+            s.reserveBps = 3_000;
         } else if (k == 5) {
             s.reserveBps = 40_000;
         } else if (k == 6) {
@@ -95,9 +96,9 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 10) {
             s.buybackSlice = 0.01 ether;
         } else if (k == 11) {
-            s.buybackSlice = 100 ether;
+            s.buybackSlice = 5 ether;
         } else if (k == 12) {
-            s.exitAfter = 0;
+            s.exitAfter = 1 hours;
         } else if (k == 13) {
             s.spendCapBps = 100;
         } else if (k == 14) {
@@ -121,8 +122,11 @@ abstract contract HandlerOwner is HandlerHouse {
             s.climbBaseBps = 1_000;
             s.climbMaxBps = 2_000;
             s.climbDoubleEvery = 1 hours;
-            s.auctionDuration = 1 hours;
+            s.auctionDuration = 6 hours;
             s.xAuctionHalfLife = 10 minutes;
+        } else if (k == 17) {
+            // the lowest rate cap: it pulls the eth rate down to it at the checkpoint
+            s.rateCap = 1e11;
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -200,8 +204,10 @@ abstract contract HandlerOwner is HandlerHouse {
     function _afterSettings(Settings memory ns, Settings memory cur, OPre memory p) internal {
         _opost(p, "setSettings");
         // invariant 6 across a settings call: the stored rate does not jump, the call only checkpoints it
-        if (core.ethRate() != p.rate) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
-        if (core.rateAtCheckpoint() != p.rate) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
+        // except that a lower rate cap pulls the rate down to the cap
+        uint256 wantRate = p.rate > ns.rateCap ? ns.rateCap : p.rate;
+        if (core.ethRate() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
+        if (core.rateAtCheckpoint() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
         _fundedCheck();
         // the exit rate is held inside the new band and nothing else
         uint256 want = p.xRate > ns.xRateCap ? ns.xRateCap : p.xRate;
@@ -224,23 +230,23 @@ abstract contract HandlerOwner is HandlerHouse {
     /// the bounds of docs/FLOW.md section 2, written out again. the name of the first field out of bounds, or zero
     function _firstViolation(Settings memory s) internal pure returns (bytes32) {
         if (s.flatBps > 10_000) return "flatBps";
-        if (s.avgScore < 800_000 || s.avgScore > 8_000_000) return "avgScore";
+        if (s.avgScore < 800_000 || s.avgScore > 6_000_000) return "avgScore";
         if (s.climbBaseBps > 1_000) return "climbBaseBps";
         if (s.climbDoubleEvery < 1 hours || s.climbDoubleEvery > 30 days) return "climbDoubleEvery";
         if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2_000) return "climbMaxBps";
-        if (s.dropBps > 5_000) return "dropBps";
-        if (s.spendCapBps < 100 || s.spendCapBps > 10_000) return "spendCapBps";
+        if (s.dropBps < 500 || s.dropBps > 5_000) return "dropBps";
+        if (s.spendCapBps < 100 || s.spendCapBps > 5_000) return "spendCapBps";
         if (s.bonusCapBps > 5_000) return "bonusCapBps";
         if (s.tipSavingsBps > 2_500) return "tipSavingsBps";
         if (s.tipCapBps > 500) return "tipCapBps";
         if (s.reimburseBps > 15_000) return "reimburseBps";
         if (s.reimburseCapBps > 1_000) return "reimburseCapBps";
-        if (s.reserveBps < 1_000 || s.reserveBps > 40_000) return "reserveBps";
-        if (s.auctionDuration < 1 hours || s.auctionDuration > 30 days) return "auctionDuration";
-        if (s.exitAfter > 365 days) return "exitAfter";
+        if (s.reserveBps < 3_000 || s.reserveBps > 40_000) return "reserveBps";
+        if (s.auctionDuration < 6 hours || s.auctionDuration > 30 days) return "auctionDuration";
+        if (s.exitAfter < 1 hours || s.exitAfter > 365 days) return "exitAfter";
         if (s.saleToBuybackBps > 10_000) return "saleToBuybackBps";
         if (s.exitToBuybackBps > 10_000) return "exitToBuybackBps";
-        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 100 ether) return "buybackSlice";
+        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 5 ether) return "buybackSlice";
         if (s.buybackDelay < 1 || s.buybackDelay > 7_200) return "buybackDelay";
         if (s.keeperTipBps > 500) return "keeperTipBps";
         if (s.xRateCap > 10_000) return "xRateCap";
@@ -249,6 +255,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.xRateDropPerCredit > 1_000) return "xRateDropPerCredit";
         if (s.xAuctionHalfLife < 10 minutes || s.xAuctionHalfLife > 30 days) return "xAuctionHalfLife";
         if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1_000) return "exitSliceCredits";
+        if (s.rateCap < 1e11 || s.rateCap > 1e15) return "rateCap";
         return bytes32(0);
     }
 
@@ -259,13 +266,13 @@ abstract contract HandlerOwner is HandlerHouse {
     /// breaks exactly one field of valid settings, `which` picks it. returns the name the library must report
     function _break(Settings memory s, uint256 which) internal pure returns (bytes32 name) {
         // forge-lint: disable-start(unsafe-typecast)
-        which = which % 36;
+        which = which % 40;
         if (which == 0) {
             (s.flatBps, name) = (10_001, "flatBps");
         } else if (which == 1) {
             (s.avgScore, name) = (799_999, "avgScore");
         } else if (which == 2) {
-            (s.avgScore, name) = (8_000_001, "avgScore");
+            (s.avgScore, name) = (6_000_001, "avgScore");
         } else if (which == 3) {
             (s.climbBaseBps, name) = (1_001, "climbBaseBps");
         } else if (which == 4) {
@@ -281,7 +288,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 9) {
             (s.spendCapBps, name) = (99, "spendCapBps");
         } else if (which == 10) {
-            (s.spendCapBps, name) = (10_001, "spendCapBps");
+            (s.spendCapBps, name) = (5_001, "spendCapBps");
         } else if (which == 11) {
             (s.bonusCapBps, name) = (5_001, "bonusCapBps");
         } else if (which == 12) {
@@ -293,11 +300,11 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 15) {
             (s.reimburseCapBps, name) = (1_001, "reimburseCapBps");
         } else if (which == 16) {
-            (s.reserveBps, name) = (999, "reserveBps");
+            (s.reserveBps, name) = (2_999, "reserveBps");
         } else if (which == 17) {
             (s.reserveBps, name) = (40_001, "reserveBps");
         } else if (which == 18) {
-            (s.auctionDuration, name) = (1 hours - 1, "auctionDuration");
+            (s.auctionDuration, name) = (6 hours - 1, "auctionDuration");
         } else if (which == 19) {
             (s.auctionDuration, name) = (uint32(30 days) + 1, "auctionDuration");
         } else if (which == 20) {
@@ -309,7 +316,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 23) {
             (s.buybackSlice, name) = (0.01 ether - 1, "buybackSlice");
         } else if (which == 24) {
-            (s.buybackSlice, name) = (100 ether + 1, "buybackSlice");
+            (s.buybackSlice, name) = (5 ether + 1, "buybackSlice");
         } else if (which == 25) {
             (s.buybackDelay, name) = (0, "buybackDelay");
         } else if (which == 26) {
@@ -330,8 +337,16 @@ abstract contract HandlerOwner is HandlerHouse {
             (s.xAuctionHalfLife, name) = (uint32(30 days) + 1, "xAuctionHalfLife");
         } else if (which == 34) {
             (s.exitSliceCredits, name) = (0, "exitSliceCredits");
-        } else {
+        } else if (which == 35) {
             (s.exitSliceCredits, name) = (1_001, "exitSliceCredits");
+        } else if (which == 36) {
+            (s.dropBps, name) = (499, "dropBps");
+        } else if (which == 37) {
+            (s.exitAfter, name) = (1 hours - 1, "exitAfter");
+        } else if (which == 38) {
+            (s.rateCap, name) = (1e11 - 1, "rateCap");
+        } else {
+            (s.rateCap, name) = (1e15 + 1, "rateCap");
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -386,16 +401,18 @@ abstract contract HandlerOwner is HandlerHouse {
     function setRate(uint256 seed, uint256 mode) external checked {
         uint8 a = A_SET_RATE;
         uint256 m = mode % 10;
+        uint256 cap = core.settings().rateCap;
         uint256 rate;
         if (m == 0) rate = RATE_START_MIN_WEI;
-        else if (m == 1) rate = RATE_START_MAX_WEI;
+        else if (m == 1) rate = cap;
         else if (m == 2) rate = core.ethRate();
         else if (m == 3) rate = RATE_START_MIN_WEI - 1;
         else if (m == 4) rate = RATE_START_MAX_WEI + 1;
         else if (m == 5) rate = seed % 3 == 0 ? 0 : type(uint256).max;
-        else rate = _logBound(seed, RATE_START_MIN_WEI, RATE_START_MAX_WEI);
+        else if (m == 6) rate = cap + 1;
+        else rate = _logBound(seed, RATE_START_MIN_WEI, cap);
         bool stranger = mode % 13 == 5;
-        bool good = rate >= RATE_START_MIN_WEI && rate <= RATE_START_MAX_WEI;
+        bool good = rate >= RATE_START_MIN_WEI && rate <= RATE_START_MAX_WEI && rate <= cap;
         OPre memory p = _opre();
         _att(a);
         vm.prank(stranger ? _actor(seed) : owner);

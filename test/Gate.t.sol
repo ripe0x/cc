@@ -34,6 +34,7 @@ contract GateTest is Fixture {
     /// after a fill and runs on, a statement sale changes none of it, and the pot is never gated on inventory
     function test_unsoldStatementsNeverStopTheBidOrTheClimb() public {
         _skipSniperWindow();
+        _liftRateCap();
         uint256 s1 = _composeNext();
         uint256 s2 = _composeNext();
         assertEq(core.heldStatements().length, 2);
@@ -78,8 +79,8 @@ contract GateFuzzTest is Fixture {
         Settings memory s = core.settings();
         uint256 pick = seed >> 8;
         // forge-lint: disable-start(unsafe-typecast)
-        if (pick % 4 == 0) s.avgScore = uint32(800_000 + (seed >> 16) % 7_200_000);
-        if (pick % 4 == 1) s.spendCapBps = uint16(100 + (seed >> 16) % 9_900);
+        if (pick % 4 == 0) s.avgScore = uint32(800_000 + (seed >> 16) % 5_200_001);
+        if (pick % 4 == 1) s.spendCapBps = uint16(100 + (seed >> 16) % 4_901);
         if (pick % 4 == 2) s.flatBps = uint16((seed >> 16) % 10_001);
         if (pick % 4 == 3) {
             s.climbBaseBps = uint16((seed >> 16) % 1_001);

@@ -39,7 +39,6 @@ contract EconDialsTest is Fixture {
             assertEq(core.ethPot(), p);
         }
         assertGt(r, 0);
-        if (dropBps == 0) assertEq(r, 4e12, "no drop, the rate never moved");
         emit log_named_uint("share of the pot spent, bps", (p0 - p) * 10_000 / p0);
         emit log_named_uint("rate left, wei per point", r);
         _solvent();
@@ -54,12 +53,12 @@ contract EconDialsTest is Fixture {
         _manyFills(2_000, 0);
     }
 
-    function test_drop_zeroNeverMovesTheRate() public {
-        _manyFills(0, 10_000);
+    function test_drop_atTheSmallestBound() public {
+        _manyFills(500, 10_000);
     }
 
-    function test_drop_oneBasisPoint() public {
-        _manyFills(1, 10_000);
+    function test_drop_justAboveTheSmallestBound() public {
+        _manyFills(501, 10_000);
     }
 
     function test_drop_atTheLargestBound() public {
@@ -122,12 +121,12 @@ contract EconDialsTest is Fixture {
         assertLe(spent, 0.2 ether / 100);
     }
 
-    /// at the largest cap (the whole pot) the window can spend nearly all of it, and no more than all of it
+    /// at the largest cap (half of the pot) the window can spend nearly half of it, and no more than half
     function test_spendCap_atTheLargestBound() public {
-        (uint256 sold, uint256 spent) = _window(10_000, 0.01 ether);
-        assertGe(sold, 5);
-        assertGt(spent, 0.01 ether * 7 / 10, "most of the pot in one window");
-        assertLe(spent, 0.01 ether);
+        (uint256 sold, uint256 spent) = _window(5_000, 0.02 ether);
+        assertGe(sold, 4);
+        assertGt(spent, 0.02 ether * 4 / 10, "most of the half pot in one window");
+        assertLe(spent, 0.02 ether / 2);
         _solvent();
     }
 }

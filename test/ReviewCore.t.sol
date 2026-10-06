@@ -383,7 +383,9 @@ contract ReviewCoreTest is Fixture {
         uint256 g = gasleft();
         uint256 r = core.ethRate();
         g -= gasleft();
-        assertEq(r, pot * 2000 / core.settings().avgScore, "clamped at the funded threshold");
+        uint256 clamp = pot * 2000 / core.settings().avgScore;
+        uint256 cap = core.settings().rateCap;
+        assertEq(r, clamp < cap ? clamp : cap, "clamped at the funded threshold or the rate cap");
         assertLt(g, 400_000, "gas of the read");
         emit log_named_uint("gas of a ten year read", g);
         // a checkpointing call after the gap still works

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Fixture} from "./utils/Fixture.sol";
 import {Settings} from "../src/interfaces/Interfaces.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
-import {SetSettings} from "../script/SetSettings.s.sol";
+import {SetSettings, ICoreOwner} from "../script/SetSettings.s.sol";
 
 /// @dev the script with its environment replaced by fields, so parallel tests never share an environment variable
 contract SetSettingsProbe is SetSettings {
@@ -38,6 +38,20 @@ contract SetSettingsProbe is SetSettings {
         return (false, 0);
     }
 
+    bool internal reprice_;
+
+    function setReprice(bool on) external {
+        reprice_ = on;
+    }
+
+    function _reprice() internal view override returns (bool) {
+        return reprice_;
+    }
+
+    function open() external view returns (uint256[] memory) {
+        return _openListings(ICoreOwner(core_));
+    }
+
     function applyTo(Settings memory s) external view returns (Settings memory) {
         return _apply(s);
     }
@@ -61,7 +75,7 @@ contract SetSettingsTest is Fixture {
         probe.configure(address(core), "");
     }
 
-    /// @dev how many of the 26 fields differ between two structs, and whether field `i` is among them
+    /// @dev how many of the 27 fields differ between two structs, and whether field `i` is among them
     function _diff(Settings memory a, Settings memory b) internal pure returns (uint256 n, uint256 first) {
         first = type(uint256).max;
         for (uint256 i; i < SettingsFields.N; ++i) {
@@ -149,5 +163,34 @@ contract SetSettingsTest is Fixture {
         (bool ok,) = address(core).call(abi.encodeCall(core.setSettings, (next)));
         assertTrue(ok, "the printed calldata is accepted by the core");
         assertEq(core.settings().reserveBps, 8_000);
+    }
+
+    /// REPRICE=1 lists the statements the Core holds that are listed with no bid, and only those. after a raised
+    /// `reserveBps` each of them takes the new reserve through `repriceStatement`, the one with a bid keeps its own
+    function test_repriceModeListsOnlyUnbidListings() public {
+        uint256 a = _composeOnce().sid;
+        _fillEthPile(80);
+        vm.fee(composeBasefee);
+        vm.prank(keeper);
+        core.compose();
+        uint256 b = STATEMENTS.supply();
+        uint256 bidReserve = _live(b).reserve;
+        _bid(makeAddr("bidder"), b, bidReserve);
+        uint256[] memory open = probe.open();
+        assertEq(open.length, 1, "one listing has no bid");
+        assertEq(open[0], a);
+
+        probe.setReprice(true);
+        probe.single("reserveBps", 12_000);
+        probe.run();
+        // the owner's batch: setSettings, then the repriceStatement calls the script printed
+        Settings memory next = probe.applyTo(core.settings());
+        _setSettings(next);
+        for (uint256 i; i < open.length; ++i) {
+            core.repriceStatement(open[i]);
+        }
+        (,, uint256 cost,) = core.statementInfo(a);
+        assertEq(_live(a).reserve, cost * 12_000 / 10_000, "the unbid listing took the new reserve");
+        assertEq(_live(b).reserve, bidReserve, "the listing with a bid keeps its reserve");
     }
 }

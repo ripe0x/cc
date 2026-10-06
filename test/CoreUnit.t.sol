@@ -196,6 +196,7 @@ contract CoreUnitTest is CoreBase {
         vm.expectRevert(Core.BadRate.selector);
         this.mk(owner, address(coin), address(ctl), lc.stack, 1e15 + 1, s);
         Core lo = this.mk(owner, address(coin), address(ctl), lc.stack, 1e11, s);
+        s.rateCap = 1e15;
         Core hi = this.mk(owner, address(coin), address(ctl), lc.stack, 1e15, s);
         assertEq(lo.RATE_START(), 1e11);
         assertEq(lo.ethRate(), 1e11);
@@ -304,10 +305,10 @@ contract CoreUnitTest is CoreBase {
     /// exactly that pot the cap equals the rate, so there is no room to climb
     function test_rate_fundedThresholdFollowsTheAverageScore() public {
         Settings memory s = core.settings();
-        s.avgScore = 8_000_000;
+        s.avgScore = 6_000_000;
         _setSettings(s);
-        _fund(1.6e16 - 1);
-        assertFalse(core.funded(), "one wei short of 8M * 4e12 / 20 percent");
+        _fund(1.2e16 - 1);
+        assertFalse(core.funded(), "one wei short of 6M * 4e12 / 20 percent");
         _warp(1000 hours);
         assertEq(core.ethRate(), 4e12);
         _fund(1);
@@ -405,11 +406,11 @@ contract CoreUnitTest is CoreBase {
         assertGe(core.ethPot() * 1000, 2_000_000 * core.ethRate());
         assertLt(core.ethPot() * 1000, 2_000_000 * (core.ethRate() + 1));
         s.spendCapBps = 5000;
-        s.avgScore = 8_000_000;
+        s.avgScore = 6_000_000;
         _setSettings(s);
         assertEq(core.rateAtCheckpoint(), 10_000_000_000_000, "the change credited the old clamp");
         _warp(10_000 hours);
-        assertEq(core.ethRate(), 12_500_000_000_000, "2e16 * 5000 / 8e6");
+        assertEq(core.ethRate(), 16_666_666_666_666, "2e16 * 5000 / 6e6");
     }
 
     /// the same clamp when the pot is filled by real swaps: it is measured, not assumed
@@ -2141,7 +2142,8 @@ contract CoreComposedTest is CoreBase {
         _solvent();
     }
 
-    /// the notional cap of an exit lane compose follows `avgScore`, the rate and `reimburseCapBps` of the settings
+    /// the notional cap of an exit lane compose follows `avgScore`, the opening rate `RATE_START` (not the live eth rate,
+    /// which the owner can set) and `reimburseCapBps` of the settings
     function test_exitLane_composeReimbursementCapFollowsTheSettings() public {
         Settings memory s = core.settings();
         s.reimburseCapBps = 100;
@@ -2154,7 +2156,7 @@ contract CoreComposedTest is CoreBase {
         vm.prank(alice);
         core.sellForExitToken(ids);
         vm.fee(1000 gwei);
-        uint256 rate = core.ethRate();
+        uint256 rate = core.RATE_START();
         uint256 before = keeper.balance;
         vm.prank(keeper);
         core.composeExit();

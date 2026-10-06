@@ -681,6 +681,7 @@ abstract contract HandlerBase is Test {
             if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above climbMaxBps an hour");
             if (s.funded) {
                 uint256 cap = s.pot * s.st.spendCapBps / s.st.avgScore;
+                if (cap > s.st.rateCap) cap = s.st.rateCap;
                 uint256 minR = s.rate;
                 if (s.rate < cap) {
                     minR = s.rate * _growth(s.st.climbBaseBps, dt) / 1e18;
@@ -1285,8 +1286,9 @@ abstract contract HandlerBase is Test {
     /// the page the controller would answer, asked the way the core asks it.
     function _peekPage(Lane lane) internal view returns (bool ready, uint256[] memory ids, uint256 format) {
         ids = new uint256[](80);
+        // the core reads the controller under a fixed gas cap of 500_000 in both lanes, and so does the model
         (bool ok, bytes memory out) =
-            core.controller().staticcall(abi.encodeWithSignature("nextPage(uint8)", uint8(lane)));
+            core.controller().staticcall{gas: 500_000}(abi.encodeWithSignature("nextPage(uint8)", uint8(lane)));
         if (!ok || out.length < 82 * 32) return (false, ids, 0);
         (uint256 flag, uint256[80] memory p, uint256 f) = abi.decode(out, (uint256, uint256[80], uint256));
         for (uint256 i; i < 80; ++i) {
@@ -1390,11 +1392,11 @@ abstract contract HandlerBase is Test {
         }
         uint256 reimb = keeper.balance - p.callerBal;
         // gas reimbursement: min(gas * basefee * reimburseBps, reimburseCapBps of the cost). the exit lane caps against
-        // 80 average credits at the eth rate. the gas used is what the handler saw, which is at least what the core
+        // 80 average credits at the opening rate RATE_START. the gas used is what the handler saw, which is at least what the core
         // measured, plus its fixed overhead and, on the eth lane, the gas the core counts for the listing
         uint256 extra = 50_000 + (lane == Lane.Eth ? 350_000 : 0);
         uint256 gasCap = (p.gasUsed + extra) * p.basefee * p.st.reimburseBps / 10_000;
-        uint256 base = lane == Lane.Eth ? p.sum : 80 * uint256(p.st.avgScore) * p.rate / 1e4;
+        uint256 base = lane == Lane.Eth ? p.sum : 80 * uint256(p.st.avgScore) * core.RATE_START() / 1e4;
         uint256 costCap = base * p.st.reimburseCapBps / 10_000;
         uint256 cap = gasCap < costCap ? gasCap : costCap;
         if (reimb > cap) {

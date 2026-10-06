@@ -10,17 +10,18 @@ const fmtSci = (x) => (x == null || !isFinite(x) ? 'n/a' : x === 0 ? '0' : x.toE
 // the one mid run change: the setting, its unit and a sensible value to switch to
 const CHG = {
   flatBps: { label: 'flatBps (share of the bid priced flat)', unit: 'bps, 0 to 10000', to: 5000 },
-  reserveBps: { label: 'reserveBps (auction reserve over cost)', unit: 'bps, 1000 to 40000', to: 6000 },
-  auctionDuration: { label: 'auctionDuration', unit: 'hours, 1 to 720', to: 6, hours: true },
+  reserveBps: { label: 'reserveBps (auction reserve over cost)', unit: 'bps, 3000 to 40000', to: 6000 },
+  auctionDuration: { label: 'auctionDuration', unit: 'hours, 6 to 720', to: 6, hours: true },
   saleToBuybackBps: { label: 'saleToBuybackBps (proceeds to burn)', unit: 'bps, 0 to 10000', to: 2500 },
-  dropBps: { label: 'dropBps', unit: 'bps, 0 to 5000', to: 5000 },
+  dropBps: { label: 'dropBps', unit: 'bps, 500 to 5000', to: 5000 },
   climbBaseBps: { label: 'climbBaseBps', unit: 'bps an hour, 0 to 1000', to: 200 },
-  spendCapBps: { label: 'spendCapBps', unit: 'bps an hour, 100 to 10000', to: 4000 },
-  exitAfter: { label: 'exitAfter', unit: 'hours, 0 to 8760', to: 24, hours: true },
+  spendCapBps: { label: 'spendCapBps', unit: 'bps an hour, 100 to 5000', to: 4000 },
+  exitAfter: { label: 'exitAfter', unit: 'hours, 1 to 8760', to: 24, hours: true },
+  rateCap: { label: 'rateCap (most the eth rate can be)', unit: 'wei per point, 1e11 to 1e15', to: 50000000000000 },
 };
 // every control: key in the state object, how to show it. launch values are the Core's (script/config/mainnet.json)
 const BASE_STATE = { volPreset: 'comparable', volScale: 1, volTail: 17, volHalfLifeDays: 3, buyShareLate: 'auto', pricePath: 'flat', priceP0: 0.0089, wtpMult: 1, stmtPerDay: 8, impactElast: 0.12,
-  openPct: 75, flatBps: 10000, reserveBps: 9000, auctionHours: 24, saleToBuybackBps: 5000, exitAfterH: 72, dropBps: 2000, climbBaseBps: 100, spendCapBps: 2000, fundedRule: 'built',
+  openPct: 75, flatBps: 10000, reserveBps: 9000, auctionHours: 24, saleToBuybackBps: 5000, exitAfterH: 72, dropBps: 2000, climbBaseBps: 100, spendCapBps: 2000, rateCap: 123200000000000, fundedRule: 'built',
   chgOn: false, chgDay: 30, chgKey: 'flatBps', chgValue: 5000,
   phase2On: false, phase2Day: 14, xp: 2.5e-5, takerThreshold: 0.15, days: 90, seed: 7 };
 const GROUPS = [
@@ -39,15 +40,16 @@ const GROUPS = [
   { title: 'launch settings', open: true, ctl: [
     { k: 'openPct', t: 'range', label: 'opening limit, percent of market', min: 20, max: 125, step: 5, fmt: (v) => v + '%', hint: 'rateStart, wei per point =', hintFn: (s) => fmtSci(rateOf(s)) },
     { k: 'flatBps', t: 'range', label: 'flatBps', min: 0, max: 10000, step: 500, fmt: (v) => v, hint: '10000 is flat per credit, 0 is per score point' },
-    { k: 'reserveBps', t: 'range', label: 'reserveBps', min: 1000, max: 15000, step: 500, fmt: (v) => v, hint: 'auction reserve as bps of the statement cost' },
-    { k: 'auctionHours', t: 'range', label: 'auctionDuration, hours', min: 1, max: 168, log: true, fmt: (v) => (+v).toFixed(v < 10 ? 1 : 0) + 'h', hint: 'runs from the first bid' },
+    { k: 'reserveBps', t: 'range', label: 'reserveBps', min: 3000, max: 15000, step: 500, fmt: (v) => v, hint: 'auction reserve as bps of the statement cost' },
+    { k: 'auctionHours', t: 'range', label: 'auctionDuration, hours', min: 6, max: 168, log: true, fmt: (v) => (+v).toFixed(v < 10 ? 1 : 0) + 'h', hint: 'runs from the first bid' },
     { k: 'saleToBuybackBps', t: 'range', label: 'saleToBuybackBps', min: 0, max: 10000, step: 500, fmt: (v) => v, hint: 'share of collected sale proceeds that buys and burns the coin' },
-    { k: 'exitAfterH', t: 'range', label: 'exitAfter, hours', min: 0, max: 336, step: 6, fmt: (v) => v + 'h', hint: 'a listing with no bid may be redeemed in phase 2 after this' },
+    { k: 'exitAfterH', t: 'range', label: 'exitAfter, hours', min: 1, max: 336, step: 6, fmt: (v) => v + 'h', hint: 'a listing with no bid may be redeemed in phase 2 after this' },
   ] },
   { title: 'engine settings', open: false, ctl: [
-    { k: 'dropBps', t: 'range', label: 'dropBps', min: 0, max: 5000, step: 250, fmt: (v) => v },
+    { k: 'dropBps', t: 'range', label: 'dropBps', min: 500, max: 5000, step: 250, fmt: (v) => v },
     { k: 'climbBaseBps', t: 'range', label: 'climbBaseBps', min: 0, max: 800, step: 25, fmt: (v) => v },
-    { k: 'spendCapBps', t: 'range', label: 'spendCapBps', min: 100, max: 10000, log: true, fmt: (v) => v },
+    { k: 'spendCapBps', t: 'range', label: 'spendCapBps', min: 100, max: 5000, log: true, fmt: (v) => v },
+    { k: 'rateCap', t: 'range', label: 'rateCap, wei per point', min: 3e13, max: 1e15, log: true, fmt: fmtSci, hint: 'the eth rate never passes it. launch 1.23e14, 8 times rateStart. the page keeps it at or above rateStart' },
     { k: 'fundedRule', t: 'select', label: 'funded rule', opts: [['built', 'as built: the hourly cap affords one average credit'], ['old', 'counterfactual: the pot affords one average credit']] },
   ] },
   { title: 'change a setting on day N', open: true, ctl: [
@@ -132,6 +134,7 @@ function toParams(s) {
     pricePath: s.pricePath, priceP0: s.priceP0, wtpMult: s.wtpMult, stmtPerDay: s.stmtPerDay, impactElast: s.impactElast, rateStart: rateOf(s),
     flatBps: s.flatBps, reserveBps: s.reserveBps, auctionDuration: Math.round(s.auctionHours * 3600), saleToBuybackBps: s.saleToBuybackBps, exitAfter: s.exitAfterH * 3600,
     dropBps: s.dropBps, climbBaseBps: s.climbBaseBps, spendCapBps: s.spendCapBps, fundedRule: s.fundedRule,
+    rateCap: Math.max(s.rateCap, rateOf(s)), // the Core refuses a deploy with rateStart above rateCap
     phase2Day: s.phase2On ? s.phase2Day : null, xp: s.xp, takerThreshold: s.takerThreshold, days: +s.days, seed: s.seed,
   };
   p.climbMaxBps = Math.max(p.climbBaseBps, 800);

@@ -21,8 +21,9 @@ verdict in one paragraph: **the engine keeps buying under every volume preset, a
 | phase 2 exit | an unbid listing may exit through the exitModule after `exitAfter` (72 hours), a statement with a bid never |
 | settings | one `Settings` object with the Core's field names, `schedule` of `{day, patch}` changes it mid run with the Core's checkpoint, bounds and reprice rules |
 | opening limit | `rateStart` 1.54e13, 75 percent of the market price of a credit over `avgScore` |
+| rate cap | `rateCap` 1.232e14 (8 times `rateStart`): the climb stops at the lower of the funded clamp and `rateCap`, `setRate` refuses above it. the launch runs below it, so every number in this file is the same with and without it (checked: identical credits, statements and sales at 90 days on three presets) |
 
-port checks: node engine.test.mjs runs 235 numeric checks against hand computed Core values: the launch values against mainnet.json, climb tiers, the funded rule and clamp, drop on fill, hourly cap, the blended ceiling at five values of `flatBps`, tip rule, compose reimbursement with the listing gas, the reserve and repricing, every english auction rule (reserve, 5 percent raise, extension, end, winner), the proceeds split at five values, `setSettings` bounds and checkpoint, exit eligibility, the exitToken auction and bid, buyback, the pool, and eth accounting identities over whole runs (pot, buyback pot, house).
+port checks: node engine.test.mjs runs 254 numeric checks against hand computed Core values: the launch values against mainnet.json, climb tiers, the funded rule and clamp, the rate cap (climb clamp, `setRate`, a lower cap pulling the rate down), the tightened bounds, the exit lane reimbursement cap at `rateStart`, drop on fill, hourly cap, the blended ceiling at five values of `flatBps`, tip rule, compose reimbursement with the listing gas, the reserve and repricing, every english auction rule (reserve, 5 percent raise, extension, end, winner), the proceeds split at five values, `setSettings` bounds and checkpoint, exit eligibility, the exitToken auction and bid, buyback, the pool, and eth accounting identities over whole runs (pot, buyback pot, house).
 
 ## model in short
 
@@ -159,7 +160,7 @@ sustained 17 eth a day: credits at day 90 53,240 / 50,280 / 47,430 / 44,560 / 41
 
 ## 6. dropBps, climbBaseBps, spendCapBps
 
-comparable volume, 90 days, launch values 2000 / 100 / 2000.
+comparable volume, 90 days, launch values 2000 / 100 / 2000. the bounds were tightened after these runs: `dropBps` 500 to 5000 and `spendCapBps` 100 to 5000, so the `dropBps` 0 and `spendCapBps` 10000 rows are counterfactuals the Core now refuses.
 
 | dropBps | credits day 3 | day 14 | day 90 | price paid over market | launch pot spent on day | peak bid over market |
 |---|---|---|---|---|---|---|
@@ -296,7 +297,8 @@ low and high value of each input against the base case (27,110 credits and 339 s
 | `saleToBuybackBps` | 5000 | keep for the first week | no effect on week one. decide on day 7 to 14, it is the largest lever left |
 | `dropBps` | 2000 | keep | 3000 gives 3% more credits by day 14 and 8% fewer on day 3 |
 | `climbBaseBps` | 100 | keep | the biggest pace dial. 200 is earlier and dearer, 50 later and cheaper |
-| `spendCapBps` | 2000 | keep | a guard. blocks 18 hours in 90 days |
+| `spendCapBps` | 2000 | keep | a guard. blocks 18 hours in 90 days. at most 5000 |
+| `rateCap` | 1.232e14 | keep | 8 times `rateStart`. never reached at launch values (the climb is clamped by the pot first). it is the owner's "never pay more than this per credit" |
 | `exitAfter` | 72 hours | keep | no effect before phase 2 |
 | `exitToBuybackBps` and exitToken settings | as launched | keep | phase 2 only. the auction pace is slow (1 slice per 6 hours) |
 
@@ -315,4 +317,4 @@ low and high value of each input against the base case (27,110 credits and 339 s
 
 ## files
 
-sim/engine.js (model, the single source), sim/engine.test.mjs (235 checks), sim/run.mjs (batches, node run.mjs q1 to q11), sim/results/*.json, sim/build.mjs and the page parts (page.css, page.body.html, page.ui1.js to page.ui4.js), sim/index.html (built, single file).
+sim/engine.js (model, the single source), sim/engine.test.mjs (254 checks), sim/run.mjs (batches, node run.mjs q1 to q11), sim/results/*.json, sim/build.mjs and the page parts (page.css, page.body.html, page.ui1.js to page.ui4.js), sim/index.html (built, single file).

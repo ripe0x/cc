@@ -15,6 +15,12 @@ interface ICoreOwner {
     function setRate(uint256 rate) external;
     function xRate() external view returns (uint256);
     function setXRate(uint256 rate) external;
+    function heldStatements() external view returns (uint256[] memory);
+    function statementStatus(uint256 sid)
+        external
+        view
+        returns (uint8 status, uint256 auctionId, uint256 reserve, uint256 bid, uint64 endTime);
+    function repriceStatement(uint256 sid) external;
 }
 
 /// @notice changes the settings of a live Core without touching the fields you do not name. it reads the live struct, applies
@@ -25,6 +31,9 @@ interface ICoreOwner {
 /// * `SET_<field>=<value>`, one variable per field of `Settings`, for example `SET_reserveBps=8000`
 /// * `SETTINGS_PATCH`, a json object as text or the path of a json file, for example `{"reserveBps":8000}`
 /// `SET_RATE=<wei per point>` also prepares `setRate`, `SET_XRATE=<bps>` also prepares `setXRate`.
+/// `REPRICE=1` also prepares one `repriceStatement` per listed statement that has no bid, after the settings call.
+/// use it whenever `reserveBps` changes: a listing keeps its old reserve until it is repriced, and anyone may bid at
+/// the old reserve first. send the whole set as one batch from the owner (a Safe batch): reprice is permissionless
 ///
 /// `CORE=0x... SET_reserveBps=8000 forge script script/SetSettings.s.sol --rpc-url $MAINNET_RPC_URL`
 /// (add `SEND=1 --broadcast --ledger` or `--account <name>` to send, as the owner)
@@ -39,7 +48,7 @@ contract SetSettings is Script {
     error NotOwner(address owner, address signer);
 
     string internal constant TUPLE =
-        "(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16)";
+        "(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64)";
 
     function run() external {
         ICoreOwner core = ICoreOwner(_core());
@@ -78,6 +87,22 @@ contract SetSettings is Script {
             );
         }
 
+        uint256[] memory open;
+        if (_reprice()) {
+            open = _openListings(core);
+            console.log("repriceStatement calls, listed statements without a bid:", open.length);
+            for (uint256 i; i < open.length; ++i) {
+                console.log(
+                    string.concat(
+                        "cast send ",
+                        vm.toString(address(core)),
+                        " \"repriceStatement(uint256)\" ",
+                        vm.toString(open[i])
+                    )
+                );
+            }
+        }
+
         if (!_send()) {
             console.log("nothing sent. add SEND=1 and --broadcast with the owner as signer to send");
             return;
@@ -88,6 +113,9 @@ contract SetSettings is Script {
         if (settingsChanged) core.setSettings(next);
         if (rate != 0) core.setRate(rate);
         if (xRate != 0) core.setXRate(xRate);
+        for (uint256 i; i < open.length; ++i) {
+            core.repriceStatement(open[i]);
+        }
         vm.stopBroadcast();
         console.log("sent. read it back with settings(), ethRate() and the SettingsSet event");
     }
@@ -99,6 +127,27 @@ contract SetSettings is Script {
 
     function _send() internal view virtual returns (bool) {
         return vm.envOr("SEND", uint256(0)) == 1;
+    }
+
+    /// @dev REPRICE=1 adds a `repriceStatement` for every listed statement without a bid. a test overrides it
+    function _reprice() internal view virtual returns (bool) {
+        return vm.envOr("REPRICE", uint256(0)) == 1;
+    }
+
+    /// @dev the statements the Core holds that are listed on the house with no bid yet (status Listed, 2), the only
+    /// ones `repriceStatement` accepts. `heldStatements` may hold sold statements until synced, those are skipped
+    function _openListings(ICoreOwner core) internal view returns (uint256[] memory out) {
+        uint256[] memory held = core.heldStatements();
+        uint256[] memory tmp = new uint256[](held.length);
+        uint256 n;
+        for (uint256 i; i < held.length; ++i) {
+            (uint8 status,,,,) = core.statementStatus(held[i]);
+            if (status == 2) tmp[n++] = held[i];
+        }
+        out = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            out[i] = tmp[i];
+        }
     }
 
     /// @dev the patch text or file path, empty when there is none. a test overrides it
@@ -125,7 +174,7 @@ contract SetSettings is Script {
                 _set(s, keys[k], vm.parseJsonUint(json, string.concat(".", keys[k])));
             }
         }
-        bytes32[26] memory names = SettingsFields.names();
+        bytes32[27] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             string memory name = _name(names[i]);
             (bool has, uint256 v) = _single(name);
@@ -134,7 +183,7 @@ contract SetSettings is Script {
     }
 
     function _set(Settings memory s, string memory name, uint256 v) internal pure {
-        bytes32[26] memory names = SettingsFields.names();
+        bytes32[27] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             if (keccak256(bytes(_name(names[i]))) != keccak256(bytes(name))) continue;
             SettingsFields.set(s, i, v);
@@ -160,9 +209,9 @@ contract SetSettings is Script {
         console.log(
             "settings: field | live | new | bounds (a * marks a change; climbMaxBps >= climbBaseBps, xRateFloor <= xRateCap)"
         );
-        uint256[26] memory lo = SettingsFields.lo();
-        uint256[26] memory hi = SettingsFields.hi();
-        bytes32[26] memory names = SettingsFields.names();
+        uint256[27] memory lo = SettingsFields.lo();
+        uint256[27] memory hi = SettingsFields.hi();
+        bytes32[27] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             uint256 x = SettingsFields.get(a, i);
             uint256 y = SettingsFields.get(b, i);

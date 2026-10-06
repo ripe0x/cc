@@ -114,32 +114,33 @@ constants of the Core (compiled in, not configurable). the owner signs off each 
 
 the skim split (9.5 points of a 10 point skim to the engine, 0.5 to the creator) is fixed inside the artcoins pool at launch and cannot be made adjustable by this system.
 
-settings. one struct, `Settings`, in Core storage, in the config file under `settings`, inside `CONFIG_HASH`. the owner changes any of them after the launch with `setSettings(Settings)` (all at once, effective at once, after a checkpoint of the eth rate and the exit rate; the whole struct is emitted in `SettingsSet`) and reads them with `settings()`. the Core rejects a value outside the bounds, and preflight rejects it first. the bounds exist to stop typos and to keep the owner from moving assets (tips, reimbursements and keeper rewards are capped). postflight reads every field back. the owner signs off each row. the field order is the struct order.
+settings. one struct, `Settings`, in Core storage, in the config file under `settings`, inside `CONFIG_HASH`. the owner changes any of them after the launch with `setSettings(Settings)` (all at once, effective at once, after a checkpoint of the eth rate and the exit rate; the whole struct is emitted in `SettingsSet`) and reads them with `settings()`. the Core rejects a value outside the bounds, and preflight rejects it first. the bounds exist to stop typos and to keep the owner from transferring assets out (tips, reimbursements and keeper rewards are capped). they do not bound the price the owner sets for credits: see the owner section of docs/ARCHITECTURE.md. postflight reads every field back. the owner signs off each row. the field order is the struct order.
 
 | key | launch | bounds | meaning | adjustable after launch |
 |---|---|---|---|---|
 | `flatBps` | 10000 | 0 to 10000 | share of the bid that is flat per credit. price = rate * (flatBps * avgScore + (10000 - flatBps) * score) / 10000 / 1e4, before the controller bonus. at 10000 the score contract is not read on the eth doors | yes |
-| `avgScore` | 4330000 | 800000 to 8000000 | the score a flat credit is priced as, and the average credit of the funded rule | yes |
+| `avgScore` | 4330000 | 800000 to 6000000 | the score a flat credit is priced as, and the average credit of the funded rule | yes |
 | `climbBaseBps` | 100 | 0 to 1000 | rate climb per hour in the first period since the last fill | yes |
 | `climbDoubleEvery` | 86400 | 3600 to 2592000 s | the climb doubles every period without a fill | yes |
 | `climbMaxBps` | 800 | `climbBaseBps` to 2000 | top climb per hour | yes |
-| `dropBps` | 2000 | 0 to 5000 | a fill of `x` from pot `p` drops the rate by `rate * dropBps / 10000 * min(x, p) / p` | yes |
-| `spendCapBps` | 2000 | 100 to 10000 | hourly spend cap, share of the pot at the window open. also the funded threshold and the climb clamp | yes |
+| `dropBps` | 2000 | 500 to 5000 | a fill of `x` from pot `p` drops the rate by `rate * dropBps / 10000 * min(x, p) / p` | yes |
+| `spendCapBps` | 2000 | 100 to 5000 | hourly spend cap, share of the pot at the window open. also the funded threshold and the climb clamp | yes |
 | `bonusCapBps` | 2500 | 0 to 5000 | largest controller bonus on a ceiling | yes |
 | `tipSavingsBps`, `tipCapBps` | 1000, 200 | 0 to 2500, 0 to 500 | `buyListing` keeper tip, share of savings capped at a share of cost | yes |
 | `reimburseBps`, `reimburseCapBps` | 11000, 500 | 0 to 15000, 0 to 1000 | gas reimbursement for compose, share of gas cost capped at a share of statement cost | yes |
-| `reserveBps` | 9000 | 1000 to 40000 | auction reserve as bps of the statement cost. 9000 sells at no less than 90 percent of cost. the low bound of 10 percent means a bad setting can sell a statement for a tenth of its cost, which is why the settings are owner only and public in `SettingsSet` | yes |
-| `auctionDuration` | 86400 | 3600 to 2592000 s | statement auction length, runs from the first bid | yes |
-| `exitAfter` | 259200 | 0 to 31536000 s | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 | yes |
+| `reserveBps` | 9000 | 3000 to 40000 | auction reserve as bps of the statement cost. 9000 sells at no less than 90 percent of cost. the low bound of 30 percent means a bad setting can sell a statement for 30 percent of its cost (with the 6 hour auction minimum a stranger has time to bid over it), which is why the settings are owner only and public in `SettingsSet`. a raised value does not reach listings that have no bid yet until `repriceStatement` runs on each (see changing settings after launch) | yes |
+| `auctionDuration` | 86400 | 21600 to 2592000 s | statement auction length, runs from the first bid | yes |
+| `exitAfter` | 259200 | 3600 to 31536000 s | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 | yes |
 | `saleToBuybackBps` | 5000 | 0 to 10000 | share of sale proceeds to the coin buyback pot, the rest to the credit pot | yes |
 | `exitToBuybackBps` | 5000 | 0 to 10000 | share of exit token from an eth lane exit to the buyback pot | yes |
-| `buybackSlice`, `buybackDelay`, `keeperTipBps` | 1 eth, 25 blocks, 50 | 0.01 to 100 eth, 1 to 7200, 0 to 500 | coin buyback slice, minimum block gap, caller tip in bps of the slice | yes |
+| `buybackSlice`, `buybackDelay`, `keeperTipBps` | 1 eth, 25 blocks, 50 | 0.01 to 5 eth, 1 to 7200, 0 to 500 | coin buyback slice, minimum block gap, caller tip in bps of the slice | yes |
 | `xRateCap`, `xRateFloor` | 9700, 3000 | floor <= cap <= 10000 | exit token bid in bps of score, phase 2 | yes |
 | `xRateClimbPerHour`, `xRateDropPerCredit` | 100, 20 | 0 to 1000 each | exit bid climb per hour and drop per credit | yes |
 | `xAuctionHalfLife` | 21600 | 600 to 2592000 s | exit token dutch auction price half life | yes |
 | `exitSliceCredits` | 20 | 1 to 1000 | credits per exit slice | yes |
+| `rateCap` | 123200000000000 | 1e11 to 1e15 (the rate bounds) | wei per whole point, 8 times `rateStart` at launch. the eth rate never exceeds it: the climb stops at the lower of the funded clamp and `rateCap`, `setRate` refuses a value above it, and lowering it below the live rate pulls the rate down to it at once (checkpoint first). the owner's "never pay more than this per credit". `rateStart` must not exceed it (preflight row, and the Core constructor reverts `BadRate`). last field of the struct | yes |
 
-two more owner functions, each with its own event: `setRate(uint256)` resets the current eth limit (inside the rate bounds, checkpoints first, keeps the last fill time) and `setXRate(uint256)` sets the exit bid (inside the settings floor and cap).
+two more owner functions, each with its own event: `setRate(uint256)` resets the current eth limit (inside the rate bounds and at most `rateCap`, checkpoints first, keeps the last fill time) and `setXRate(uint256)` sets the exit bid (inside the settings floor and cap).
 
 there is one config file, `script/config/mainnet.json`. the hash covers the settings, so a changed launch value is a new signed hash.
 
@@ -159,7 +160,7 @@ config values (`script/config/mainnet.json`). the owner signs off each row.
 | `creator` | unset, must fill | skim protocol leg recipient (0.5 points) and the locker reward recipient |
 | `name`, `symbol` | unset, must fill | coin name and symbol, part of the coin initcode so part of its address |
 | `salt` | zero, must fill | user salt of the coin address. any nonzero value, change it if the predicted address is taken |
-| `rateStart` | 1.54e13 | opening bid in wei per whole point, bounded to [1e11, 1e15]. launch day rule in section 1: `0.75 * (market price of one credit in wei) * 1e4 / avgScore`. 1.54e13 is for a market price of 0.0089 eth. it only decides how soon the pot starts working, `setRate` moves it later |
+| `rateStart` | 1.54e13 | opening bid in wei per whole point, bounded to [1e11, 1e15] and to `rateCap`. launch day rule in section 1: `0.75 * (market price of one credit in wei) * 1e4 / avgScore`. 1.54e13 is for a market price of 0.0089 eth. it only decides how soon the pot starts working, `setRate` moves it later |
 | `stack.auctionFactory` | 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 | the pnd auction house factory. the Core creates its own house through it in the constructor. preflight needs code, a default fee of 0 and no house yet for the predicted core |
 | `settings` | see the settings table above | the launch value of every economic setting, one key per field of `Settings`, in the hash |
 | `launch.supply` | 1,000,000,000e18 | coin supply, all of it in the pool manager as the locked launch position (a few thousand wei of rounding dust stay in the locker), must equal the Core `SUPPLY` |
@@ -192,7 +193,7 @@ pinned rules. preflight fails (and `Deploy` stops) on any value outside them. ea
 | factory | deprecated, so only the owner and admins can launch | `"overrides": {"openFactory": true}` for a future public factory |
 | `owner`, `creator` | not the dead address, a stack address, the mev module or the factory owner. WARN when they are equal or when one is the deployer | none |
 | `supply` | the Core `SUPPLY` constant | none |
-| `rateStart` | [1e11, 1e15], the Core limits | none |
+| `rateStart` | [1e11, 1e15] and at most `settings.rateCap`, the Core limits | none |
 | `settings` | every field inside its bound (the table in this section), `climbMaxBps` at least `climbBaseBps`, `xRateFloor` at most `xRateCap`. the Core checks the same bounds on `setSettings` and in its constructor | none |
 | `stack.auctionFactory` | has code, the default fee is 0 (WARN otherwise), no house exists yet for the predicted core | none |
 
@@ -206,16 +207,16 @@ the compiler settings are in `foundry.toml`: solc 0.8.30, evm cancun, via ir, op
 
 the library address is the CREATE2 address of the compiled code. take it from `jq -r '.libraries[0]' broadcast/Deploy.s.sol/1/run-latest.json | cut -d: -f3` or from the line `verify: library CoreLib at` that postflight prints (step 9), both are the same. export it as `LIB`. the Core links against it: its runtime code carries the library address in place of the placeholder, so verifying the Core needs `--libraries src/lib/CoreLib.sol:CoreLib:$LIB` or etherscan compiles an unlinked Core and reports a mismatch. verify the library first, it has no constructor arguments. postflight prints the exact `--libraries` flag, the Core constructor args and the controller constructor args (`verify:` lines), and its row `core: linked library is the compiled CoreLib` fails when the address inside the Core is not code equal to the compiled library.
 
-the constructor arguments of the Core are `(owner, coin, controller, stack, rateStart, settings)`, where `stack` is the tuple `(poolManager, hook, tickSpacing, poolFee, factory, locker, escrow, auctionFactory)` and `settings` is the `Settings` tuple in the field order of the settings table (types: uint16 flatBps, uint32 avgScore, uint16 climbBaseBps, uint32 climbDoubleEvery, uint16 climbMaxBps, uint16 dropBps, uint16 spendCapBps, uint16 bonusCapBps, uint16 tipSavingsBps, uint16 tipCapBps, uint16 reimburseBps, uint16 reimburseCapBps, uint16 reserveBps, uint32 auctionDuration, uint32 exitAfter, uint16 saleToBuybackBps, uint16 exitToBuybackBps, uint128 buybackSlice, uint16 buybackDelay, uint16 keeperTipBps, uint16 xRateCap, uint16 xRateFloor, uint16 xRateClimbPerHour, uint16 xRateDropPerCredit, uint32 xAuctionHalfLife, uint16 exitSliceCredits). every member is a static type, so the tuples are encoded inline. postflight prints the exact hex read back from the deployed Core (the settings it prints are the current ones, so run it before any `setSettings`), compare it with the hex below.
+the constructor arguments of the Core are `(owner, coin, controller, stack, rateStart, settings)`, where `stack` is the tuple `(poolManager, hook, tickSpacing, poolFee, factory, locker, escrow, auctionFactory)` and `settings` is the `Settings` tuple in the field order of the settings table (types: uint16 flatBps, uint32 avgScore, uint16 climbBaseBps, uint32 climbDoubleEvery, uint16 climbMaxBps, uint16 dropBps, uint16 spendCapBps, uint16 bonusCapBps, uint16 tipSavingsBps, uint16 tipCapBps, uint16 reimburseBps, uint16 reimburseCapBps, uint16 reserveBps, uint32 auctionDuration, uint32 exitAfter, uint16 saleToBuybackBps, uint16 exitToBuybackBps, uint128 buybackSlice, uint16 buybackDelay, uint16 keeperTipBps, uint16 xRateCap, uint16 xRateFloor, uint16 xRateClimbPerHour, uint16 xRateDropPerCredit, uint32 xAuctionHalfLife, uint16 exitSliceCredits, uint64 rateCap). every member is a static type, so the tuples are encoded inline. postflight prints the exact hex read back from the deployed Core (the settings it prints are the current ones, so run it before any `setSettings`), compare it with the hex below.
 
 ```sh
 export POOL_MANAGER=$(jq -r .stack.poolManager $LAUNCH_CONFIG) HOOK=$(jq -r .stack.hook $LAUNCH_CONFIG)
 export LOCKER=$(jq -r .stack.locker $LAUNCH_CONFIG) ESCROW=$(jq -r .stack.escrow $LAUNCH_CONFIG)
 export AUCTION_FACTORY=$(jq -r .stack.auctionFactory $LAUNCH_CONFIG)
 export RATE_START=$(jq -r .rateStart $LAUNCH_CONFIG)   # OWNER, FACTORY, CORE, COIN, CONTROLLER, LIB as in sections 0 and 1
-export SETTINGS="($(jq -r '.settings | [.flatBps,.avgScore,.climbBaseBps,.climbDoubleEvery,.climbMaxBps,.dropBps,.spendCapBps,.bonusCapBps,.tipSavingsBps,.tipCapBps,.reimburseBps,.reimburseCapBps,.reserveBps,.auctionDuration,.exitAfter,.saleToBuybackBps,.exitToBuybackBps,.buybackSlice,.buybackDelay,.keeperTipBps,.xRateCap,.xRateFloor,.xRateClimbPerHour,.xRateDropPerCredit,.xAuctionHalfLife,.exitSliceCredits] | map(tostring) | join(",")' $LAUNCH_CONFIG))"
+export SETTINGS="($(jq -r '.settings | [.flatBps,.avgScore,.climbBaseBps,.climbDoubleEvery,.climbMaxBps,.dropBps,.spendCapBps,.bonusCapBps,.tipSavingsBps,.tipCapBps,.reimburseBps,.reimburseCapBps,.reserveBps,.auctionDuration,.exitAfter,.saleToBuybackBps,.exitToBuybackBps,.buybackSlice,.buybackDelay,.keeperTipBps,.xRateCap,.xRateFloor,.xRateClimbPerHour,.xRateDropPerCredit,.xAuctionHalfLife,.exitSliceCredits,.rateCap] | map(tostring) | join(",")' $LAUNCH_CONFIG))"
 ARGS=$(cast abi-encode \
-  "constructor(address,address,address,(address,address,int24,uint24,address,address,address,address),uint256,(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16))" \
+  "constructor(address,address,address,(address,address,int24,uint24,address,address,address,address),uint256,(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64))" \
   $OWNER $COIN $CONTROLLER \
   "($POOL_MANAGER,$HOOK,200,8388608,$FACTORY,$LOCKER,$ESCROW,$AUCTION_FACTORY)" \
   $RATE_START "$SETTINGS")
@@ -266,7 +267,7 @@ all times are from the launch block. the anti sniper window is `launch.sniperSec
 | with no fills | after 72 hours without a fill the climb is 800 bps an hour until the clamp, so a bid that nobody hits runs up to what the pot can pay | none |
 | statements | each eth lane compose lists the statement on the Core's own auction house at 90 percent of its cost, for 24 hours from the first bid. the proceeds are credited to the Core inside the house and move into the pots when anyone calls `collectSales()` (`buyback()` calls it first). a statement with a bid cannot be cancelled. `syncStatement(sid)` clears the record of a sold statement and relists a returned one, `repriceStatement(sid)` applies a changed `reserveBps` to an old listing with no bid | check `statementStatus(sid)` after the first compose, then that the first sale clears and `collectSales()` moves the eth |
 | eth in `ethToBuyback` | it fills from statement sales (`collectSales`), so only after the first auction. `buyback()` then burns coin, one slice of at most 1 eth every 25 blocks | anyone may call, 0.5 percent tip |
-| settings | the owner may change any setting at once with `setSettings(Settings)` and the eth limit with `setRate`, the exit bid with `setXRate`. the owner cannot move eth, credits, statements, coin or exit token out of the Core by any setting: tips, reimbursements and keeper rewards are capped and everything else is spent only by the engine's own doors | after any change read `settings()` and the `SettingsSet` event |
+| settings | the owner may change any setting at once with `setSettings(Settings)` and the eth limit with `setRate`, the exit bid with `setXRate`. the owner cannot transfer eth, credits, statements, coin or exit token out of the Core by any setting: tips, reimbursements and keeper rewards are capped and everything else is spent only by the engine's own doors. the owner does set the price the engine pays, so a dishonest owner or a stolen owner key could sell credits to the engine at an inflated limit and drain the pot at the bounded pace of docs/ARCHITECTURE.md section 10 (the owner accepted this, holders trust the owner key). use a multisig as owner | after any change read `settings()` and the `SettingsSet` event |
 | phase 2 | exit doors stay shut while the exitModule slot is empty. the owner queues `SetExitModule` through the 7 day timelock | queue only after the module is final |
 
 housekeeping after launch.
@@ -291,12 +292,18 @@ SETTINGS_PATCH='{"reserveBps":8000,"auctionDuration":43200}' forge script script
 SET_reserveBps=8000 SET_RATE=20000000000000 SEND=1 forge script script/SetSettings.s.sol --rpc-url $PRIVATE_RPC --broadcast --ledger   # sends setSettings and setRate
 ```
 
-`SET_<field>` and `SETTINGS_PATCH` name the fields of the table, the single variables win over the patch, `SET_RATE` and `SET_XRATE` add `setRate` and `setXRate`. checked on the anvil fork: the table showed the live value 9000 and the new one 8000, the broadcast from the impersonated owner changed `reserveBps` and the rate.
-
-the by hand way, with `cast`. the tuple type is the one of the constructor in section 3 (`T` below). field 13 is `reserveBps`, count the fields in the order of the table:
+after you change `reserveBps`, reprice the open listings in the same transaction batch. a listing keeps the reserve it was made with until `repriceStatement(sid)` runs on it, and anyone can bid at the old reserve first (after a bid the reserve and the sale price cannot change). raising the reserve is the case that needs it, a lower one only helps bidders. `repriceStatement` is permissionless, so a Safe batch can hold `setSettings` and one `repriceStatement` per listed statement without a bid. the script prepares them: add `REPRICE=1` and it appends one `repriceStatement` call for every statement the Core holds that is listed with no bid (read through `heldStatements()` and `statementStatus`), prints each `cast send`, and with `SEND=1` sends them after `setSettings` and `setRate`. send everything as one batch from the owner when the owner is a multisig, so no bid can land between the settings change and the reprices:
 
 ```sh
-T="(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16)"
+SET_reserveBps=12000 REPRICE=1 forge script script/SetSettings.s.sol --rpc-url $MAINNET_RPC_URL      # dry run, lists the repriceStatement calls
+```
+
+`SET_<field>` and `SETTINGS_PATCH` name the fields of the table, the single variables win over the patch, `SET_RATE` and `SET_XRATE` add `setRate` and `setXRate`, `REPRICE=1` adds the reprices. checked on the anvil fork: the table showed the live value 9000 and the new one 8000, the broadcast from the impersonated owner changed `reserveBps` and the rate.
+
+the by hand way, with `cast`. the tuple type is the one of the constructor in section 3 (`T` below). field 13 is `reserveBps` and field 27 is `rateCap`, count the fields in the order of the table:
+
+```sh
+T="(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64)"
 S=$(cast call $CORE "settings()($T)" --rpc-url $MAINNET_RPC_URL | sed -E 's/ \[[^]]*\]//g')   # the live struct, plain numbers
 NEW=$(echo "$S" | tr -d '() ' | awk -F, -v OFS=, '{$13=8000; print "(" $0 ")"}')                # change field 13 only
 echo "$S"; echo "$NEW"                                                                          # read both before sending

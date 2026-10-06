@@ -267,8 +267,10 @@ abstract contract Fixture is Test, SystemDeployer {
         CREDITS.setApprovalForAll(address(core), true);
     }
 
-    /// @notice warps an hour at a time until the ceiling of credit `id` reaches `price`
+    /// @notice warps an hour at a time until the ceiling of credit `id` reaches `price`. the real listings cost more
+    /// than the launch `rateCap` allows the bid to reach, so the owner lifts the cap to its bound first
     function _warpUntilCeiling(uint256 id, uint256 price) internal {
+        _liftRateCap();
         for (uint256 i; i < 400; ++i) {
             if (core.ceilingOf(id) >= price) return;
             vm.warp(block.timestamp + 1 hours);
@@ -380,6 +382,15 @@ abstract contract Fixture is Test, SystemDeployer {
     /// @notice the reserve a statement of `cost` gets under the settings now
     function _reserveFor(uint256 cost) internal view returns (uint256) {
         return cost * core.settings().reserveBps / 10_000;
+    }
+
+    /// @notice the owner lifts `rateCap` to its upper bound, for suites that climb past the launch cap
+    function _liftRateCap() internal {
+        Settings memory s = core.settings();
+        if (s.rateCap < 1e15) {
+            s.rateCap = 1e15;
+            _setSettings(s);
+        }
     }
 
     /// @notice the owner changes the settings

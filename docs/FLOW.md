@@ -15,7 +15,7 @@ naming rule: only `exitModule` and `exitToken`. never name or describe them.
 | 5 | the opening limit is set on launch day at about 75% of the market price of a credit |
 | 6 | the split of sale proceeds between the pot and the buyback is an adjustable setting |
 | 7 | the controller, the exit module and the allowed targets keep the 7 day timelock |
-| 8 | the owner can never move eth, credits, statements, coin or exit token out directly. this stays a hard rule and must stay true under every combination of settings |
+| 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key |
 
 ## 2. settings
 
@@ -24,23 +24,23 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | setting | launch value | bounds | meaning |
 |---|---|---|---|
 | flatBps | 10_000 | 0 to 10_000 | share of the bid that is flat per credit. price = rate * (flatBps * avgScore + (10_000 - flatBps) * score) / 10_000 / 1e4, before the controller bonus |
-| avgScore | 4_330_000 | 800_000 to 8_000_000 | the score a flat credit is priced as, and the "average credit" in the funded rule |
+| avgScore | 4_330_000 | 800_000 to 6_000_000 | the score a flat credit is priced as, and the "average credit" in the funded rule |
 | climbBaseBps | 100 | 0 to 1_000 | per hour |
 | climbDoubleEvery | 24 hours | 1 hour to 30 days | |
 | climbMaxBps | 800 | climbBaseBps to 2_000 | per hour |
-| dropBps | 2_000 | 0 to 5_000 | |
-| spendCapBps | 2_000 | 100 to 10_000 | per hour window |
+| dropBps | 2_000 | 500 to 5_000 | |
+| spendCapBps | 2_000 | 100 to 5_000 | per hour window |
 | bonusCapBps | 2_500 | 0 to 5_000 | |
 | tipSavingsBps | 1_000 | 0 to 2_500 | |
 | tipCapBps | 200 | 0 to 500 | |
 | reimburseBps | 11_000 | 0 to 15_000 | of gas cost |
 | reimburseCapBps | 500 | 0 to 1_000 | of statement cost |
-| reserveBps | 9_000 | 1_000 to 40_000 | auction reserve as bps of statement cost |
-| auctionDuration | 24 hours | 1 hour to 30 days | runs from the first bid |
-| exitAfter | 72 hours | 0 to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
+| reserveBps | 9_000 | 3_000 to 40_000 | auction reserve as bps of statement cost |
+| auctionDuration | 24 hours | 6 hours to 30 days | runs from the first bid |
+| exitAfter | 72 hours | 1 hour to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
 | saleToBuybackBps | 5_000 | 0 to 10_000 | share of sale proceeds to the coin buyback, rest to the pot |
 | exitToBuybackBps | 5_000 | 0 to 10_000 | share of exit token from eth lane exits to the coin buyback |
-| buybackSlice | 1 ether | 0.01 to 100 ether | |
+| buybackSlice | 1 ether | 0.01 to 5 ether | |
 | buybackDelay | 25 | 1 to 7_200 blocks | |
 | keeperTipBps | 50 | 0 to 500 | |
 | xRateCap / xRateFloor | 9_700 / 3_000 | floor <= cap <= 10_000 | |
@@ -48,8 +48,9 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | xRateDropPerCredit | 20 | 0 to 1_000 | |
 | xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
 | exitSliceCredits | 20 | 1 to 1_000 | |
+| rateCap | 123_200_000_000_000 (8 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
 
-also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
+also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
 the skim split (9.5 points to the engine, 0.5 to the creator) is fixed inside the artcoins pool at launch and cannot be made adjustable here. say so in the docs.
 

@@ -1031,7 +1031,7 @@ contract LifecycleNarrativeTest is Fixture {
             // eth, not milli eth). the owner puts it back to the opening price of the launch
             if (round == 1) {
                 uint256 opening = core.RATE_START();
-                assertGt(core.ethRate(), 100 * opening);
+                assertGt(core.ethRate(), 10 * opening);
                 vm.prank(owner);
                 core.setRate(opening);
                 _check();

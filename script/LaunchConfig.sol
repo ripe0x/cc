@@ -147,6 +147,8 @@ abstract contract ConfigReader is CommonBase {
         s.xRateDropPerCredit = _u16(j, ".settings.xRateDropPerCredit");
         s.xAuctionHalfLife = _u32(j, ".settings.xAuctionHalfLife");
         s.exitSliceCredits = _u16(j, ".settings.exitSliceCredits");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        s.rateCap = uint64(_uint(j, ".settings.rateCap", type(uint64).max));
     }
 
     function _loadLaunch(LaunchConfig memory c, string memory j) private pure {
@@ -216,7 +218,7 @@ abstract contract ConfigReader is CommonBase {
     }
 
     function rateInBounds(LaunchConfig memory c) internal pure returns (bool) {
-        return c.rateStart >= RATE_START_MIN && c.rateStart <= RATE_START_MAX;
+        return c.rateStart >= RATE_START_MIN && c.rateStart <= RATE_START_MAX && c.rateStart <= c.settings.rateCap;
     }
 
     /// @notice the name of the first launch setting outside the bounds the Core enforces, zero when all are inside

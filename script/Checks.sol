@@ -103,7 +103,11 @@ abstract contract LaunchChecks is PostflightChecks {
         _check(
             "placeholders filled", unset.length == 0, unset.length == 0 ? "owner creator name symbol salt set" : names
         );
-        _check("rateStart in bounds", rateInBounds(c), string.concat("rateStart ", vm.toString(c.rateStart)));
+        _check(
+            "rateStart in bounds and at most rateCap",
+            rateInBounds(c),
+            string.concat("rateStart ", vm.toString(c.rateStart), " rateCap ", vm.toString(c.settings.rateCap))
+        );
         bytes32 bad = settingsViolation(c);
         _check(
             "settings inside the bounds",
@@ -418,7 +422,9 @@ abstract contract LaunchChecks is PostflightChecks {
                 " spendCapBps ",
                 vm.toString(c.settings.spendCapBps),
                 " dropBps ",
-                vm.toString(c.settings.dropBps)
+                vm.toString(c.settings.dropBps),
+                " rateCap ",
+                vm.toString(c.settings.rateCap)
             )
         );
         _info(

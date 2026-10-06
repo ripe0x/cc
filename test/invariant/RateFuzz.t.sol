@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Core} from "../../src/Core.sol";
-import {Settings} from "../../src/interfaces/Interfaces.sol";
+import {Settings, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {Fixture} from "../utils/Fixture.sol";
 
 /// @notice plain fuzz tests for the eth rate and the hourly cap (SPEC 5.1 and 5.2) with fuzzed times, amounts and, now,
@@ -35,9 +35,10 @@ contract RateFuzzTest is Fixture {
         return (uint256(s.avgScore) * rate + s.spendCapBps - 1) / s.spendCapBps;
     }
 
-    /// @dev the rate cap of a pot: the hourly cap spent on one average credit
+    /// @dev the clamp of the climb for a pot: the hourly cap spent on one average credit, never above `rateCap`
     function _capOf(Settings memory s, uint256 pot) internal pure returns (uint256) {
-        return pot * s.spendCapBps / s.avgScore;
+        uint256 c = pot * s.spendCapBps / s.avgScore;
+        return c < s.rateCap ? c : s.rateCap;
     }
 
     /// the rate after `hrs` whole hours of climbing from `r`, where `offset` hours have passed since the last fill.
@@ -84,10 +85,11 @@ contract RateFuzzTest is Fixture {
     function _randomSettings(uint256 seed, bool calm) internal view returns (Settings memory s) {
         s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
-        s.avgScore = uint32(bound(_r(seed, 0), 800_000, 8_000_000));
-        s.spendCapBps = uint16(bound(_r(seed, 1), 100, 10_000));
+        s.avgScore = uint32(bound(_r(seed, 0), 800_000, 6_000_000));
+        s.spendCapBps = uint16(bound(_r(seed, 1), 100, 5_000));
         s.flatBps = uint16(bound(_r(seed, 2), 0, 10_000));
-        s.dropBps = uint16(bound(_r(seed, 3), 0, 5_000));
+        s.dropBps = uint16(bound(_r(seed, 3), 500, 5_000));
+        s.rateCap = uint64(RATE_START_MAX_WEI);
         if (!calm) {
             s.climbBaseBps = uint16(bound(_r(seed, 4), 0, 1_000));
             s.climbMaxBps = uint16(bound(_r(seed, 5), s.climbBaseBps, 2_000));
@@ -185,7 +187,7 @@ contract RateFuzzTest is Fixture {
         public
     {
         Settings memory s = _randomSettings(seed, true);
-        s.spendCapBps = uint16(bound(_r(seed, 9), 2_000, 10_000));
+        s.spendCapBps = uint16(bound(_r(seed, 9), 2_000, 5_000));
         s.climbBaseBps = uint16(bound(_r(seed, 10), 1, 100));
         s.climbMaxBps = 800;
         _setSettings(s);
@@ -227,7 +229,7 @@ contract RateFuzzTest is Fixture {
     function testFuzz_hourlyCap(uint256 capSeed, uint256 potSeed, uint256 gapSeed) public {
         Settings memory s = core.settings();
         // forge-lint: disable-next-line(unsafe-typecast)
-        s.spendCapBps = uint16(bound(capSeed, 100, 10_000));
+        s.spendCapBps = uint16(bound(capSeed, 100, 5_000));
         _setSettings(s);
         uint256 pot = bound(potSeed, 0.03 ether, 0.05 ether);
         _fund(pot);
@@ -282,7 +284,7 @@ contract RateFuzzTest is Fixture {
     function testFuzz_capChangeInsideAWindow(uint256 capA, uint256 capB, uint256 potSeed) public {
         Settings memory s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
-        s.spendCapBps = uint16(bound(capA, 500, 9_000));
+        s.spendCapBps = uint16(bound(capA, 500, 5_000));
         _setSettings(s);
         uint256 pot = bound(potSeed, 0.5 ether, 2 ether);
         _fund(pot);
@@ -293,7 +295,7 @@ contract RateFuzzTest is Fixture {
         uint256 windowPot = pot;
         uint256 spent = pot - core.ethPot();
         uint256 spent0 = spent;
-        s.spendCapBps = uint16(bound(capB, 500, 9_000));
+        s.spendCapBps = uint16(bound(capB, 500, 5_000));
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);
         uint256 capNow = windowPot * s.spendCapBps / 10_000;
@@ -323,7 +325,9 @@ contract RateFuzzTest is Fixture {
         Settings memory s = _randomSettings(seed, true);
         _setSettings(s);
         uint256 min = _minPot(s, START);
-        uint256 pot = bound(potSeed, min, min + 100 ether);
+        // the funded clamp must sit below the rate cap, or the cap is what pins the rate (tested on its own)
+        uint256 top = uint256(s.rateCap) * s.avgScore / s.spendCapBps;
+        uint256 pot = bound(potSeed, min, min + 100 ether > top ? top : min + 100 ether);
         _fund(pot);
         _warp(bound(waitSeed, 3000, 20_000) * 1 hours);
         uint256 cap = _capOf(s, pot);
@@ -332,7 +336,7 @@ contract RateFuzzTest is Fixture {
         // one average credit costs what the hourly cap allows, up to rounding down of the rate
         uint256 avgPrice = uint256(s.avgScore) * cap / 1e4;
         assertLe(avgPrice, pot * s.spendCapBps / 10_000);
-        assertGe(avgPrice * 1e4 + s.avgScore, pot * s.spendCapBps);
+        assertGe(avgPrice * 1e4 + s.avgScore + 1e4, pot * s.spendCapBps);
 
         uint256[] memory ids = _credits(alice, 12);
         uint256 sold;

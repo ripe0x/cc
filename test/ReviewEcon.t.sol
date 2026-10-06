@@ -66,7 +66,8 @@ contract PilePageEquivalence is ReviewEconBase {
         uint256 mode = pick % 4;
         uint256 startAfter = mode == 0 ? 0 : mode == 1 ? pile[(pick >> 8) % pile.length] : mode == 2 ? junk : pile[0];
         // a start id of the other lane is not a valid input, see test_pilePageCrossLaneStartDiffers
-        if (lane == Lane.Exit && (mode == 1 || mode == 3)) startAfter = 0;
+        // a junk id can collide with a member of the eth pile, which is the same cross lane input
+        if (lane == Lane.Exit && (mode == 1 || mode == 3 || core.pileNext(startAfter) != 0)) startAfter = 0;
         n = (pick >> 40) % 3 == 0 ? n : n % 90;
         uint256[] memory got = core.pilePage(lane, startAfter, n);
         uint256[] memory want = _ref(lane, startAfter, n);
@@ -124,10 +125,11 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
         // forty hours later: 24 hours at 1 percent, then 16 hours at 2 percent
         _warp(40 hours);
         assertEq(core.ethRate(), 7_474_410_246_507);
-        // and at the clamp of the hourly cap: 20 percent of the pot over 4.33M
+        // the funded clamp of the hourly cap is 20 percent of the pot over 4.33M, 4.6e15, far above the rate cap of
+        // 8 * rateStart, so after a long climb the rate sits at the rate cap
         _warp(10_000 hours);
-        assertEq(core.ethRate(), 4_616_364_615_062_981);
-        assertEq(core.ethRate(), core.ethPot() * 2000 / 4_330_000);
+        assertEq(core.ethRate(), 123_200_000_000_000);
+        assertGt(core.ethPot() * 2000 / 4_330_000, core.ethRate());
         _solvent();
     }
 }
@@ -243,6 +245,7 @@ contract RateModelFuzz is ReviewEconBase {
         if (!mFunded) return r;
         Settings memory s = core.settings();
         uint256 cap = core.ethPot() * s.spendCapBps / s.avgScore;
+        if (cap > s.rateCap) cap = s.rateCap;
         uint256 t = mTime;
         while (t < to && r < cap) {
             uint256 k = t > mLast ? (t - mLast) / s.climbDoubleEvery : 0;
@@ -289,11 +292,14 @@ contract RateModelFuzz is ReviewEconBase {
         s.climbBaseBps = uint16(seed % 1_001);
         s.climbMaxBps = uint16(uint256(s.climbBaseBps) + (seed >> 12) % (2_001 - s.climbBaseBps));
         s.climbDoubleEvery = uint32(1 hours + (seed >> 24) % 10 days);
-        s.avgScore = uint32(800_000 + (seed >> 48) % 7_200_000);
-        s.spendCapBps = uint16(100 + (seed >> 72) % 9_900);
-        s.dropBps = uint16((seed >> 96) % 5_001);
+        s.avgScore = uint32(800_000 + (seed >> 48) % 5_200_001);
+        s.spendCapBps = uint16(100 + (seed >> 72) % 4_901);
+        s.dropBps = uint16(500 + (seed >> 96) % 4_501);
+        s.rateCap = uint64(1e13 + (seed >> 120) % (1e15 - 1e13 + 1));
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);
+        // a lower rate cap pulls the rate down to it at the checkpoint
+        if (mRate > s.rateCap) mRate = s.rateCap;
         _syncFunded();
     }
 
