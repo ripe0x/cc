@@ -38,6 +38,20 @@ abstract contract SystemDeployer is LaunchChecks {
     /// lock the extension slot, hand over the token admin. intrinsic transaction gas comes on top of each
     uint256[5] internal stepGas;
 
+    /// @notice creates the controller and the core. a test base overrides these two with `deployCode`, so the test
+    /// contracts do not embed the creation code of the whole system (solc fails with "Tag too large" on them)
+    function _newController(address core) internal virtual returns (address) {
+        return address(new ControllerV1(core));
+    }
+
+    function _newCore(address owner, address coin, address controller, LaunchConfig memory c)
+        internal
+        virtual
+        returns (address)
+    {
+        return address(new Core(owner, coin, controller, c.stack, c.rateStart, c.settings));
+    }
+
     /// @notice deploys and launches the whole system
     /// @param deployer the address that sends every transaction. must be the broadcaster or the active prank
     /// @param c the launch config, placeholders filled
@@ -49,10 +63,10 @@ abstract contract SystemDeployer is LaunchChecks {
         address coinAt = predictCoin(c, deployer, coreAt);
 
         uint256 g = gasleft();
-        d.controller = address(new ControllerV1(coreAt));
+        d.controller = _newController(coreAt);
         stepGas[0] = g - gasleft();
         g = gasleft();
-        d.core = address(new Core(c.owner, coinAt, d.controller, c.stack, c.rateStart, c.settings));
+        d.core = _newCore(c.owner, coinAt, d.controller, c);
         stepGas[1] = g - gasleft();
         if (d.controller != controllerAt) revert AddressMismatch("controller");
         if (d.core != coreAt) revert AddressMismatch("core");

@@ -160,6 +160,19 @@ abstract contract Fixture is Test, SystemDeployer {
         launchTime = block.timestamp;
     }
 
+    /// @dev the system is created from its artifacts, so no test contract embeds the creation code of the Core
+    function _newController(address core_) internal override returns (address) {
+        return deployCode("ControllerV1.sol:ControllerV1", abi.encode(core_));
+    }
+
+    function _newCore(address owner_, address coin_, address controller_, LaunchConfig memory c)
+        internal
+        override
+        returns (address)
+    {
+        return deployCode("Core.sol:Core", abi.encode(owner_, coin_, controller_, c.stack, c.rateStart, c.settings));
+    }
+
     // ------------------------------------------------------------------ builders on the fixture config
 
     function _cfg(string memory name, string memory symbol, bytes32 salt) private view returns (LaunchConfig memory l) {
