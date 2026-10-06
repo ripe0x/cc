@@ -240,7 +240,8 @@ contract ReviewFlowCoreTest is Fixture {
             1_000,
             30 days,
             1_000,
-            uint64(RATE_START_MAX_WEI)
+            uint64(RATE_START_MAX_WEI),
+            10_000
         );
     }
 
@@ -265,8 +266,9 @@ contract ReviewFlowCoreTest is Fixture {
             uint256 w0 = uint256(vm.load(address(core), slot));
             assertEq(w0 >> 240, 0, "slot 0 top bits clear");
             uint256 w2 = uint256(vm.load(address(core), bytes32(uint256(slot) + 2)));
-            assertEq(w2 >> 176, 0, "slot 2 top bits clear");
+            assertEq(w2 >> 192, 0, "slot 2 top bits clear");
             assertEq(uint64(w2 >> 112), two[i].rateCap, "the rate cap sits at bits 112 to 175");
+            assertEq(uint16(w2 >> 176), two[i].exitLaneToBuybackBps, "the exit lane share sits at bits 176 to 191");
         }
     }
 
@@ -434,8 +436,8 @@ contract ReviewFlowCoreTest is Fixture {
     function test_dirtyCalldataWordsAreRefused() public {
         Settings memory base = core.settings();
         bytes memory good = abi.encodeCall(Core.setSettings, (base));
-        assertEq(good.length, 4 + 27 * 32);
-        for (uint256 i; i < 27; ++i) {
+        assertEq(good.length, 4 + 28 * 32);
+        for (uint256 i; i < 28; ++i) {
             bytes memory bad = bytes.concat(good);
             uint256 off = 32 + 4 + i * 32;
             uint256 w;

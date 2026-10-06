@@ -189,6 +189,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
                 vm.toString(live.saleToBuybackBps),
                 " exit to buyback ",
                 vm.toString(live.exitToBuybackBps),
+                " exit lane to buyback ",
+                vm.toString(live.exitLaneToBuybackBps),
                 " exitAfter ",
                 vm.toString(live.exitAfter),
                 "s"

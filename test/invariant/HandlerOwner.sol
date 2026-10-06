@@ -5,6 +5,8 @@ import {Vm} from "forge-std/Test.sol";
 import {Core} from "../../src/Core.sol";
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {HandlerHouse} from "./HandlerHouse.sol";
+import {MockExitModule} from "../standins/MockExitModule.sol";
+import {MockExitToken} from "../standins/MockExitToken.sol";
 
 /// @notice the owner as an adversarial actor. the owner calls `setSettings` with random valid settings across the
 /// whole allowed bounds, extreme corners included, `setRate` and `setXRate` anywhere in their bounds, and invalid
@@ -67,6 +69,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.xAuctionHalfLife = uint32(_f(_r(seed, 24), 10 minutes, 30 days, c.xAuctionHalfLife));
         s.exitSliceCredits = uint16(_f(_r(seed, 25), 1, 1_000, c.exitSliceCredits));
         s.rateCap = uint64(_f(_r(seed, 26), 1e11, 1e15, c.rateCap));
+        s.exitLaneToBuybackBps = uint16(_f(_r(seed, 27), 0, 10_000, c.exitLaneToBuybackBps));
         _corner(s, corner);
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -74,7 +77,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// the extreme corners the brief names, forced on top of the random settings
     function _corner(Settings memory s, uint256 k) internal pure {
         // forge-lint: disable-start(unsafe-typecast)
-        k = k % 18;
+        k = k % 20;
         if (k == 1) {
             s.flatBps = 0;
         } else if (k == 2) {
@@ -127,6 +130,13 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 17) {
             // the lowest rate cap: it pulls the eth rate down to it at the checkpoint
             s.rateCap = 1e11;
+        } else if (k == 18) {
+            // every exit goes to the bid pot, and every exit lane exit goes to the buyback
+            s.exitToBuybackBps = 0;
+            s.exitLaneToBuybackBps = 10_000;
+        } else if (k == 19) {
+            s.exitToBuybackBps = 10_000;
+            s.exitLaneToBuybackBps = 10_000;
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -209,6 +219,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (core.ethRate() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
         if (core.rateAtCheckpoint() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
         _fundedCheck();
+        if (phase2()) _xFundedCheck();
         // the exit rate is held inside the new band and nothing else
         uint256 want = p.xRate > ns.xRateCap ? ns.xRateCap : p.xRate;
         if (want < ns.xRateFloor) want = ns.xRateFloor;
@@ -256,6 +267,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.xAuctionHalfLife < 10 minutes || s.xAuctionHalfLife > 30 days) return "xAuctionHalfLife";
         if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1_000) return "exitSliceCredits";
         if (s.rateCap < 1e11 || s.rateCap > 1e15) return "rateCap";
+        if (s.exitLaneToBuybackBps > 10_000) return "exitLaneToBuybackBps";
         return bytes32(0);
     }
 
@@ -266,7 +278,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// breaks exactly one field of valid settings, `which` picks it. returns the name the library must report
     function _break(Settings memory s, uint256 which) internal pure returns (bytes32 name) {
         // forge-lint: disable-start(unsafe-typecast)
-        which = which % 40;
+        which = which % 41;
         if (which == 0) {
             (s.flatBps, name) = (10_001, "flatBps");
         } else if (which == 1) {
@@ -345,8 +357,10 @@ abstract contract HandlerOwner is HandlerHouse {
             (s.exitAfter, name) = (1 hours - 1, "exitAfter");
         } else if (which == 38) {
             (s.rateCap, name) = (1e11 - 1, "rateCap");
-        } else {
+        } else if (which == 39) {
             (s.rateCap, name) = (1e15 + 1, "rateCap");
+        } else {
+            (s.exitLaneToBuybackBps, name) = (10_001, "exitLaneToBuybackBps");
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -511,5 +525,100 @@ abstract contract HandlerOwner is HandlerHouse {
         if (core.allowedTarget(t)) _flag(V_OWNER, "an owner door allowed a target at once");
         _opost(p, "ownerMisc");
         _ok(a);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              REPLACE THE EXIT MODULE
+    //////////////////////////////////////////////////////////////*/
+
+    /// the owner replaces the exit module through the timelock (docs/FLOW.md section 8): a new module with the same
+    /// exit token and a new unit, the same address again after its unit changed, the same address and unit, and the
+    /// refused ones (another exit token, no unit, a unit the opening price floor refuses, no code). the action queues,
+    /// tries to run early (TooEarly), waits the 7 days and executes. a good set keeps the pots, the balances and the
+    /// exit auction price, credits the exit rate under the old unit, resyncs the funded flag, reads the unit again and
+    /// switches the handler to the new module. a refused one changes nothing
+    function replaceModule(uint256 seed, uint256 mode) external checked {
+        uint8 a = A_REPLACE_MODULE;
+        if (!phase2()) return _skip(a);
+        address token = core.exitToken();
+        address oldModule = core.exitModule();
+        uint256 oldUnit = core.unitPerPoint();
+        (MockExitModule next, bytes4 want) = _nextModule(seed, mode % 8, token);
+        bytes memory data = abi.encode(address(next));
+        _att(a);
+        vm.startPrank(owner);
+        core.queue(Core.Action.SetExitModule, data);
+        try core.execute(Core.Action.SetExitModule, data) {
+            _flag(V_OWNER, "a module set executed before its timelock");
+        } catch (bytes memory why) {
+            if (bytes4(why) != Core.TooEarly.selector) _unexpected(a, why);
+        }
+        vm.stopPrank();
+        _advance(core.TIMELOCK(), 0);
+        OPre memory p = _opre();
+        uint256 start0 = core.xStartPrice();
+        uint64 at0 = core.xStartTime();
+        vm.prank(owner);
+        try core.execute(Core.Action.SetExitModule, data) {
+            if (want != 0) _flag(V_OWNER, "a refused module set was accepted");
+            _afterModuleSet(p, next, token, start0, at0);
+            module = next;
+            _ok(a);
+        } catch (bytes memory why) {
+            _failed(p.bal, p.pot, p.rate, "replaceModule");
+            _opost(p, "replaceModule");
+            if (want == 0 || bytes4(why) != want) _unexpected(a, why);
+            else _ok(a);
+            if (core.exitModule() != oldModule || core.unitPerPoint() != oldUnit || core.exitToken() != token) {
+                _flag(V_OWNER, "a refused module set changed the module, the unit or the token");
+            }
+            vm.prank(owner);
+            core.cancel(Core.Action.SetExitModule, data);
+        }
+    }
+
+    /// the module the owner proposes and the selector the set must revert with, zero when it must go through
+    function _nextModule(uint256 seed, uint256 m, address token) internal returns (MockExitModule next, bytes4 want) {
+        if (m <= 1) {
+            next = new MockExitModule(token, _logBound(seed >> 8, 2e9, 5e10));
+        } else if (m <= 3) {
+            // the same module again: its unit changed (m 2) or did not (m 3), and it answers the unit read
+            module.setRevertUnit(false);
+            if (m == 2) module.setUnitPerPoint(_logBound(seed >> 8, 2e9, 5e10));
+            next = module;
+        } else if (m == 4) {
+            next = new MockExitModule(address(new MockExitToken("Other", "OTH")), 1e10);
+            want = Core.ExitTokenChanged.selector;
+        } else if (m == 5) {
+            next = new MockExitModule(token, seed % 2 == 0 ? 0 : uint256(type(uint128).max) + 1);
+            want = Core.BadModule.selector;
+        } else if (m == 6) {
+            // the opening price asks the supply for one slice (exitSliceCredits * avgScore * unit, at least 8e5 times the
+            // unit): above 1.25e27 per point it falls under 1e12 under any setting
+            next = new MockExitModule(token, 1e28);
+            want = Core.BadModule.selector;
+        } else {
+            next = MockExitModule(address(uint160(uint256(keccak256(abi.encode("nocode", seed))))));
+            want = Core.BadModule.selector;
+        }
+    }
+
+    function _afterModuleSet(OPre memory p, MockExitModule next, address token, uint256 start0, uint64 at0) internal {
+        _opost(p, "replaceModule");
+        if (core.exitModule() != address(next)) _flag(V_OWNER, "the module set did not install the module");
+        if (core.exitToken() != token) _flag(V_OWNER, "a module set changed the exit token");
+        if (core.unitPerPoint() != next.currentUnit()) _flag(V_OWNER, "a module set did not read the unit again");
+        // the climb so far was credited under the old unit
+        if (core.xRate() != p.xRate) _flag(V_RATE_BOUND, "a module set lost or invented exit rate climb");
+        _xFundedCheck();
+        // the price is coin per exit token: kept whatever the unit, and the clock too while there is something to sell
+        if (core.exitAuctionPrice() < p.xPrice) _flag(V_AUCTION, "a module set made the exit auction cheaper");
+        if (p.xToBuyback != 0) {
+            if (core.exitAuctionPrice() != p.xPrice || core.xStartPrice() != start0 || core.xStartTime() != at0) {
+                _flag(V_AUCTION, "a module set moved the running exit auction");
+            }
+        } else if (core.xStartPrice() < start0) {
+            _flag(V_AUCTION, "a module set lowered the stored start of an empty exit auction");
+        }
     }
 }

@@ -458,6 +458,8 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.settings.saleToBuybackBps),
                 " exit to buyback ",
                 vm.toString(c.settings.exitToBuybackBps),
+                " exit lane to buyback ",
+                vm.toString(c.settings.exitLaneToBuybackBps),
                 " buyback slice ",
                 vm.toString(c.settings.buybackSlice)
             )

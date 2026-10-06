@@ -122,7 +122,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error Underpaid();
     error NoExitModule();
     error Frozen();
-    error AlreadySet();
+    error ExitTokenChanged();
     error AlreadyQueued();
     error NotQueued();
     error TooEarly();
@@ -668,10 +668,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     function _forbidden(address t) private view returns (bool) {
+        return _forbiddenBase(t) || t == exitModule || t == exitToken;
+    }
+
+    /// every forbidden target except the exitModule and the exitToken, which a later set may name again
+    function _forbiddenBase(address t) private view returns (bool) {
         return t == address(CREDITS) || t == address(STATEMENTS) || t == address(this) || t == COIN || t == HOOK
             || t == address(MANAGER) || t == FACTORY || t == LOCKER || t == ESCROW || t == address(HOUSE)
             || t == AUCTION_FACTORY || t == Mainnet.PERMIT2 || t == Mainnet.POSITION_MANAGER
-            || t == Mainnet.UNIVERSAL_ROUTER || t == exitModule || t == exitToken;
+            || t == Mainnet.UNIVERSAL_ROUTER;
     }
 
     function _measuring() private pure returns (LibTransient.TBool storage) {
@@ -878,7 +883,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (balanceAfter < balanceBefore + required) revert Underpaid();
         uint256 received = balanceAfter - balanceBefore;
 
-        uint256 toBuyback = s.lane == Lane.Eth ? received * _st().exitToBuybackBps / BPS : 0;
+        uint256 toBuyback = received * (s.lane == Lane.Eth ? _st().exitToBuybackBps : _st().exitLaneToBuybackBps) / BPS;
         _xCheckpoint();
         if (toBuyback != 0) {
             // new funds never inherit a decayed clock: the curve re anchors at the price now, floored at a quarter
@@ -1113,24 +1118,34 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         emit XRateSet(rate);
     }
 
+    /// sets or replaces the exit module (7 day timelock, any number of times). the exit token never changes once set.
+    /// the unit is read again every time, so naming the same module again is how the unit is updated. the exit rate is
+    /// checkpointed under the old unit first and the funded flag resynced after. the exit auction keeps its price and
+    /// clock while it has something to sell, and never opens below the price it stored
     function _setExitModule(address module) private {
-        if (exitModule != address(0)) revert AlreadySet();
+        address old = exitModule;
         if (module.code.length == 0) revert BadModule();
         address token = IExitModule(module).exitToken();
-        if (token.code.length == 0 || _forbidden(module) || _forbidden(token)) revert BadModule();
+        if (old != address(0) && token != exitToken) revert ExitTokenChanged();
+        if (token.code.length == 0 || _forbiddenBase(module) || _forbiddenBase(token)) revert BadModule();
         (bool ok, bytes memory out) = _ask(module, abi.encodeCall(IExitModule.unitPerPoint, ()), READ_GAS, 32);
         uint256 unit = ok ? abi.decode(out, (uint256)) : 0;
         if (unit == 0 || unit > type(uint128).max) revert BadModule();
+        // the climb so far is credited under the old unit
+        _xCheckpoint();
         exitModule = module;
         exitToken = token;
         unitPerPoint = unit;
-        xCheckpointTime = uint64(block.timestamp);
         // the opening price asks the whole coin supply for one full slice
         uint256 start = SUPPLY * 1e18 / _fullSlice(unit);
         // below 1e12 the integer halves to zero within days, and zero hands the slice away
         if (start < 1e12) revert BadModule();
-        xStartPrice = start;
-        xStartTime = uint64(block.timestamp);
+        if (xToBuyback == 0) {
+            // nothing for sale: the start may be reset from the new unit, never below what was stored
+            xStartPrice = start.max(xStartPrice);
+            xStartTime = uint64(block.timestamp);
+        }
+        if (old != address(0)) _syncXFunded();
         emit ExitModuleSet(module, token, unit);
     }
 

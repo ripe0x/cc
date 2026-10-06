@@ -1253,7 +1253,7 @@ contract CoreUnitTest is CoreBase {
         assertFalse(core.allowedTarget(address(t)));
     }
 
-    function test_timelock_exitModuleOnce() public {
+    function test_timelock_exitModuleReplaceable() public {
         _enterPhase2();
         assertEq(core.exitModule(), address(mod));
         assertEq(core.exitToken(), address(xt));
@@ -1262,13 +1262,22 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.xStartPrice(), core.SUPPLY() * 1e18 / (20 * 4_330_000 * UNIT), "opening auction price");
         assertEq(core.xStartTime(), block.timestamp);
 
+        // a second set with the same exit token goes through and reads the unit again
         MockExitModule other = new MockExitModule(address(xt), 1e10);
+        _timelock(Core.Action.SetExitModule, abi.encode(address(other)));
+        assertEq(core.exitModule(), address(other));
+        assertEq(core.exitToken(), address(xt));
+        assertEq(core.unitPerPoint(), 1e10);
+
+        // a module with another exit token reverts, and the state stays
+        MockExitModule alien = new MockExitModule(address(new MockExitToken("x", "x")), 1e10);
         vm.startPrank(owner);
-        core.queue(Core.Action.SetExitModule, abi.encode(address(other)));
+        core.queue(Core.Action.SetExitModule, abi.encode(address(alien)));
         _warp(7 days);
-        vm.expectRevert(Core.AlreadySet.selector);
-        core.execute(Core.Action.SetExitModule, abi.encode(address(other)));
+        vm.expectRevert(Core.ExitTokenChanged.selector);
+        core.execute(Core.Action.SetExitModule, abi.encode(address(alien)));
         vm.stopPrank();
+        assertEq(core.exitModule(), address(other));
     }
 
     function test_timelock_exitModuleValidation() public {

@@ -72,6 +72,7 @@ one `Settings` struct in Core storage (a fixed slot shared with `CoreLib`, three
 | `xAuctionHalfLife` | 6 hours | 10 minutes to 30 days | exitToken auction price halving time |
 | `exitSliceCredits` | 20 | 1 to 1_000 | exitToken auction slice, in average credits |
 | `rateCap` | 123_200_000_000_000 (8 * `rateStart`) | 1e11 to 1e15, the rate bounds | the most the eth rate can ever be, wei per point. the climb stops at the lower of the funded clamp and `rateCap`, `setRate` refuses a value above it, and a lower cap pulls the rate down to it at the checkpoint. "never pay more than this per credit" |
+| `exitLaneToBuybackBps` | 0 | 0 to 10_000 | share of exitToken from exit lane exits that goes to the exit auction, the rest to the exit bid pot. last field of the struct. launch 0 keeps every exit lane exit in the exit bid pot |
 
 other numbers. `SUPPLY` (1,000,000,000e18, read by the exit auction opening price and checked against the launch supply), `XRATE_START` (6000 bps), `TIMELOCK` (7 days) and `OVERPRINT_CAP_PER_DAY` (8) are constants. the skim split of the pool (9.5 points to the engine, 0.5 to the creator, anti sniper 90 to 10 over 30 minutes) is fixed inside the artcoins pool at launch and cannot be made adjustable here. the 5 percent raise and the 15 minute extension of an auction are fixed in the house.
 
@@ -153,7 +154,9 @@ the Core never bids. a bidder talks to the house directly (`createBid`, `endAuct
 
 ## 8. exit and overprint
 
-exit (`exitStatement`). needs the exitModule. an eth lane statement must be listed, have no bid, and `now >= listedAt + exitAfter`. the Core cancels the listing (this reverts if a bid arrived first), then hands the statement to the module and must end with at least `rating * unitPerPoint` more exitToken, measured as a balance delta. an exit lane statement is never listed and exits at once. `unitPerPoint` and `exitToken` are read once when the module is set (unit non zero and at most uint128) and never again, so a module cannot change what it owes later. eth lane: `exitToBuybackBps` of the received amount to `xToBuyback`, the rest to `xPot`. exit lane: all to `xPot`. while the exit measurement runs `receive()` books nothing. `exitStatement` is permissionless.
+exit (`exitStatement`). needs the exitModule. an eth lane statement must be listed, have no bid, and `now >= listedAt + exitAfter`. the Core cancels the listing (this reverts if a bid arrived first), then hands the statement to the module and must end with at least `rating * unitPerPoint` more exitToken, measured as a balance delta. an exit lane statement is never listed and exits at once. `unitPerPoint` (non zero, at most uint128) and `exitToken` are read when a module is set, and `unitPerPoint` again on every later set, never in between, so a module cannot change what it owes without a 7 day public delay. eth lane: `exitToBuybackBps` of the received amount to `xToBuyback`, the rest to `xPot`. exit lane: `exitLaneToBuybackBps` (launch 0) of the received amount to `xToBuyback`, the rest to `xPot`. either way a share that is not zero re anchors the exit auction like any injection.
+
+replacing the module (`SetExitModule`, any number of times, each under the 7 day timelock). the exitToken never changes once set: a later module must report the same `exitToken()` or the set reverts `ExitTokenChanged`. the validity checks are those of the first set (code, forbidden targets, unit in range, opening price floor computed with the new unit). setting the same address again is allowed and is how a changed unit is taken over. a later set checkpoints the exit rate under the old unit first, then stores the module and the unit, and resyncs the funded flag. the exit auction price is coin per exitToken and does not depend on the unit, only the slice does: while `xToBuyback` is not zero a set keeps the running price and clock, so `buybackExit` is never cheaper right after a set. with nothing for sale the stored start price becomes the larger of the old one and the one the new unit gives. pots, piles, held statements and the pending queue are untouched, `ExitModuleSet` is emitted every time, the old module stops being a forbidden target and the new one is forbidden from then on. while the exit measurement runs `receive()` books nothing. `exitStatement` is permissionless.
 
 overprint. permissionless and guarded. asks `controller.nextOverprint()`, needs two different held statements of the same lane, at most 8 per day. on the eth lane both must be listed with no bid: both listings are cancelled, costs add onto the base, the top is merged into it, the base keeps its id and is listed again with the summed cost, and the combined score is checked against the sum.
 
@@ -173,7 +176,7 @@ exitToken lane (phase 2 only). exit lane credits are bought with the exitToken b
 | restart after a fill | `startPrice = max(2 * clearingPrice, previousStartPrice / 4)`, `startTime = now`, at least 1 |
 | clock | runs only while `xToBuyback` is not zero |
 | injection | every time exitToken is added to `xToBuyback`: `startPrice = max(price now, startPrice / 4)` and `startTime = now`. injected funds never inherit a decayed clock |
-| first start price | set when the module is set: the price at which one full slice costs the whole coin supply. setting the module reverts `BadModule` if this is below 1e12 |
+| first start price | set when the first module is set: the price at which one full slice costs the whole coin supply. setting a module reverts `BadModule` if this is below 1e12 (computed with the unit of that set). a later set keeps the running price and clock while `xToBuyback` is not zero (section 8) |
 | half life change | `setSettings` re anchors the curve at its price now when `xAuctionHalfLife` changes |
 | views | `exitAuctionPrice()`, `exitAuctionQuote()` returning `(slice, coinIn)` |
 
@@ -185,7 +188,7 @@ the restart rule means the next auction can never start more than 4x below the s
 |---|---|
 | every economic number | `setSettings(Settings)`, `setRate`, `setXRate`. owner only, effective at once, no timelock. bounded by `SettingsBounds`, the whole struct emitted in `SettingsSet` |
 | controller | `SetController` under the 7 day timelock, blocked after `Freeze` |
-| exitModule | `SetExitModule` under the 7 day timelock, once |
+| exitModule | `SetExitModule` under the 7 day timelock, any number of times. the exitToken must stay the same, the unit is read again on every set |
 | allowed targets | `AddTarget` under the 7 day timelock, `removeTarget` at once |
 | freeze | `Freeze` under the 7 day timelock: no controller change after it |
 | queue, execute, cancel | `queue(action, data)`, `execute`, `cancel`, owner only, keyed by `keccak256(abi.encode(action, data))` |
@@ -263,7 +266,7 @@ none of these is a code change in this repo. each is a deliberate departure from
 | 16 | funded clamp equals the hourly cap | the bid cannot climb above what the cap lets anyone sell into. with a pot under one average credit over the cap the rate does not climb at all |
 | 17 | eth buyback has no min out | the swap is exact in with no price floor. the launch liquidity is locked, and the slice (at most 5 ether) and the delay bound the exposure: a sandwich of a 1 or 5 eth slice loses money for the attacker after both skims |
 | 18 | exit auction sells at a discount | the opening price asks the whole supply for a slice and falls by half every `xAuctionHalfLife`. buyers take exitToken below its market value whenever they wait. the restart rule keeps each start at least a quarter of the last, and the pace is one slice per half life, so a large exit batch waits months |
-| 19 | `unitPerPoint` is fixed | read once when the exitModule is set. the module cannot change what the Core requires afterwards |
+| 19 | `unitPerPoint` changes only with a set | read when the exitModule is set and again on every later set, never in between. the module cannot change what the Core requires afterwards without a 7 day timelock |
 | 20 | fee on transfer or rebasing exitToken unsupported | pot accounting and the balance delta checks assume the amount sent is the amount received |
 | 21 | credits sent to the Core outside the doors are stuck | they are in no pile. same for eth from a non hook sender until `skim` books it |
 | 22 | the stack is a deploy input | the Core stores the stack it launched on and cannot be repointed. a launch on a new artcoins version is a new Core. `rateStart` is a deploy input in [1e11, 1e15], at most `rateCap` |
@@ -273,3 +276,4 @@ none of these is a code change in this repo. each is a deliberate departure from
 | 26 | venue tax bypass | the venue tax can be bypassed with a flash liquidity add and remove in the canonical pool, so model fee income on canonical pool volume only |
 | 27 | the library | `CoreLib` is a deployed contract the Core links against. it is stateless and its address depends only on its bytecode. a proxy is not used anywhere |
 | 28 | the owner can overpay a seller of credits it controls | see section 10. accepted by the owner. at most `spendCapBps` (5,000) of the pot per hour window, one window per hour. measured worst case 47.4 percent of the pot per transaction (bound 50 percent) and 99.99 percent per day with every setting loosened (98.96 percent per day with only `setRate` at the launch settings). mitigations are social: a multisig owner, `SettingsSet` and `RateSet` events, and `rateCap` as the owner's own visible ceiling on the price per credit |
+| 29 | the exitModule door stays open | before this change the module door closed forever after one set. now it stays open behind the 7 day timelock for the life of the engine. a dishonest owner or a stolen key can queue a module that returns dust for statements (a tiny unit) or a unit so high that the exitToken bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side. the exitToken itself can never change |

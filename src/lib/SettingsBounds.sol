@@ -36,6 +36,7 @@ library SettingsBounds {
         if (s.xAuctionHalfLife < 10 minutes || s.xAuctionHalfLife > 30 days) return "xAuctionHalfLife";
         if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1_000) return "exitSliceCredits";
         if (!rateInBounds(s.rateCap)) return "rateCap";
+        if (s.exitLaneToBuybackBps > 10_000) return "exitLaneToBuybackBps";
         return bytes32(0);
     }
 

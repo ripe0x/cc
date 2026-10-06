@@ -374,6 +374,7 @@ abstract contract InvariantFixture is Fixture {
             s[n++] = HandlerOwner.setRate.selector;
             s[n++] = HandlerOwner.setXRate.selector;
             s[n++] = HandlerOwner.ownerMisc.selector;
+            if (phase2) s[n++] = HandlerOwner.replaceModule.selector;
         }
         bytes4[] memory sel = new bytes4[](n);
         for (uint256 i; i < n; ++i) {

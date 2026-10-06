@@ -75,7 +75,7 @@ contract SetSettingsTest is Fixture {
         probe.configure(address(core), "");
     }
 
-    /// @dev how many of the 27 fields differ between two structs, and whether field `i` is among them
+    /// @dev how many of the 28 fields differ between two structs, and whether field `i` is among them
     function _diff(Settings memory a, Settings memory b) internal pure returns (uint256 n, uint256 first) {
         first = type(uint256).max;
         for (uint256 i; i < SettingsFields.N; ++i) {

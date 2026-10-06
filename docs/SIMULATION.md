@@ -300,7 +300,7 @@ low and high value of each input against the base case (27,110 credits and 339 s
 | `spendCapBps` | 2000 | keep | a guard. blocks 18 hours in 90 days. at most 5000 |
 | `rateCap` | 1.232e14 | keep | 8 times `rateStart`. never reached at launch values (the climb is clamped by the pot first). it is the owner's "never pay more than this per credit" |
 | `exitAfter` | 72 hours | keep | no effect before phase 2 |
-| `exitToBuybackBps` and exitToken settings | as launched | keep | phase 2 only. the auction pace is slow (1 slice per 6 hours) |
+| `exitToBuybackBps`, `exitLaneToBuybackBps` and exitToken settings | as launched (the exit lane share is 0: exit lane proceeds stay in the exit bid pot) | keep | phase 2 only. the auction pace is slow (1 slice per 6 hours) |
 
 ## settings the owner should expect to adjust, and the signal
 

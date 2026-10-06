@@ -17,7 +17,7 @@ import {MockExitToken} from "./standins/MockExitToken.sol";
 contract FlowTest is Fixture {
     using FixedPointMathLib for uint256;
 
-    uint256 internal constant N = 27;
+    uint256 internal constant N = 28;
 
     // ------------------------------------------------------------------ helpers
 
@@ -40,7 +40,7 @@ contract FlowTest is Fixture {
 
     /// @dev field i of the settings struct, in declaration order
     function _get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[27] memory f = [
+        uint256[28] memory f = [
             uint256(s.flatBps),
             s.avgScore,
             s.climbBaseBps,
@@ -67,7 +67,8 @@ contract FlowTest is Fixture {
             s.xRateDropPerCredit,
             s.xAuctionHalfLife,
             s.exitSliceCredits,
-            s.rateCap
+            s.rateCap,
+            s.exitLaneToBuybackBps
         ];
         return f[i];
     }
@@ -101,13 +102,14 @@ contract FlowTest is Fixture {
         else if (i == 23) s.xRateDropPerCredit = uint16(v);
         else if (i == 24) s.xAuctionHalfLife = uint32(v);
         else if (i == 25) s.exitSliceCredits = uint16(v);
-        else s.rateCap = uint64(v);
+        else if (i == 26) s.rateCap = uint64(v);
+        else s.exitLaneToBuybackBps = uint16(v);
         // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// @dev the documented lower bound of every field. climbMaxBps is bounded below by climbBaseBps and xRateFloor and
     /// xRateCap by each other, those three are handled by the callers
-    function _lo() internal pure returns (uint256[27] memory) {
+    function _lo() internal pure returns (uint256[28] memory) {
         return [
             uint256(0),
             800_000,
@@ -135,11 +137,12 @@ contract FlowTest is Fixture {
             0,
             10 minutes,
             1,
-            1e11
+            1e11,
+            0
         ];
     }
 
-    function _hi() internal pure returns (uint256[27] memory) {
+    function _hi() internal pure returns (uint256[28] memory) {
         return [
             uint256(10_000),
             6_000_000,
@@ -167,11 +170,12 @@ contract FlowTest is Fixture {
             1_000,
             30 days,
             1_000,
-            1e15
+            1e15,
+            10_000
         ];
     }
 
-    function _names() internal pure returns (bytes32[27] memory) {
+    function _names() internal pure returns (bytes32[28] memory) {
         return [
             bytes32("flatBps"),
             "avgScore",
@@ -199,14 +203,15 @@ contract FlowTest is Fixture {
             "xRateDropPerCredit",
             "xAuctionHalfLife",
             "exitSliceCredits",
-            "rateCap"
+            "rateCap",
+            "exitLaneToBuybackBps"
         ];
     }
 
     /// @dev a valid settings struct derived from a seed, inside every bound and the two orderings
     function _valid(uint256 seed) internal pure returns (Settings memory s) {
-        uint256[27] memory lo = _lo();
-        uint256[27] memory hi = _hi();
+        uint256[28] memory lo = _lo();
+        uint256[28] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             uint256 x = uint256(keccak256(abi.encode(seed, i)));
             uint256 a = lo[i];
@@ -249,6 +254,7 @@ contract FlowTest is Fixture {
         assertEq(s.xAuctionHalfLife, 6 hours);
         assertEq(s.exitSliceCredits, 20);
         assertEq(s.rateCap, 123_200_000_000_000);
+        assertEq(s.exitLaneToBuybackBps, 0);
     }
 
     /// @dev write then read of random valid settings: the packed layout the library unpacks matches the compiler's
@@ -261,8 +267,8 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundEdgeIsAccepted() public {
-        uint256[27] memory lo = _lo();
-        uint256[27] memory hi = _hi();
+        uint256[28] memory lo = _lo();
+        uint256[28] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             for (uint256 k; k < 2; ++k) {
                 Settings memory s = Mainnet.defaultSettings();
@@ -280,9 +286,9 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundViolationReverts() public {
-        uint256[27] memory lo = _lo();
-        uint256[27] memory hi = _hi();
-        bytes32[27] memory names = _names();
+        uint256[28] memory lo = _lo();
+        uint256[28] memory hi = _hi();
+        bytes32[28] memory names = _names();
         for (uint256 i; i < N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top

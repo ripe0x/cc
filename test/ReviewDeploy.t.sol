@@ -124,7 +124,7 @@ contract ReviewDeployTest is ReviewHarness {
         return address(_make(c, coinAt, controller));
     }
 
-    /// @dev a frame of its own for the constructor call: the 27 field settings struct leaves no room for more locals
+    /// @dev a frame of its own for the constructor call: the 28 field settings struct leaves no room for more locals
     function _make(LaunchConfig memory c, address coinAt, address controller) private returns (Core) {
         return new Core(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings);
     }

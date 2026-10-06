@@ -135,6 +135,8 @@ struct Settings {
     /// the most the eth rate can ever be, wei per whole point: the owner's "never pay more than this per credit". the
     /// climb stops here, `setRate` refuses above it and a lower cap pulls the rate down at once. the rate bounds apply
     uint64 rateCap;
+    /// share of exit token from EXIT lane exits that goes to the coin buyback, bps, the rest to the exit bid pot
+    uint16 exitLaneToBuybackBps;
 }
 
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
@@ -209,7 +211,8 @@ library Mainnet {
             xRateDropPerCredit: 20,
             xAuctionHalfLife: 6 hours,
             exitSliceCredits: 20,
-            rateCap: 123_200_000_000_000
+            rateCap: 123_200_000_000_000,
+            exitLaneToBuybackBps: 0
         });
     }
 

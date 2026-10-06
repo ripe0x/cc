@@ -127,7 +127,7 @@ abstract contract InvariantsBase is InvariantFixture {
                 }
             } else if (s.status == handler.S_EXITED()) {
                 assertTrue(!held, "exited but still held");
-                assertEq(o, address(handler.module()), "an exited statement is not with the module");
+                assertEq(o, address(s.module), "an exited statement is not with the module that took it");
                 assertGe(s.received, s.required, "exit returned less than rating * unitPerPoint");
             } else if (s.status == handler.S_TOP()) {
                 assertTrue(!held, "overprint top still marked held");
@@ -409,7 +409,7 @@ abstract contract InvariantsBase is InvariantFixture {
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal {
-        a = a % 31;
+        a = a % 32;
         if (a == 0) handler.buyCoin(w, x, y);
         else if (a == 1) handler.sellCoin(w, x, y);
         else if (a == 2) handler.sellForEth(w, x, y, z);
@@ -440,7 +440,8 @@ abstract contract InvariantsBase is InvariantFixture {
         else if (a == 27) handler.setSettingsInvalid(w, x);
         else if (a == 28) handler.setRate(w, x);
         else if (a == 29) handler.setXRate(w, x);
-        else handler.ownerMisc(w, x);
+        else if (a == 30) handler.ownerMisc(w, x);
+        else handler.replaceModule(w, x);
     }
 
     /// no action may revert, whatever the inputs. a reverting handler loses its ghost writes and hides violations.
@@ -483,7 +484,7 @@ abstract contract InvariantsBase is InvariantFixture {
     }
 
     function _available(uint256 a) internal view returns (bool) {
-        if (a >= 16 && a <= 20 && !handler.phase2()) return false;
+        if ((a >= 16 && a <= 20 || a == 31) && !handler.phase2()) return false;
         if (a == 13 && !handler.canSwapController()) return false;
         return true;
     }
@@ -557,6 +558,11 @@ abstract contract InvariantsBase is InvariantFixture {
         _try(16, 60);
         assertTrue(_try(17, 80), "no exit lane compose");
         assertTrue(_try(20, 20), "no module mode");
+        // the owner replaces the exit module: a new one, the same one with a new unit, and the refusals
+        assertTrue(_try(31, 40), "no module replacement");
+        for (uint256 i; i < 8; ++i) {
+            handler.replaceModule(i * 7919 + 1, i);
+        }
         // the auction opens at the whole coin supply for one slice and halves every 6 hours. wait until a taker can
         // afford a fill with a little coin bought in the real pool
         for (uint256 i; i < 120 && handler.successes(19) == 0; ++i) {

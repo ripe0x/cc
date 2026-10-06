@@ -58,6 +58,7 @@ library CoreLib {
         s.xAuctionHalfLife = ns.xAuctionHalfLife;
         s.exitSliceCredits = ns.exitSliceCredits;
         s.rateCap = ns.rateCap;
+        s.exitLaneToBuybackBps = ns.exitLaneToBuybackBps;
         emit SettingsSet(ns);
     }
 
@@ -93,6 +94,7 @@ library CoreLib {
         s.xAuctionHalfLife = uint32(c >> 64);
         s.exitSliceCredits = uint16(c >> 96);
         s.rateCap = uint64(c >> 112);
+        s.exitLaneToBuybackBps = uint16(c >> 176);
         // forge-lint: disable-end(unsafe-typecast)
     }
 

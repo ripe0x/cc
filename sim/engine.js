@@ -35,6 +35,7 @@ export const SETTINGS = {
   xAuctionHalfLife: 6 * 3600,
   exitSliceCredits: 20,
   rateCap: 123200000000000, // wei per whole point, 8 times rateStart: the eth rate never passes it (climb clamp, setRate)
+  exitLaneToBuybackBps: 0, // share of exitToken from exit lane exits to the coin buyback, rest to the exit bid pot
 };
 export const SETTING_KEYS = Object.keys(SETTINGS);
 
@@ -68,6 +69,7 @@ export function firstViolation(s) {
   if (s.xAuctionHalfLife < 600 || s.xAuctionHalfLife > 30 * d) return 'xAuctionHalfLife';
   if (s.exitSliceCredits < 1 || s.exitSliceCredits > 1000) return 'exitSliceCredits';
   if (s.rateCap < RATE_MIN || s.rateCap > RATE_MAX) return 'rateCap';
+  if (s.exitLaneToBuybackBps > 10000) return 'exitLaneToBuybackBps';
   return null;
 }
 // the eth rate bounds of setRate, rateStart and rateCap, wei per whole point (Interfaces.sol)
@@ -387,11 +389,11 @@ export class Core {
   exitReady(st, now) {
     return this.moduleSet && (st.lane === 'exit' || (!st.bid && now >= st.t0 + this.s.exitAfter));
   }
-  // the module hands back rating * unitPerPoint. eth lane splits exitToBuybackBps, exit lane keeps all
+  // the module hands back rating * unitPerPoint. eth lane splits exitToBuybackBps, exit lane splits exitLaneToBuybackBps (launch 0: keeps all)
   exitStatement(st, rating, now) {
     const s = this.s;
     const received = rating * this.xp;
-    const toBuyback = st.lane === 'eth' ? (received * s.exitToBuybackBps) / BPS : 0;
+    const toBuyback = (received * (st.lane === 'eth' ? s.exitToBuybackBps : s.exitLaneToBuybackBps)) / BPS;
     this.xCheckpoint(now);
     if (toBuyback > 0) {
       this.xStartPrice = Math.max(this.xAuctionPrice(now), this.xStartPrice / 4, 1e-12);

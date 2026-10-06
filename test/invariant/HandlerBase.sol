@@ -93,7 +93,8 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_SET_RATE = 28;
     uint8 internal constant A_SET_XRATE = 29;
     uint8 internal constant A_OWNER_MISC = 30;
-    uint256 internal constant N_ACTIONS = 31;
+    uint8 internal constant A_REPLACE_MODULE = 31;
+    uint256 internal constant N_ACTIONS = 32;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -337,7 +338,8 @@ abstract contract HandlerBase is Test {
             "setSettingsInvalid",
             "setRate",
             "setXRate",
-            "ownerMisc"
+            "ownerMisc",
+            "replaceModule"
         ];
         names = n;
         controllers.push(w.v1);
@@ -695,6 +697,16 @@ abstract contract HandlerBase is Test {
             }
         }
         _fundedCheck();
+    }
+
+    /// the exit side of the same rule, read from the core's storage (slots 13 and 14, `forge inspect Core
+    /// storage-layout`): the stored flag is what the stored rate, the exit pot and the unit say
+    function _xFundedCheck() internal {
+        Settings memory st = core.settings();
+        uint256 rate = uint256(vm.load(address(core), bytes32(uint256(13))));
+        bool stored = (uint256(vm.load(address(core), bytes32(uint256(14)))) >> 64) & 0xff != 0;
+        bool want = core.xPot() * 10_000 >= uint256(st.avgScore) * rate * core.unitPerPoint();
+        if (stored != want) _flag(V_FUNDED_STALE, "exit funded flag disagrees with pot, stored rate and unit");
     }
 
     function _fundedCheck() internal {
@@ -1839,8 +1851,8 @@ abstract contract HandlerBase is Test {
         _rsCheck(rs, 0);
     }
 
-    /// the unit the core stored when the module was set. the module can change what it reports, the core never
-    /// reads it again
+    /// the unit the core stored when the module was last set. the module can change what it reports, the core reads
+    /// it again only when a module is set
     function _unitOf() internal view returns (uint256 u) {
         return core.unitPerPoint();
     }
@@ -1928,7 +1940,8 @@ abstract contract HandlerBase is Test {
         uint256 received = _xBal(address(core)) - p.xbal;
         if (received < p.required) _flag(V_EXIT_SHORT, "exit returned less than rating * unitPerPoint");
         if (p.unit == 0) _flag(V_EXIT_SHORT, "exit with an unreadable unit per point");
-        uint256 toBuyback = p.lane == uint8(Lane.Eth) ? received * p.st.exitToBuybackBps / 10_000 : 0;
+        uint256 share = p.lane == uint8(Lane.Eth) ? p.st.exitToBuybackBps : p.st.exitLaneToBuybackBps;
+        uint256 toBuyback = received * share / 10_000;
         if (core.xToBuyback() != p.xto + toBuyback) _flag(V_POT, "exit buyback share wrong");
         if (core.xPot() != p.xpot + received - toBuyback) _flag(V_POT, "exit pot share wrong");
         _x(p.xbal, 0, received, "exitStatement");

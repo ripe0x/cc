@@ -149,6 +149,7 @@ abstract contract ConfigReader is CommonBase {
         s.exitSliceCredits = _u16(j, ".settings.exitSliceCredits");
         // forge-lint: disable-next-line(unsafe-typecast)
         s.rateCap = uint64(_uint(j, ".settings.rateCap", type(uint64).max));
+        s.exitLaneToBuybackBps = _u16(j, ".settings.exitLaneToBuybackBps");
     }
 
     function _loadLaunch(LaunchConfig memory c, string memory j) private pure {

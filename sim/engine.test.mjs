@@ -225,6 +225,7 @@ const R0 = 1.54e13;
   bad({ reserveBps: 2999 }, 'reserveBps'); bad({ auctionDuration: 6 * 3600 - 1 }, 'auctionDuration');
   bad({ buybackSlice: 5.01 }, 'buybackSlice'); bad({ exitAfter: 3599 }, 'exitAfter');
   bad({ rateCap: 1e11 - 1 }, 'rateCap'); bad({ rateCap: 1e15 + 1 }, 'rateCap');
+  bad({ exitLaneToBuybackBps: 10001 }, 'exitLaneToBuybackBps');
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, reserveBps: 3000, auctionDuration: 6 * 3600, buybackSlice: 5, exitAfter: 3600, rateCap: 1e15 })), null); n++;
   assert.equal(SETTINGS.rateCap, 8 * DEFAULTS.rateStart); n++;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { xRateFloor: 9800 })), 'xRateFloor'); n++;
@@ -310,6 +311,13 @@ const R0 = 1.54e13;
   near(c.xPot, 0.175 + 0.1, 1e-12, 'exit lane keeps all');
   const e = fresh({ exitToBuybackBps: 2000 }); e.setExitModule(0, 1e-5);
   near(e.exitStatement({ lane: 'eth', t0: 0 }, 10000, 0).toBuyback, 0.02, 1e-12, 'exitToBuybackBps');
+  // exitLaneToBuybackBps: the exit lane share to the buyback, the rest to the bid pot, the eth lane unaffected
+  for (const [bps, want] of [[0, 0], [5000, 0.05], [10000, 0.1]]) {
+    const l = fresh({ exitLaneToBuybackBps: bps }); l.setExitModule(0, 1e-5);
+    const r = l.exitStatement({ lane: 'exit', t0: 0 }, 10000, 0);
+    near(r.toBuyback, want, 1e-12, 'exit lane to buyback at ' + bps); near(l.xPot, 0.1 - want, 1e-12, 'exit lane rest to the bid pot at ' + bps);
+    near(l.exitStatement({ lane: 'eth', t0: 0 }, 10000, 0).toBuyback, 0.05, 1e-12, 'eth lane ignores exitLaneToBuybackBps');
+  }
 }
 // buyback slice and keeper tip
 {

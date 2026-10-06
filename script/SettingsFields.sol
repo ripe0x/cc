@@ -3,15 +3,15 @@ pragma solidity ^0.8.28;
 
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 
-/// @notice the 27 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
+/// @notice the 28 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
 /// docs/FLOW.md section 2, for the settings script and the config and deploy tests. the three fields bounded by another
 /// field (climbMaxBps, xRateCap, xRateFloor) have the bounds of the other field in the callers' hands
 library SettingsFields {
-    uint256 internal constant N = 27;
+    uint256 internal constant N = 28;
 
     /// @dev field i of the settings struct, in declaration order
     function get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[27] memory f = [
+        uint256[28] memory f = [
             uint256(s.flatBps),
             s.avgScore,
             s.climbBaseBps,
@@ -38,7 +38,8 @@ library SettingsFields {
             s.xRateDropPerCredit,
             s.xAuctionHalfLife,
             s.exitSliceCredits,
-            s.rateCap
+            s.rateCap,
+            s.exitLaneToBuybackBps
         ];
         return f[i];
     }
@@ -72,13 +73,14 @@ library SettingsFields {
         else if (i == 23) s.xRateDropPerCredit = uint16(v);
         else if (i == 24) s.xAuctionHalfLife = uint32(v);
         else if (i == 25) s.exitSliceCredits = uint16(v);
-        else s.rateCap = uint64(v);
+        else if (i == 26) s.rateCap = uint64(v);
+        else s.exitLaneToBuybackBps = uint16(v);
         // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// @dev the documented lower bound of every field. climbMaxBps is bounded below by climbBaseBps and xRateFloor and
     /// xRateCap by each other, those three are handled by the callers
-    function lo() internal pure returns (uint256[27] memory) {
+    function lo() internal pure returns (uint256[28] memory) {
         return [
             uint256(0),
             800_000,
@@ -106,11 +108,12 @@ library SettingsFields {
             0,
             10 minutes,
             1,
-            RATE_START_MIN_WEI
+            RATE_START_MIN_WEI,
+            0
         ];
     }
 
-    function hi() internal pure returns (uint256[27] memory) {
+    function hi() internal pure returns (uint256[28] memory) {
         return [
             uint256(10_000),
             6_000_000,
@@ -138,11 +141,12 @@ library SettingsFields {
             1_000,
             30 days,
             1_000,
-            RATE_START_MAX_WEI
+            RATE_START_MAX_WEI,
+            10_000
         ];
     }
 
-    function names() internal pure returns (bytes32[27] memory) {
+    function names() internal pure returns (bytes32[28] memory) {
         return [
             bytes32("flatBps"),
             "avgScore",
@@ -170,7 +174,8 @@ library SettingsFields {
             "xRateDropPerCredit",
             "xAuctionHalfLife",
             "exitSliceCredits",
-            "rateCap"
+            "rateCap",
+            "exitLaneToBuybackBps"
         ];
     }
 }

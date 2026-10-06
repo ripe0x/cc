@@ -946,6 +946,9 @@ contract BuybackSettingsTest is FeeBase {
         assertEq(_buyback(), 0.01 ether);
         assertEq(keeper.balance, keeper0, "tip zero pays nothing");
 
+        // the exit lane share of the exit token has no bearing on the eth buyback
+        assertEq(core.settings().exitLaneToBuybackBps, 0);
+
         // the largest tip is 500 bps of the slice
         _configure(0.01 ether, 1, 500);
         vm.roll(block.number + 1);

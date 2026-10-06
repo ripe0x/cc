@@ -49,6 +49,7 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
 | exitSliceCredits | 20 | 1 to 1_000 | |
 | rateCap | 123_200_000_000_000 (8 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
+| exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot`. last field of the struct (section 8) |
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
