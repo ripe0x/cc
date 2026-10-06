@@ -92,3 +92,23 @@ the Core is at the limit. make room in this order: delete what section 5 removes
 ## 7. tests and docs
 
 real contracts only on the fork (Credits, Statements, CreditScore, CreditStrategy, Seaport, pool manager, artcoins stack, the pnd factory and house). the two exit stand ins and attacker contracts are the only doubles. everything in SPEC section 10 and 11 still needs coverage, adapted to the above. the simulator (sim/engine.js, sim/index.html, docs/SIMULATION.md) must model the same rules and names.
+
+## 8. phase 2 flexibility (owner confirmed, added after the rework)
+
+the real exit module interface is still unknown. the adapter is written later. these three changes keep the exit side repairable.
+
+| # | decision |
+|---|---|
+| 9 | the exit module is replaceable. `SetExitModule` under the 7 day timelock may run any number of times. the exitToken can never change once set: a later module must report the same `exitToken()` or the action reverts |
+| 10 | `unitPerPoint` is read again from the module every time a module is set. setting the same module address again is allowed and is how the unit is updated. so a unit change always waits 7 days |
+| 11 | new setting `exitLaneToBuybackBps`: share of the exit token from EXIT lane exits that goes to the coin buyback, the rest goes to `xPot`. launch value 0 (today's behavior), bounds 0 to 10_000. it joins the `Settings` struct, the bounds, the config, every script and check that lists settings, the simulator if it models exit lane proceeds |
+
+rules for a later set (the first set behaves as before):
+* same validity checks as the first set on the module and on the unit (code, forbidden targets, unit range, the opening price floor of the exit auction computed with the new unit).
+* checkpoint the exit rate under the OLD unit before the unit changes, resync the funded flag after. no climb is credited under the wrong numbers.
+* the exit auction price is coin per exit token and does not depend on the unit, only the slice size does. a set must never make `buybackExit` cheaper than it was the moment before: keep the running price and clock when `xToBuyback` is not zero. when it is zero, the stored start price may be reset from the new unit.
+* pots, piles, held statements and the pending timelock queue are untouched. two queued sets may both run.
+* `ExitModuleSet` is emitted every time.
+* the old module stops being a forbidden target, the new one is forbidden at call time as today.
+
+trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open behind the 7 day timelock for the life of the engine. a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
