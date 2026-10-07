@@ -12,6 +12,8 @@ contract ConfigTest is Fixture {
     /// @dev SETTINGS_CHANGED of the operator, a flag here so parallel tests never share an environment variable
     bool internal changedFlag;
 
+    address internal constant SHIPPED_OWNER = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+
     function _settingsChanged() internal view override returns (bool) {
         return changedFlag;
     }
@@ -20,17 +22,24 @@ contract ConfigTest is Fixture {
         return keccak256(abi.encode(a)) == keccak256(abi.encode(b));
     }
 
-    /// the json file is the default config: the live artcoins stack and the launch parameters, placeholders unset
+    /// the json file is the default config plus the launch inputs the owner supplied (owner, creator, name). the salt is
+    /// the one placeholder still unset
     function test_jsonEqualsDefaultConfig() public view {
         LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
         LaunchConfig memory d = defaultConfig();
+        d.owner = SHIPPED_OWNER;
+        d.creator = SHIPPED_OWNER;
+        d.name = "CC";
         assertEq(f.stack.hook, d.stack.hook);
         assertEq(abi.encode(f.stack), abi.encode(d.stack));
         assertTrue(_same(f, d), "script/config/mainnet.json drifted from the default config");
-        assertEq(f.owner, address(0));
-        assertEq(f.creator, address(0));
-        assertEq(bytes(f.name).length, 0);
+        assertEq(f.owner, SHIPPED_OWNER);
+        assertEq(f.creator, SHIPPED_OWNER);
+        assertEq(f.name, "CC");
         assertEq(f.symbol, "CC");
+        string[] memory unset = unsetFields(f);
+        assertEq(unset.length, 1, "only the salt is still unset");
+        assertEq(unset[0], "salt");
         assertEq(f.rateStart, 1.54e13);
         assertEq(f.supply, 1_000_000_000e18);
         assertEq(f.stack.factory, Mainnet.ARTCOINS_FACTORY);

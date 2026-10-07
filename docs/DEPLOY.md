@@ -54,7 +54,7 @@ all commands run from the repo root after `set -a; . ./.env; set +a` and the var
 
 | step | action | command or owner |
 |---|---|---|
-| 1 | local config | `cp script/config/mainnet.json script/config/local.json` (gitignored, never edit the tracked file). edit `local.json`: `owner`, `creator`, `name`, `symbol`, `salt`, and `rateStart` by the launch day rule below. the `settings` block holds the launch values of every economic setting, review it row by row (section 2). `export LAUNCH_CONFIG=script/config/local.json`. review every row of the sign off tables in section 2 |
+| 1 | local config | `cp script/config/mainnet.json script/config/local.json` (gitignored, never edit the tracked file). edit `local.json`: `salt` (the one input still open), and `rateStart` by the launch day rule below. `owner`, `creator`, `name` and `symbol` are filled in the tracked file. the `settings` block holds the launch values of every economic setting, review it row by row (section 2). `export LAUNCH_CONFIG=script/config/local.json`. review every row of the sign off tables in section 2 |
 | 2 | rehearse the exact file on the latest block | `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv`. it reads `LAUNCH_CONFIG`, fills only the placeholders the file leaves unset, and runs preflight, the whole deploy (the library included), postflight and a trading smoke. it prints the gas of each of the six transactions and the eth the deployer needs at 1, 5 and 20 gwei |
 | 3 | preflight, first run, and the sign off | `DEPLOYER=$DEPLOYER forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL`. it knows the library takes the first deployer nonce when it is not on chain yet, so the predicted controller, core and coin are the ones the deploy will create. the only failure allowed is `factory: deployer may launch`, until the factory owner acts. read the `signoff:` rows, the owner signs them, then `export CONFIG_HASH=0x...` with the printed `CONFIG_HASH=` value. that one value stands for the whole config |
 | 4 | the factory owner enables the deployer | from the factory owner, `cast send $FACTORY "setAdmin(address,bool)" $DEPLOYER true --rpc-url $MAINNET_RPC_URL --ledger` (or `--account <name>`). keep the factory `deprecated`. confirm: `cast call $FACTORY "admins(address)(bool)" $DEPLOYER --rpc-url $MAINNET_RPC_URL` prints true |
@@ -143,6 +143,8 @@ settings. one struct, `Settings`, in Core storage, in the config file under `set
 
 two more owner functions, each with its own event: `setRate(uint256)` resets the current eth limit (inside the rate bounds and at most `rateCap`, checkpoints first, keeps the last fill time) and `setXRate(uint256)` sets the exit bid (inside the settings floor and cap).
 
+launch inputs status. filled: `owner`, `creator` (both 0xCB43078C32423F5348Cab5885911C3B5faE217F9), `name` and `symbol` (`CC`). still open: `salt`, and a decision on the pinned rule `owner and creator are not ... the factory owner`: the filled owner and creator equal the factory owner, so preflight fails that row until the owner and creator are another address or the rule is changed in a reviewed commit to `script/Checks.sol`. the deployer is not required to be that address: it only has to be enabled by the factory owner at step 4 (or be the factory owner).
+
 there is one config file, `script/config/mainnet.json`. the hash covers the settings, so a changed launch value is a new signed hash.
 
 config values (`script/config/mainnet.json`). the owner signs off each row.
@@ -157,11 +159,11 @@ config values (`script/config/mainnet.json`). the owner signs off each row.
 | `stack.escrow` | 0x7559689765aE86cBB38e68CD1294830CccB125F2 | fee escrow of the hook, forbidden target |
 | `stack.mevModule` | 0xb038D597365FfD108D63C265Bb0621444a1D8B83 | anti sniper linear skim module |
 | `factoryOwner` | 0xCB43078C32423F5348Cab5885911C3B5faE217F9 | expected factory owner, a preflight check and the rehearsal prank |
-| `owner` | unset, must fill | Core owner (immediate owner functions, three one way locks, two step handover) and final token admin |
-| `creator` | unset, must fill | skim protocol leg recipient (0.5 points) and the locker reward recipient |
-| `name`, `symbol` | name unset, must fill. symbol `CC` | coin name and symbol, part of the coin initcode so part of its address. deploy refuses an empty name |
+| `owner` | 0xCB43078C32423F5348Cab5885911C3B5faE217F9, supplied by the owner | Core owner (immediate owner functions, three one way locks, two step handover) and final token admin |
+| `creator` | 0xCB43078C32423F5348Cab5885911C3B5faE217F9, supplied by the owner | skim protocol leg recipient (0.5 points) and the locker reward recipient |
+| `name`, `symbol` | `CC`, `CC`, both supplied by the owner | coin name and symbol, part of the coin initcode so part of its address. deploy refuses an empty name |
 | `sale` | `false, 11000, 100, 10800, 7500` | the controller sale settings, constructor arguments of `ControllerV1`, inside `CONFIG_HASH`: `buyOnly`, `startBps`, `stepBps`, `stepEvery` (seconds), `floorBps`. bounds as the controller doors in section 4. `floorBps` must not be below `saleFloorBps` of the settings |
-| `salt` | zero, must fill | user salt of the coin address. any nonzero value, change it if the predicted address is taken |
+| `salt` | zero, the only input still open, must fill | user salt of the coin address. any nonzero value, change it if the predicted address is taken |
 | `rateStart` | 1.54e13 | opening bid in wei per whole point, bounded to [1e11, 1e15] and to `rateCap`. launch day rule in section 1: `0.75 * (market price of one credit in wei) * 1e4 / avgScore`. 1.54e13 is for a market price of 0.0089 eth. it only decides how soon the pot starts working, `setRate` moves it later |
 | `stack.auctionFactory` | 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 | the pnd auction house factory. the Core creates its own house through it in the constructor. preflight needs code, a default fee of 0 and no house yet for the predicted core |
 | `settings` | see the settings table above | the launch value of every economic setting, one key per field of `Settings`, in the hash |

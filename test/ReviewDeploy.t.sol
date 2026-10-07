@@ -456,6 +456,14 @@ contract ReviewDeployTest is ReviewHarness {
         _requireConfigHash(c, h);
     }
 
+    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, name)
+    function _shipped() internal pure returns (LaunchConfig memory s) {
+        s = defaultConfig();
+        s.owner = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+        s.creator = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+        s.name = "CC";
+    }
+
     function _hashRow() internal view returns (string memory) {
         for (uint256 i; i < rows.length; ++i) {
             if (keccak256(bytes(rows[i].name)) == keccak256("signoff: CONFIG_HASH")) return rows[i].detail;
@@ -483,7 +491,7 @@ contract ReviewDeployTest is ReviewHarness {
         this.requireHash(c, h);
         // the hash does not depend on the machine: same content from a file and from the struct
         LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
-        assertEq(configHash(f), configHash(defaultConfig()));
+        assertEq(configHash(f), configHash(_shipped()));
         // a changed token creation code changes it too
         c = base;
         c.tokenCodeFile = MUT_TOKEN;
