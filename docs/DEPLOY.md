@@ -205,6 +205,21 @@ a change of a pinned value means editing `script/Checks.sol` on purpose, in a re
 
 what the sign off table covers: owner (Core owner and token admin), creator (0.5 point leg and lp rewards), the deployer, the skim bounty and referral payout that point to the Core, the protocol leg that points to the creator, the tax and burn address, the opening bid, one row per setting (the launch value of every economic setting) and the economics line (skim, bounty, sniper, tax).
 
+### mainnet gas cap per transaction
+
+mainnet caps one transaction at 16,777,216 gas (EIP-7825, since the fusaka upgrade). every transaction of this system fits, measured by `test/GasCap.t.sol` on the pinned fork. each figure is the gas of the call with cold access, plus 21,000 intrinsic and the calldata, so it is an estimate. the largest, with the headroom to the cap:
+
+| transaction | gas | share of the cap | headroom |
+|---|---|---|---|
+| `compose()`, eth lane, 80 credits, first compose | 9,303,091 | 55.4 percent | 7,474,125 |
+| `composeExit()`, 80 credits | 8,973,045 | 53.4 percent | 7,804,171 |
+| Core creation (house creation inside) | 5,936,113 | 35.3 percent | 10,841,103 |
+| launch through the factory | 4,249,915 | 25.3 percent | 12,527,301 |
+| `overprint()`, scripted controller, 160 to 640 credits | about 1,371,000 | 8.2 percent | 15,400,000 |
+| every other call (doors, buybacks, owner calls, the house) | under 500,000 | under 3 percent | over 16,200,000 |
+
+`compose` and `composeExit` are the only calls above 10 percent after the deploy. they sit at about half the cap because the live Statements contract needs about 8 million gas for 80 credits (7.90 to 8.07 million across pages of real credits). a keeper must not hardcode a gas limit under 10 million for them. `sellForEth` and `sellForExitToken` take any number of credits: the cap stops a batch at about 116 credits (flat bid), 93 (score bid, `flatBps` 0) or 98 (exit bid), and a larger call simply reverts for its sender. the gas capped reads inside the Core use under half of their caps: `nextPage` 235,693 of 500,000 with a full pile and cold storage, `statementPrice` 3,659 of 200,000. the exit module is a stand in in these tests: what a real one spends inside `exit` is added to `exitStatement`, and the Core forwards it all the remaining gas.
+
 ## 3. verify on etherscan
 
 the compiler settings are in `foundry.toml`: solc 0.8.30, evm cancun, via ir, optimizer 200 runs, `bytecode_hash = "none"`. the three contracts we own are the library `CoreLib` (`src/lib/CoreLib.sol`), ControllerV1 and Core. the coin, hook, factory, locker and auction house are artcoins and pnd contracts and verify on their own.
