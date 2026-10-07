@@ -19,8 +19,8 @@ import {OrderComponents} from "./utils/SeaportTypes.sol";
 /// slots cooled first, so the first access of every slot is charged the cold price like in a fresh transaction.
 /// ESTIMATE: the transaction gas is that delta plus 21,000 intrinsic plus the calldata cost (4 per zero byte, 16 per
 /// other byte, or the EIP-7623 floor of 10 per token when that is larger). it ignores the access list, the gas refund
-/// (the cap counts gas before refunds) and a few hundred gas of call overhead inside the delta. the exit module and
-/// exit token are test stand ins: what a real exit module costs inside `exit` is not measured here
+/// (the cap counts gas before refunds) and a few hundred gas of call overhead inside the delta. `exitModule` and
+/// `exitToken` are test stand ins: what a real `exitModule` costs inside `exit` is not measured here
 contract GasCapTest is SeaportBase {
     uint256 internal constant CAP = 16_777_216;
     /// @dev above this share of the cap a row is flagged
@@ -237,7 +237,7 @@ contract GasCapTest is SeaportBase {
         g = gasleft();
         core.exitStatement(sid);
         g -= gasleft();
-        _row("exitStatement, exit lane (stand in exit module), cold", g, abi.encodeCall(core.exitStatement, (sid)));
+        _row("exitStatement, exit lane (stand in exitModule), cold", g, abi.encodeCall(core.exitStatement, (sid)));
     }
 
     function test_gas_exitStatement_ethLane() public {
@@ -250,7 +250,7 @@ contract GasCapTest is SeaportBase {
         core.exitStatement(sid);
         g -= gasleft();
         _row(
-            "exitStatement, eth lane (cancels the listing, stand in exit module), cold",
+            "exitStatement, eth lane (cancels the listing, stand in exitModule), cold",
             g,
             abi.encodeCall(core.exitStatement, (sid))
         );
@@ -646,7 +646,7 @@ contract GasCapTest is SeaportBase {
         core.setExitModule(address(mod2));
         g -= gasleft();
         _row(
-            "setExitModule, replace with a module of the same exit token, cold",
+            "setExitModule, replace with a module of the same exitToken, cold",
             g,
             abi.encodeCall(core.setExitModule, (address(mod2)))
         );
