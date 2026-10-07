@@ -178,3 +178,45 @@ contract HostileModule is IExitModule {
         while (gasleft() > end && burn != 0) {}
     }
 }
+
+/// the caller of `exitStatement` that is repaid in eth and tries every door of the core from its `receive`
+contract RepaidCaller {
+    Core public immutable CORE;
+    uint256 public other;
+    uint256 public hits;
+    uint256 public blocked;
+    uint256 public ok;
+    uint256 public repaid;
+
+    constructor(Core core_) {
+        CORE = core_;
+    }
+
+    function exit(uint256 sid, uint256 other_) external {
+        other = other_;
+        CORE.exitStatement(sid);
+    }
+
+    function _try(bytes memory data) private {
+        (bool success, bytes memory out) = address(CORE).call(data);
+        if (success) {
+            ok++;
+        } else if (out.length >= 4 && bytes4(out) == bytes4(0xab143c06)) {
+            blocked++;
+        }
+    }
+
+    receive() external payable {
+        repaid += msg.value;
+        if (hits++ != 0) return;
+        _try(abi.encodeCall(Core.exitStatement, (other)));
+        _try(abi.encodeCall(Core.compose, ()));
+        _try(abi.encodeCall(Core.composeExit, ()));
+        _try(abi.encodeCall(Core.skim, ()));
+        _try(abi.encodeCall(Core.collectSales, ()));
+        _try(abi.encodeCall(Core.buyback, ()));
+        _try(abi.encodeCall(Core.overprint, ()));
+        _try(abi.encodeCall(Core.repriceStatement, (other)));
+        _try(abi.encodeCall(Core.syncStatement, (other)));
+    }
+}
