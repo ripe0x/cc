@@ -631,7 +631,7 @@ contract GasCapTest is SeaportBase {
     }
 
     function test_gas_setExitModule_firstAndReplace() public {
-        xt = new MockExitToken("Exit Token", "XT");
+        xt = new MockExitToken("XT", "XT");
         mod = new MockExitModule(address(xt), UNIT);
         _cool(address(core));
         vm.prank(owner);
