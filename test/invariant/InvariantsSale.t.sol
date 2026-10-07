@@ -83,6 +83,18 @@ abstract contract SaleSuite is InvariantsBase {
         }
     }
 
+    /// the seeds at the top of the range must not overflow inside a handler action
+    function test_saleActionsSurviveMaxSeeds() public {
+        uint256 m = type(uint256).max;
+        for (uint256 a = 32; a < 40; ++a) {
+            _act(a, m, m, m, m);
+            _act(a, 0, m, m - 1, m - 2);
+        }
+        for (uint256 i = 1; i < handler.violationCount(); ++i) {
+            assertEq(handler.viol(i), 0, handler.violMsg(i));
+        }
+    }
+
     /// the hostile owner path with every sale action in a long fixed sequence of mixed calls: nothing reverts, no violation
     /// forge-config: default.gas_limit = 9223372036854775807
     function testFuzz_saleActionsNeverRevert(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) public {

@@ -166,6 +166,14 @@ abstract contract HandlerSale is HandlerOwner {
         uint8 a = A_BUY;
         (uint256 sid, bool found) = _pickBy(sIdx, mode % 4 == 0 ? K_ANY : K_LISTED);
         if (!found) return _skip(a);
+        // the owner, now and then, puts the first controller back in force in buy only mode: a legal owner move that
+        // keeps the buy path busy under the fuzzer. a locked controller door is left alone
+        if (mode % 3 == 1) {
+            vm.startPrank(owner);
+            if (core.controller() != v1 && !core.controllerLocked()) core.setController(v1);
+            if (core.controller() == v1 && !ControllerV1(v1).buyOnly()) ControllerV1(v1).setBuyOnly(true);
+            vm.stopPrank();
+        }
         address who = _actor(aSeed);
         uint256 price;
         bool priced;
@@ -204,6 +212,10 @@ abstract contract HandlerSale is HandlerOwner {
         uint8 a = A_OWNER_SELL;
         (uint256 sid, bool found) = _pickBy(sIdx, mode % 3 == 0 ? K_ANY : K_LISTED);
         if (!found) return _skip(a);
+        if (mode % 2 == 0 && core.controller() != address(selling) && !core.controllerLocked()) {
+            vm.prank(owner);
+            core.setController(address(selling));
+        }
         if (core.controller() != address(selling) && aSeed % 4 != 0) return _skip(a);
         address who = _actor(aSeed);
         address buyer = mode % 5 == 0 ? _actor(vSeed) : address(uint160(uint256(keccak256(abi.encode("buyer", vSeed)))));
@@ -238,7 +250,7 @@ abstract contract HandlerSale is HandlerOwner {
         try this.repriceStatement(sIdx, 1) {} catch {}
         try this.bid(sIdx, aSeed, amtSeed, 1) {} catch {}
         if (mode % 2 == 0) {
-            try this.bid(sIdx, aSeed + 1, amtSeed, 6) {} catch {}
+            try this.bid(sIdx, aSeed ^ 1, amtSeed, 6) {} catch {}
         }
         if (successes[A_BID] > before) _ok(a);
     }
