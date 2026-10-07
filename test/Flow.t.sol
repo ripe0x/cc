@@ -1288,7 +1288,9 @@ contract FlowTest is Fixture {
     /// @dev a random sequence of owner calls under random valid settings, mixed with public doors, bids and time. the
     /// owner and the controller never end up holding more eth, coin, credits, statements or exit token than they
     /// began with, an owner call never changes what the core holds, and eth leaves the core only by a sale of a credit
-    /// (paid to the seller, exactly the quoted ceiling) or by the buyback (at most one slice)
+    /// (paid to the seller, exactly the quoted ceiling) or by the buyback (at most one slice). the exit is a paid door
+    /// (it repays its caller's gas from the pot like compose), so it is called by a neutral keeper that is not watched,
+    /// and what that keeper receives is at most the reimbursement cap
     /// forge-config: default.fuzz.runs = 40
     function testFuzz_rule8_noSettingsOrOwnerCallMovesAssetsOut(uint256 seed) public {
         if (seed % 2 == 1) _enterPhase2();
@@ -1326,14 +1328,50 @@ contract FlowTest is Fixture {
             } else if (kind == 9) {
                 _sellMaybe(ids[(r >> 8) % 6]);
             } else {
-                vm.prank(owner);
-                try core.exitStatement(sid) {} catch {}
+                _exitAsKeeper(sid);
             }
             for (uint256 i; i < 3; ++i) {
                 _noGain(watched[i], base[i], "owner or controller gained");
             }
             _solvent();
         }
+    }
+
+    /// @dev a neutral keeper exits the statement. the paid door pays it at most `reimburseCapBps` of the statement cost
+    function _exitAsKeeper(uint256 sid) internal {
+        address exitKeeper = makeAddr("exitKeeper");
+        (,, uint256 cost,) = core.statementInfo(sid);
+        uint256 cap = cost * core.settings().reimburseCapBps / 10_000;
+        uint256 before = exitKeeper.balance;
+        vm.prank(exitKeeper);
+        try core.exitStatement(sid) {} catch {}
+        assertLe(exitKeeper.balance - before, cap, "the exit reimbursement stays within the cap");
+    }
+
+    /// @dev the owner who calls the paid exit door is paid like any keeper: exactly the pot debit, within the cap
+    function test_rule8_ownerAsRedeemCallerGetsOnlyTheCappedReimbursement() public {
+        _enterPhase2();
+        Composed memory c = _composeOnce();
+        _potTo(1 ether);
+        (,,, uint64 listedAt) = core.statementInfo(c.sid);
+        vm.warp(listedAt + 105 hours);
+        (,, uint256 cost,) = core.statementInfo(c.sid);
+        uint256 cap = cost * core.settings().reimburseCapBps / 10_000;
+        uint256 pot = core.ethPot();
+        uint256 coreEth = address(core).balance;
+        uint256[5] memory base = _holdings(owner);
+        vm.fee(composeBasefee);
+        vm.prank(owner);
+        core.exitStatement(c.sid);
+        uint256 gain = owner.balance - base[0];
+        assertGt(gain, 0, "the paid door repays its caller");
+        assertEq(gain, pot - core.ethPot(), "exactly the pot debit");
+        assertEq(gain, coreEth - address(core).balance, "exactly what left the core");
+        assertLe(gain, cap, "within the cap");
+        assertEq(coin.balanceOf(owner), base[1]);
+        assertEq(CREDITS.balanceOf(owner), base[2]);
+        assertEq(STATEMENTS.balanceOf(owner), base[3]);
+        assertEq(xt.balanceOf(owner), base[4]);
     }
 
     function _ownerCall(uint256 kind, uint256 r) internal {
