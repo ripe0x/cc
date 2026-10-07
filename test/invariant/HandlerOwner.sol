@@ -508,7 +508,8 @@ abstract contract HandlerOwner is HandlerHouse {
                 core.removeTarget(t);
             } catch (bytes memory why) {
                 // the stack contracts and the exit side are refused, nothing else is
-                if (bytes4(why) != Core.ForbiddenTarget.selector) _unexpected(a, why);
+                bool shut = core.targetsLocked() && bytes4(why) == Core.Locked.selector;
+                if (bytes4(why) != Core.ForbiddenTarget.selector && !shut) _unexpected(a, why);
             }
             vm.stopPrank();
         } else if (m == 2) {
@@ -558,6 +559,8 @@ abstract contract HandlerOwner is HandlerHouse {
         address oldModule = core.exitModule();
         uint256 oldUnit = core.unitPerPoint();
         (MockExitModule next, bytes4 want) = _nextModule(seed, mode % 8, token);
+        // a locked module door refuses every set, whatever the module
+        if (core.exitModuleLocked()) want = Core.Locked.selector;
         _att(a);
         OPre memory p = _opre();
         uint256 start0 = core.xStartPrice();

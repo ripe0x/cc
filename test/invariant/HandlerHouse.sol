@@ -197,6 +197,7 @@ abstract contract HandlerHouse is HandlerBase {
         // invariant 3: the statement left the core's control by an auction whose winning bid was at or above the
         // reserve the core set for it
         if (au.amount < g.reserve) _flag(V_SALE_FLOOR, "a statement sold below the reserve the core set");
+        if (au.amount < g.floorAtSet) _flag(V_SALE_FLOOR, "a statement sold below the hard floor");
         if (au.amount != g.bid || au.bidder != g.bidder) _flag(V_MODEL, "the winning bid differs from the ghost");
         if (_ownerOf(sid) != au.bidder) _flag(V_DEPART, "the winner does not hold the statement");
         if (house.getAuction(g.auctionId).tokenOwner != address(0)) _flag(V_MODEL, "the house kept a settled auction");
@@ -340,10 +341,12 @@ abstract contract HandlerHouse is HandlerBase {
         try core.repriceStatement(sid) {
             _ok(a);
             if (!should) _flag(V_SALE_FLOOR, "a listing with a bid, or none, was repriced");
-            (bool priced, uint256 want) = _wantReserve(sid, g.cost, g.listedAt, st.saleFloorBps);
+            (bool priced, uint256 wantRes) = _wantReserve(sid, g.cost, g.listedAt, st.saleFloorBps);
             IAuctionHouse.Auction memory au = house.getAuction(g.auctionId);
             g.reserve = au.reservePrice;
-            if (!priced || au.reservePrice != want) {
+            g.floorAtSet = g.cost * st.saleFloorBps / 10_000;
+            if (g.reserve < g.floorAtSet) _flag(V_SALE_FLOOR, "a repriced reserve below the hard floor");
+            if (!priced || au.reservePrice != wantRes) {
                 _flag(V_SALE_FLOOR, "the repriced reserve is not the controller price, floored");
             }
             _eth(b0, 0, 0, "repriceStatement");

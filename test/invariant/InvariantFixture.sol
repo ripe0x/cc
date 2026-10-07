@@ -19,6 +19,7 @@ import {Handler} from "./Handler.sol";
 import {Wiring, HandlerBase} from "./HandlerBase.sol";
 import {HandlerHouse} from "./HandlerHouse.sol";
 import {HandlerOwner} from "./HandlerOwner.sol";
+import {HandlerSale} from "./HandlerSale.sol";
 
 /// @notice builds the real system on the fork for the invariant suites on top of the single real stack `Fixture`:
 /// the real Core and ControllerV1 deployed through the deploy path, the coin launched through the live artcoins
@@ -89,7 +90,9 @@ abstract contract InvariantFixture is Fixture {
             canSwapController: canSwapController,
             tag: tag
         });
-        handler = new Handler(w);
+        // built from its artifact: the handler is large and no test contract may embed its creation code
+        handler = Handler(deployCode("Handler.sol:Handler", abi.encode(w)));
+        _saleParts();
         _actors();
         _prefill(phase2, inWindow);
         _holders();
@@ -109,6 +112,22 @@ abstract contract InvariantFixture is Fixture {
         }
         assertLt(creditCursor, CANDIDATE_START, "the moved credits reach the listing candidates");
         _targets(phase2);
+    }
+
+    /// the controller that sells for the owner and the heirs of the handover chain, handed to the handler. the selling
+    /// controller is built from its artifact. the owner installs it only when the handler's hostile owner does
+    function _saleParts() internal {
+        address selling = deployCode("SaleAttackers.sol:SellingController", abi.encode(address(core)));
+        address[] memory heirs = new address[](4);
+        for (uint256 i; i < 4; ++i) {
+            heirs[i] = _user(string.concat("inv.heir", vm.toString(i)));
+        }
+        handler.setSaleParts(selling, heirs);
+    }
+
+    /// the suites that list the sale and owner actions of `HandlerSale` override this
+    function _saleActions() internal pure virtual returns (bool) {
+        return false;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -304,7 +323,7 @@ abstract contract InvariantFixture is Fixture {
     /// the actions the fuzzer may call. the setters of the handler are left out. an action listed twice is called
     /// twice as often
     function _targets(bool phase2) internal virtual {
-        bytes4[] memory s = new bytes4[](160);
+        bytes4[] memory s = new bytes4[](200);
         uint256 n;
         s[n++] = HandlerBase.buyCoin.selector;
         s[n++] = HandlerBase.buyCoin.selector;
@@ -339,6 +358,19 @@ abstract contract InvariantFixture is Fixture {
             s[n++] = HandlerBase.buybackExit.selector;
             s[n++] = HandlerBase.buybackExit.selector;
             s[n++] = HandlerBase.moduleMode.selector;
+        }
+        if (_saleActions()) {
+            s[n++] = HandlerSale.buyOnlyBuy.selector;
+            s[n++] = HandlerSale.buyOnlyBuy.selector;
+            s[n++] = HandlerSale.ownerSell.selector;
+            s[n++] = HandlerSale.repriceBid.selector;
+            s[n++] = HandlerSale.repriceBid.selector;
+            s[n++] = HandlerSale.saleSettings.selector;
+            s[n++] = HandlerSale.flipMode.selector;
+            s[n++] = HandlerSale.flipMode.selector;
+            s[n++] = HandlerSale.hostileOwner.selector;
+            s[n++] = HandlerSale.lockDoor.selector;
+            s[n++] = HandlerSale.handover.selector;
         }
         // the owner as an adversary: settings anywhere in the bounds, rates, invalid calls, the other owner doors
         for (uint256 k; k < _ownerWeight(); ++k) {

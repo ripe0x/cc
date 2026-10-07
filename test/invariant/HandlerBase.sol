@@ -94,7 +94,16 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_SET_XRATE = 29;
     uint8 internal constant A_OWNER_MISC = 30;
     uint8 internal constant A_REPLACE_MODULE = 31;
-    uint256 internal constant N_ACTIONS = 32;
+    // the sale and owner actions of HandlerSale
+    uint8 internal constant A_BUY = 32;
+    uint8 internal constant A_OWNER_SELL = 33;
+    uint8 internal constant A_REPRICE_BID = 34;
+    uint8 internal constant A_SALE_SETTINGS = 35;
+    uint8 internal constant A_FLIP_MODE = 36;
+    uint8 internal constant A_HOSTILE_OWNER = 37;
+    uint8 internal constant A_LOCK = 38;
+    uint8 internal constant A_HANDOVER = 39;
+    uint256 internal constant N_ACTIONS = 40;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -126,7 +135,9 @@ abstract contract HandlerBase is Test {
     uint256 internal constant V_SETTINGS = 27; // settings changed outside the owner's call, or an owner call misbehaved
     uint256 internal constant V_HOUSE = 28; // sale proceeds on the house or their collection are off the ghost
     uint256 internal constant V_OWNER = 29; // an owner action moved assets or the books it must not touch
-    uint256 internal constant N_VIOL = 30;
+    uint256 internal constant V_SALE_PATH = 30; // a sellTo or buy sale outside the rules: price, booking, holder or record
+    uint256 internal constant V_LOCK = 31; // a one way lock came undone, or a handover left a power behind
+    uint256 internal constant N_VIOL = 32;
 
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
@@ -235,12 +246,14 @@ abstract contract HandlerBase is Test {
     uint8 public constant S_SOLD = 3; // a house auction cleared, the winner holds it
     uint8 public constant S_EXITED = 4; // handed to the exit module
     uint8 public constant S_TOP = 5; // burned as the top of an overprint
+    uint8 public constant S_SOLD_TO = 6; // eth lane, sold at once by the controller through `sellTo`, the buyer holds it
 
     struct SG {
         uint8 status;
         uint8 lane;
         uint256 cost;
         uint256 reserve; // the reserve the core set at the listing or the latest reprice
+        uint256 floorAtSet; // the hard floor (cost * saleFloorBps) in force when that reserve was set
         uint256 auctionId;
         uint64 listedAt;
         uint256 bid; // listed: the top bid so far, zero before the first bid
@@ -334,7 +347,15 @@ abstract contract HandlerBase is Test {
             "setRate",
             "setXRate",
             "ownerMisc",
-            "replaceModule"
+            "replaceModule",
+            "buyOnlyBuy",
+            "ownerSell",
+            "repriceBid",
+            "saleSettings",
+            "flipMode",
+            "hostileOwner",
+            "lockDoor",
+            "handover"
         ];
         names = n;
         controllers.push(w.v1);
@@ -400,6 +421,7 @@ abstract contract HandlerBase is Test {
         g.listedAt = clock;
         (, uint256 aid, uint256 reserve,,) = core.statementStatus(sid);
         g.auctionId = aid;
+        g.floorAtSet = cost * core.settings().saleFloorBps / 10_000;
         if (price != 0) {
             g.status = S_SOLD;
             g.reserve = cost * core.settings().saleFloorBps / 10_000;
@@ -1474,6 +1496,9 @@ abstract contract HandlerBase is Test {
             _flag(V_SALE_FLOOR, "the house record differs from what the core listed");
         }
         if (_ownerOf(sid) != address(house)) _flag(V_MODEL, "a listed statement is not held by the house");
+        // invariant 3: no reserve is ever set below the hard floor of the settings in force at that moment
+        g.floorAtSet = cost * saleFloorBps / 10_000;
+        if (reserve < g.floorAtSet) _flag(V_SALE_FLOOR, "a listing reserve below the hard floor");
         g.status = S_LISTED;
         g.auctionId = id;
         g.reserve = reserve;
@@ -1738,11 +1763,16 @@ abstract contract HandlerBase is Test {
         address target = which % 2 == 0 ? v1 : address(fuzz);
         if (target == core.controller()) return _skip(a);
         _att(a);
+        bool locked = core.controllerLocked();
         vm.prank(owner);
         try core.setController(target) {
+            if (locked) _flag(V_LOCK, "a locked controller door took a new controller");
             if (core.controller() != target) _flag(V_MODEL, "controller not set at once");
             _ok(a);
-        } catch {}
+        } catch (bytes memory why) {
+            if (!locked || bytes4(why) != Core.Locked.selector) _unexpected(a, why);
+            else _ok(a);
+        }
     }
 
     /// the controller address makes calls that need an authority or an asset it does not have, outside any

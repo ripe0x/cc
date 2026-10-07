@@ -47,6 +47,10 @@ abstract contract InvariantsBase is InvariantFixture {
     uint256[] internal g8 = [15, 16, 17, 27, 29];
     uint256[] internal g9 = [25];
     uint256[] internal g10 = [24];
+    /// sales through sellTo and buy, and the departures of statements
+    uint256[] internal g11 = [7, 8, 30];
+    /// locks and handovers
+    uint256[] internal g12 = [31];
 
     function _zero(uint256[] storage codes) internal view {
         for (uint256 i; i < codes.length; ++i) {
@@ -84,6 +88,11 @@ abstract contract InvariantsBase is InvariantFixture {
             HandlerBase.SG memory s = handler.statementGhost(handler.everHeld(i));
             if (s.status == handler.S_SOLD()) {
                 assertGe(s.price, s.reserve, "sold below the reserve the core set");
+                assertGe(s.reserve, s.floorAtSet, "an auction reserve was set below the hard floor");
+                assertGe(s.price, s.floorAtSet, "an auction cleared below the hard floor of its listing");
+            } else if (s.status == handler.S_SOLD_TO()) {
+                assertGe(s.price, s.floorAtSet, "a sellTo sale paid less than the hard floor");
+                assertGe(s.price, s.reserve, "a sellTo sale paid less than the floor it was checked against");
             }
         }
     }
@@ -125,6 +134,12 @@ abstract contract InvariantsBase is InvariantFixture {
                 } else {
                     assertTrue(!held, "a synced sale is still recorded as held");
                 }
+            } else if (s.status == handler.S_SOLD_TO()) {
+                assertEq(o, s.winner, "a statement sold at once is not with its buyer");
+                assertTrue(!held, "a statement sold at once is still recorded as held");
+                assertGe(s.price, s.floorAtSet, "sold at once below the hard floor");
+                (bool exists,) = house.getAuctionFor(address(STATEMENTS), sid);
+                assertTrue(!exists, "the house has an auction for a statement sold at once");
             } else if (s.status == handler.S_EXITED()) {
                 assertTrue(!held, "exited but still held");
                 assertEq(o, address(s.module), "an exited statement is not with the module that took it");
@@ -342,6 +357,47 @@ abstract contract InvariantsBase is InvariantFixture {
         }
     }
 
+    /// 12. docs/FLOW.md 9.2, SPEC invariant 3 as changed: a statement leaves the core only by a house auction whose reserve
+    /// was at least the hard floor (cost * saleFloorBps) when the core set it and which cleared at or above it, by `sellTo`
+    /// with a payment at least the hard floor, booked whole and split by saleToBuybackBps, by an exit that returned at
+    /// least rating * unitPerPoint, or as the top of an overprint. every ghost status is one of those, the record and the
+    /// house agree (invariant 4), and nobody the owner can name holds a statement they did not pay the floor for.
+    function invariant_12_aStatementOnlyLeavesByASaleAnExitOrAnOverprint() public view {
+        _zero(g11);
+        uint256 n = handler.everHeldCount();
+        for (uint256 i; i < n; ++i) {
+            HandlerBase.SG memory s = handler.statementGhost(handler.everHeld(i));
+            uint8 st = s.status;
+            assertTrue(
+                st == handler.S_LISTED() || st == handler.S_HELD() || st == handler.S_SOLD() || st == handler.S_SOLD_TO()
+                    || st == handler.S_EXITED() || st == handler.S_TOP(),
+                "a statement left the core by a path that is not allowed"
+            );
+            if (st == handler.S_SOLD_TO()) assertGe(s.price, s.floorAtSet, "a sale at once below the hard floor");
+            if (st == handler.S_SOLD()) assertGe(s.price, s.floorAtSet, "an auction below the hard floor");
+        }
+    }
+
+    /// 13. the three one way locks never come undone, the setter of a locked door always refuses, every former owner has no
+    /// power for the core or for the controller's sale settings, and the core's owner is the one the handler last saw
+    /// accept. the handler checks each of these again on every call here
+    function invariant_13_locksAndHandoversNeverComeUndone() public {
+        handler.lockCheck();
+        handler.formerOwnersCheck();
+        _zero(g12);
+        assertEq(core.owner(), handler.owner(), "the core owner differs from the last accepted owner");
+        assertTrue(core.pendingOwner() != core.owner(), "the pending owner is the owner");
+    }
+
+    /// 14. no exit module ever called the core, or the selling controller, successfully from inside an exit: every door is
+    /// shut while the core is inside `exitStatement`, whatever the module does with its gas
+    function invariant_14_noCallFromInsideAnExitEverWorked() public view {
+        uint256 n = handler.moduleEverCount();
+        for (uint256 i; i < n; ++i) {
+            assertTrue(!handler.modulesEver(i).calledOk(), "a module made a call into the core that went through");
+        }
+    }
+
     /// logs how often each action ran, succeeded and was skipped in this run, and over all runs so far.
     function invariant_callSummary() public view {
         _summary();
@@ -408,7 +464,7 @@ abstract contract InvariantsBase is InvariantFixture {
     //////////////////////////////////////////////////////////////*/
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
-    function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal {
+    function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal virtual {
         a = a % 32;
         if (a == 0) handler.buyCoin(w, x, y);
         else if (a == 1) handler.sellCoin(w, x, y);
@@ -483,7 +539,13 @@ abstract contract InvariantsBase is InvariantFixture {
         _summary();
     }
 
+    /// the sale and owner actions of `HandlerSale` run only in the suites that list them
+    function _saleSuite() internal pure virtual returns (bool) {
+        return false;
+    }
+
     function _available(uint256 a) internal view returns (bool) {
+        if (a >= 32) return _saleSuite();
         if ((a >= 16 && a <= 20 || a == 31) && !handler.phase2()) return false;
         if (a == 13 && !handler.canSwapController()) return false;
         return true;
