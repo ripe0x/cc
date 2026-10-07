@@ -311,7 +311,7 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("owner = the dead address", Class.Pre);
             m.c.owner = Mainnet.DEAD;
         } else if (i == 7) {
-            m = _m("owner = the factory owner", Class.Pre);
+            m = _m("owner = the factory owner (a warning, not a failure)", Class.Hash);
             m.c.owner = m.c.factoryOwner;
         } else {
             m = _m("owner = the auction factory", Class.Pre);
@@ -342,7 +342,7 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("overrides.openFactory on while the factory is deprecated", Class.Hash);
             m.c.allowOpenFactory = true;
         } else if (i == 7) {
-            m = _m("creator = the factory owner", Class.Pre);
+            m = _m("creator = the factory owner (a warning, not a failure)", Class.Hash);
             m.c.creator = m.c.factoryOwner;
         } else {
             m = _m("creator = the pool manager", Class.Pre);

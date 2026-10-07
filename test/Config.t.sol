@@ -22,14 +22,14 @@ contract ConfigTest is Fixture {
         return keccak256(abi.encode(a)) == keccak256(abi.encode(b));
     }
 
-    /// the json file is the default config plus the launch inputs the owner supplied (owner, creator, name). the salt is
-    /// the one placeholder still unset
+    /// the json file is the default config plus the launch inputs the owner supplied (owner, creator, name) and the salt, keccak256 of "CC"
     function test_jsonEqualsDefaultConfig() public view {
         LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
         LaunchConfig memory d = defaultConfig();
         d.owner = SHIPPED_OWNER;
         d.creator = SHIPPED_OWNER;
         d.name = "CC";
+        d.salt = keccak256("CC");
         assertEq(f.stack.hook, d.stack.hook);
         assertEq(abi.encode(f.stack), abi.encode(d.stack));
         assertTrue(_same(f, d), "script/config/mainnet.json drifted from the default config");
@@ -37,9 +37,8 @@ contract ConfigTest is Fixture {
         assertEq(f.creator, SHIPPED_OWNER);
         assertEq(f.name, "CC");
         assertEq(f.symbol, "CC");
-        string[] memory unset = unsetFields(f);
-        assertEq(unset.length, 1, "only the salt is still unset");
-        assertEq(unset[0], "salt");
+        assertEq(f.salt, keccak256("CC"));
+        assertEq(unsetFields(f).length, 0, "no placeholder is left in the shipped file");
         assertEq(f.rateStart, 1.54e13);
         assertEq(f.supply, 1_000_000_000e18);
         assertEq(f.stack.factory, Mainnet.ARTCOINS_FACTORY);
@@ -80,6 +79,27 @@ contract ConfigTest is Fixture {
         this.requireExt(c);
     }
 
+    /// the shipped file is complete, so the refusal is proven by blanking each field of it in memory
+    function test_shippedFileBlankedIsRefused() public {
+        LaunchConfig memory c = loadConfig(DEFAULT_CONFIG_FILE);
+        this.requireExt(c);
+        c.owner = address(0);
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "owner"));
+        this.requireExt(c);
+        c = loadConfig(DEFAULT_CONFIG_FILE);
+        c.creator = address(0);
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "creator"));
+        this.requireExt(c);
+        c = loadConfig(DEFAULT_CONFIG_FILE);
+        c.name = "";
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "name"));
+        this.requireExt(c);
+        c = loadConfig(DEFAULT_CONFIG_FILE);
+        c.salt = bytes32(0);
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "salt"));
+        this.requireExt(c);
+    }
+
     function _enabledDeployer() internal returns (address d2) {
         d2 = _user("second deployer");
         vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
@@ -96,6 +116,34 @@ contract ConfigTest is Fixture {
         preflight(lc, d2);
         assertEq(_failedNames(), "");
         _print("preflight");
+    }
+
+    /// the owner is the factory owner here: owner or creator equal to the factory owner is a warning, never a failure
+    function test_warnOwnerOrCreatorIsTheFactoryOwner() public {
+        address d2 = _enabledDeployer();
+        string memory w = "warn: owner or creator is the factory owner";
+        LaunchConfig memory c = lc;
+        preflight(c, d2);
+        assertTrue(_warnClean(w), "clean when neither is the factory owner");
+        c.owner = c.factoryOwner;
+        preflight(c, d2);
+        assertFalse(_warnClean(w), "the owner warning fires");
+        assertEq(_failedNames(), "", "owner = factory owner passes");
+        c = lc;
+        c.creator = c.factoryOwner;
+        preflight(c, d2);
+        assertFalse(_warnClean(w), "the creator warning fires");
+        assertEq(_failedNames(), "", "creator = factory owner passes");
+        c.owner = c.stack.hook;
+        preflight(c, d2);
+        assertEq(_failedNames(), "rule: owner and creator are not dead or stack addresses", "a stack address still fails");
+    }
+
+    function _warnClean(string memory name) internal view returns (bool) {
+        for (uint256 i; i < rows.length; ++i) {
+            if (keccak256(bytes(rows[i].name)) == keccak256(bytes(name))) return rows[i].ok;
+        }
+        revert("row missing");
     }
 
     function test_preflightFailures() public {

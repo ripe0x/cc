@@ -456,12 +456,13 @@ contract ReviewDeployTest is ReviewHarness {
         _requireConfigHash(c, h);
     }
 
-    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, name)
+    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, name, salt)
     function _shipped() internal pure returns (LaunchConfig memory s) {
         s = defaultConfig();
         s.owner = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.creator = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.name = "CC";
+        s.salt = keccak256("CC");
     }
 
     function _hashRow() internal view returns (string memory) {

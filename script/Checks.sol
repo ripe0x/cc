@@ -214,11 +214,13 @@ abstract contract LaunchChecks is PostflightChecks {
             address a = who[i];
             if (a == address(0)) continue; // the placeholder row reports it
             bad = bad || a == Mainnet.DEAD || a == c.stack.poolManager || a == c.stack.hook || a == c.stack.factory
-                || a == c.stack.locker || a == c.stack.escrow || a == c.stack.auctionFactory || a == c.mevModule
-                || a == c.factoryOwner;
+                || a == c.stack.locker || a == c.stack.escrow || a == c.stack.auctionFactory || a == c.mevModule;
         }
-        _check(
-            "rule: owner and creator are not dead or stack addresses", !bad, "dead, stack, mev module, factory owner"
+        _check("rule: owner and creator are not dead or stack addresses", !bad, "dead, stack, mev module");
+        _warn(
+            "warn: owner or creator is the factory owner",
+            c.owner != c.factoryOwner && c.creator != c.factoryOwner,
+            "one key holds the engine, the token admin and the factory"
         );
         bool set = c.owner != address(0) && c.creator != address(0);
         _warn("warn: owner differs from creator", !set || c.owner != c.creator, "one party takes both roles");
