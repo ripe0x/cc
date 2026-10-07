@@ -634,15 +634,14 @@ contract OwnerHandoverTest is OwnerBase {
         assertEq(core.pendingOwner(), address(0));
     }
 
-    /// coded behaviour, unreachable on chain (no key signs for the zero address): while nothing is pending the
-    /// pending owner is the zero address, so a call from it would pass `acceptOwnership` and make the zero address the
-    /// owner. the report lists it as an ambiguity, not a bug
-    function test_handover_zeroAddressAcceptWhileNothingPendingWouldSucceed() public {
+    /// while nothing is pending the pending owner is the zero address, and a call from it must not pass
+    /// `acceptOwnership` (review S-9, fixed): the owner stays
+    function test_handover_zeroAddressAcceptWhileNothingPendingReverts() public {
         assertEq(core.pendingOwner(), address(0));
         vm.prank(address(0));
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
         core.acceptOwnership();
-        assertEq(core.owner(), address(0));
-        _allShutFor(owner);
+        assertEq(core.owner(), owner);
     }
 
     /// the assets: no owner call, of any owner, moves eth, credits, statements or the coin out of the core

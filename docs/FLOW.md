@@ -62,6 +62,8 @@ the skim split (9.5 points to the engine, 0.5 to the creator) is fixed inside th
 
 ## 4. statement sales on the pnd auction house
 
+note: the reserve rule of this section (`reserveBps`) is superseded by section 9. read section 9.2 for the live rule. there is no queue and no delay anywhere in this file after section 9.
+
 live factory: `SovereignAuctionHouseV2Factory` 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 (verified; source saved under docs/reference/pnd/). facts read from the source:
 * `createAuctionHouse()` deploys a non upgradeable clone owned forever by msg.sender. one per address. fee is fixed at the factory default (0 now).
 * `createAuction(tokenId, tokenContract, duration, reservePrice, listingExpiry)` is owner only, pulls the token into the house with transferFrom (needs approval), returns an auction id. `getAuctionFor(token, id)` and `getAuction(id)` read it.
@@ -72,12 +74,12 @@ live factory: `SovereignAuctionHouseV2Factory` 0x77aB853543286C9Cdd7dd6c01222A7c
 
 design:
 * the Core owns its own house: it calls `factory.createAuctionHouse()` in its constructor, stores the house address, and approves the house for all on Statements.
-* compose (eth lane): after minting, the Core lists the statement: `createAuction(sid, Statements, auctionDuration, cost * reserveBps / 10_000, 0)` and records the auction id on the statement. the dutch auction (`priceOf`, `buyStatement`, AUCTION_START_X, AUCTION_FLOOR_X, AUCTION_LENGTH) is deleted.
+* compose (eth lane): after minting, the Core lists the statement: `createAuction(sid, Statements, auctionDuration, reserve, 0)` (reserve is `_reserveFor`, section 9.2: the controller price floored at `cost * saleFloorBps / 10_000`; `reserveBps` was replaced by section 9) and records the auction id on the statement. the dutch auction (`priceOf`, `buyStatement`, AUCTION_START_X, AUCTION_FLOOR_X, AUCTION_LENGTH) is deleted.
 * `collectSales()`, permissionless, guarded: if `house.pendingRefunds(core) > 0`, call `withdrawRefund()`, measure the eth balance delta under the measuring flag, split it by `saleToBuybackBps` into `ethToBuyback` and `ethPot` (checkpoint first). the Core never bids, so everything credited to it in the house is sale proceeds. `buyback()` calls the same collection first so proceeds are never stranded.
 * statement state is settled lazily and permissionlessly with `syncStatement(sid)`: if the Core's record says listed but the house has no auction for it and neither the house nor the Core owns it, it was sold: clear the record (emit `StatementSold`). if the Core owns it and it has no auction (unwound sale, or returned), relist it at the current reserve. `heldStatements()` may include sold statements until synced; add a view that reports the live status.
 * phase 2 exit of an eth lane statement: allowed when the module is set, the statement is listed, has no bid, and `now >= listedAt + exitAfter`. the Core cancels the listing (this reverts if a bid arrived) and then exits exactly as before (balance delta check against `rating * unitPerPoint`). the exit lane is unchanged (immediate exit, never listed).
 * overprint: both statements must be listed with no bid; cancel both, overprint, relist the base with the summed cost.
-* reserve changes: `repriceStatement(sid)` permissionless: sets the listing's reserve to `cost * reserveBps / 10_000` if it has no bid (so a settings change can be applied to old listings).
+* reserve changes: `repriceStatement(sid)` permissionless: sets the listing's reserve to `_reserveFor(sid)` (section 9.2, `reserveBps` no longer exists) if it has no bid (so a settings change can be applied to old listings).
 * a bidder interacts with the house directly (`createBid`, `endAuction`). nothing in the Core is needed to buy.
 * SPEC invariant 3 becomes: a statement only leaves the Core's control by a house auction that cleared at or above its reserve at listing time, by an exit that returned at least `rating * unitPerPoint`, or as the top of an overprint. invariant 5 gains: eth owed to the Core by the house is not counted in the pots until collected.
 * forbidden `buyListing` targets gain the house and the auction factory.
@@ -97,6 +99,8 @@ real contracts only on the fork (Credits, Statements, CreditScore, CreditStrateg
 
 ## 8. phase 2 flexibility (owner confirmed, added after the rework)
 
+note: every mention of a queue, a 7 day delay or `Queued` in this section is superseded by section 9 (no timelock, every set works at once).
+
 the real exit module interface is still unknown. the adapter is written later. these three changes keep the exit side repairable.
 
 | # | decision |
@@ -114,7 +118,7 @@ rules for a later set (the first set behaves as before):
 * `ExitModuleSet` is emitted every time.
 * the old module stops being a forbidden target, the new one is forbidden at call time as today.
 
-trust note for the docs (ARCHITECTURE accepted list): before this change the module door closed forever after one set. now it stays open until the owner calls `lockExitModule` (section 9, no timelock). a dishonest owner or a stolen key can queue a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`. the 7 day public delay and the `Queued` event are the protection. the owner accepted this in exchange for a repairable exit side.
+trust note for the docs (ARCHITECTURE accepted list): superseded by section 9 (no timelock, no queue, no `Queued` event, no 7 day delay). before section 8 the module door closed forever after one set. now it stays open until the owner calls `lockExitModule`, and every set works at once. a dishonest owner or a stolen key can set a module that returns dust for statements (tiny unit) or a unit so high that the exit token bid overpays an accomplice from `xPot`, with no delay and no public warning. the owner accepted this in exchange for a repairable exit side (section 9.4).
 
 ## 9. sale controller, no timelock, fee share (owner confirmed. replaces every earlier text on buy now)
 
@@ -132,7 +136,8 @@ trust note for the docs (ARCHITECTURE accepted list): before this change the mod
 ### 9.2 Core side
 
 * setting `reserveBps` is replaced by `saleFloorBps` (launch 7_500, bounds 1_000 to 40_000): the hard floor. no statement leaves the Core by a sale for less than `cost * saleFloorBps / 10_000`.
-* `IController` gains `function statementPrice(uint256 sid, uint256 cost, uint64 listedAt) external view returns (uint256 priceWei)`. the Core calls it with the same fixed gas cap as the other controller reads. `_reserveFor(sid) = max(priceWei, floorWei)`. if the call fails or returns malformed data: compose and relists revert, `repriceStatement` reverts (the stored reserve stays).
+* `IController` gains `function statementPrice(uint256 sid, uint256 cost, uint64 listedAt) external view returns (uint256 priceWei)`. the Core calls it with the same fixed gas cap as the other controller reads. `_reserveFor(sid) = max(priceWei, floorWei)`. if the call fails or returns malformed data: compose, the relist after overprint and `repriceStatement` revert (the stored reserve stays). the one exception is the relist of a held statement through `syncStatement` (an unwound sale, a returned statement): there the reserve falls back to the hard floor, so a statement can always be listed again and redeemed whatever the controller does.
+* raising `saleFloorBps` does not move open reserves: a listing keeps the reserve it was set with until `repriceStatement`. the owner sends the raise together with the reprice of every open listing (`SetSettings` with `REPRICE=1`, docs/DEPLOY.md). this is the plain rule, say so in every runbook.
 * listing at compose, relist after an unwound sale, relist after overprint: reserve `_reserveFor` at the new `listedAt` (age zero, so the start price).
 * `repriceStatement(sid)`, permissionless: sets the house reserve to `_reserveFor(sid)` when the listing has no bid. this is the call a first bidder makes before bidding.
 * `sellTo(uint256 sid, address buyer) external payable`, only the controller, guarded: eth lane statement, held and listed. cancels the house listing (reverts if a bid exists, a live auction always wins), requires `msg.value >= cost * saleFloorBps / 10_000`, sends the statement to `buyer` with `transferFrom`, books `msg.value` exactly like collected sale proceeds (checkpoint, split by `saleToBuybackBps`, resync funded), clears the record, emits a sold event with buyer and price. no refund logic in the Core.
@@ -145,8 +150,8 @@ trust note for the docs (ARCHITECTURE accepted list): before this change the mod
 * owner of the controller settings is the Core's owner read live (`core.owner()`), no second owner.
 * settings, each owner settable at once with an event: `buyOnly` (launch false), `startBps` (11_000), `stepBps` (100), `stepEvery` (3 hours), `floorBps` (7_500). sane bounds: startBps 1_000 to 40_000, stepBps 0 to 5_000, stepEvery 1 minute to 30 days, floorBps 1_000 to startBps.
 * `statementPrice(sid, cost, listedAt)`: `steps = (now - listedAt) / stepEvery`, `bps = max(startBps - min(steps * stepBps, startBps), floorBps)`, `cost * bps / 10_000`. in buy only mode it returns the start price without decay, so the house reserve is not walked down.
-* `priceOf(sid)` view for frontends: the current asking price from the Core's `statementInfo`, in either mode.
-* `buy(uint256 sid) external payable`, guarded, only when `buyOnly`: price is the decayed asking price, `msg.value >= price`, calls `core.sellTo{value: price}(sid, msg.sender)`, refunds the excess to the caller last.
+* `priceOf(sid)` view for frontends: the current asking price from the Core's `statementInfo`, in either mode, never below the Core hard floor `cost * saleFloorBps / 10_000` (so it is always a price `sellTo` takes).
+* `buy(uint256 sid) external payable`, guarded, only when `buyOnly`: price is the decayed asking price, `msg.value >= price`, calls `core.sellTo{value: price}(sid, msg.sender)` (the price is `priceOf`, so the floor holds even if the owner raised `saleFloorBps` above the controller `floorBps`), refunds the excess to the caller last.
 * the credit picking functions are unchanged.
 
 ### 9.4 trust note for the docs (replaces the timelock text everywhere)

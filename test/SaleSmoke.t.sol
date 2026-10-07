@@ -116,15 +116,16 @@ contract SaleSmokeTest is Fixture {
         Settings memory s = core.settings();
         s.saleFloorBps = 12_000;
         _setSettings(s);
-        // the controller still asks 110 percent, below the new floor of 120 percent
+        // the controller still asks 110 percent, the quote and the payment are lifted to the new floor of 120 percent
         address buyer = address(0xB0B);
         uint256 ask = ctl.priceOf(sid);
-        vm.deal(buyer, 10 ether);
-        vm.prank(buyer);
-        vm.expectRevert(Core.BelowFloor.selector);
-        ctl.buy{value: ask}(sid);
+        assertEq(ask, cost * 12_000 / 10_000, "the quote is the hard floor");
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost * 12_000 / 10_000, "reserve floored");
+        vm.deal(buyer, 10 ether);
+        vm.prank(buyer);
+        ctl.buy{value: ask}(sid);
+        assertEq(STATEMENTS.ownerOf(sid), buyer, "sold at the floor, buy only mode is alive");
     }
 
     function test_pool_fees_split_by_feeToBuybackBps() public {

@@ -1,6 +1,6 @@
 # credits engine: build spec v1
 
-this is the original handoff spec. the branch `flow` is the current implementation and docs/ARCHITECTURE.md lists what differs.
+this is the original handoff spec. the branch `flow` is the current implementation and docs/ARCHITECTURE.md lists what differs. superseded by docs/FLOW.md section 9: the timelock, the queue and the freeze action no longer exist, owner actions work at once with three one way locks and a two step owner handover. sections 8 and 9 below carry a note at each spot.
 
 ## 0. what this is
 
@@ -131,7 +131,7 @@ all are immutable constants in the core unless marked.
 | `XRATE_START / CAP / FLOOR` | 60 / 97 / 30 | exit token bid, percent of score |
 | `XRATE_CLIMB_PER_HOUR` | 1 point | while funded |
 | `XRATE_DROP_PER_CREDIT` | 0.2 point | fixed, per credit bought |
-| `TIMELOCK` | 7 days | for every owner action in section 9 |
+| `TIMELOCK` | removed | superseded by docs/FLOW.md section 9: there is no timelock and no queue, owner actions work at once |
 | `OVERPRINT_CAP_PER_DAY` | 8 | core limit on overprints requested by a controller |
 
 ## 4. coin and fee
@@ -263,7 +263,7 @@ copy tokenworks' `processTokenTwap`: anyone calls `buyback()`, at most once per 
 
 ### 8.2 exit token buyback (phase 2)
 
-same shape, spending `xToBuyback` through a coin/exitToken pool whose key is set once by the owner under the timelock. dormant until set.
+same shape, spending `xToBuyback` through a coin/exitToken pool whose key is set once by the owner (superseded by docs/FLOW.md section 9: at once, no timelock). dormant until set.
 
 ### 8.3 exit token bid (phase 2)
 
@@ -278,15 +278,16 @@ function sellForExitToken(uint256[] calldata ids) external nonReentrant;
 
 ## 9. owner powers
 
-the owner is a multisig. every action below is queued, emits an event, and executes only after `TIMELOCK`.
+superseded by docs/FLOW.md section 9 (no timelock, no queue, no freeze). the old rule, kept out of this file on purpose: it no longer holds.
+
+the owner is a multisig address. every action works at once and emits an event.
 
 | action | limit |
 |---|---|
-| set controller | any time, until frozen |
-| set exit module | once. then locked |
-| set coin/exitToken pool key | once. then locked |
-| add an allowed target | timelocked. removal is immediate |
-| freeze | removes the controller power forever |
+| set controller | at once, until `lockController` |
+| set exit module | at once, any number of times, until `lockExitModule`. the exitToken never changes once set |
+| add an allowed target | at once, until `lockTargets`. removal always works |
+| transfer ownership | two step: `transferOwnership`, then `acceptOwnership` by the new owner |
 
 there are no other owner functions. the owner cannot move eth, credits, statements, coin, or exit token, cannot change any parameter in section 3, and cannot pause.
 

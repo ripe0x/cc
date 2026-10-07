@@ -771,13 +771,18 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// the reserve of a listing: the controller's asking price now (from the age of the listing), never below the hard
-    /// floor. a controller that fails or answers short makes the caller revert, so a listing is never priced blind
+    /// floor. a controller that fails or answers short makes the caller revert, so a listing is never priced blind,
+    /// except on the relist of `syncStatement`, which falls back to the hard floor so redemption never depends on the
+    /// controller. told apart by the selector of the call, like `_compose`, so no code is duplicated
     function _reserveFor(uint256 sid) private view returns (uint256) {
         Statement storage st = _statements[sid];
         uint256 cost = st.cost;
         (bool ok, bytes memory out) =
             _ask(controller, abi.encodeCall(IController.statementPrice, (sid, cost, st.listedAt)), READ_GAS, 32);
-        if (!ok) revert BadPrice();
+        if (!ok) {
+            if (msg.sig == this.syncStatement.selector) return _floor(cost);
+            revert BadPrice();
+        }
         return abi.decode(out, (uint256)).max(_floor(cost));
     }
 
@@ -1084,9 +1089,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         emit OwnershipTransferStarted(msg.sender, to);
     }
 
-    /// completes the handover, called by the pending owner
+    /// completes the handover, called by the pending owner. the zero caller never passes
     function acceptOwnership() external {
-        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        if (msg.sender == address(0) || msg.sender != pendingOwner) revert OnlyPendingOwner();
         emit OwnershipTransferred(owner, msg.sender);
         owner = msg.sender;
         delete pendingOwner;

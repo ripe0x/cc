@@ -97,8 +97,9 @@ contract TupleProbe is SetSettings {
     }
 }
 
-/// independent review of the sale controller, the owner doors and the fee share (docs/REVIEW-sale.md). every
-/// test_FINDING asserts a bug as it behaves today, every test_OK confirms a safety property
+/// independent review of the sale controller, the owner doors and the fee share (docs/REVIEW-sale.md). test_FIXED asserts
+/// the behavior after the fix of a finding, test_ACCEPTED pins a finding that was accepted or documented, every test_OK
+/// confirms a safety property
 contract ReviewSaleTest is Fixture {
     address internal alice;
     address internal bob;
@@ -378,20 +379,20 @@ contract ReviewSaleTest is Fixture {
         ctl.buy{value: 100 ether}(sid);
     }
 
-    /// the controller floor can sit under the core hard floor (the owner raised only the core floor). then the ask
-    /// falls below what the core accepts, `buy` sends exactly the ask, and nobody can overpay: buying is dead
-    function test_FINDING_buyOnlyDeadWhileTheAskIsUnderTheCoreFloor() public {
+    /// S-1 fixed: the controller floor can sit under the core hard floor (the owner raised only the core floor). the
+    /// quote and the payment are clamped at the hard floor, so buy only mode keeps working and the excess comes back
+    function test_FIXED_buyOnlyWorksWhileTheAskIsUnderTheCoreFloor() public {
         uint256 sid = _composeOnce().sid;
         _buyOnly();
         _raise(9_000);
         _warp(63 hours);
-        uint256 ask = ctl.priceOf(sid);
-        assertLt(ask, _floorOf(sid), "the ask is under the core floor");
+        uint256 floor = _floorOf(sid);
+        assertEq(ctl.priceOf(sid), floor, "the quote is the hard floor");
         vm.deal(bob, 1000 ether);
         vm.prank(bob);
-        vm.expectRevert(Core.BelowFloor.selector);
         ctl.buy{value: 1000 ether}(sid);
-        // the controller never reads the core floor, so even an overpayment is not forwarded
+        assertEq(STATEMENTS.ownerOf(sid), bob, "sold at the floor");
+        assertEq(bob.balance, 1000 ether - floor, "the excess came back");
         assertEq(address(ctl).balance, 0);
     }
 
@@ -496,10 +497,10 @@ contract ReviewSaleTest is Fixture {
         assertEq(_live(sid).reserve, _cost(sid) * 12_000 / 10_000);
     }
 
-    /// after the owner raises the hard floor, listings keep the old reserve until someone reprices them, and a bid at
+    /// S-2 accepted, documented in FLOW 9.2 and DEPLOY: raise the floor with `REPRICE=1`. after the owner raises the hard floor, listings keep the old reserve until someone reprices them, and a bid at
     /// the old reserve wins the statement below the new floor. the spec says a reserve must be at least the floor when
     /// it was SET, so this follows the invariant, but not the plain sentence of 9.2
-    function test_FINDING_reserveStaysBelowARaisedFloorUntilRepriced() public {
+    function test_ACCEPTED_reserveStaysBelowARaisedFloorUntilRepriced() public {
         uint256 sid = _composeOnce().sid;
         uint256 cost = _cost(sid);
         uint256 old = _live(sid).reserve;
@@ -511,8 +512,8 @@ contract ReviewSaleTest is Fixture {
         assertEq(_collectSales(), old);
     }
 
-    /// the ask rises again under a bidder after an owner change (here the mode flip), and a stranger can apply it
-    function test_FINDING_aStrangerCanRaiseTheReserveAfterAnOwnerAskChange() public {
+    /// S-7 documented in DEPLOY: the ask rises again under a bidder after an owner change (here the mode flip), and a stranger can apply it
+    function test_ACCEPTED_aStrangerCanRaiseTheReserveAfterAnOwnerAskChange() public {
         uint256 sid = _composeOnce().sid;
         _warp(30 hours);
         core.repriceStatement(sid);
@@ -683,9 +684,9 @@ contract ReviewSaleTest is Fixture {
         assertEq(core.settings().feeToBuybackBps, 1_234);
     }
 
-    /// the owner locks a controller that cannot price: reprice, compose and the relist of an unwound sale revert for
+    /// S-3 documented in DEPLOY (lock only a controller proven in use). the owner locks a controller that cannot price: reprice, compose and the relist of an unwound sale revert for
     /// good and the controller can never be replaced. redeem still works because it never reads the controller
-    function test_FINDING_lockControllerAcceptsAControllerThatCannotPrice() public {
+    function test_ACCEPTED_lockControllerAcceptsAControllerThatCannotPrice() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
         ScriptedController sc = new ScriptedController();
@@ -776,17 +777,26 @@ contract ReviewSaleTest is Fixture {
         }
     }
 
-    /// postflight reads owner() but never pendingOwner(): a handover offered to an unknown address at launch is
-    /// invisible to every row. the owner is a live storage slot now, so the pending slot is part of the trust surface
-    function test_FINDING_postflightDoesNotReadThePendingOwner() public {
+    /// true when a warning row of that name is in the report and it is currently raised (its condition is false)
+    function _warned(string memory name) internal view returns (bool) {
+        for (uint256 i; i < rows.length; ++i) {
+            if (rows[i].warn && !rows[i].ok && vm.contains(rows[i].name, name)) return true;
+        }
+        return false;
+    }
+
+    /// S-5 fixed: a handover offered to an address shows as a warning row, which never fails the run
+    function test_FIXED_postflightWarnsOnAPendingOwner() public {
         postflight(lc, address(core));
-        (string memory clean, uint256 n0) = _failed();
+        (, uint256 n0) = _failed();
+        assertFalse(_warned("no pending owner"), "clean at launch");
         vm.prank(owner);
         core.transferOwnership(bob);
         postflight(lc, address(core));
-        (string memory dirty, uint256 n1) = _failed();
-        assertEq(n1, n0, "no row reacts to a pending handover");
-        assertEq(keccak256(bytes(clean)), keccak256(bytes(dirty)));
+        (, uint256 n1) = _failed();
+        assertEq(n1, n0, "a warning never fails the run");
+        assertTrue(_warned("no pending owner"), "the offer shows as a warning");
+        assertEq(core.pendingOwner(), bob);
     }
 
     function test_OK_postflight_readsTheLiveOwnerAndTheLocks() public {
@@ -949,9 +959,9 @@ contract ReviewSaleTest is Fixture {
         assertEq(got, notional * s.reimburseCapBps / 10_000);
     }
 
-    /// the caller is repaid 110 percent of (gas used + a fixed 50_000), but a real call carries about 23_000 of
+    /// S-8 accepted. the caller is repaid 110 percent of (gas used + a fixed 50_000), but a real call carries about 23_000 of
     /// intrinsic cost: at a zero priority fee every exit nets a small profit. bounded by the cap and one per statement
-    function test_FINDING_exitRepayExceedsTheRealGasCost() public {
+    function test_ACCEPTED_exitRepayExceedsTheRealGasCost() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
@@ -1117,24 +1127,43 @@ contract ReviewSaleTest is Fixture {
         return ownerChangedFlag;
     }
 
-    /// DEPLOY.md hands the Core to a multisig with OWNER_CHANGED=1 and the token admin with updateAdmin. the flag relaxes
-    /// the Core owner row only: the coin admin row still compares with the launch owner, so a postflight after the
-    /// documented handover of both fails with no override
-    function test_FINDING_ownerChangedFlagDoesNotRelaxTheCoinAdminRow() public {
+    /// S-6 fixed (postflight half, the Resume half is in test/Resume.t.sol): DEPLOY.md hands the Core to a multisig with
+    /// OWNER_CHANGED=1 and the token admin with updateAdmin. the flag now relaxes the coin admin row too
+    function test_FIXED_ownerChangedFlagRelaxesTheCoinAdminRow() public {
         ownerChangedFlag = true;
         vm.prank(owner);
         core.transferOwnership(alice);
         vm.prank(alice);
         core.acceptOwnership();
-        postflight(lc, address(core));
-        (string memory clean,) = _failed();
-        assertFalse(vm.contains(clean, "coin: admin is owner"), "the core owner row is a warning");
         vm.prank(owner);
         coin.updateAdmin(alice);
         postflight(lc, address(core));
         (string memory failed, uint256 n) = _failed();
+        assertEq(n, 0, failed);
+        ownerChangedFlag = false;
+        postflight(lc, address(core));
+        (failed,) = _failed();
+        assertTrue(vm.contains(failed, "coin: admin is owner"), "without the flag the row still fails");
+    }
+
+    bool internal locksChangedFlag;
+
+    function _locksChanged() internal view override returns (bool) {
+        return locksChangedFlag;
+    }
+
+    /// S-10 fixed: LOCKS_CHANGED=1 turns the launch state row into a report line
+    function test_FIXED_locksChangedFlagTurnsTheLockRowIntoAReportLine() public {
+        vm.prank(owner);
+        core.lockTargets();
+        postflight(lc, address(core));
+        (string memory failed, uint256 n) = _failed();
         assertGt(n, 0);
-        assertTrue(vm.contains(failed, "coin: admin is owner"), failed);
+        assertTrue(vm.contains(failed, "core: no locks, no exit module"), failed);
+        locksChangedFlag = true;
+        postflight(lc, address(core));
+        (failed, n) = _failed();
+        assertEq(n, 0, failed);
     }
 
     function test_OK_priceOf_refusesWhatIsNotForSale() public {
@@ -1150,15 +1179,59 @@ contract ReviewSaleTest is Fixture {
         ctl.priceOf(sid);
     }
 
-    /// with nothing pending, pendingOwner is the zero address and a call from the zero address passes the check. no key
-    /// exists for that address on mainnet, so this is unreachable there, but a guard is one comparison
-    function test_FINDING_acceptOwnershipFromZeroWhenNothingPending() public {
+    /// S-9 fixed: with nothing pending, the zero address is the pending owner, and a call from it no longer passes
+    function test_FIXED_acceptOwnershipRejectsTheZeroCaller() public {
         assertEq(core.pendingOwner(), address(0));
         vm.prank(address(0));
+        vm.expectRevert(Core.OnlyPendingOwner.selector);
         core.acceptOwnership();
-        assertEq(core.owner(), address(0), "the role is gone");
+        assertEq(core.owner(), owner, "the owner is untouched");
+    }
+
+    /// S-4 fixed: a statement that came back from an unwound sale is relisted at the hard floor when the controller
+    /// cannot price, so it can be redeemed whatever the controller does. compose and reprice keep reverting
+    function test_FIXED_relistFallsBackToTheHardFloorWhenTheControllerFails() public {
+        _enterPhase2();
+        uint256 sid = _composeOnce().sid;
+        uint256 aid = _live(sid).auctionId;
+        _bid(alice, sid, _live(sid).reserve);
+        vm.mockCallRevert(
+            address(STATEMENTS),
+            abi.encodeWithSelector(IStatements.transferFrom.selector, address(house), alice, sid),
+            "cannot receive"
+        );
+        _endAuction(sid);
+        _warp(30 days + 1);
+        house.unwindStuckLot{gas: END_GAS}(aid);
+        vm.clearMockedCalls();
+        assertEq(STATEMENTS.ownerOf(sid), address(core), "returned to the core by the unwind");
+        ScriptedController sc = new ScriptedController();
+        sc.setRevertPrice(true);
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyOwner.selector);
-        core.setController(address(ctl));
+        core.setController(address(sc));
+        core.syncStatement(sid);
+        assertEq(_live(sid).reserve, _floorOf(sid), "listed at the hard floor");
+        vm.expectRevert(Core.BadPrice.selector);
+        core.repriceStatement(sid);
+        _warp(105 hours);
+        core.exitStatement(sid);
+        assertEq(STATEMENTS.ownerOf(sid), address(mod), "redeemed with a controller that cannot price");
+    }
+
+    function test_OK_composeStillRevertsWhenTheControllerCannotPrice() public {
+        _fillEthPile(80 - core.pileSize(Lane.Eth));
+        ScriptedController sc = new ScriptedController();
+        uint256[] memory page = core.pilePage(Lane.Eth, 0, 80);
+        uint256[80] memory ids;
+        for (uint256 i; i < 80; ++i) {
+            ids[i] = page[i];
+        }
+        sc.setPage(Lane.Eth, true, ids, 0);
+        sc.setRevertPrice(true);
+        vm.prank(owner);
+        core.setController(address(sc));
+        vm.fee(composeBasefee);
+        vm.expectRevert(Core.BadPrice.selector);
+        core.compose();
     }
 }

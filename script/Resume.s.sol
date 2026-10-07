@@ -31,8 +31,10 @@ abstract contract SystemResumer is SystemDeployer {
         if (coin.code.length == 0) return Stage.CoreOnly;
         bytes32 id = keccak256(abi.encode(poolKeyOf(coin, c.stack)));
         if (!IArtCoinsSkimHook(c.stack.hook).poolExtensionLocked(id)) return Stage.Launched;
-        if (IArtCoinsToken(coin).admin() != c.owner) return Stage.Locked;
-        return Stage.Done;
+        address admin = IArtCoinsToken(coin).admin();
+        // OWNER_CHANGED=1: an admin that moved on to the live owner of the core is a handover that ran, so it is done
+        if (admin == c.owner || (_ownerChanged() && admin == Core(payable(core)).owner())) return Stage.Done;
+        return Stage.Locked;
     }
 
     /// @dev the core must be the one this config would have built, and its coin the one the config predicts

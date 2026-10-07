@@ -40,6 +40,7 @@ interface ICoreViews {
 /// what the controller needs of the core beyond the views: the live owner and the one door that sells a statement
 interface ICoreSale {
     function owner() external view returns (address);
+    function settings() external view returns (Settings memory);
     function sellTo(uint256 sid, address buyer) external payable;
 }
 

@@ -29,6 +29,13 @@ contract ResumeTest is Test, SystemResumer {
         return changedFlag;
     }
 
+    /// @dev OWNER_CHANGED of the operator, a flag here for the same reason
+    bool internal ownerFlag;
+
+    function _ownerChanged() internal view override returns (bool) {
+        return ownerFlag;
+    }
+
     function _scriptContext() internal view override returns (bool) {
         return scriptMode;
     }
@@ -179,6 +186,28 @@ contract ResumeTest is Test, SystemResumer {
         IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, true);
         this.resume(deployer, base, core);
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
+    }
+
+    /// S-6: after the owner role and the token admin both moved on, OWNER_CHANGED=1 counts the admin as handed over
+    function test_resumeOwnerChangedTreatsAHandedOverAdminAsDone() public {
+        (address core,) = _steps(5);
+        _assertDone(core, Stage.Locked);
+        address next = makeAddr("resume.next");
+        address coin = Core(payable(core)).COIN();
+        vm.startPrank(owner);
+        Core(payable(core)).transferOwnership(next);
+        IArtCoinsToken(coin).updateAdmin(next);
+        vm.stopPrank();
+        vm.prank(next);
+        Core(payable(core)).acceptOwnership();
+        assertEq(uint256(detectStage(base, core)), uint256(Stage.Locked), "no flag, the admin looks unfinished");
+        ownerFlag = true;
+        assertEq(uint256(detectStage(base, core)), uint256(Stage.Done), "flag set, the handover is done");
+        Stage from = this.resume(deployer, base, core);
+        assertEq(uint256(from), uint256(Stage.Done), "nothing is sent");
+        postflight(base, core);
+        (string memory list,) = _failed();
+        assertEq(list, "", "postflight reports the handover as warnings only");
     }
 
     function test_resumeHandoverNeedsNoFactory() public {

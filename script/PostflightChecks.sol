@@ -126,12 +126,12 @@ abstract contract PostflightChecks is SystemBuilder, Report {
                 && !core.allowedTarget(address(core.HOUSE())) && !core.allowedTarget(c.stack.auctionFactory),
             "seaport and CreditStrategy only"
         );
-        _check(
-            "core: no locks, no exit module",
-            !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
-                && core.exitModule() == address(0),
-            "launch state"
-        );
+        // after launch the owner may lock or set the exit module: LOCKS_CHANGED=1 turns the row into a report line
+        bool launchState = !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
+            && core.exitModule() == address(0);
+        if (_locksChanged()) _warn("warn: no locks, no exit module", launchState, "LOCKS_CHANGED=1, the owner changed them");
+        else _check("core: no locks, no exit module", launchState, "launch state");
+        _warn("warn: no pending owner", core.pendingOwner() == address(0), "an owner handover is offered");
         _postSale(c, ctl);
         _check(
             "core: pots covered by balance",
@@ -145,6 +145,12 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             core.ethPot() != 0 || core.ethRate() == c.rateStart,
             string.concat("ethRate ", vm.toString(core.ethRate()), " rateStart ", vm.toString(c.rateStart))
         );
+    }
+
+    /// @notice the operator says the owner locked a setter or set the exit module since launch (LOCKS_CHANGED=1). a test
+    /// overrides it
+    function _locksChanged() internal view virtual returns (bool) {
+        return vm.envOr("LOCKS_CHANGED", uint256(0)) == 1;
     }
 
     /// @notice the operator says the owner role was handed over since launch (OWNER_CHANGED=1). a test overrides it
@@ -306,7 +312,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _eq("coin: name", coin.name(), c.name);
         _eq("coin: symbol", coin.symbol(), c.symbol);
         _eq("coin: supply", coin.totalSupply(), c.supply);
-        _eq("coin: admin is owner", coin.admin(), c.owner);
+        // OWNER_CHANGED=1: the token admin was handed over with the owner role, so the row is a warning
+        if (_ownerChanged()) _warn("warn: coin admin is owner", coin.admin() == c.owner, "OWNER_CHANGED=1, a handover ran");
+        else _eq("coin: admin is owner", coin.admin(), c.owner);
         _eq("coin: pool id", coin.canonicalPoolId(), id);
         _eq("coin: held by core", coin.balanceOf(address(core)), 0);
         if (vm.exists(c.tokenCodeFile)) {

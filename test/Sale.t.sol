@@ -24,6 +24,11 @@ abstract contract SaleBase is Fixture {
         (,,, at) = core.statementInfo(sid);
     }
 
+    /// the controller curve alone, below the hard floor too. `priceOf` is never below the hard floor
+    function _raw(uint256 sid) internal view returns (uint256) {
+        return ctl.statementPrice(sid, _cost(sid), _listedAt(sid));
+    }
+
     /// moves the clock to `secs` after the statement was listed
     function _age(uint256 sid, uint256 secs) internal {
         vm.warp(_listedAt(sid) + secs);
@@ -145,19 +150,22 @@ contract SaleCurveTest is SaleBase {
         uint256[6] memory bps = [uint256(20_000), 20_000, 19_750, 17_500, 5_250, 5_000];
         for (uint256 i; i < t.length; ++i) {
             _age(sid, t[i]);
-            assertEq(ctl.priceOf(sid), cost * bps[i] / 10_000, "ask");
+            assertEq(_raw(sid), cost * bps[i] / 10_000, "ask");
+            assertEq(ctl.priceOf(sid), cost * (bps[i] > 7_500 ? bps[i] : 7_500) / 10_000, "quote floored");
         }
         _age(sid, 4000 * H);
-        assertEq(ctl.priceOf(sid), cost * 5_000 / 10_000, "held at the controller floor");
+        assertEq(_raw(sid), cost * 5_000 / 10_000, "held at the controller floor");
+        assertEq(ctl.priceOf(sid), cost * 7_500 / 10_000, "the quote is the hard floor");
     }
 
-    /// the controller's floor below the core's hard floor: the ask goes below, the reserve does not
+    /// the controller's floor below the core's hard floor: the curve goes below, the quote and the reserve do not
     function test_curve_controllerFloorBelowTheHardFloorIsLiftedOnTheReserve() public {
         uint256 sid = _composeOnce().sid;
         uint256 cost = _cost(sid);
         _saleSettings(11_000, 100, 3 hours, 5_000);
         _age(sid, 200 * H);
-        assertEq(ctl.priceOf(sid), cost * 5_000 / 10_000, "the ask is the controller floor");
+        assertEq(_raw(sid), cost * 5_000 / 10_000, "the curve is at the controller floor");
+        assertEq(ctl.priceOf(sid), cost * 7_500 / 10_000, "the quote is the hard floor");
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost * 7_500 / 10_000, "the reserve is the hard floor");
     }
@@ -168,23 +176,24 @@ contract SaleCurveTest is SaleBase {
         uint256 cost = _cost(sid);
         _saleSettings(11_000, 0, 3 hours, 7_500);
         _age(sid, 1000 * H);
-        assertEq(ctl.priceOf(sid), cost * 11_000 / 10_000, "a zero step never decays");
+        assertEq(_raw(sid), cost * 11_000 / 10_000, "a zero step never decays");
         _saleSettings(11_000, 4_000, 1 minutes, 1_000);
         _age(sid, 59);
-        assertEq(ctl.priceOf(sid), cost * 11_000 / 10_000);
+        assertEq(_raw(sid), cost * 11_000 / 10_000);
         _age(sid, 60);
-        assertEq(ctl.priceOf(sid), cost * 7_000 / 10_000, "one step of 4000 bps");
+        assertEq(_raw(sid), cost * 7_000 / 10_000, "one step of 4000 bps");
         _age(sid, 120);
-        assertEq(ctl.priceOf(sid), cost * 3_000 / 10_000, "two steps");
+        assertEq(_raw(sid), cost * 3_000 / 10_000, "two steps");
         _age(sid, 180);
-        assertEq(ctl.priceOf(sid), cost * 1_000 / 10_000, "three steps would go below zero: the floor holds");
+        assertEq(_raw(sid), cost * 1_000 / 10_000, "three steps would go below zero: the floor holds");
+        assertEq(ctl.priceOf(sid), cost * 7_500 / 10_000, "the quote never goes under the hard floor");
         _age(sid, 10_000 days);
-        assertEq(ctl.priceOf(sid), cost * 1_000 / 10_000, "a huge age does not overflow");
+        assertEq(_raw(sid), cost * 1_000 / 10_000, "a huge age does not overflow");
         _saleSettings(11_000, 4_000, 30 days, 1_000);
         _age(sid, 30 days - 1);
-        assertEq(ctl.priceOf(sid), cost * 11_000 / 10_000);
+        assertEq(_raw(sid), cost * 11_000 / 10_000);
         _age(sid, 30 days);
-        assertEq(ctl.priceOf(sid), cost * 7_000 / 10_000);
+        assertEq(_raw(sid), cost * 7_000 / 10_000);
     }
 
     /// start equal to the floor is a flat price. start below the floor cannot be set, and a floor above the start
@@ -265,7 +274,8 @@ contract SaleFloorTest is SaleBase {
         uint256 cost = _cost(sid);
         assertEq(_live(sid).reserve, cost * 12_000 / 10_000, "the hard floor lifts the 110 percent ask");
         assertEq(_live(sid).reserve, _reserveFor(cost));
-        assertEq(ctl.priceOf(sid), cost * 11_000 / 10_000, "the controller still asks less");
+        assertEq(_raw(sid), cost * 11_000 / 10_000, "the controller still asks less");
+        assertEq(ctl.priceOf(sid), cost * 12_000 / 10_000, "the quote is lifted to the hard floor");
     }
 
     function test_floor_beatsALowerControllerPriceAtListingAndReprice() public {
@@ -648,21 +658,14 @@ contract SaleBuyOnlyTest is SaleBase {
         (uint256 sid, uint256 price) = _buyAt(200 * H);
         uint256 cost = _cost(sid);
         assertEq(price, cost * 7_500 / 10_000, "the ask at its floor equals the hard floor: allowed");
-        // the controller floor falls below the hard floor: its ask now is refused by the core
+        // the controller floor falls below the hard floor: the quote and the payment are lifted to the hard floor
+        // (review S-1, fixed), so the buy still clears at exactly the hard floor
         _saleSettings(11_000, 100, 3 hours, 5_000);
-        uint256 low = ctl.priceOf(sid);
-        assertEq(low, cost * 5_000 / 10_000);
-        vm.deal(buyer, 10 ether);
-        vm.prank(buyer);
-        vm.expectRevert(Core.BelowFloor.selector);
-        ctl.buy{value: low}(sid);
-        // nothing moved
-        assertEq(STATEMENTS.ownerOf(sid), address(house));
-        assertTrue(_held(sid));
-        // the owner restores the controller floor: the ask is the hard floor and it clears
-        _saleSettings(11_000, 100, 3 hours, 7_500);
+        assertEq(ctl.floorBps(), 5_000);
+        assertEq(ctl.priceOf(sid), cost * 7_500 / 10_000, "the quote is the hard floor");
         _pay(buyer, sid, cost * 7_500 / 10_000);
         assertEq(STATEMENTS.ownerOf(sid), buyer);
+        assertFalse(_held(sid));
     }
 
     function test_buy_revertsInAuctionMode() public {
@@ -1095,9 +1098,9 @@ contract SaleRelistTest is SaleBase {
         assertEq(STATEMENTS.ownerOf(sid), address(mod));
     }
 
-    /// the relist needs a controller that can price: a broken one makes the sync revert and the statement stays
-    /// returned, not lost
-    function test_relist_aBrokenControllerBlocksTheSyncUntilItIsRepaired() public {
+    /// the relist of a returned statement never needs the controller (review S-4, fixed): a broken one makes the sync
+    /// list at the hard floor, and a repaired controller prices it again at the next reprice
+    function test_relist_aBrokenControllerListsAtTheHardFloor() public {
         (uint256 sid, uint256 aid,) = _failedDelivery();
         _warp(30 days + 1);
         house.unwindStuckLot{gas: END_GAS}(aid);
@@ -1105,13 +1108,17 @@ contract SaleRelistTest is SaleBase {
         ScriptedController sc = new ScriptedController();
         sc.setRevertPrice(true);
         _setController(address(sc));
-        vm.expectRevert(Core.BadPrice.selector);
-        core.syncStatement(sid);
         assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
         assertEq(STATEMENTS.ownerOf(sid), address(core));
-        sc.setRevertPrice(false);
         core.syncStatement(sid);
         assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(_live(sid).reserve, _cost(sid) * core.settings().saleFloorBps / 10_000, "listed at the hard floor");
+        vm.expectRevert(Core.BadPrice.selector);
+        core.repriceStatement(sid);
+        sc.setRevertPrice(false);
+        sc.setPriceBps(20_000);
+        core.repriceStatement(sid);
+        assertEq(_live(sid).reserve, _cost(sid) * 2, "a repaired controller prices it again");
     }
 
     /// the overprint relist: the base keeps its id, sums the cost, restarts the clock and lists at the start price of

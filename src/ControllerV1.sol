@@ -100,11 +100,14 @@ contract ControllerV1 is IController {
         return cost * _bps(buyOnly ? 0 : block.timestamp - listedAt) / BPS;
     }
 
-    /// the asking price of statement `sid` now, in either mode, read from the core
+    /// the asking price of statement `sid` now, in either mode, read from the core. never below the core hard floor
+    /// `cost * saleFloorBps / 10_000`, so the quote is always a price `sellTo` takes
     function priceOf(uint256 sid) public view returns (uint256) {
         (bool held, Lane lane, uint256 cost, uint64 listedAt) = CORE.statementInfo(sid);
         if (!held || lane != Lane.Eth || listedAt == 0) revert NotForSale();
-        return cost * _bps(block.timestamp - listedAt) / BPS;
+        uint256 ask = cost * _bps(block.timestamp - listedAt) / BPS;
+        uint256 floor = cost * ICoreSale(address(CORE)).settings().saleFloorBps / BPS;
+        return ask > floor ? ask : floor;
     }
 
     /// buy only mode: pays the decayed asking price, gets the statement at once. the excess of `msg.value` is refunded
