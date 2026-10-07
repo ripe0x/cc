@@ -1406,7 +1406,14 @@ abstract contract HandlerBase is Test {
     function _composeFailed(uint8 a, CPre memory p, bytes memory why) internal {
         _failed(p.bal, p.pot, p.rate, "compose");
         // a hostile controller may fail to price the listing, and then the whole compose reverts
-        if (p.valid && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) _unexpected(a, why);
+        // a hostile controller may also burn the core's 500_000 gas read of its page. the fuzz controller tries its
+        // state changing attacks only inside the core's frame (each one halting a static frame burns the 300_000 gas
+        // it was given), so the handler's own uncapped looking pre check cannot see that cost and the core answers
+        // NotReady for a page the pre check saw as ready
+        bool hostileNotReady = bytes4(why) == Core.NotReady.selector && _mayNotPrice();
+        if (p.valid && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice()) && !hostileNotReady) {
+            _unexpected(a, why);
+        }
     }
 
     function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
