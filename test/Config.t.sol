@@ -136,7 +136,9 @@ contract ConfigTest is Fixture {
         assertEq(_failedNames(), "", "creator = factory owner passes");
         c.owner = c.stack.hook;
         preflight(c, d2);
-        assertEq(_failedNames(), "rule: owner and creator are not dead or stack addresses", "a stack address still fails");
+        assertEq(
+            _failedNames(), "rule: owner and creator are not dead or stack addresses", "a stack address still fails"
+        );
     }
 
     function _warnClean(string memory name) internal view returns (bool) {
@@ -185,14 +187,17 @@ contract ConfigTest is Fixture {
         _print("postflight");
     }
 
-    /// the verification arguments read back from the deployed core are the arguments it was built with
     function test_supplyConstantMatchesCore() public view {
         assertEq(CORE_SUPPLY, core.SUPPLY());
     }
 
+    /// the verification arguments built from the config and the first controller are the arguments the core was built with
     function test_coreConstructorArgsReadBack() public view {
+        (address first, bool found) = firstController(address(core), deployer);
+        assertTrue(found);
+        assertEq(first, address(ctl), "the first controller is found from the deployer nonce");
         assertEq(
-            coreConstructorArgs(core, owner),
+            coreConstructorArgs(core, lc, first),
             abi.encode(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings),
             "etherscan constructor args"
         );

@@ -60,40 +60,79 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _postUnreadable(c);
     }
 
-    /// @notice the constructor arguments of a deployed core, read back from its immutables, in the encoding etherscan
-    /// wants for verification: `(owner, coin, controller, stack, rateStart, settings)`. the settings are the launch values, the owner may
-    /// have changed them since, so verify against the config's `settings` block. `firstOwner` is the launch config owner:
-    /// the live owner may have changed since by a handover
-    function coreConstructorArgs(Core core, address firstOwner) internal view returns (bytes memory) {
-        Stack memory s = Stack({
-            poolManager: address(core.MANAGER()),
-            hook: core.HOOK(),
-            tickSpacing: core.TICK_SPACING(),
-            poolFee: core.POOL_FEE(),
-            factory: core.FACTORY(),
-            locker: core.LOCKER(),
-            escrow: core.ESCROW(),
-            auctionFactory: core.AUCTION_FACTORY()
-        });
-        return abi.encode(firstOwner, core.COIN(), core.controller(), s, core.RATE_START(), core.settings());
+    /// @dev nonces to scan down from the deployer nonce when looking for the creation of the Core
+    uint256 internal constant NONCE_SCAN = 4096;
+
+    /// @notice the operator names the first controller by hand (FIRST_CONTROLLER) when the deployer is unknown. a test
+    /// overrides it
+    function _firstControllerEnv() internal view virtual returns (address) {
+        return vm.envOr("FIRST_CONTROLLER", address(0));
+    }
+
+    /// @notice the controller the Core was created with, never read from the Core: the deploy creates the controller at
+    /// the deployer nonce n and the Core at n + 1 (`SystemDeployer.deploySystem`), so it is the create address one nonce
+    /// before the one that gives `core_`. scans down from the deployer nonce. `found` is false when the deployer is
+    /// unknown and FIRST_CONTROLLER is not set, or the scan finds nothing
+    function firstController(address core_, address deployer) internal view returns (address ctl, bool found) {
+        address named = _firstControllerEnv();
+        if (named != address(0)) return (named, true);
+        if (deployer == address(0)) return (address(0), false);
+        uint256 top = vm.getNonce(deployer);
+        uint256 stop = top > NONCE_SCAN ? top - NONCE_SCAN : 1;
+        for (uint256 n = top; n >= stop && n > 0; --n) {
+            if (vm.computeCreateAddress(deployer, n) == core_) return (vm.computeCreateAddress(deployer, n - 1), true);
+        }
+        return (address(0), false);
+    }
+
+    /// @notice the constructor arguments of the Core as its creation transaction carried them, in the encoding etherscan
+    /// wants for verification: `(owner, coin, controller, stack, rateStart, settings)`. built only from the signed launch
+    /// config and the first controller: the original owner `c.owner`, `c.stack`, `c.rateStart` and `c.settings`. the coin
+    /// is the Core immutable `COIN`, which cannot change. nothing here reads the live `owner`, `controller` or `settings`,
+    /// all of which the owner can change after launch (audit finding A02)
+    function coreConstructorArgs(Core core, LaunchConfig memory c, address firstController_)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return abi.encode(c.owner, core.COIN(), firstController_, c.stack, c.rateStart, c.settings);
     }
 
     /// @notice prints what etherscan verification needs: the library address and the exact `--libraries` flag, the
-    /// constructor arguments of the Core (read back from the chain) and of the controller. docs/DEPLOY.md section 3
-    function printVerifyInputs(Core core, LaunchConfig memory c) internal view {
+    /// constructor arguments of the Core (from the config, see `coreConstructorArgs`) and of the controller, then the
+    /// live controller and settings on separate lines labelled as live. docs/DEPLOY.md section 3. `deployer` is the
+    /// address that sent the deploy, it finds the first controller
+    function printVerifyInputs(Core core, LaunchConfig memory c, address deployer) internal view {
         address lib = findLibrary(address(core).code);
         console.log("verify: library CoreLib at", lib);
         console.log(string.concat("verify: flag  --libraries src/lib/CoreLib.sol:CoreLib:", vm.toString(lib)));
-        console.log("verify: core constructor args");
-        console.logBytes(coreConstructorArgs(core, c.owner));
-        console.log("verify: controller constructor args");
-        console.logBytes(abi.encode(address(core), c.sale));
+        (address first, bool found) = firstController(address(core), deployer);
+        if (found) {
+            console.log("verify: first controller (creation input)", first);
+            console.log("verify: core constructor args");
+            console.logBytes(coreConstructorArgs(core, c, first));
+            console.log("verify: controller constructor args");
+            console.logBytes(abi.encode(address(core), c.sale));
+        } else {
+            console.log(
+                "verify: core constructor args NOT printed: set DEPLOYER (the deploy signer) or FIRST_CONTROLLER"
+            );
+        }
+        // the live values are not constructor inputs: the owner can change them at any time
+        console.log("verify: LIVE controller now, NOT a constructor input", core.controller());
+        console.log("verify: LIVE settings now, NOT a constructor input, abi encoded");
+        console.logBytes(abi.encode(core.settings()));
+        console.log("verify: LIVE owner now, NOT a constructor input", core.owner());
+        if (found && core.controller() != first) console.log("verify: note the live controller is not the first one");
     }
 
     function _postCore(LaunchConfig memory c, Core core) private {
         // after a handover the live owner is the new one: OWNER_CHANGED=1 turns the row into a warning
-        if (_ownerChanged()) _warn("warn: owner equals the config", core.owner() == c.owner, "OWNER_CHANGED=1, a handover ran");
-        else _eq("core: owner", core.owner(), c.owner);
+        if (_ownerChanged()) {
+            _warn("warn: owner equals the config", core.owner() == c.owner, "OWNER_CHANGED=1, a handover ran");
+        } else {
+            _eq("core: owner", core.owner(), c.owner);
+        }
         _eq("core: SUPPLY constant equals the config supply", core.SUPPLY(), c.supply);
         _eq("core: RATE_START", core.RATE_START(), c.rateStart);
         _eq("core: auction factory", core.AUCTION_FACTORY(), c.stack.auctionFactory);
@@ -129,8 +168,11 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         // after launch the owner may lock or set the exit module: LOCKS_CHANGED=1 turns the row into a report line
         bool launchState = !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
             && core.exitModule() == address(0);
-        if (_locksChanged()) _warn("warn: no locks, no exit module", launchState, "LOCKS_CHANGED=1, the owner changed them");
-        else _check("core: no locks, no exit module", launchState, "launch state");
+        if (_locksChanged()) {
+            _warn("warn: no locks, no exit module", launchState, "LOCKS_CHANGED=1, the owner changed them");
+        } else {
+            _check("core: no locks, no exit module", launchState, "launch state");
+        }
         _warn("warn: no pending owner", core.pendingOwner() == address(0), "an owner handover is offered");
         _postSale(c, ctl);
         _check(
@@ -166,7 +208,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         bool same = k.buyOnly() == c.sale.buyOnly && k.startBps() == c.sale.startBps && k.stepBps() == c.sale.stepBps
             && k.stepEvery() == c.sale.stepEvery && k.floorBps() == c.sale.floorBps;
         if (_settingsChanged()) {
-            _warn("warn: sale settings equal the config", same, "SETTINGS_CHANGED=1, the owner changed them since launch");
+            _warn(
+                "warn: sale settings equal the config", same, "SETTINGS_CHANGED=1, the owner changed them since launch"
+            );
         } else {
             _check("controller: sale settings equal the config", same, "buyOnly startBps stepBps stepEvery floorBps");
         }
@@ -313,8 +357,11 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _eq("coin: symbol", coin.symbol(), c.symbol);
         _eq("coin: supply", coin.totalSupply(), c.supply);
         // OWNER_CHANGED=1: the token admin was handed over with the owner role, so the row is a warning
-        if (_ownerChanged()) _warn("warn: coin admin is owner", coin.admin() == c.owner, "OWNER_CHANGED=1, a handover ran");
-        else _eq("coin: admin is owner", coin.admin(), c.owner);
+        if (_ownerChanged()) {
+            _warn("warn: coin admin is owner", coin.admin() == c.owner, "OWNER_CHANGED=1, a handover ran");
+        } else {
+            _eq("coin: admin is owner", coin.admin(), c.owner);
+        }
         _eq("coin: pool id", coin.canonicalPoolId(), id);
         _eq("coin: held by core", coin.balanceOf(address(core)), 0);
         if (vm.exists(c.tokenCodeFile)) {
