@@ -15,7 +15,7 @@ naming rule: only `exitModule` and `exitToken`. never name or describe them.
 | 5 | the opening limit is set on launch day at about 75% of the market price of a credit |
 | 6 | the split of sale proceeds between the pot and the buyback is an adjustable setting |
 | 7 | REVOKED by section 9 (decision 15). there is no timelock: the owner sets the controller, the exit module and the allowed targets at once, with three one way locks (9.6) and a two step handover (9.7) |
-| 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key |
+| 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key | amended by section 10.2: the fee router's owner can redirect future fees until the router is locked.
 
 ## 2. settings
 
@@ -173,3 +173,41 @@ these replace the old `frozen` flag and the Freeze action. the setters revert wi
 ### 9.7 transferable owner (owner confirmed)
 
 `OWNER` is no longer immutable. two step handover: `transferOwnership(address)` by the owner sets a pending owner (zero clears it), `acceptOwnership()` by the pending owner completes it, events on both. no renounce. every `onlyOwner` check and the controller's `core.owner()` read use the live owner. scripts and postflight read `owner()`; the launch config owner is the first owner.
+
+## 10. port to the artcoins v2 stack (owner confirmed 2026-10-07)
+
+the coin launches on the artcoins v2 factory, not the v1 stack the launch package was built on. reference: the public repo ripe0x/artcoins, branch v2, commit 87a7522 (a clone is at /home/claude/nmcl/v2). the analysis is docs/V2-PORT.md: it is the working reference for every detail below, this section is the binding decision list. where V2-PORT.md and this section differ, this section wins. v2 is not on mainnet yet and its audit is pending, so every v2 address stays a config input and the final run waits for the live stack.
+
+### 10.1 decisions
+
+| # | decision |
+|---|---|
+| 18 | the coin is launched `restricted` (v2 decision D73). there is no transfer tax any more: the tax config, the 44 venues and the exemption are deleted from the launch package. the Core, the fee router and the fee swapper are NOT put on the coin's allowlist (the hook grants the allowance each canonical swap needs, burns always pass) |
+| 19 | a `FeeRouter` contract is the bounty recipient of the pool. the Core books eth as fees when it arrives from the router, no longer from the hook |
+| 20 | the lp fee income of the project side goes through a v2 `FeeAutoSwapperV2` whose end recipient is the router, so it reaches the engine as eth |
+| 21 | launch values follow the v2 factory defaults: engine share `bountyBps` 9_000 (the protocol keeps 1_000), `lpFee` 3_000 pips, protocol locker slot at the factory default. skim stays 10 points of volume, anti sniper stays 90 points falling to 10 over 30 minutes if the v2 mev module allows it (else the nearest allowed values, reported) |
+| 22 | the launch is signed by the v2 factory owner key (`deployTokenAsOwner`), which is the engine owner. the fresh deployer path and the factory admin enable and revoke steps are removed |
+
+### 10.2 FeeRouter (src/FeeRouter.sol)
+
+* `receive() external payable {}` and nothing else in it: no storage write, no cold read, no call. the hook pushes with the 2,300 gas stipend.
+* `flush()`, permissionless, guarded against reentry: sends the whole balance to `engine` with a plain call and all gas, reverts if the call fails or while `engine` is unset. eth waits safely in the router until then.
+* `engine`, set by the owner with `setEngine(address)` (must have code), any number of times until `lock()`, a one way lock with an event. events on every change.
+* its own two step owner (`transferOwnership`, `acceptOwnership`), first owner from the constructor. it does not read the Core's owner: a later engine must be able to take over.
+* no other function. it never holds coin on purpose and has no token path.
+* trust note for the docs, in this strength: the router owner can point every future fee at any address with one call until the router is locked. it never touches what an engine already holds. this is the one owner switch in the system that directs value to an address the owner picks, the owner accepted it to keep a later engine migration possible. FLOW decision 8 is amended to say so.
+
+### 10.3 Core change (the only one)
+
+* `Stack` gains `feeSource`. `receive()` books eth as fees (checkpoint, `feeToBuybackBps` split, resync) when `msg.sender == FEE_SOURCE` and no measurement is in flight. eth from any other sender, the hook and the escrow included, is accepted and left for `skim()` as today.
+* the forbidden target list takes the v2 addresses of V2-PORT.md section 7 plus the router.
+* eth the v2 escrow holds for the Core (partial fill refunds of the Core's own buyback) is claimed by anyone with the escrow's claim and then booked by `skim()` to the pot. document it, no code.
+* size: the Core must keep at least 60 bytes of headroom. if the change does not fit, move code to `CoreLib`, never drop a check.
+
+### 10.4 launch package
+
+rewritten for `IArtCoinsFactoryV2`: `DeploymentConfigV2`, the factory's own `predictToken` (the token creation hex and the hand prediction are deleted), `deployTokenAsOwner`. deploy order: library, controller, router (engine unset), Core (with `feeSource` the router and the predicted coin), the fee swapper if the v2 flow needs it deployed per coin, the launch, `router.setEngine(core)`, the swapper's post launch setup, postflight. preflight and postflight check every v2 field they can read back (restriction on, bounty recipient the router, bounty bps, lp fee, mev values, locker slots, protocol recipient reported, router engine and owner, nothing on the coin allowlist beyond the factory's seeds). the config hash sign off stays. owner steps on the v2 factory or escrow that the launch needs (for example registering the swapper as an escrow depositor) are listed in docs/DEPLOY.md as explicit owner commands.
+
+### 10.5 tests
+
+real contracts on the fork as before. the v2 stack is not on mainnet, so the fixture deploys it onto the pinned fork from prebuilt v2 artifacts (built from the v2 repo at the reference commit with the v2 repo's own compiler settings, vendored under test/v2-artifacts/ with the commit hash and the build command recorded in a README there), following the v2 repo's own deploy library. no hand written copy of a v2 contract and no mock of one. when v2 is live the fixture switches to the mainnet addresses by config.
