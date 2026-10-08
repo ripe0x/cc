@@ -13,8 +13,10 @@ contract FeeRouter {
     uint256 internal constant MAX_PAYEE_PPM = 200_000;
     uint256 internal constant MAX_TIP_PPM = 20_000;
     uint256 internal constant MAX_TIP_CAP = 0.05 ether;
-    /// gas for the tip and a payee send. enough for a wallet or a small receiver, too little to do harm
+    /// gas for the tip send. enough for a wallet or a small receiver, too little to do harm
     uint256 internal constant SEND_GAS = 50_000;
+    /// gas for a payee send (docs/FLOW.md 10.7): a payee may be a splitter contract
+    uint256 internal constant PAYEE_GAS = 100_000;
 
     address public owner;
     address public pendingOwner;
@@ -123,7 +125,7 @@ contract FeeRouter {
         }
     }
 
-    /// a payee that cannot take its share in `SEND_GAS` is credited, never blocks the flush
+    /// a payee that cannot take its share in `PAYEE_GAS` is credited, never blocks the flush
     function _payPayees(uint256 base) private returns (uint256 paid) {
         uint256 n = _payees.length;
         for (uint256 i; i < n; ++i) {
@@ -131,7 +133,7 @@ contract FeeRouter {
             uint256 share = base * _ppm[i] / PPM;
             if (share == 0) continue;
             paid += share;
-            (bool ok,) = p.call{gas: SEND_GAS, value: share}("");
+            (bool ok,) = p.call{gas: PAYEE_GAS, value: share}("");
             if (ok) {
                 emit PayeePaid(p, share);
             } else {

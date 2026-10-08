@@ -13,6 +13,19 @@ import {
 } from "./attackers/FlushEngines.sol";
 
 /// unit tests of the fee router (docs/FLOW.md 10.2 and 10.6). no fork: the router touches nothing outside itself
+/// a payee that does real work on receipt, like a splitter that writes three fresh slots (about 66k gas)
+contract WorkingPayee {
+    uint256 public a;
+    uint256 public b;
+    uint256 public c;
+
+    receive() external payable {
+        a = 1;
+        b = 2;
+        c = 3;
+    }
+}
+
 contract FeeRouterTest is Test {
     IFeeRouter internal r;
     address internal ownerA = makeAddr("router.owner");
@@ -331,7 +344,7 @@ contract FeeRouterTest is Test {
         r.claim(address(gp));
     }
 
-    /// a payee that burns its gas is capped at 50k and credited, the flush still succeeds
+    /// a payee that burns its gas is capped at 100k and credited, the flush still succeeds
     function test_aGasBurningPayeeIsCappedAndCredited() public {
         _noTip();
         GasBurnerEngine burner = new GasBurnerEngine();
@@ -351,6 +364,26 @@ contract FeeRouterTest is Test {
         assertLt(g - gasleft(), 300_000, "the burner did not drain the flush");
         assertEq(r.owed(address(burner)), 1 ether);
         assertEq(eng.received(), 1 wei + 4 ether);
+    }
+
+    /// FLOW 10.7: a payee that is a splitter contract doing about 66k gas of work is paid directly, not credited
+    function test_aWorkingPayeeContractIsPaidWithinTheGasCap() public {
+        _noTip();
+        WorkingPayee wp = new WorkingPayee();
+        address[] memory w = new address[](1);
+        w[0] = address(wp);
+        uint32[] memory p = new uint32[](1);
+        p[0] = 200_000;
+        vm.prank(ownerA);
+        r.setPayees(w, p);
+        _set(address(eng));
+        vm.prank(ownerA);
+        r.setSplitStart(uint64(block.timestamp));
+        _startSplitNow();
+        vm.deal(address(r), 5 ether);
+        r.flush();
+        assertEq(address(wp).balance, 1 ether, "paid directly");
+        assertEq(r.owed(address(wp)), 0, "nothing credited");
     }
 
     function test_claimIsGuardedAgainstReentryThroughTheEngine() public {
