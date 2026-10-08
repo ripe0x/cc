@@ -1,7 +1,7 @@
 // unit checks that the port matches src/Core.sol on hand computed cases. run: node engine.test.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { Core, Pool, DEFAULTS, SETTINGS, CONTROLLER, simulate, controllerViolation, summary, firstViolation, skimFraction, routerFeeFraction, engineFeeFraction, stepVolume, W } from './engine.js';
+import { Core, Pool, DEFAULTS, SETTINGS, CONTROLLER, simulate, controllerViolation, summary, firstViolation, skimFraction, pathPrice, routerFeeFraction, engineFeeFraction, stepVolume, W } from './engine.js';
 
 let n = 0;
 const near = (a, b, tol, msg) => {
@@ -566,5 +566,69 @@ const R0 = 1.54e13;
     assert.equal(m.S.pot.length, h.S.pot.length); n++;
   }
   assert.throws(() => simulate({ days: 2, stepSec: 7 })); n++;
+}
+// bid rules dropToLast and stepped
+{
+  const R = 1e13, MIN = 60;
+  const mk = (over) => fresh(Object.assign({ rateStart: R, spendCapBps: 5000 }, over), 1000);
+  // dropToLast: a fill sets the bid to dropToPct of the rate that fill paid, whatever share of the pot it spent; the climb is climbPerMin per minute
+  {
+    const c = mk({ bidRule: 'dropToLast', dropToPct: 80, climbPerMin: 1 });
+    near(c.ethRate(0), R, 1e-12, 'dropToLast opens at rateStart');
+    near(c.ethRate(30 * MIN), R * Math.pow(1.01, 30), 1e-12, 'dropToLast climbs 1 percent a minute before any fill');
+    ok(c.spend(0.001, 30 * MIN));
+    near(c.rateAtCheckpoint, R * Math.pow(1.01, 30) * 0.8, 1e-12, 'a one credit fill drops the bid to 80 percent of the rate paid');
+    const r1 = c.rateAtCheckpoint;
+    near(c.ethRate(30 * MIN + 10 * MIN), r1 * Math.pow(1.01, 10), 1e-12, 'climb after 10 minutes');
+    ok(c.spend(100, 30 * MIN + 10 * MIN));
+    near(c.rateAtCheckpoint, r1 * Math.pow(1.01, 10) * 0.8, 1e-12, 'a fill of a tenth of the pot drops to the same 80 percent');
+    const c2 = mk({ bidRule: 'dropToLast', dropToPct: 90, climbPerMin: 2 });
+    ok(c2.spend(0.001, 0)); near(c2.rateAtCheckpoint, R * 0.9, 1e-12, 'dropToPct 90');
+    near(c2.ethRate(5 * MIN), R * 0.9 * Math.pow(1.02, 5), 1e-12, 'climbPerMin 2');
+  }
+  // stepped: a fixed drop per credit, a floor of dropToPct of the bid at the first fill of the timestamp, a ceiling of ceilPct of the last rate paid
+  {
+    const c = mk({ bidRule: 'stepped', dropPerCreditPct: 0.5, dropToPct: 80, climbPerMin: 1, ceilPct: 125 });
+    ok(c.spend(0.001, 0));
+    near(c.rateAtCheckpoint, R * 0.995, 1e-12, 'one credit drops the bid 0.5 percent');
+    ok(c.spend(0.001, 0)); near(c.rateAtCheckpoint, R * 0.995 * 0.995, 1e-12, 'a second credit in the same minute drops it again');
+    for (let i = 0; i < 100; i++) c.spend(0.001, 0);
+    near(c.rateAtCheckpoint, R * 0.8, 1e-12, 'a burst of fills in one minute cannot drop the bid below 80 percent of the bid at its first fill');
+    // the next minute opens a new burst from the current bid
+    c.spend(0.001, 60); near(c.rateAtCheckpoint, R * 0.8 * 1.01 * 0.995, 1e-9, 'a new timestamp starts a new burst, after one minute of climb');
+    // ceiling: the bid never climbs above 125 percent of the last rate paid
+    near(c.ethRate(60 + 1000 * MIN), c.lastPaidRate * 1.25, 1e-12, 'ceiling is ceilPct of the last rate paid');
+    near(c.lastPaidRate, R * 0.8 * 1.01, 1e-9, 'the last rate paid is the rate of the last fill');
+    // climb below the ceiling: 10 minutes at 1 percent
+    const t = 60 + 1000 * MIN; c.checkpoint(t); c.spend(0.001, t);
+    const r0 = c.rateAtCheckpoint; near(c.ethRate(t + 10 * MIN), Math.min(r0 * Math.pow(1.01, 10), c.lastPaidRate * 1.25), 1e-12, 'climb after 10 minutes');
+    // before any fill the ceiling is the opening bid times ceilPct
+    const d = mk({ bidRule: 'stepped', climbPerMin: 2, ceilPct: 110 });
+    near(d.ethRate(1000 * MIN), R * 1.1, 1e-12, 'opening ceiling is rateStart times ceilPct');
+    near(d.ethRate(3 * MIN), R * Math.pow(1.02, 3), 1e-12, 'climb 2 percent a minute');
+  }
+  // the built rule is unchanged by the new params
+  {
+    const c = mk({ bidRule: 'built', dropPerCreditPct: 5, dropToPct: 10, climbPerMin: 50 });
+    ok(c.spend(100, 0)); near(c.rateAtCheckpoint, R * (1 - 0.2 * 100 / 1000), 1e-12, 'built drop is dropBps times the share of the pot');
+    near(c.ethRate(3600), c.rateAtCheckpoint * 1.01, 1e-12, 'built climb is 1 percent an hour');
+  }
+  // whole runs: books close, the stepped bid never exceeds its ceiling at a step end, the throttler sells at its fraction of the market
+  const rs = (share) => (share * 0.0089e18) / 433;
+  for (const o of [{ bidRule: 'dropToLast' }, { bidRule: 'stepped', ceilPct: 110 }]) {
+    const r = simulate(Object.assign({ days: 6, seed: 2, stepSec: 60, rateStart: rs(1), climbPerMin: 1 }, o));
+    ok(Math.abs(r.stats.potCheck) < 1e-6 && Math.abs(r.stats.houseCheck) < 1e-6, 'accounting closes under ' + o.bidRule);
+    ok(r.S.credits[r.H] > 0 && r.stats.idleHoursMax >= 0);
+    if (o.bidRule === 'stepped') ok(r.core.ethRate(r.H * 3600) <= r.core.lastPaidRate * 1.1 * (1 + 1e-9) || r.core.ethRate(r.H * 3600) <= r.p.rateStart * 1.1, 'stepped ceiling at the end of a run');
+  }
+  const a = simulate({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1) }), b = simulate({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1), throttler: true });
+  ok(a.T.throttled === 0 && b.T.throttled > 0, 'the throttler sells credits when on');
+  ok(Math.abs(b.stats.potCheck) < 1e-6, 'accounting closes with the throttler');
+  // market paths
+  const q = (path, h, o = {}) => pathPrice(Object.assign({}, DEFAULTS, { pricePath: path }, o), h * 3600) / DEFAULTS.priceP0;
+  near(q('falling', 24), 0.5, 1e-12, 'falling halves over day one'); near(q('falling', 500), 0.5, 1e-12, 'falling stays flat after');
+  near(q('rising', 7 * 24), 2, 1e-12, 'rising doubles over 7 days'); near(q('rising', 24 * 30), 2, 1e-12, 'rising stays flat after');
+  near(q('whipsaw', 48), 1, 1e-12, 'whipsaw before the fall'); near(q('whipsaw', 60), 0.4, 1e-12, 'whipsaw falls 60 percent in 12 hours');
+  near(q('whipsaw', 108), 1, 1e-12, 'whipsaw recovers over 2 days'); near(q('whipsaw', 300), 1, 1e-12, 'whipsaw flat after');
 }
 console.log(`ok, ${n} checks passed`);
