@@ -45,6 +45,9 @@ contract GateTest is Fixture {
         _sellOne();
         assertEq(core.heldStatements().length, 2, "still unsold");
         assertTrue(core.funded());
+        // the climb is clamped by the hourly cap the pot affords, so give the pot room for ten more hours of it. a v2 buy
+        // lands about 5.2 points in the pot, not the 9.5 of v1, so the one sale above left less of it
+        _fundPot(core.ethPot() + 5 ether);
         uint256 r0 = core.rateAtCheckpoint();
         uint256 t0 = core.checkpointTime();
         _warp(10 hours);

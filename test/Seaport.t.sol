@@ -749,8 +749,10 @@ contract SeaportColdTest is SeaportBase {
         uint256 price = core.ceilingOf(id) / 2;
         OrderComponents memory c = _open(id, price, 0);
         bytes memory data = _basicData(c);
-        // a pot of about three prices: the order is affordable but is above a fifth of the pot
-        _buyCoin(funder, price * 3 * 10_000 / 950);
+        // a pot of about three prices: the order is affordable but is above a fifth of the pot. the first flush after
+        // the window sends the router's whole inflow (6.18 points) to the pot, the split starts after it
+        _skipSniperWindow();
+        _buyCoin(funder, price * 3 * 10_000 / 620);
         assertGt(core.ethPot(), price * 5 / 2);
         assertLt(core.ethPot(), price * 7 / 2);
         _expectFail(id, price, data, ICore.HourlyCap.selector);

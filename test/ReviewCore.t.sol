@@ -254,7 +254,7 @@ contract ReviewCoreTest is Fixture {
     function test_attack_repeatedFillsRestartByTheRule() public {
         _auction();
         _equip(attacker, 40 ether);
-        _waitUntilCheap(attacker, 4);
+        _waitUntilCheap(attacker, 8);
         uint256 p = core.exitAuctionPrice();
         uint256 startBefore = core.xStartPrice();
         uint256[2] memory paid;

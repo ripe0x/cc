@@ -129,7 +129,7 @@ contract SaleSmokeTest is Fixture {
     }
 
     function test_pool_fees_split_by_feeToBuybackBps() public {
-        address hook = lc.stack.hook;
+        address hook = lc.stack.feeSource;
         vm.deal(hook, 10 ether);
         uint256 pot = core.ethPot();
         vm.prank(hook);

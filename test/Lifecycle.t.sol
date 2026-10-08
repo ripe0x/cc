@@ -39,6 +39,7 @@ contract LifecycleSwapsTest is Fixture {
 
     /// the rate does not climb while the pot cannot afford one average credit, and does not climb retroactively
     function test_swaps_rateClimbsOnlyOnceFunded() public {
+        _skipSniperWindow();
         assertEq(core.ethRate(), core.RATE_START());
 
         // one average credit costs 1.732e15 wei at the start rate (4e12) and funded needs the hourly cap (20 percent of
@@ -50,7 +51,7 @@ contract LifecycleSwapsTest is Fixture {
         assertEq(core.ethRate(), core.RATE_START(), "unfunded, no climb");
 
         // the pot passes the threshold
-        _buyCoin(trader, 0.1 ether);
+        _buyCoin(trader, 0.2 ether);
         assertTrue(core.funded());
         assertEq(core.ethRate(), core.RATE_START(), "no retroactive climb");
         _warp(10 hours);
@@ -506,6 +507,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(coin.balanceOf(DEAD), b.dead, "burned, not parked");
         assertEq(caller.balance - b.caller, b.slice * s.keeperTipBps / 10_000, "the caller got the tip");
         assertEq(core.ethToBuyback(), b.pool - b.slice, "the pot fell by one slice");
+        _flush();
         assertGt(core.ethPot(), b.pot, "the skim of the swap came back into the pot");
         assertEq(core.lastBuybackBlock(), block.number);
         assertLe(address(core).balance, b.balance, "the swap spent eth net of what came back");
