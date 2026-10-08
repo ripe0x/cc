@@ -20,7 +20,7 @@ contract PostflightInputsTest is Fixture {
     }
 
     function test_FIXED_A02_verifyInputsDoNotChangeAfterSettingsOrControllerChange() public {
-        (address first, bool found) = firstController(address(core), deployer);
+        (address first, bool found) = firstController(address(core), owner);
         assertTrue(found, "the deployer finds the first controller");
         assertEq(first, address(ctl));
         bytes memory before_ = coreConstructorArgs(core, lc, first);
@@ -40,7 +40,7 @@ contract PostflightInputsTest is Fixture {
         core.acceptOwnership();
         assertEq(core.owner(), next);
 
-        (address again, bool foundAgain) = firstController(address(core), deployer);
+        (address again, bool foundAgain) = firstController(address(core), owner);
         assertTrue(foundAgain);
         assertEq(again, address(ctl), "the first controller does not move with setController");
         bytes memory after_ = coreConstructorArgs(core, lc, again);
@@ -48,7 +48,7 @@ contract PostflightInputsTest is Fixture {
         assertEq(after_, _creation());
         assertTrue(keccak256(_oldLiveArgs()) != keccak256(before_), "the live values drifted, the old print would too");
         // the print itself runs against the changed core
-        printVerifyInputs(core, lc, deployer);
+        printVerifyInputs(core, lc, owner);
     }
 
     /// without the deployer or FIRST_CONTROLLER the first controller is not known and nothing is guessed from live storage
