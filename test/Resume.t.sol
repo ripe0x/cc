@@ -3,9 +3,12 @@ pragma solidity ^0.8.28;
 
 import {ProdDeployer} from "./utils/ProdDeployer.sol";
 import {Prod} from "./utils/Prod.sol";
+import {V2Stack} from "./utils/V2Stack.sol";
 import {Test} from "forge-std/Test.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
+import {IArtCoinsFactoryV2, IArtCoinsTokenV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {Deployed} from "../script/SystemDeployer.sol";
 import {SystemResumer, Stage} from "../script/SystemResumer.sol";
@@ -16,183 +19,182 @@ interface IHouseFactoryR {
     function houseOf(address owner) external view returns (address);
 }
 
-/// @notice `script/SystemResumer.sol` on the pinned fork: a deploy stopped after each of the transactions (the library, the
-/// controller, the core with its house, the launch, the lock, the handover) is finished by sending only the missing
-/// steps, as the original deployer. the library goes through the deterministic deployer in a broadcast and takes one
-/// deployer nonce, so the tests send it through that deployer too and bump the nonce by hand (a test prank sends no
+/// @notice `script/SystemResumer.sol` on the pinned fork with the v2 stack deployed onto it: a deploy stopped after each of
+/// the transactions (the library, the controller, the router, the core with its house, the launch, the router engine,
+/// the router payees, the split start) is finished by sending only the missing steps, as the original deployer, who is
+/// the factory owner and the config owner. the library goes through the deterministic deployer in a broadcast and takes
+/// one deployer nonce, so the tests send it through that deployer too and bump the nonce by hand (a test prank sends no
 /// transaction)
 contract ResumeTest is Test, SystemResumer, ProdDeployer {
     bool internal scriptMode;
-    /// @dev SETTINGS_CHANGED of the operator, a flag here so parallel tests never share an environment variable
+    /// @dev the operator flags as bools here, so parallel tests never share an environment variable
     bool internal changedFlag;
+    bool internal ownerFlag;
+    bool internal routerFlag;
 
     function _settingsChanged() internal view override returns (bool) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return changedFlag;
-    */
     }
 
-    /// @dev OWNER_CHANGED of the operator, a flag here for the same reason
-    bool internal ownerFlag;
-
     function _ownerChanged() internal view override returns (bool) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return ownerFlag;
-    */
+    }
+
+    function _routerChanged() internal view override returns (bool) {
+        return routerFlag;
     }
 
     function _scriptContext() internal view override returns (bool) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return scriptMode;
-    */
     }
 
+    V2Stack.Stack internal v2;
+    IArtCoinsFactoryV2 internal FACTORY;
+    /// @dev the deployer is the factory owner and the config owner
     address internal deployer;
     address internal owner;
     address internal creator;
     LaunchConfig internal base;
 
     function setUp() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
         deployer = makeAddr("resume.deployer");
-        owner = makeAddr("resume.owner");
+        owner = deployer;
         creator = makeAddr("resume.creator");
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, true);
-        vm.deal(deployer, 2 ether);
+        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
+        FACTORY = IArtCoinsFactoryV2(v2.factory);
+        vm.prank(owner);
+        FACTORY.setMinLpFee(0);
+        vm.deal(deployer, 5 ether);
         base = defaultConfig();
         base.owner = owner;
         base.creator = creator;
+        base.creatorPayee = makeAddr("resume.payee");
         base.name = "Resume Coin";
         base.symbol = "RSM";
         base.salt = keccak256("resume");
-    */
+        base.stack.hook = v2.hook;
+        base.stack.factory = v2.factory;
+        base.stack.locker = v2.locker;
+        base.stack.escrow = v2.escrow;
+        base.mevModule = v2.mev;
     }
 
-    /// @dev the first `n` of the six transactions, by hand, as the deployer: 1 library, 2 controller, 3 core, 4 launch,
-    /// 5 lock. the handover is the sixth
-    function _steps(uint256 n) internal returns (address core, address coin) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
+    /// @dev the first `n` of the transactions, by hand, as the deployer: 1 library, 2 controller, 3 router, 4 core,
+    /// 5 launch, 6 router engine, 7 router payees, 8 router split start (the tip is the router default, no transaction)
+    function _steps(uint256 n) internal returns (address core, address coin, address router) {
         scriptMode = true;
         if (n >= 1) _sendLibrary();
         uint64 nonce = vm.getNonce(deployer);
-        core = vm.computeCreateAddress(deployer, nonce + 1);
-        address coinAt = predictCoin(base, deployer, core);
+        router = vm.computeCreateAddress(deployer, nonce + 1);
+        core = vm.computeCreateAddress(deployer, nonce + 2);
+        base.stack.feeSource = router;
+        address coinAt = predictCoin(base, deployer, router, core);
         vm.startPrank(deployer);
-        if (n >= 2) address(Prod.newController(core, base.sale));
-        if (n >= 3) {
-            Prod.newCore(owner, coinAt, vm.computeCreateAddress(deployer, nonce), base.stack, base.rateStart, base.settings);
+        address controller;
+        if (n >= 2) controller = address(Prod.newController(core, base.sale));
+        if (n >= 3) address(Prod.newRouter(deployer));
+        if (n >= 4) Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings);
+        if (n >= 5) coin = _launch(base, coinAt, router, core);
+        IFeeRouter r = IFeeRouter(payable(router));
+        if (n >= 6) r.setEngine(core);
+        if (n >= 7) {
+            address[] memory who = new address[](1);
+            who[0] = base.creatorPayee;
+            uint32[] memory ppm = new uint32[](1);
+            ppm[0] = base.payeePpm;
+            r.setPayees(who, ppm);
         }
-        if (n >= 4) coin = _launch(base, deployer, coinAt, core);
-        if (n >= 5) _lock(base, poolKeyOf(coin, base.stack));
+        if (n >= 8) r.setSplitStart(uint64(block.timestamp + base.sniperSeconds + SPLIT_MARGIN));
         vm.stopPrank();
         scriptMode = false;
-    */
     }
 
     /// @dev the first transaction of a broadcast: the library through the deterministic deployer, from the deployer
     function _sendLibrary() internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         assertTrue(_libraryTxPending(), "the library is not on chain yet");
         vm.prank(deployer);
         (bool ok,) = CREATE2_DEPLOYER.call(abi.encodePacked(bytes32(0), vm.getCode("CoreLib.sol:CoreLib")));
         assertTrue(ok, "the library create2 failed");
         vm.setNonce(deployer, vm.getNonce(deployer) + 1);
         assertFalse(_libraryTxPending(), "the library is on chain now");
-    */
     }
 
     function stageOf(address core) external view returns (Stage) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return detectStage(base, core);
-    */
     }
 
     function resume(address who, LaunchConfig memory c, address core) external returns (Stage from) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        vm.stopPrank();
+        // as in the script: the checks simulate the launch on a snapshot and run outside the broadcast
+        from = resumeChecks(who, c, core);
         vm.startPrank(who);
-        (from,) = resumeSystem(who, c, core);
+        resumeSend(who, c, core, from);
         vm.stopPrank();
-    */
     }
 
     function _assertDone(address core, Stage expectFrom) internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         Stage from = this.resume(deployer, base, core);
         assertEq(uint256(from), uint256(expectFrom), "stage found");
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
         address coin = ICore(payable(core)).COIN();
-        assertEq(IArtCoinsToken(coin).admin(), owner, "the owner is the token admin");
-        postflight(base, core);
+        assertEq(IArtCoinsTokenV2(coin).admin(), owner, "the owner is the token admin");
+        postflightAs(base, core, deployer);
         (string memory list,) = _failed();
         assertEq(list, "", "postflight is clean");
-    */
     }
 
     function test_resumeAfterTheCore() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(3);
+        (address core,,) = _steps(4);
         assertEq(uint256(this.stageOf(core)), uint256(Stage.CoreOnly));
         _assertDone(core, Stage.CoreOnly);
-    */
     }
 
     function test_resumeAfterTheLaunch() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(4);
+        (address core,,) = _steps(5);
         assertEq(uint256(this.stageOf(core)), uint256(Stage.Launched));
         _assertDone(core, Stage.Launched);
-    */
     }
 
-    function test_resumeAfterTheLock() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(5);
-        assertEq(uint256(this.stageOf(core)), uint256(Stage.Locked));
-        _assertDone(core, Stage.Locked);
-    */
+    function test_resumeAfterTheEngine() public {
+        (address core,,) = _steps(6);
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Setup));
+        _assertDone(core, Stage.Setup);
+    }
+
+    function test_resumeAfterThePayees() public {
+        (address core,,) = _steps(7);
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Setup));
+        _assertDone(core, Stage.Setup);
     }
 
     /// a finished deploy: nothing is sent, the nonce does not move
     function test_resumeWhenDoneSendsNothing() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(5);
-        address coin = ICore(payable(core)).COIN();
-        vm.prank(deployer);
-        IArtCoinsToken(coin).updateAdmin(owner);
+        (address core,,) = _steps(8);
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Done));
         uint64 nonce = vm.getNonce(deployer);
         uint256 bal = deployer.balance;
         _assertDone(core, Stage.Done);
         assertEq(vm.getNonce(deployer), nonce);
         assertEq(deployer.balance, bal);
-    */
+    }
+
+    /// the stage is read from the chain: a router tip that differs from the config is a missing step too
+    function test_aRouterTipThatDiffersIsASetupStep() public {
+        base.tipPpm = 7_000;
+        (address core,, address router) = _steps(8);
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Setup));
+        _assertDone(core, Stage.Setup);
+        assertEq(IFeeRouter(payable(router)).tipPpm(), 7_000);
     }
 
     function test_resumeRefusesWhatItCannotFinish() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         // no core
         vm.expectRevert(
             abi.encodeWithSelector(CoreMismatch.selector, "no code at the core address, run Deploy instead")
         );
         this.resume(deployer, base, makeAddr("nothing"));
 
-        (address core,) = _steps(4);
+        (address core,,) = _steps(4);
         // a core built from another config
         LaunchConfig memory c = base;
         c.owner = creator;
@@ -207,97 +209,129 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         c.name = "Other";
         vm.expectRevert(abi.encodeWithSelector(CoreMismatch.selector, "coin prediction (config or deployer)"));
         this.resume(deployer, c, core);
-        // a stranger is not the deployer of the run: the prediction does not hold, and it cannot lock or hand over
+        // another stack address
+        c = base;
+        c.stack.auctionFactory = Mainnet.PERMIT2;
+        vm.expectRevert(abi.encodeWithSelector(CoreMismatch.selector, "stack"));
+        this.resume(deployer, c, core);
+        // a stranger is not the deployer of the run: the prediction does not hold
         address stranger = makeAddr("stranger");
         vm.deal(stranger, 1 ether);
         vm.expectRevert(abi.encodeWithSelector(CoreMismatch.selector, "coin prediction (config or deployer)"));
         this.resume(stranger, base, core);
         // the real deployer still finishes it
+        _assertDone(core, Stage.CoreOnly);
+    }
+
+    /// after the launch the factory is no longer needed, but the router owner is
+    function test_aStrangerCannotSetUpTheRouter() public {
+        (address core,, address router) = _steps(5);
+        address stranger = makeAddr("stranger");
+        vm.deal(stranger, 1 ether);
+        vm.expectRevert(abi.encodeWithSelector(NotRouterOwner.selector, deployer, stranger));
+        this.resume(stranger, base, core);
         _assertDone(core, Stage.Launched);
-    */
+        assertEq(IFeeRouter(payable(router)).engine(), core);
     }
 
-    /// the launch step needs the deployer to still be allowed on the factory
-    function test_resumeLaunchNeedsTheDeployerEnabled() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(3);
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, false);
-        vm.expectRevert(abi.encodeWithSelector(Report.ChecksFailed.selector, "factory: deployer may launch"));
+    /// the launch step needs the deployer to still be the factory owner
+    function test_resumeLaunchNeedsTheFactoryOwner() public {
+        (address core,,) = _steps(4);
+        address next = makeAddr("next factory owner");
+        vm.prank(deployer);
+        IArtCoinsFactoryV2Owner(address(FACTORY)).transferOwnership(next);
+        vm.prank(next);
+        IArtCoinsFactoryV2Owner(address(FACTORY)).acceptOwnership();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Report.ChecksFailed.selector,
+                "factory: owner is the config owner, factory: owner is the deployer, factory: deployTokenAsOwner accepts the config (simulated)"
+            )
+        );
         this.resume(deployer, base, core);
-        // after the lock the factory is no longer needed: a revoked deployer can still hand over
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, true);
-        this.resume(deployer, base, core);
-        assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
-    */
+        // the owner path is the owner's: after the launch the router steps need no factory
+        vm.prank(next);
+        IArtCoinsFactoryV2Owner(address(FACTORY)).transferOwnership(deployer);
+        vm.prank(deployer);
+        IArtCoinsFactoryV2Owner(address(FACTORY)).acceptOwnership();
+        _assertDone(core, Stage.CoreOnly);
     }
 
-    /// S-6: after the owner role and the token admin both moved on, OWNER_CHANGED=1 counts the admin as handed over
-    function test_resumeOwnerChangedTreatsAHandedOverAdminAsDone() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(5);
-        _assertDone(core, Stage.Locked);
+    /// the factory floor of the lp fee is the owner command: the launch step names the failed row when it is not 0
+    function test_resumeLaunchNeedsMinLpFeeZero() public {
+        (address core,,) = _steps(4);
+        vm.prank(deployer);
+        FACTORY.setMinLpFee(3_000);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Report.ChecksFailed.selector,
+                "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)"
+            )
+        );
+        this.resume(deployer, base, core);
+        vm.prank(deployer);
+        FACTORY.setMinLpFee(0);
+        _assertDone(core, Stage.CoreOnly);
+    }
+
+    /// S-6 of the old review, ported: the owner moved on after the launch. OWNER_CHANGED=1 says so
+    function test_resumeOwnerChangedFinishesTheRouterAndWarns() public {
+        (address core,,) = _steps(8);
+        _assertDone(core, Stage.Done);
         address next = makeAddr("resume.next");
-        address coin = ICore(payable(core)).COIN();
         vm.startPrank(owner);
         ICore(payable(core)).transferOwnership(next);
-        IArtCoinsToken(coin).updateAdmin(next);
         vm.stopPrank();
         vm.prank(next);
         ICore(payable(core)).acceptOwnership();
-        assertEq(uint256(detectStage(base, core)), uint256(Stage.Locked), "no flag, the admin looks unfinished");
         ownerFlag = true;
-        assertEq(uint256(detectStage(base, core)), uint256(Stage.Done), "flag set, the handover is done");
         Stage from = this.resume(deployer, base, core);
         assertEq(uint256(from), uint256(Stage.Done), "nothing is sent");
-        postflight(base, core);
+        postflightAs(base, core, deployer);
         (string memory list,) = _failed();
         assertEq(list, "", "postflight reports the handover as warnings only");
-    */
     }
 
-    function test_resumeHandoverNeedsNoFactory() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(5);
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, false);
-        _assertDone(core, Stage.Locked);
-        // the hook slot stays locked and empty
-        bytes32 id = keccak256(abi.encode(poolKeyOf(ICore(payable(core)).COIN(), base.stack)));
-        assertTrue(IArtCoinsSkimHook(base.stack.hook).poolExtensionLocked(id));
-    */
+    /// the owner changed the router after the launch (new payee, locked): ROUTER_CHANGED=1 makes it Done and sends nothing
+    function test_routerChangedIsDoneWhateverItHolds() public {
+        (address core,, address router) = _steps(8);
+        address[] memory who = new address[](1);
+        who[0] = makeAddr("splitter");
+        uint32[] memory ppm = new uint32[](1);
+        ppm[0] = 100_000;
+        vm.startPrank(owner);
+        IFeeRouter(payable(router)).setPayees(who, ppm);
+        IFeeRouter(payable(router)).lock();
+        vm.stopPrank();
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Setup), "without the flag the payee looks unfinished");
+        routerFlag = true;
+        assertEq(uint256(this.stageOf(core)), uint256(Stage.Done));
+        uint64 nonce = vm.getNonce(deployer);
+        Stage from = this.resume(deployer, base, core);
+        assertEq(uint256(from), uint256(Stage.Done));
+        assertEq(vm.getNonce(deployer), nonce);
+        (address[] memory have,) = IFeeRouter(payable(router)).payees();
+        assertEq(have[0], who[0], "the owner's payee is not touched");
     }
 
     function requireDeployerExt(address want, address got) external pure {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         _requireDeployer(want, got);
-    */
     }
 
     /// the core created its own house in its constructor: it is there at the first resume point, owned by the core
     function test_theHouseExistsFromTheCoreOn() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(3);
+        (address core,,) = _steps(4);
         address house = IHouseFactoryR(base.stack.auctionFactory).houseOf(core);
         assertTrue(house != address(0) && house.code.length != 0, "no house");
         assertEq(address(ICore(payable(core)).HOUSE()), house);
         _assertDone(core, Stage.CoreOnly);
-    */
     }
 
     /// resume point 0: only the library is on chain. nothing to resume (no core), rerunning Deploy is safe: the library
     /// is skipped and takes no second nonce, so the addresses of a rerun are the ones preflight predicts now
     function test_libraryOnlyThenRerunDeploy() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         _steps(1);
-        address someCore = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        address someCore = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 2);
         vm.expectRevert(
             abi.encodeWithSelector(CoreMismatch.selector, "no code at the core address, run Deploy instead")
         );
@@ -310,39 +344,34 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
         assertEq(d.core, someCore, "the rerun lands where the preflight said");
-    */
     }
 
-    /// resume point 0b: library and controller are on chain, the core is not. the controller is inert. no resume, the
-    /// way on is a rerun of Deploy (new controller, new core) or the saved core transaction at its own nonce
-    function test_orphanControllerIsInert() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(2);
+    /// resume points 0b and 0c: the controller, then the router are on chain, the core is not. both are inert. no
+    /// resume, the way on is a rerun of Deploy (new controller, router, core)
+    function test_orphanControllerAndRouterAreInert() public {
+        (address core,, address router) = _steps(3);
         assertEq(core.code.length, 0, "no core");
-        address controller = vm.computeCreateAddress(deployer, vm.getNonce(deployer) - 1);
+        address controller = vm.computeCreateAddress(deployer, vm.getNonce(deployer) - 2);
         assertEq(address(IControllerV1(controller).CORE()), core, "it points at the core that never came");
         assertEq(controller.balance, 0);
+        assertEq(IFeeRouter(payable(router)).engine(), address(0), "the router has no engine");
         vm.expectRevert(
             abi.encodeWithSelector(CoreMismatch.selector, "no code at the core address, run Deploy instead")
         );
         this.resume(deployer, base, core);
         // sending the saved core creation at the next nonce gives the predicted core, and Resume goes on from there
-        address coinAt = predictCoin(base, deployer, core);
+        address coinAt = predictCoin(base, deployer, router, core);
         vm.startPrank(deployer);
         address c2 = address(Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings));
         vm.stopPrank();
         assertEq(c2, core, "the saved creation lands on the predicted core");
         _assertDone(core, Stage.CoreOnly);
-    */
     }
 
     /// the owner can call setSettings the moment the core exists: Resume does not finish a core whose settings are not
     /// the signed ones unless the operator says so
     function test_resumeRefusesChangedSettings() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        (address core,) = _steps(4);
+        (address core,,) = _steps(5);
         Settings memory s = ICore(payable(core)).settings();
         s.saleFloorBps = 8_000;
         vm.prank(owner);
@@ -356,18 +385,42 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         Stage from = this.resume(deployer, base, core);
         assertEq(uint256(from), uint256(Stage.Launched));
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
-    */
     }
 
     /// the signer must be the deployer the operator named
     function test_deployerMustBeTheNamedOne() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         this.requireDeployerExt(deployer, deployer);
-        vm.expectRevert(abi.encodeWithSelector(DeployerMismatch.selector, owner, deployer));
-        this.requireDeployerExt(owner, deployer);
+        vm.expectRevert(abi.encodeWithSelector(DeployerMismatch.selector, owner, creator));
+        this.requireDeployerExt(owner, creator);
         vm.expectRevert(abi.encodeWithSelector(DeployerMismatch.selector, address(0), deployer));
         this.requireDeployerExt(address(0), deployer);
-    */
     }
+
+    /// the deploy itself refuses a sender that is not the factory owner and the config owner
+    function test_deployRefusesANonFactoryOwner() public {
+        address stranger = makeAddr("stranger");
+        vm.deal(stranger, 5 ether);
+        LaunchConfig memory c = base;
+        c.owner = stranger;
+        vm.startPrank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(NotFactoryOwner.selector, deployer, stranger));
+        this.deployExt(stranger, c);
+        vm.stopPrank();
+        // the factory owner with another config owner is refused too
+        c = base;
+        c.owner = creator;
+        vm.startPrank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(NotFactoryOwner.selector, deployer, deployer));
+        this.deployExt(deployer, c);
+        vm.stopPrank();
+    }
+
+    function deployExt(address who, LaunchConfig memory c) external {
+        deploySystem(who, c);
+    }
+}
+
+interface IArtCoinsFactoryV2Owner {
+    function transferOwnership(address newOwner) external;
+    function acceptOwnership() external;
 }

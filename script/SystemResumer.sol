@@ -104,15 +104,4 @@ abstract contract SystemResumer is SystemDeployer {
         postflightAs(c, core_, deployer);
         _require();
     }
-
-    /// @notice checks, sends what is missing and reads the result back. used by the tests
-    /// @return from the stage found
-    /// @return d what the deploy created
-    function resumeSystem(address deployer, LaunchConfig memory c, address core_)
-        internal
-        returns (Stage from, Deployed memory d)
-    {
-        from = resumeChecks(deployer, c, core_);
-        d = resumeSend(deployer, c, core_, from);
-    }
 }
