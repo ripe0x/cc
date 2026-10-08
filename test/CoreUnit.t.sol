@@ -261,12 +261,12 @@ contract CoreUnitTest is CoreBase {
                            fee intake and skim
     //////////////////////////////////////////////////////////////*/
 
-    /// eth the hook pushes after a real swap is booked at once. eth from anyone else waits for `skim`
+    /// eth the router flushes after a real swap is booked at once. eth from anyone else waits for `skim`
     function test_receiveBooksHookEth_skimBooksTheRest() public {
         _skipSniperWindow();
         _buyCoin(funder, 1 ether);
         uint256 pot = core.ethPot();
-        assertEq(pot, 0.095 ether, "9.5 points of a 1 eth buy");
+        assertEq(pot, 0.0621 ether - 0.0621 ether * 5_000 / 1e6, "6.21 points of a 1 eth buy less the flush tip");
         assertEq(address(core).balance, pot);
 
         vm.deal(alice, 3 ether);
