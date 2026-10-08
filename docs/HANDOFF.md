@@ -6,7 +6,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 
 | item | state |
 |---|---|
-| branch | `flow` is the working branch. github `main` was fast forwarded to `flow` at 3bc342d (2026-10-07). everything after that exists only in the git bundle the previous session delivered: about 100 commits |
+| branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
 | engine | ported to the artcoins v2 stack and tested: 1,036 tests pass, 8 skipped, with the launch rehearsal on (full run on commit b645073, one rpc timeout passed on a rerun) |
 | contracts | `src/Core.sol` 24,501 bytes runtime (75 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 10,724 (linked library, lots of room), `src/ControllerV1.sol` 4,426, `src/FeeRouter.sol` 4,982 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
