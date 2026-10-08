@@ -101,12 +101,10 @@ abstract contract SystemDeployer is LaunchChecks {
     function _setupRouter(LaunchConfig memory c, address router, address core) internal {
         IFeeRouter r = IFeeRouter(payable(router));
         r.setEngine(core);
-        address[] memory who = new address[](2);
+        address[] memory who = new address[](1);
         who[0] = c.creatorPayee;
-        who[1] = c.artistPayee;
-        uint32[] memory ppm = new uint32[](2);
+        uint32[] memory ppm = new uint32[](1);
         ppm[0] = c.payeePpm;
-        ppm[1] = c.payeePpm;
         r.setPayees(who, ppm);
         r.setTip(c.tipPpm, c.tipCap);
         // forge-lint: disable-next-line(unsafe-typecast)

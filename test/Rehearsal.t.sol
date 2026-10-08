@@ -10,7 +10,6 @@ import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, Mainnet} from "../src/interfaces/Interfaces.sol";
-import {IArtCoinsFactory, IArtCoinsToken} from "../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
 import {LaunchConfig} from "../script/LaunchConfig.sol";
 

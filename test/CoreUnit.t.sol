@@ -137,7 +137,15 @@ contract CoreUnitTest is CoreBase {
 
     function _stack8(Stack memory st, uint256 which, address to) internal pure returns (Stack memory bad) {
         bad = Stack(
-            st.poolManager, st.hook, st.tickSpacing, st.poolFee, st.factory, st.locker, st.escrow, st.auctionFactory
+            st.poolManager,
+            st.hook,
+            st.tickSpacing,
+            st.poolFee,
+            st.factory,
+            st.locker,
+            st.escrow,
+            st.auctionFactory,
+            st.feeSource
         );
         if (which == 0) bad.poolManager = to;
         if (which == 1) bad.hook = to;
@@ -145,6 +153,7 @@ contract CoreUnitTest is CoreBase {
         if (which == 3) bad.locker = to;
         if (which == 4) bad.escrow = to;
         if (which == 5) bad.auctionFactory = to;
+        if (which == 6) bad.feeSource = to;
     }
 
     function test_constructorRejectsZero() public {
@@ -158,7 +167,7 @@ contract CoreUnitTest is CoreBase {
         vm.expectRevert(ICore.ZeroAddress.selector);
         this.mk(owner, address(coin), address(0), st, r, s);
         // every address of the stack is required, the auction factory included
-        for (uint256 i; i < 6; ++i) {
+        for (uint256 i; i < 7; ++i) {
             vm.expectRevert(ICore.ZeroAddress.selector);
             this.mk(owner, address(coin), address(ctl), _stack8(st, i, address(0)), r, s);
         }
@@ -179,7 +188,7 @@ contract CoreUnitTest is CoreBase {
         uint256 r = lc.rateStart;
         Settings memory s = lc.settings;
         address nobody = makeAddr("no code");
-        for (uint256 i; i < 6; ++i) {
+        for (uint256 i; i < 7; ++i) {
             vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, nobody));
             this.mk(owner, address(coin), address(ctl), _stack8(st, i, nobody), r, s);
         }
@@ -203,7 +212,7 @@ contract CoreUnitTest is CoreBase {
         assertEq(hi.rateAtCheckpoint(), 1e15);
     }
 
-    /// the stack is stored as given, nothing of it is hardcoded in the core. the five members that are only
+    /// the stack is stored as given, nothing of it is hardcoded in the core. the six members that are only
     /// addresses are stand in code, the auction factory is the live one because the constructor creates a house
     function test_stackIsStored() public {
         Stack memory other = Stack(
@@ -214,9 +223,10 @@ contract CoreUnitTest is CoreBase {
             address(0x3333),
             address(0x4444),
             address(0x5555),
-            Mainnet.AUCTION_FACTORY
+            Mainnet.AUCTION_FACTORY,
+            address(0x6666)
         );
-        for (uint160 a = 0x1111; a <= 0x5555; a += 0x1111) {
+        for (uint160 a = 0x1111; a <= 0x6666; a += 0x1111) {
             vm.etch(address(a), hex"00");
         }
         ICore c2 = this.mk(owner, address(coin), address(ctl), other, lc.rateStart, lc.settings);
@@ -228,17 +238,23 @@ contract CoreUnitTest is CoreBase {
         assertEq(c2.LOCKER(), address(0x4444));
         assertEq(c2.ESCROW(), address(0x5555));
         assertEq(c2.AUCTION_FACTORY(), Mainnet.AUCTION_FACTORY);
-        // only the configured hook is booked as fee income
-        vm.deal(address(0x2222), 1 ether);
-        vm.prank(address(0x2222));
+        assertEq(c2.FEE_SOURCE(), address(0x6666));
+        // only the configured fee source is booked as fee income, the hook included is not
+        vm.deal(address(0x6666), 1 ether);
+        vm.prank(address(0x6666));
         (bool ok,) = address(c2).call{value: 1 ether}("");
         assertTrue(ok);
         assertEq(c2.ethPot(), 1 ether);
-        vm.deal(lc.stack.hook, 1 ether);
-        vm.prank(lc.stack.hook);
+        vm.deal(address(0x2222), 1 ether);
+        vm.prank(address(0x2222));
         (ok,) = address(c2).call{value: 1 ether}("");
         assertTrue(ok);
-        assertEq(c2.ethPot(), 1 ether, "the default hook is not special to this core");
+        assertEq(c2.ethPot(), 1 ether, "the hook is not the fee source");
+        vm.deal(address(feeRouter), 1 ether);
+        vm.prank(address(feeRouter));
+        (ok,) = address(c2).call{value: 1 ether}("");
+        assertTrue(ok);
+        assertEq(c2.ethPot(), 1 ether, "the default fee router is not special to this core");
     }
 
     /*//////////////////////////////////////////////////////////////

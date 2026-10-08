@@ -7,7 +7,6 @@ import {Test} from "forge-std/Test.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
-import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
 import {Deployed} from "../script/SystemDeployer.sol";
 import {SystemResumer, Stage} from "../script/SystemResumer.sol";
 import {LaunchConfig} from "../script/LaunchConfig.sol";

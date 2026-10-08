@@ -12,7 +12,6 @@ import {CreditIds} from "./utils/CreditIds.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Mainnet, Stack, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory, IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook, IArtCoinsMevSkim} from "../src/interfaces/ArtCoins.sol";
 import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
 import {LaunchConfig, ConfigReader} from "../script/LaunchConfig.sol";
 import {Report} from "../script/Report.sol";

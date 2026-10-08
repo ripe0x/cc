@@ -314,6 +314,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (
             stack_.poolManager == address(0) || stack_.hook == address(0) || stack_.factory == address(0)
                 || stack_.locker == address(0) || stack_.escrow == address(0) || stack_.auctionFactory == address(0)
+                || stack_.feeSource == address(0)
         ) revert ZeroAddress();
         if (stack_.tickSpacing <= 0 || stack_.tickSpacing > 32_767) revert BadStack();
         // the stack members must be contracts. the coin is not deployed yet when the core is created

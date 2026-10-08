@@ -8,17 +8,9 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {Mainnet} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory, IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
-import {
-    IArtCoinsFactory,
-    IArtCoinsSkimHook,
-    IArtCoinsLocker,
-    IArtCoinsMevSkim,
-    IArtCoinsToken
-} from "../src/interfaces/ArtCoins.sol";
 
 /// the launch of the coin through the live artcoins factory and everything it must read back as
 contract LaunchTest is Fixture {
-    IArtCoinsSkimHook internal constant HOOK = IArtCoinsSkimHook(Mainnet.SKIM_HOOK);
 
     function test_predictedCoinEqualsDeployed() public view {
         revert("TODO(v2 port stage 3)");
@@ -190,7 +182,7 @@ contract LaunchTest is Fixture {
     function _config(address admin, bytes32 salt)
         internal
         view
-        returns (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax)
+        returns (uint256 cfg, uint256 tax)
     {
         revert("TODO(v2 port stage 3)");
         /* TODO(v2 port stage 3), old body:

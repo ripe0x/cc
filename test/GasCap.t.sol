@@ -166,12 +166,10 @@ contract GasCapTest is SeaportBase {
 
         // the router set up: engine, payees, tip, split start (four owner transactions)
         IFeeRouter r2 = IFeeRouter(payable(deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
-        address[] memory who = new address[](2);
+        address[] memory who = new address[](1);
         who[0] = lc.creatorPayee;
-        who[1] = lc.artistPayee;
-        uint32[] memory ppm = new uint32[](2);
+        uint32[] memory ppm = new uint32[](1);
         ppm[0] = lc.payeePpm;
-        ppm[1] = lc.payeePpm;
         data = abi.encodeCall(IFeeRouter.setEngine, (address(core)));
         _cool(address(r2));
         vm.prank(owner);
@@ -204,6 +202,15 @@ contract GasCapTest is SeaportBase {
         _flush();
         _buyCoin(funder, 5 ether);
         assertTrue(feeRouter.splitOn(), "the split is on");
+        // launch has one payee. measure the heavier case of two, set by the owner
+        address[] memory who = new address[](2);
+        who[0] = lc.creatorPayee;
+        who[1] = makeAddr("secondPayee");
+        uint32[] memory ppm = new uint32[](2);
+        ppm[0] = 80_515;
+        ppm[1] = 80_515;
+        vm.prank(owner);
+        feeRouter.setPayees(who, ppm);
         bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
         _cool(address(feeRouter));
         vm.prank(flusher);

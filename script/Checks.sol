@@ -196,9 +196,9 @@ abstract contract LaunchChecks is PostflightChecks {
     }
 
     function _rulePeople(LaunchConfig memory c, address deployer) private {
-        address[4] memory who = [c.owner, c.creator, c.creatorPayee, c.artistPayee];
+        address[3] memory who = [c.owner, c.creator, c.creatorPayee];
         bool bad;
-        for (uint256 i; i < 4; ++i) {
+        for (uint256 i; i < 3; ++i) {
             address a = who[i];
             if (a == address(0)) continue; // the placeholder row reports it
             bad = bad || a == Mainnet.DEAD || a == c.stack.poolManager || a == c.stack.hook || a == c.stack.factory
@@ -302,7 +302,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _info("signoff: creator (0.5 point leg and lp rewards)", vm.toString(c.creator));
         _info("signoff: deployer (sends the transactions)", vm.toString(deployer));
         _info("signoff: core address (the fee router flushes to it)", vm.toString(core));
-        _info("signoff: payees (creator, artist)", string.concat(vm.toString(c.creatorPayee), " ", vm.toString(c.artistPayee)));
+        _info("signoff: payee (the creator address, one at launch)", vm.toString(c.creatorPayee));
         _info("signoff: locker reward slot goes to the creator", vm.toString(c.creator));
         _info(
             "signoff: opening bid",

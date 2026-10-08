@@ -20,7 +20,8 @@ import {
     Settings
 } from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsToken, IArtCoinsMevSkim} from "../../src/interfaces/ArtCoins.sol";
+import {IArtCoinsTokenV2, IArtCoinsMevSkimV2} from "../../src/interfaces/ArtCoinsV2.sol";
+import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
 import {ProbeTarget} from "../attackers/ProbeTarget.sol";
@@ -31,11 +32,13 @@ import {TestSwapRouter} from "../utils/TestSwapRouter.sol";
 struct Wiring {
     ICore core;
     IAuctionHouse house;
-    IArtCoinsToken coin;
+    IArtCoinsTokenV2 coin;
     TestSwapRouter router;
     PoolKey launchKey;
-    PoolKey sideKey;
     bytes32 poolId;
+    address hook;
+    address mev;
+    IFeeRouter feeRouter;
     address owner;
     address v1;
     FuzzController fuzz;
@@ -83,7 +86,7 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_EXIT_STATEMENT = 18;
     uint8 internal constant A_BUYBACK_EXIT = 19;
     uint8 internal constant A_MODULE_MODE = 20;
-    uint8 internal constant A_SIDE_BUY = 21;
+    uint8 internal constant A_WALLET_MOVE = 21;
     uint8 internal constant A_END_AUCTION = 22;
     uint8 internal constant A_COLLECT_SALES = 23;
     uint8 internal constant A_SYNC_STATEMENT = 24;
@@ -144,7 +147,6 @@ abstract contract HandlerBase is Test {
     address internal constant STRATEGY = Mainnet.CREDIT_STRATEGY;
     IPoolManager internal constant PM = IPoolManager(Mainnet.POOL_MANAGER);
     address internal constant DEAD = Mainnet.DEAD;
-    address internal constant HOOK = lc.stack.hook;
     bytes32 internal constant SKIM_SPLIT = keccak256("SkimSplit(bytes32,uint256,uint256,uint256,uint256)");
     bytes32 internal constant TRANSFER = keccak256("Transfer(address,address,uint256)");
 
@@ -161,12 +163,16 @@ abstract contract HandlerBase is Test {
 
     ICore public core;
     IAuctionHouse public house;
-    IArtCoinsToken public coin;
+    IArtCoinsTokenV2 public coin;
     TestSwapRouter public router;
     PoolKey public launchKey;
-    /// a hookless side pool of the coin in the real pool manager, a tax venue
-    PoolKey public sideKey;
     bytes32 public poolId;
+    /// the v2 hook, the mev module and the fee router of the launch. the hook pays the router, `flush` pays the core
+    address internal HOOK;
+    address internal mev;
+    IFeeRouter public feeRouter;
+    /// the account that flushes the router and collects the tips
+    address internal flusher;
     address public owner;
     address public v1;
     FuzzController public fuzz;
@@ -216,8 +222,6 @@ abstract contract HandlerBase is Test {
     uint256 public gDead;
     uint256 public gBurnedByBuyback;
     uint256 public gBurnedByAuction;
-    /// coin taxed to the burn address in side pool buys
-    uint256 public sideTaxed;
     uint256 internal gSupplyLast;
     /// swaps and buybacks that ran while the anti sniper skim was above the baseline
     uint256 public windowSwaps;
@@ -304,8 +308,11 @@ abstract contract HandlerBase is Test {
         coin = w.coin;
         router = w.router;
         launchKey = w.launchKey;
-        sideKey = w.sideKey;
         poolId = w.poolId;
+        HOOK = w.hook;
+        mev = w.mev;
+        feeRouter = w.feeRouter;
+        flusher = makeAddr("credeng.inv.flusher");
         owner = w.owner;
         v1 = w.v1;
         fuzz = w.fuzz;
@@ -337,7 +344,7 @@ abstract contract HandlerBase is Test {
             "exitStatement",
             "buybackExit",
             "moduleMode",
-            "sideBuy",
+            "walletMove",
             "endAuction",
             "collectSales",
             "syncStatement",
@@ -795,26 +802,50 @@ abstract contract HandlerBase is Test {
     }
 
     /// the skim rate the live anti sniper module reports for the next swap, in hundred thousandths. 90 percent at
-    /// launch, falling linearly to the 10 percent baseline over the window
+    /// launch, falling linearly to the 6.9 percent baseline over the window
     function _skimBps() internal view returns (uint256 bps) {
-        bps = IArtCoinsMevSkim(lc.mevModule).currentSkimBps(poolId);
-        if (bps < 10_000) bps = 10_000;
+        (uint24 b,) = IArtCoinsMevSkimV2(mev).currentSkimBps(poolId);
+        bps = b;
+        if (bps < 6_900) bps = 6_900;
     }
 
     /// the legs of the skim on `volume` eth at `bps`, from the rules of the hook written out independently. an
-    /// exact input swap skims volume * bps, an exact output swap grosses it up. 95 percent of the baseline goes to
-    /// the core with the whole extra, the rest of the baseline to the creator
+    /// exact input swap skims volume * bps, an exact output swap grosses it up. 90 percent of the baseline goes to
+    /// the router (the bounty recipient) with the whole extra, the rest of the baseline to the protocol
     function _expectSkim(uint256 volume, bool exactIn, uint256 bps)
         internal
         pure
         returns (uint256 bounty, uint256 protocol)
     {
         uint256 total = exactIn ? volume * bps / 100_000 : volume * bps / (100_000 - bps);
-        uint256 base = exactIn ? volume * 10_000 / 100_000 : volume * 10_000 / (100_000 - bps);
+        uint256 base = exactIn ? volume * 6_900 / 100_000 : volume * 6_900 / (100_000 - bps);
         if (base > total) base = total;
-        uint256 share = base * 9500 / 10_000;
+        uint256 share = base * 9000 / 10_000;
         protocol = base - share;
         bounty = share + (total - base);
+    }
+
+    /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip comes off the top,
+    /// the payees' parts per million of the rest only once the split is on
+    function _routerEngine(uint256 amount) internal view returns (uint256) {
+        uint256 tip = amount * feeRouter.tipPpm() / 1_000_000;
+        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
+        uint256 rest = amount - tip;
+        if (feeRouter.splitOn()) {
+            (, uint32[] memory ppm) = feeRouter.payees();
+            for (uint256 i; i < ppm.length; ++i) {
+                rest -= (amount - tip) * ppm[i] / 1_000_000;
+            }
+        }
+        return rest;
+    }
+
+    /// flushes the fee router as the flusher. returns the eth the router held and what the core must receive of it
+    function _flushRouter() internal returns (uint256 held, uint256 toCore) {
+        held = address(feeRouter).balance;
+        toCore = _routerEngine(held);
+        vm.prank(flusher);
+        feeRouter.flush();
     }
 
     /// the selector a failed swap really died of. the pool manager wraps a revert of the hook, so look inside
@@ -903,8 +934,8 @@ abstract contract HandlerBase is Test {
         bool exactIn;
     }
 
-    /// buys coin with eth through the launch pool. exact in or exact out. the skim of the live hook goes into the
-    /// core's receive() and funds the pot. inside the sniper window that is most of the swap
+    /// buys coin with eth through the launch pool. exact in or exact out. the skim of the live hook goes to the fee router
+    /// and the flush after the swap books it in the pot. inside the sniper window that is most of the swap
     function buyCoin(uint256 aSeed, uint256 amtSeed, uint256 mode) external checked {
         uint8 a = A_BUY_COIN;
         address who = _actor(aSeed);
@@ -935,39 +966,38 @@ abstract contract HandlerBase is Test {
         _rsCheck(rs, 0);
     }
 
-    /// buys coin out of the hookless side pool, which is a venue of the coin's buy tax. 15 percent of the coin goes
-    /// to the burn address, which holds it: that is a transfer, not a burn, so the supply must not move. the side
-    /// pool pays no skim, so the core's books must not move either
-    function sideBuy(uint256 aSeed, uint256 amtSeed) external checked {
-        uint8 a = A_SIDE_BUY;
+    /// tries to move coin between wallets and into a side pool. the coin is restricted: the pool is the only way to
+    /// move it, so a wallet to wallet transfer must revert and move nothing. a transfer to the core is the one thing that
+    /// passes (the core is on the allowlist), and the owner takes it out again with `rescueCoin`. the books of the core
+    /// must not move either way
+    function walletMove(uint256 aSeed, uint256 amtSeed) external checked {
+        uint8 a = A_WALLET_MOVE;
         address who = _actor(aSeed);
-        uint256 eth = _logBound(amtSeed, 1e13, 0.2 ether);
+        address other = _actor(aSeed >> 8);
+        uint256 bal = coin.balanceOf(who);
+        if (bal < 2 || who == other) return _skip(a);
+        uint256 amt = bound(amtSeed, 1, bal / 2);
         uint256 b0 = address(core).balance;
         uint256 pot0 = core.ethPot();
-        uint256 rate0 = core.ethRate();
-        uint256 dead0 = coin.balanceOf(DEAD);
-        uint256 coin0 = coin.balanceOf(who);
         uint256 supply0 = coin.totalSupply();
-        vm.deal(who, who.balance + eth);
         _att(a);
         vm.prank(who);
-        try router.swap{value: eth}(sideKey, true, -int256(eth), who) returns (BalanceDelta d) {
+        try coin.transfer(other, amt) returns (bool) {
+            _flag(V_SUPPLY, "a wallet to wallet transfer of the restricted coin went through");
+        } catch {
             _ok(a);
-            // forge-lint: disable-next-line(unsafe-typecast)
-            uint256 gross = uint256(uint128(d.amount1()));
-            uint256 tax = gross * coin.taxBps() / 10_000;
-            if (coin.balanceOf(who) - coin0 != gross - tax) {
-                _flag(V_SUPPLY, "the side pool buyer did not get 85 percent");
-            }
-            if (coin.balanceOf(DEAD) - dead0 != tax) _flag(V_SUPPLY, "the buy tax did not go to the burn address");
-            if (coin.totalSupply() != supply0) _flag(V_SUPPLY, "a taxed buy moved the coin supply");
-            _eth(b0, 0, 0, "sideBuy");
-            if (core.ethPot() != pot0) _flag(V_POT, "a hookless pool swap changed the pot");
-            if (tax != 0) sideTaxed += tax;
-        } catch (bytes memory why) {
-            _failed(b0, pot0, rate0, "sideBuy");
-            if (swapFails[_rootSelector(why)]++ == 0) swapFailSels.push(_rootSelector(why));
         }
+        if (amtSeed % 3 == 0) {
+            // a gift to the core is accepted and sits there, the owner rescues it. nothing is booked
+            vm.prank(who);
+            coin.transfer(address(core), amt);
+            vm.prank(owner);
+            core.rescueCoin(who, amt);
+            if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "rescueCoin left coin in the core");
+        }
+        _eth(b0, 0, 0, "walletMove");
+        if (core.ethPot() != pot0) _flag(V_POT, "a coin move changed the pot");
+        if (coin.totalSupply() != supply0) _flag(V_SUPPLY, "a coin move changed the supply");
     }
 
     /// sells coin for eth through the launch pool. exact in or exact out.
@@ -1006,11 +1036,15 @@ abstract contract HandlerBase is Test {
     /// be booked into the pot. `exactVolume` is the eth volume the swap must have skimmed on, when known
     function _afterSwap(SwapPre memory p, Vm.Log[] memory logs, uint256 exactVolume, string memory what) internal {
         (uint256 volume, uint256 bounty, uint256 protocol) = _skimOf(logs);
-        if (p.bps > 10_000) windowSwaps++;
-        _eth(p.bal, 0, bounty, what);
-        // the hook's eth is split by feeToBuybackBps: that share to the coin buyback, the rest to the pot
-        uint256 fee = bounty * core.settings().feeToBuybackBps / 10_000;
-        if (core.ethPot() != p.pot + bounty - fee || core.ethToBuyback() != p.tb + fee) {
+        if (p.bps > 6_900) windowSwaps++;
+        // the hook paid the bounty leg to the router, nothing reached the core yet. the flush books the engine share
+        if (core.ethPot() != p.pot || address(core).balance != p.bal) _flag(V_POT, "the core booked before the flush");
+        (uint256 held, uint256 toCore) = _flushRouter();
+        if (held != bounty) _flag(V_POT, "the router received other than the hook bounty leg");
+        _eth(p.bal, 0, toCore, what);
+        // the router's eth is split by feeToBuybackBps in the core: that share to the coin buyback, the rest to the pot
+        uint256 fee = toCore * core.settings().feeToBuybackBps / 10_000;
+        if (core.ethPot() != p.pot + toCore - fee || core.ethToBuyback() != p.tb + fee) {
             _flag(V_POT, "swap skim not booked by the fee split");
         }
         if (volume != 0) {
@@ -1678,26 +1712,33 @@ abstract contract HandlerBase is Test {
         }
         (uint256 volume, uint256 bounty, uint256 protocol) = _skimOf(logs);
         uint256 budget = p.slice - p.tip0;
-        if (p.bps > 10_000) windowSwaps++;
+        if (p.bps > 6_900) windowSwaps++;
         if (bought == 0) _flag(V_BUYBACK, "buyback bought no coin");
         if (burned != bought) _flag(V_BUYBACK, "buyback did not burn exactly the coin it bought");
         if (spent == 0 || spent > budget) _flag(V_BUYBACK, "buyback spent more than the slice less the tip");
         if (evTip != tip) _flag(V_BUYBACK, "buyback tip event differs from what the caller received");
         if (tip != p.tip0 * spent / budget) _flag(V_BUYBACK, "buyback tip is not keeperTipBps of the slice, scaled");
-        // the sale proceeds the house owed were collected first, once, by the amount it owed
-        if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
-        gCollected += collected;
-        // the skim of the swap comes back through receive() and is split by feeToBuybackBps
-        uint256 feeShare = bounty * core.settings().feeToBuybackBps / 10_000;
-        if (core.ethToBuyback() != p.pool - spent - tip + feeShare) {
-            _flag(V_BUYBACK, "buyback pot is not the pot less what was spent and tipped, plus the fee share");
-        }
-        // eth leaves as the swap input plus the tip. the skim of the swap comes back as an inflow
-        _eth(p.bal, spent + tip, bounty + p.owed, "buyback");
-        if (core.ethPot() != p.pot + bounty - feeShare) _flag(V_POT, "buyback skim not booked to the pot");
+        _buybackPotChecks(p, spent, tip, bounty, collected);
         // a dust swap (the skim of it rounds to nothing) emits no skim event at all, and the fee share can now leave
         // one wei in the buyback pot, so a volume of zero is right when the whole skim rounds to zero
         _buybackSkimChecks(p, volume, bounty, protocol, spent, bought);
+    }
+
+    /// @dev the house, router flush and pot checks of a buyback (a helper so the locals of `_afterBuyback` fit the stack)
+    function _buybackPotChecks(BbPre memory p, uint256 spent, uint256 tip, uint256 bounty, uint256 collected) internal {
+        // the sale proceeds the house owed were collected first, once, by the amount it owed
+        if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
+        gCollected += collected;
+        // the skim of the swap went to the router. the flush books its engine share, split by feeToBuybackBps
+        (uint256 held, uint256 toCore) = _flushRouter();
+        if (held != bounty) _flag(V_BUYBACK, "the router received other than the hook bounty leg");
+        uint256 feeShare = toCore * core.settings().feeToBuybackBps / 10_000;
+        if (core.ethToBuyback() != p.pool - spent - tip + feeShare) {
+            _flag(V_BUYBACK, "buyback pot is not the pot less what was spent and tipped, plus the fee share");
+        }
+        // eth leaves as the swap input plus the tip. the skim of the swap comes back as an inflow after the flush
+        _eth(p.bal, spent + tip, toCore + p.owed, "buyback");
+        if (core.ethPot() != p.pot + toCore - feeShare) _flag(V_POT, "buyback skim not booked to the pot");
     }
 
     /// @dev the skim and burn checks of a buyback (a helper so the locals of `_afterBuyback` fit the stack)
@@ -1713,7 +1754,7 @@ abstract contract HandlerBase is Test {
         if (volume != spent && !dust) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
         (uint256 eb, uint256 ep) = _expectSkim(volume, true, p.bps);
         if (bounty != eb || protocol != ep) _flag(V_BUYBACK, "buyback skim differs from the hook rules");
-        if (coin.balanceOf(DEAD) != p.dead) _flag(V_BUYBACK, "the exempt buyback take was taxed to the burn address");
+        if (coin.balanceOf(DEAD) != p.dead) _flag(V_BUYBACK, "the buyback moved coin to the burn address");
         gSupply -= bought;
         gBurnedByBuyback += bought;
     }
@@ -1753,14 +1794,14 @@ abstract contract HandlerBase is Test {
     }
 
     /// sends eth to the core's receive(), and in phase 2 exit token. a send from an account is accepted and not
-    /// booked, the core books it only through skim. now and then the send is made from the hook's address, which
-    /// the core books into the pot at once. receive() must accept every one of them
+    /// booked, the core books it only through skim. now and then the eth is sent to the fee router and flushed, which the
+    /// core books into the pot at once. receive() must accept every one of them
     function donate(uint256 aSeed, uint256 amtSeed) external checked {
         uint8 a = A_DONATE;
         address who = _actor(aSeed);
         uint256 amt = _logBound(amtSeed, 1, 5 ether);
         bool fromHook = amtSeed % 4 == 1;
-        address sender = fromHook ? HOOK : who;
+        address sender = who;
         uint256 b0 = address(core).balance;
         uint256 pot0 = core.ethPot();
         uint256 tb0 = core.ethToBuyback();
@@ -1769,13 +1810,25 @@ abstract contract HandlerBase is Test {
         vm.deal(sender, sender.balance + amt);
         _att(a);
         receiveSends++;
-        vm.prank(sender);
-        (bool ok,) = address(core).call{value: amt}("");
+        uint256 expectIn = amt;
+        uint256 fee;
+        bool ok;
+        if (fromHook) {
+            // eth sent to the router and flushed: the engine share is booked as fees
+            vm.prank(sender);
+            (ok,) = address(feeRouter).call{value: amt}("");
+            if (ok) {
+                (, expectIn) = _flushRouter();
+                fee = expectIn * core.settings().feeToBuybackBps / 10_000;
+            }
+        } else {
+            vm.prank(sender);
+            (ok,) = address(core).call{value: amt}("");
+        }
         if (ok) {
             _ok(a);
-            _eth(b0, 0, amt, "donate");
-            uint256 fee = fromHook ? amt * core.settings().feeToBuybackBps / 10_000 : 0;
-            if (core.ethPot() != pot0 + (fromHook ? amt - fee : 0) || core.ethToBuyback() != tb0 + fee) {
+            _eth(b0, 0, expectIn, "donate");
+            if (core.ethPot() != pot0 + (fromHook ? expectIn - fee : 0) || core.ethToBuyback() != tb0 + fee) {
                 _flag(V_POT, "a donation was booked wrongly");
             }
         } else {

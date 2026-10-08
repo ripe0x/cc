@@ -5,7 +5,7 @@ import {console} from "forge-std/Test.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsMevSkim} from "../../src/interfaces/ArtCoins.sol";
+import {IArtCoinsMevSkimV2} from "../../src/interfaces/ArtCoinsV2.sol";
 import {InvariantFixture} from "./InvariantFixture.sol";
 import {HandlerBase} from "./HandlerBase.sol";
 
@@ -322,7 +322,7 @@ abstract contract InvariantsBase is InvariantFixture {
             "supply fell by something other than buyback and auction burns"
         );
         assertGe(coin.balanceOf(Mainnet.DEAD), handler.gDead(), "the burn address lost coin");
-        assertEq(coin.balanceOf(Mainnet.DEAD), handler.sideTaxed(), "the burn address holds more than the buy tax");
+        assertEq(coin.balanceOf(Mainnet.DEAD), handler.gDead(), "the burn address holds coin nothing sent it");
         assertEq(coin.balanceOf(address(core)), 0, "the core holds coin");
     }
 
@@ -448,9 +448,7 @@ abstract contract InvariantsBase is InvariantFixture {
         console.log("statements ever held", handler.everHeldCount(), "held now", core.heldStatements().length);
         console.log("coin supply", coin.totalSupply(), "burned by buybacks", handler.gBurnedByBuyback());
         console.log("burned by auction fills", handler.gBurnedByAuction(), "held by the burn address", handler.gDead());
-        console.log(
-            "swaps under a skim above baseline", handler.windowSwaps(), "taxed to the burn address", handler.sideTaxed()
-        );
+        console.log("swaps under a skim above baseline", handler.windowSwaps());
         console.log("receive() direct sends", handler.receiveSends(), "failures", handler.receiveFails());
         uint256 f = handler.swapFailSelCount();
         for (uint256 i; i < f; ++i) {
@@ -487,7 +485,7 @@ abstract contract InvariantsBase is InvariantFixture {
         else if (a == 18) handler.exitStatement(w, x);
         else if (a == 19) handler.buybackExit(w, x);
         else if (a == 20) handler.moduleMode(w);
-        else if (a == 21) handler.sideBuy(w, x);
+        else if (a == 21) handler.walletMove(w, x);
         else if (a == 22) handler.endAuction(w, x);
         else if (a == 23) handler.collectSales(w);
         else if (a == 24) handler.syncStatement(w, x);
@@ -712,16 +710,17 @@ contract InvariantsPhase1Window is InvariantsBase {
     /// the run starts inside the window with the skim well above the baseline
     function test_startsInsideTheSniperWindow() public view {
         assertLt(block.timestamp, launchTime + SNIPER_WINDOW / 2);
-        assertGt(_skimBpsNow(), 10_000);
+        assertGt(_skimBpsNow(), 6_900);
     }
 
     function _skimBpsNow() internal view returns (uint256) {
-        return IArtCoinsMevSkim(lc.mevModule).currentSkimBps(poolId);
+        (uint24 bps,) = IArtCoinsMevSkimV2(lc.mevModule).currentSkimBps(poolId);
+        return bps;
     }
 
     /// everything the money side does inside the window first, then the standard smoke after a week
     function _smoke() internal override {
-        assertGt(_skimBpsNow(), 10_000);
+        assertGt(_skimBpsNow(), 6_900);
         _try(0, 20);
         _try(1, 20);
         _try(2, 40);

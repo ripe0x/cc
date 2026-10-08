@@ -5,7 +5,6 @@ import {ReviewHarness, IFactoryAdmin} from "./utils/ReviewHarness.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
 
 /// @notice the config mutation matrix, part one: the stack, the launch fields, the rate, the token code file and the
 /// people. every mutation says which outcome it must have, `runOne` runs it in its own call frame

@@ -175,13 +175,13 @@ contract FeeFlowTest is FeeBase {
         _stock();
         _checkSteady(Kind.BuyExactIn, 3 ether);
         // an exact figure: 1 eth in is 0.0621 to the router (6.21 points). the split is on after the stock buy, the tip is
-        // 0.5 percent, each payee takes 80_515 ppm of the rest, the pot gets the remainder
+        // 0.5 percent, the one payee takes 161_030 ppm of the rest, the pot gets the remainder
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(f.routerRise, 0.0621 ether);
         assertEq(f.skimProtocol, 0.0069 ether);
         uint256 rest = 0.0621 ether - 0.0621 ether * 5_000 / 1_000_000;
-        assertEq(f.potRise, rest - 2 * (rest * 80_515 / 1_000_000));
-        // 5.21 points of the buy in total, and the payees have 0.5 points each
+        assertEq(f.potRise, rest - rest * 161_030 / 1_000_000);
+        // 5.21 points of the buy in total, and the payee has 1.0 point
         assertApproxEqAbs(f.potRise, 0.0521 ether, 0.0003 ether);
         assertEq(feeRouter.splitOn(), true);
     }
@@ -201,23 +201,46 @@ contract FeeFlowTest is FeeBase {
         _checkSteady(Kind.SellExactOut, 0.5 ether);
     }
 
-    /// the payees are paid by the flush, 0.5 points of volume each (a touch less: the tip comes off first), and the tip
-    /// goes to the flusher
-    function test_flushPaysThePayeesAndTheTip() public {
+    /// the one launch payee is paid by the flush, 1.0 point of volume (a touch less: the tip comes off first), and the
+    /// tip goes to the flusher
+    function test_flushPaysThePayeeAndTheTip() public {
         _stock();
+        (address[] memory who, uint32[] memory ppm) = feeRouter.payees();
+        assertEq(who.length, 1, "one payee at launch");
+        assertEq(who[0], lc.creatorPayee);
+        assertEq(ppm[0], 161_030);
         address a = lc.creatorPayee;
-        address b = lc.artistPayee;
         uint256 a0 = a.balance;
-        uint256 b0 = b.balance;
         uint256 f0 = flusher.balance;
         Flow memory f = _flow(Kind.BuyExactIn, 10 ether, "");
         uint256 rest = f.routerRise - f.tip;
-        assertEq(a.balance - a0, rest * 80_515 / 1_000_000);
-        assertEq(b.balance - b0, rest * 80_515 / 1_000_000);
+        assertEq(a.balance - a0, rest * 161_030 / 1_000_000);
         assertEq(flusher.balance - f0, f.tip);
         assertEq(f.tip, f.routerRise * 5_000 / 1_000_000);
-        assertApproxEqRel(a.balance - a0, 0.05 ether, 0.01e18);
+        assertApproxEqRel(a.balance - a0, 0.1 ether, 0.01e18);
+        assertEq(f.toPayees, rest * 161_030 / 1_000_000);
+    }
+
+    /// the owner replaces the payees through `setPayees` and the flush pays both of them, the pot gets the rest
+    function test_flushPaysTwoPayeesAfterSetPayees() public {
+        _stock();
+        address a = lc.creatorPayee;
+        address b = makeAddr("secondPayee");
+        address[] memory who = new address[](2);
+        who[0] = a;
+        who[1] = b;
+        uint32[] memory ppm = new uint32[](2);
+        ppm[0] = 80_515;
+        ppm[1] = 80_515;
+        vm.prank(owner);
+        feeRouter.setPayees(who, ppm);
+        uint256 a0 = a.balance;
+        Flow memory f = _flow(Kind.BuyExactIn, 10 ether, "");
+        uint256 rest = f.routerRise - f.tip;
+        assertEq(a.balance - a0, rest * 80_515 / 1_000_000);
+        assertEq(b.balance, rest * 80_515 / 1_000_000);
         assertEq(f.toPayees, 2 * (rest * 80_515 / 1_000_000));
+        assertEq(f.potRise, rest - f.toPayees);
     }
 
     /// the protocol leg of the skim (0.69 points) is not the engine's: it goes to the v2 protocol controller, by push

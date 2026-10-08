@@ -170,7 +170,6 @@ abstract contract Fixture is Test, ProdDeployer {
         lc.owner = owner;
         lc.creator = creator;
         lc.creatorPayee = _user("creatorPayee");
-        lc.artistPayee = _user("artistPayee");
         lc.name = "Fixture Coin";
         lc.symbol = "FIXT";
         lc.salt = FIXTURE_SALT;
@@ -183,6 +182,8 @@ abstract contract Fixture is Test, ProdDeployer {
         Deployed memory d = deploySystem(owner, lc);
         vm.stopPrank();
 
+        // `deploySystem` filled the router into its own copy of the config
+        lc.stack.feeSource = d.router;
         core = ICore(payable(d.core));
         coin = IArtCoinsTokenV2(d.coin);
         ctl = IControllerV1(d.controller);

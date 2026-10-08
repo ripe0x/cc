@@ -75,8 +75,7 @@
   },
   "router": {
     "creatorPayee": "0xCB43078C32423F5348Cab5885911C3B5faE217F9",
-    "artistPayee": "0x0000000000000000000000000000000000000000",
-    "payeePpm": 80515,
+    "payeePpm": 161030,
     "tipPpm": 5000,
     "tipCap": 5000000000000000
   }

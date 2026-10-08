@@ -45,11 +45,10 @@ struct LaunchConfig {
     /// and the Core, which the builder always adds (docs/FLOW.md 29)
     bool restricted;
     address[] allowed;
-    // the fee router (docs/FLOW.md 10.6): two payees by parts per million of a flush, the tip of the caller of `flush`
+    // the fee router (docs/FLOW.md 10.6): one payee at launch, by parts per million of a flush, the tip of the caller of
+    // `flush`. later payees are set through `setPayees`
     address creatorPayee;
-    /// a placeholder the deploy refuses until it is set
-    address artistPayee;
-    /// each payee's share of a flush after the tip, ppm. the router receives 6.21 points of 6.9, so 80_515 is 0.5 points
+    /// the payee's share of a flush after the tip, ppm. the router receives 6.21 points of 6.9, so 161_030 is 1.0 point
     uint32 payeePpm;
     uint32 tipPpm;
     uint96 tipCap;
@@ -90,7 +89,7 @@ abstract contract ConfigReader is CommonBase {
         c.sniperSeconds = 1800;
         c.protocolBps = 2000;
         c.restricted = true;
-        c.payeePpm = 80_515;
+        c.payeePpm = 161_030;
         c.tipPpm = 5_000;
         c.tipCap = 0.005 ether;
     }
@@ -190,7 +189,6 @@ abstract contract ConfigReader is CommonBase {
         c.restricted = vm.parseJsonBool(j, ".launch.restricted");
         c.allowed = vm.parseJsonAddressArray(j, ".launch.allowed");
         c.creatorPayee = vm.parseJsonAddress(j, ".router.creatorPayee");
-        c.artistPayee = vm.parseJsonAddress(j, ".router.artistPayee");
         c.payeePpm = _u32(j, ".router.payeePpm");
         c.tipPpm = _u32(j, ".router.tipPpm");
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -239,7 +237,6 @@ abstract contract ConfigReader is CommonBase {
         if (bytes(c.symbol).length == 0) tmp[n++] = "symbol";
         if (c.salt == bytes32(0)) tmp[n++] = "salt";
         if (c.creatorPayee == address(0)) tmp[n++] = "router.creatorPayee";
-        if (c.artistPayee == address(0)) tmp[n++] = "router.artistPayee";
         // the v2 stack is not live yet: its addresses are zero placeholders until it is
         if (c.stack.hook == address(0)) tmp[n++] = "stack.hook";
         if (c.stack.factory == address(0)) tmp[n++] = "stack.factory";

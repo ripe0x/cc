@@ -54,8 +54,6 @@ abstract contract InvariantFixture is Fixture {
     Handler internal handler;
     address internal filler;
     address internal whale;
-    TestLiquidityHelper internal lp;
-    PoolKey internal sideKey;
 
     /// @dev the suites differ in the exit phase, the controller, the start state and the tag of their counters.
     function _build(bool phase2, bool hostile, bool canSwapController, bool inWindow, string memory tag) internal {
@@ -70,7 +68,6 @@ abstract contract InvariantFixture is Fixture {
         }
         _ownerSetup(phase2, hostile, inWindow);
         _fundWhale();
-        _sidePool();
 
         Wiring memory w = Wiring({
             core: core,
@@ -78,7 +75,9 @@ abstract contract InvariantFixture is Fixture {
             coin: coin,
             router: router,
             launchKey: launchKey,
-            sideKey: sideKey,
+            hook: lc.stack.hook,
+            mev: lc.mevModule,
+            feeRouter: feeRouter,
             poolId: poolId,
             owner: owner,
             v1: address(ctl),
@@ -154,19 +153,6 @@ abstract contract InvariantFixture is Fixture {
         coin.approve(address(router), type(uint256).max);
         assertGt(core.ethPot(), 3 ether);
         assertEq(address(core).balance, core.ethPot());
-    }
-
-    /// a hookless side pool of the coin in the real pool manager, which is a venue of the coin's buy tax, with the
-    /// whale's liquidity around the launch price
-    function _sidePool() internal {
-        lp = new TestLiquidityHelper();
-        sideKey = PoolKey(Currency.wrap(address(0)), Currency.wrap(address(coin)), 3000, 60, IHooks(address(0)));
-        PM.initialize(sideKey, TickMath.getSqrtPriceAtTick(175_020));
-        vm.deal(whale, whale.balance + 6 ether);
-        vm.startPrank(whale);
-        coin.approve(address(lp), type(uint256).max);
-        lp.modify{value: 5 ether}(sideKey, 174_000, 176_040, 1e23);
-        vm.stopPrank();
     }
 
     /// four actors with credits, eth and coin, all approved for the core and the router. every approval and every
@@ -327,7 +313,7 @@ abstract contract InvariantFixture is Fixture {
         s[n++] = HandlerBase.buyCoin.selector;
         s[n++] = HandlerBase.buyCoin.selector;
         s[n++] = HandlerBase.sellCoin.selector;
-        s[n++] = HandlerBase.sideBuy.selector;
+        s[n++] = HandlerBase.walletMove.selector;
         s[n++] = HandlerBase.sellForEth.selector;
         s[n++] = HandlerBase.sellForEth.selector;
         s[n++] = HandlerBase.listingStrategy.selector;
