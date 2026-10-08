@@ -13,37 +13,55 @@ import {Mainnet, Stack, Settings, IStatements} from "../src/interfaces/Interface
 import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
+import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
-import {SystemBuilder} from "./Builder.sol";
-import {Report} from "./Report.sol";
+import {PostflightPool} from "./PostflightPool.sol";
 
 /// @notice reads a launched system back and compares it with the config. read only, safe against mainnet any time.
-/// run it right after the launch: the supply and rate rows are exact at launch and tolerant once trading started
-abstract contract PostflightChecks is SystemBuilder, Report {
-    using PositionInfoLibrary for PositionInfo;
-
-    /// @dev the locker keeps rounding dust of the supply
-    uint256 internal constant LOCKER_DUST_MAX = 1e6;
-
-    /// @dev a staticcall that never reverts. ok is false when the call failed or returned less than a word
-    function _word(address target, bytes memory data) internal view returns (bool ok, uint256 w) {
-        bytes memory out;
-        (ok, out) = target.staticcall(data);
-        if (ok && out.length >= 32) w = abi.decode(out, (uint256));
-        else ok = false;
+/// run it right after the launch: the supply and rate rows are exact at launch and tolerant once trading started.
+/// the rows that the owner can change afterwards (settings, locks, owner, the coin, the router) turn into warnings when the
+/// operator names the change: SETTINGS_CHANGED, LOCKS_CHANGED, OWNER_CHANGED, COIN_CHANGED, ROUTER_CHANGED = 1
+abstract contract PostflightChecks is PostflightPool {
+    /// @notice the deployer of the launch from the environment (DEPLOYER), zero when not given. a test overrides it
+    function _deployerEnv() internal view virtual returns (address) {
+        return vm.envOr("DEPLOYER", address(0));
     }
 
     function postflight(LaunchConfig memory c, address core_) internal {
+        postflightAs(c, core_, _deployerEnv());
+    }
+
+    /// @notice every postflight row. `deployer` (zero when unknown) adds the rows that need the creation nonces: the router
+    /// and the controller were created by it right before the Core, and the coin equals the factory prediction
+    function postflightAs(LaunchConfig memory c, address core_, address deployer) internal {
         _reset();
         _code("code: core", core_);
         if (core_.code.length == 0) return;
         ICore core = ICore(payable(core_));
+        // derived, never signed: the fee source is an immutable of the Core, and the config hash leaves it out
+        c.stack.feeSource = core.FEE_SOURCE();
         _postCore(c, core);
         address coin = core.COIN();
         _code("code: coin", coin);
         if (coin.code.length == 0) return;
-        _postV2Todo();
+        bytes32 poolId = _postPool(c, coin);
+        _postCoin(c, core_, coin, poolId);
+        _postRouter(c, core, deployer, coin);
+        _postPrediction(c, coin, deployer, core_);
         _postUnreadable(c);
+    }
+
+    /// @dev the coin equals the factory's prediction for the deployer. the prediction reads mutable factory state (the
+    /// default allowlist, the hook escrow), so a later change of it is a warning, never a failure. it proves the allowlist
+    /// the coin was built with when the factory state is still the launch state
+    function _postPrediction(LaunchConfig memory c, address coin, address deployer, address core_) private {
+        if (deployer == address(0)) return;
+        (bool ok, uint256 n) = _coreNonce(core_, deployer);
+        if (!ok) return;
+        address routerAt = vm.computeCreateAddress(deployer, n - 2);
+        (bool okp, address want) = _predict(c, deployer, routerAt, core_);
+        _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
     }
 
     /// @dev nonces to scan down from the deployer nonce when looking for the creation of the Core
@@ -62,13 +80,22 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     function firstController(address core_, address deployer) internal view returns (address ctl, bool found) {
         address named = _firstControllerEnv();
         if (named != address(0)) return (named, true);
-        if (deployer == address(0)) return (address(0), false);
+        (bool ok, uint256 n) = _coreNonce(core_, deployer);
+        if (!ok) return (address(0), false);
+        return (vm.computeCreateAddress(deployer, n - 1), true);
+    }
+
+    /// @notice the deployer nonce the Core was created at, scanning down from the deployer nonce. the deploy creates the
+    /// router at n - 2, the controller at n - 1 and the Core at n (`SystemDeployer.deploySystem`)
+    function _coreNonce(address core_, address deployer) internal view returns (bool, uint256) {
+        if (deployer == address(0)) return (false, 0);
         uint256 top = vm.getNonce(deployer);
-        uint256 stop = top > NONCE_SCAN ? top - NONCE_SCAN : 1;
-        for (uint256 n = top; n >= stop && n > 0; --n) {
-            if (vm.computeCreateAddress(deployer, n) == core_) return (vm.computeCreateAddress(deployer, n - 1), true);
+        uint256 stop = top > NONCE_SCAN ? top - NONCE_SCAN : 2;
+        if (stop < 2) stop = 2;
+        for (uint256 n = top; n >= stop; --n) {
+            if (vm.computeCreateAddress(deployer, n) == core_) return (true, n);
         }
-        return (address(0), false);
+        return (false, 0);
     }
 
     /// @notice the constructor arguments of the Core as its creation transaction carried them, in the encoding etherscan
@@ -81,6 +108,8 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         view
         returns (bytes memory)
     {
+        // the fee source is an immutable of the Core: it cannot drift, so it is read from the Core (the config file has none)
+        c.stack.feeSource = core.FEE_SOURCE();
         return abi.encode(c.owner, core.COIN(), firstController_, c.stack, c.rateStart, c.settings);
     }
 
@@ -105,6 +134,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
             );
         }
         // the live values are not constructor inputs: the owner can change them at any time
+        console.log("verify: router (the fee source) at", core.FEE_SOURCE());
+        console.log("verify: router constructor args (the owner)");
+        console.logBytes(abi.encode(c.owner));
         console.log("verify: LIVE controller now, NOT a constructor input", core.controller());
         console.log("verify: LIVE settings now, NOT a constructor input, abi encoded");
         console.logBytes(abi.encode(core.settings()));
@@ -148,9 +180,11 @@ abstract contract PostflightChecks is SystemBuilder, Report {
                 && !core.allowedTarget(c.stack.hook) && !core.allowedTarget(c.stack.factory)
                 && !core.allowedTarget(c.stack.locker) && !core.allowedTarget(c.stack.escrow)
                 && !core.allowedTarget(c.stack.poolManager) && !core.allowedTarget(core.COIN())
-                && !core.allowedTarget(address(core.HOUSE())) && !core.allowedTarget(c.stack.auctionFactory),
-            "seaport and CreditStrategy only"
+                && !core.allowedTarget(address(core.HOUSE())) && !core.allowedTarget(c.stack.auctionFactory)
+                && !core.allowedTarget(core.FEE_SOURCE()),
+            "seaport and CreditStrategy only, the router is not a target"
         );
+        _code("code: fee source (the router)", core.FEE_SOURCE());
         // after launch the owner may lock or set the exit module: LOCKS_CHANGED=1 turns the row into a report line
         bool launchState = !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
             && core.exitModule() == address(0);
@@ -338,12 +372,55 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         }
     }
 
-    /// @dev TODO(v2 port stage 3): the v2 read back. coin (restricted, the Core and nothing else on the allowlist, admin
-    /// the owner, supply in the pool), pool, hook `poolInfo` and `skimConfig` (bounty recipient the router, bounty bps,
-    /// skim 6.9 points, lp fee 0), mev module values, the locker slots (creator), the launch position, the router (engine
-    /// the Core, owner, payees, tip, split start). until they exist this row fails every postflight
-    function _postV2Todo() private {
-        _check("v2 coin, pool, hook, locker, mev, position and router read back", false, "TODO(v2 port stage 3): not ported yet");
+    /// @dev the router: the compiled code, created by the deployer right before the controller, the engine is the Core, the
+    /// owner is the config owner, payees and tip as signed, the split start after the anti sniper window, not locked by the
+    /// deploy. the owner can change every setting afterwards: ROUTER_CHANGED=1 turns those rows into warnings
+    function _postRouter(LaunchConfig memory c, ICore core, address deployer, address coin_) private {
+        IFeeRouter r = IFeeRouter(payable(core.FEE_SOURCE()));
+        address ra = address(r);
+        if (ra.code.length == 0) return;
+        _check(
+            "router: runtime code is the compiled FeeRouter",
+            keccak256(ra.code) == keccak256(vm.getDeployedCode("FeeRouter.sol:FeeRouter")),
+            vm.toString(ra)
+        );
+        if (deployer != address(0)) {
+            (bool ok, uint256 n) = _coreNonce(address(core), deployer);
+            _check(
+                "router: created by the deployer two nonces before the Core",
+                ok && vm.computeCreateAddress(deployer, n - 2) == ra,
+                vm.toString(ra)
+            );
+        }
+        bool ch = _routerChanged();
+        _soft(ch, "router: engine is the Core", r.engine() == address(core), vm.toString(r.engine()), "ROUTER_CHANGED=1");
+        _soft(ch, "router: owner is the config owner", r.owner() == c.owner, vm.toString(r.owner()), "ROUTER_CHANGED=1");
+        _soft(ch, "router: not locked", !r.locked(), "the deploy does not lock the router", "ROUTER_CHANGED=1");
+        _warn("warn: router has no pending owner", r.pendingOwner() == address(0), "an owner handover is offered");
+        _postRouterSettings(c, r, ch, coin_);
+    }
+
+    function _postRouterSettings(LaunchConfig memory c, IFeeRouter r, bool ch, address coin_) private {
+        (address[] memory who, uint32[] memory ppm) = r.payees();
+        bool payees = who.length == 1 && who[0] == c.creatorPayee && ppm[0] == c.payeePpm;
+        _soft(ch, "router: payee and share equal the config", payees, string.concat("payees ", vm.toString(who.length)), "ROUTER_CHANGED=1");
+        _soft(
+            ch,
+            "router: tip equals the config",
+            r.tipPpm() == c.tipPpm && r.tipCap() == c.tipCap,
+            string.concat("tip ppm ", vm.toString(r.tipPpm()), " cap ", vm.toString(r.tipCap())),
+            "ROUTER_CHANGED=1"
+        );
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, coin_);
+        _soft(
+            ch || r.splitOn(),
+            "router: split start is the launch time plus the anti sniper window",
+            info.launchedAt != 0 && r.splitStart() == uint256(info.launchedAt) + c.sniperSeconds,
+            string.concat("splitStart ", vm.toString(r.splitStart())),
+            "ROUTER_CHANGED=1 or the split is on"
+        );
+        _info("router: split", r.splitOn() ? "on" : "not started, everything goes to the engine");
+        _info("router: eth held", string.concat(vm.toString(address(r).balance), " wei, owed to payees ", vm.toString(r.totalOwed())));
     }
 
     /// @dev what a read back cannot cover, said in the output

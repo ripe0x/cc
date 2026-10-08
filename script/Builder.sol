@@ -89,8 +89,12 @@ abstract contract SystemBuilder is ConfigReader {
     /// @notice keccak256 of the canonical abi encoding of the whole launch config. it covers every value the launch
     /// depends on (the overrides included) and none of the machine (not the deployer). the operator signs off this
     /// one value: preflight prints it, `Deploy` needs it in CONFIG_HASH and postflight prints it again
-    function configHash(LaunchConfig memory l) internal pure returns (bytes32) {
-        return keccak256(abi.encode(l));
+    function configHash(LaunchConfig memory l) internal pure returns (bytes32 h) {
+        // `stack.feeSource` is the router the deploy creates: derived, never signed, so the hash leaves it out
+        address fs = l.stack.feeSource;
+        l.stack.feeSource = address(0);
+        h = keccak256(abi.encode(l));
+        l.stack.feeSource = fs;
     }
 
     /// @notice the address the v2 factory will give the coin, from its own `predictToken`. it depends on the sender

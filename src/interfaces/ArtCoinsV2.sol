@@ -167,6 +167,7 @@ interface IArtCoinsHookV2 {
     function globals() external view returns (HookGlobals memory);
     function isLauncher(address launcher) external view returns (bool);
     function constantsHash() external pure returns (bytes32);
+    function poolManager() external view returns (address); // BaseHook getter, not in the v2 interface file
     function setLauncher(address launcher, bool enabled) external;
     function setFeeEscrow(address escrow) external;
     function setExtensionAllowlist(address allowlist) external;
@@ -186,6 +187,8 @@ interface IArtCoinsTokenV2 {
     function canonicalPoolId() external view returns (bytes32);
     function poolManager() external view returns (address);
     function admin() external view returns (address);
+    function originalAdmin() external view returns (address);
+    function launcher() external view returns (address);
     function setAllowed(address account, bool allowed) external;
     function unrestrict() external;
     function lock() external;
@@ -230,6 +233,15 @@ interface IArtCoinsFeeEscrowV2 {
 }
 
 interface IArtCoinsMevSkimV2 {
+    /// the frozen per pool schedule. `schedule` is on the contract, not in the v2 interface file
+    struct SkimSchedule {
+        uint24 startingSkimBps;
+        uint24 endSkimBps;
+        uint32 windowSeconds;
+        uint40 startTime;
+    }
+
+    function schedule(bytes32 poolId) external view returns (SkimSchedule memory);
     function currentSkimBps(bytes32 poolId) external view returns (uint24 skimBps, bool active);
     function windowEnd(bytes32 poolId) external view returns (uint40);
     function hook() external view returns (address);
