@@ -140,4 +140,22 @@ contract V2PortRestrictionTest is FeeBase {
         core.rescueCoin(friend, 1e18);
         assertEq(coin.balanceOf(address(core)), 0);
     }
+
+    /// the coin admin can take the Core off the allowlist again: the buyback's take then consumes exactly the allowance the
+    /// hook granted, nothing is left to spend, and nobody can send coin to the Core any more
+    function test_buybackWorksAfterTheAdminDelistsTheCore() public {
+        _fillEthBuyback();
+        vm.prank(owner);
+        coin.setAllowed(address(core), false);
+        assertFalse(coin.isAllowed(address(core)));
+        uint256 supply0 = coin.totalSupply();
+        vm.prank(keeper);
+        core.buyback();
+        assertLt(coin.totalSupply(), supply0, "bought and burned");
+        assertEq(coin.transferAllowance(), 0, "the take consumed the whole allowance");
+        assertEq(coin.balanceOf(address(core)), 0);
+        vm.prank(trader);
+        vm.expectRevert();
+        coin.transfer(address(core), 1e18);
+    }
 }
