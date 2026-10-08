@@ -122,9 +122,17 @@ abstract contract FeeBase is Fixture {
         toProtocol = skim - toRouter;
     }
 
+    /// @dev moves past the sniper window and the router split start (the window end plus the deploy margin). the first
+    /// flush at or after the start turns the split on
+    function _skipToSplitStart() internal {
+        _skipSniperWindow();
+        uint256 at = feeRouter.splitStart();
+        if (block.timestamp < at) vm.warp(at);
+    }
+
     /// @dev moves past the sniper window, then gives the trader coin and the pool about 18 eth of depth
     function _stock() internal {
-        _skipSniperWindow();
+        _skipToSplitStart();
         _buyCoin(trader, 20 ether);
     }
 
@@ -297,7 +305,7 @@ contract FeeFlowTest is FeeBase {
         uint256 held = address(feeRouter).balance;
         assertGt(held, 10 ether, "the window skim waits in the router");
         assertEq(core.ethPot(), 0, "nothing booked before a flush");
-        _skipSniperWindow();
+        _skipToSplitStart();
         uint256 a0 = lc.creatorPayee.balance;
         (uint256 tip,, uint256 toEngine) = _routerSplit(held);
         assertEq(toEngine, held - tip, "the split is off until the first flush after the window");
