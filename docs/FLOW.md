@@ -232,3 +232,7 @@ FeeRouter, replacing 10.2 where they differ:
 * the engine gets the rest by a plain call with all gas. if that call fails the whole flush reverts and the eth waits.
 * owner setters, each with an event, all frozen by the one way `lock()`: `setEngine`, `setPayees`, `setTip` (ppm at most 20_000, cap at most 0.05 ether), `setSplitStart` (only while the split is not on).
 * flush is guarded against reentry and reverts while the engine is unset.
+
+### 10.7 amendment to decision 25 (owner, 2026-10-08)
+
+the router's payee list holds ONE entry at launch: the creator address (the config `creator`), with the combined share of 1.0 point of volume, which is 161_031 parts per million of router inflow (1.0 / 6.21). there is no separate artist payee and no placeholder for one: the owner will later point the payee at his own splitter contract with `setPayees`. the router keeps supporting up to 4 payees. because a payee may be a contract, the fixed gas cap on a payee payment is 100_000 and the `owed` and `claim` fallback stays.
