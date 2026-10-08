@@ -220,6 +220,66 @@ contract GasCapTest is SeaportBase {
         _row("flush with the split on (tip, two payees, the Core books the fees)", g, data);
     }
 
+    /// @dev the first flush at or after the split start: sends everything to the engine and turns the split on
+    function test_gas_routerFlush_firstAtSplitStart() public {
+        _skipToSplitStart();
+        autoFlush = false;
+        _buyCoin(funder, 5 ether);
+        assertFalse(feeRouter.splitOn());
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
+        _cool(address(feeRouter));
+        vm.prank(flusher);
+        uint256 g = gasleft();
+        feeRouter.flush();
+        g -= gasleft();
+        assertTrue(feeRouter.splitOn());
+        _row("flush that turns the split on (tip, engine only)", g, data);
+    }
+
+    /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), `skim()` books it, a payee claim on the
+    /// router, `rescueCoin` and `setTip`
+    function test_gas_escrowClaim_skim_rescue_routerClaim() public {
+        _skipToSplitStart();
+        _buyCoin(funder, 5 ether);
+        vm.deal(v2.hook, 1 ether);
+        vm.prank(v2.hook);
+        (bool ok,) = v2.escrow.call{value: 0.3 ether}(abi.encodeWithSignature("storeFeesNative(address)", address(core)));
+        assertTrue(ok);
+        bytes memory data = abi.encodeCall(ESCROW.claim, (address(core), address(0)));
+        _cool(v2.escrow);
+        vm.prank(stranger);
+        uint256 g = gasleft();
+        ESCROW.claim(address(core), address(0));
+        g -= gasleft();
+        _row("escrow claim of the Core credit (pays the Core, not booked)", g, data);
+
+        data = abi.encodeCall(core.skim, ());
+        _cool(address(core));
+        vm.prank(stranger);
+        g = gasleft();
+        core.skim();
+        g -= gasleft();
+        _row("skim books the claimed eth", g, data);
+
+        vm.prank(funder);
+        coin.transfer(address(core), 1_000e18);
+        data = abi.encodeCall(core.rescueCoin, (creator, 1_000e18));
+        _cool(address(core));
+        vm.prank(owner);
+        g = gasleft();
+        core.rescueCoin(creator, 1_000e18);
+        g -= gasleft();
+        _row("rescueCoin", g, data);
+
+        data = abi.encodeCall(IFeeRouter.setTip, (4_000, 0.004 ether));
+        _cool(address(feeRouter));
+        vm.prank(owner);
+        g = gasleft();
+        feeRouter.setTip(4_000, 0.004 ether);
+        g -= gasleft();
+        _row("router setTip", g, data);
+    }
+
     // ------------------------------------------------------------------ compose, exit, overprint
 
     function _measureCompose(string memory name) internal returns (uint256 g) {
