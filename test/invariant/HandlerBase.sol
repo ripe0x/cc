@@ -809,20 +809,24 @@ abstract contract HandlerBase is Test {
         if (bps < 6_900) bps = 6_900;
     }
 
-    /// the legs of the skim on `volume` eth at `bps`, from the rules of the hook written out independently. an
-    /// exact input swap skims volume * bps, an exact output swap grosses it up. 90 percent of the baseline goes to
-    /// the router (the bounty recipient) with the whole extra, the rest of the baseline to the protocol
-    function _expectSkim(uint256 volume, bool exactIn, uint256 bps)
-        internal
-        pure
-        returns (uint256 bounty, uint256 protocol)
-    {
-        uint256 total = exactIn ? volume * bps / 100_000 : volume * bps / (100_000 - bps);
-        uint256 base = exactIn ? volume * 6_900 / 100_000 : volume * 6_900 / (100_000 - bps);
-        if (base > total) base = total;
+    /// the legs of a skim of `skim` eth at the rate `bps`, from the rules of the hook written out independently: the
+    /// baseline part of the skim (6.9 points over the live rate) splits 90 percent to the router (the bounty recipient)
+    /// and the rest to the protocol, and the whole extra above the baseline goes to the router
+    function _expectSkim(uint256 skim, uint256 bps) internal pure returns (uint256 bounty, uint256 protocol) {
+        uint256 base = skim * 6_900 / bps;
+        if (base > skim) base = skim;
         uint256 share = base * 9000 / 10_000;
         protocol = base - share;
-        bounty = share + (total - base);
+        bounty = share + (skim - base);
+    }
+
+    /// whether `skim` is the skim the hook takes on a swap whose pool eth amount was `volume`. a buy (eth in) skims
+    /// on top of the pool amount, a sell skims out of it. exact input swaps round down once, so two wei of play
+    function _skimTotalOk(uint256 volume, bool buy, uint256 bps, uint256 skim) internal pure returns (bool) {
+        uint256 total = buy ? volume * bps / (100_000 - bps) : volume * bps / 100_000;
+        // the rounding of the pool amount is scaled by bps / (100_000 - bps) on a buy, which is 9 at the 90 point start
+        uint256 tol = buy ? 2 + 2 * bps / (100_000 - bps) + 1 : 2;
+        return skim + tol >= total && skim <= total + tol;
     }
 
     /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip comes off the top,
@@ -932,6 +936,7 @@ abstract contract HandlerBase is Test {
         uint256 rate;
         uint256 bps;
         bool exactIn;
+        bool buy;
     }
 
     /// buys coin with eth through the launch pool. exact in or exact out. the skim of the live hook goes to the fee router
@@ -942,6 +947,7 @@ abstract contract HandlerBase is Test {
         uint256 eth = _logBound(amtSeed, 1e13, 25 ether);
         SwapPre memory p;
         p.exactIn = mode % 3 != 0;
+        p.buy = true;
         p.bps = _skimBps();
         // an exact out buy pays the gross up of the skim on top, which is large inside the window
         uint256 value = p.exactIn ? eth : eth * 2 * 100_000 / (100_000 - p.bps) + 1e12;
@@ -1048,14 +1054,23 @@ abstract contract HandlerBase is Test {
             _flag(V_POT, "swap skim not booked by the fee split");
         }
         if (volume != 0) {
-            (uint256 eb, uint256 ep) = _expectSkim(volume, p.exactIn, p.bps);
+            (uint256 eb, uint256 ep) = _expectSkim(bounty + protocol, p.bps);
             if (bounty != eb) _flag(V_POT, "skim bounty differs from the hook rules at the live rate");
             if (protocol != ep) _flag(V_POT, "skim creator leg differs from the hook rules at the live rate");
+            if (!_skimTotalOk(volume, p.buy, p.bps, bounty + protocol)) {
+                _flag(V_POT, "skim total differs from the hook rules at the live rate");
+            }
         }
-        if (exactVolume != 0 && volume != exactVolume) _flag(V_POT, "skim volume is not the eth the swap spent");
+        // the hook reports the pool eth amount, which is the eth spent less the skim on an exact input buy
+        if (exactVolume != 0 && (volume + bounty + protocol) + 2 < exactVolume) {
+            _flag(V_POT, "skim volume is not the eth the swap spent");
+        }
+        if (exactVolume != 0 && (volume + bounty + protocol) > exactVolume) {
+            _flag(V_POT, "skim volume is not the eth the swap spent");
+        }
         // the whole skim is at most 90 percent of the gross eth of the swap. an exact output swap grosses the
         // skim up on top of the eth the pool moved
-        uint256 gross = p.exactIn ? volume : volume + bounty + protocol;
+        uint256 gross = p.buy ? volume + bounty + protocol : volume;
         if ((bounty + protocol) * 100_000 > gross * 90_000 + 100_000) {
             _flag(V_POT, "skim above 90 percent of the swap");
         }
@@ -1751,8 +1766,9 @@ abstract contract HandlerBase is Test {
         uint256 bought
     ) internal {
         bool dust = volume == 0 && spent * p.bps / 100_000 == 0;
-        if (volume != spent && !dust) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
-        (uint256 eb, uint256 ep) = _expectSkim(volume, true, p.bps);
+        uint256 sum = volume + bounty + protocol;
+        if ((sum != spent) && !dust) _flag(V_BUYBACK, "buyback skim volume plus skim is not the eth spent");
+        (uint256 eb, uint256 ep) = _expectSkim(bounty + protocol, p.bps);
         if (bounty != eb || protocol != ep) _flag(V_BUYBACK, "buyback skim differs from the hook rules");
         if (coin.balanceOf(DEAD) != p.dead) _flag(V_BUYBACK, "the buyback moved coin to the burn address");
         gSupply -= bought;

@@ -37,7 +37,7 @@ import {HandlerSale} from "./HandlerSale.sol";
 /// few seconds after launch, the skim is 90 percent).
 abstract contract InvariantFixture is Fixture {
     /// eth the whale spends on coin. in steady state 9.5 percent of it becomes pot
-    uint256 internal constant FUND_ETH = 40 ether;
+    uint256 internal constant FUND_ETH = 100 ether;
     /// credits that stay in the eth pile after the pre filled composes, so two more fill it to 80
     uint256 internal constant LEFT_IN_PILE = 78;
     /// statements composed and listed before the run
