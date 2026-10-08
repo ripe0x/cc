@@ -18,6 +18,12 @@ contract ConfigTest is Fixture {
         return changedFlag;
     }
 
+    bool internal coinFlag;
+
+    function _coinChanged() internal view override returns (bool) {
+        return coinFlag;
+    }
+
     function _same(LaunchConfig memory a, LaunchConfig memory b) internal pure returns (bool) {
         return keccak256(abi.encode(a)) == keccak256(abi.encode(b));
     }
@@ -331,6 +337,50 @@ contract ConfigTest is Fixture {
         assertEq(_failedNames(), "");
         _print("postflight");
         assertGe(rows.length, 85, "postflight rows");
+    }
+
+    /// V2R-5: the postflight compares the runtime code of the Core and of the controller with the compiled artifacts
+    /// (immutables and the library address masked). one changed byte in either fails exactly its row
+    function test_postflightComparesTheCoreAndControllerRuntime() public {
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), "");
+        string memory coreRow = "core: runtime code is the compiled Core (immutables and the library address masked)";
+        string memory ctlRow = "controller: runtime code is the compiled ControllerV1 (immutables masked)";
+        assertTrue(_warnClean(coreRow) && _warnClean(ctlRow), "both rows pass on the fixture");
+
+        bytes memory c = address(core).code;
+        c[c.length - 1] = bytes1(uint8(c[c.length - 1]) ^ 1);
+        vm.etch(address(core), c);
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), coreRow);
+        c[c.length - 1] = bytes1(uint8(c[c.length - 1]) ^ 1);
+        vm.etch(address(core), c);
+
+        bytes memory k = address(ctl).code;
+        k[k.length - 1] = bytes1(uint8(k[k.length - 1]) ^ 1);
+        vm.etch(address(ctl), k);
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), ctlRow);
+    }
+
+    /// V2R-5: the coin's image, metadata and context are read back. the admin changing them fails the row until the
+    /// operator names the change (COIN_CHANGED=1), then it is a warning
+    function test_postflightReadsTheCoinImageMetadataAndContext() public {
+        string memory row = "coin: image, metadata and context are empty as launched";
+        postflightAs(lc, address(core), owner);
+        assertTrue(_warnClean(row), "empty at launch");
+        vm.startPrank(owner);
+        (bool ok1,) = address(coin).call(abi.encodeWithSignature("updateImage(string)", "ipfs://img"));
+        (bool ok2,) = address(coin).call(abi.encodeWithSignature("updateMetadata(string)", "{}"));
+        vm.stopPrank();
+        assertTrue(ok1 && ok2, "the admin updates the coin");
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), row);
+        assertFalse(_warnClean(row));
+        coinFlag = true;
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), "");
+        assertFalse(_warnClean("warn: coin: image, metadata and context are empty as launched"));
     }
 
     function test_supplyConstantMatchesCore() public view {

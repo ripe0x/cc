@@ -188,6 +188,16 @@ abstract contract PostflightChecks is PostflightPool {
             "seaport and CreditStrategy only, the router is not a target"
         );
         _code("code: fee source (the router)", core.FEE_SOURCE());
+        _check(
+            "core: runtime code is the compiled Core (immutables and the library address masked)",
+            runtimeMatchesArtifact(address(core), "Core"),
+            vm.toString(address(core))
+        );
+        _check(
+            "controller: runtime code is the compiled ControllerV1 (immutables masked)",
+            runtimeMatchesArtifact(ctl, "ControllerV1"),
+            vm.toString(ctl)
+        );
         // after launch the owner may lock or set the exit module: LOCKS_CHANGED=1 turns the row into a report line
         bool launchState = !core.controllerLocked() && !core.exitModuleLocked() && !core.targetsLocked()
             && core.exitModule() == address(0);
@@ -431,7 +441,7 @@ abstract contract PostflightChecks is PostflightPool {
     function _postUnreadable(LaunchConfig memory c) private {
         _info(
             "not readable on chain",
-            "protocolBps argument, sniper fee config, token image metadata context, the deploy fee paid, the salt itself"
+            "protocolBps argument, sniper fee config, the deploy fee paid, the salt itself"
         );
         _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
     }

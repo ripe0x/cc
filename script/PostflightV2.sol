@@ -9,6 +9,67 @@ import {Report} from "./Report.sol";
 /// @notice the safe readers and the coin side of the postflight (docs/FLOW.md 10.4): every read is a staticcall that
 /// reports a failure instead of reverting, so a wrong address turns into a failed row and never aborts the table
 abstract contract PostflightV2 is SystemBuilder, Report {
+    // ------------------------------------------------------------------ runtime code identity
+
+    /// @dev the {start, length} pairs (packed start << 128 | length) of the immutable slots and the library address
+    /// slots of an artifact, read once from its json and kept: the json is large and a postflight may run many times
+    mapping(bytes32 => uint256[]) private _idMasks;
+
+    /// @dev json objects decode in key order: length, then start
+    struct IdRef {
+        uint256 length;
+        uint256 start;
+    }
+
+    function _idCollect(string memory j, string memory path, uint256[] storage out) private {
+        IdRef[] memory refs = abi.decode(vm.parseJson(j, path), (IdRef[]));
+        for (uint256 i; i < refs.length; ++i) {
+            out.push((refs[i].start << 128) | refs[i].length);
+        }
+    }
+
+    function _idMaskOf(string memory name) private returns (uint256[] storage m) {
+        m = _idMasks[keccak256(bytes(name))];
+        if (m.length != 0) return m;
+        string memory j = vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));
+        string[] memory ids = vm.parseJsonKeys(j, ".deployedBytecode.immutableReferences");
+        for (uint256 i; i < ids.length; ++i) {
+            _idCollect(j, string.concat(".deployedBytecode.immutableReferences.", ids[i]), m);
+        }
+        string[] memory files = vm.parseJsonKeys(j, ".deployedBytecode.linkReferences");
+        for (uint256 i; i < files.length; ++i) {
+            string memory fp = string.concat(".deployedBytecode.linkReferences['", files[i], "']");
+            string[] memory libs = vm.parseJsonKeys(j, fp);
+            for (uint256 k; k < libs.length; ++k) {
+                _idCollect(j, string.concat(fp, ".", libs[k]), m);
+            }
+        }
+    }
+
+    function _idZero(bytes memory code, uint256[] storage m) private view {
+        for (uint256 i; i < m.length; ++i) {
+            uint256 start = m[i] >> 128;
+            uint256 end = start + uint128(m[i]);
+            for (uint256 x = start; x < end; ++x) {
+                code[x] = 0;
+            }
+        }
+    }
+
+    /// @notice whether the runtime code at `at` is the runtime code of the compiled artifact `name` (`Core`,
+    /// `ControllerV1`), the immutable slots and the linked library address masked in both (the method of
+    /// test/BuildIdentity.t.sol). false when `at` has no code
+    function runtimeMatchesArtifact(address at, string memory name) internal returns (bool) {
+        if (at.code.length == 0) return false;
+        bytes memory live = at.code;
+        bytes memory built = vm.getDeployedCode(string.concat(name, ".sol:", name));
+        if (live.length != built.length) return false;
+        uint256[] storage m = _idMaskOf(name);
+        _idZero(live, m);
+        _idZero(built, m);
+        return keccak256(live) == keccak256(built);
+    }
+
     /// @dev a staticcall that never reverts. ok is false when the call failed or returned less than a word
     function _word(address target, bytes memory data) internal view returns (bool ok, uint256 w) {
         bytes memory out;
@@ -112,6 +173,14 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         bool ch = _coinChanged();
         _soft(ch, "coin: admin is the config owner", t.admin() == c.owner, vm.toString(t.admin()), "COIN_CHANGED=1");
         _soft(ch, "coin: restricted as in the config", t.restricted() == c.restricted, "restricted()", "COIN_CHANGED=1");
+        _soft(
+            ch,
+            "coin: image, metadata and context are empty as launched",
+            bytes(t.imageUrl()).length == 0 && bytes(t.metadata()).length == 0 && bytes(t.context()).length == 0,
+            string.concat("image ", t.imageUrl(), " metadata ", t.metadata(), " context ", t.context()),
+            "COIN_CHANGED=1"
+        );
+        _soft(ch, "coin: no metadata renderer", t.metadataRenderer() == address(0), vm.toString(t.metadataRenderer()), "COIN_CHANGED=1");
         _postAllowlist(c, core, t, ch);
         _warn("warn: coin allowlist is not locked", !t.locked(), "locked(): the admin can no longer change the allowlist");
         _warn("warn: core holds no coin", t.balanceOf(core) == 0, "stray coin, the owner can call rescueCoin");

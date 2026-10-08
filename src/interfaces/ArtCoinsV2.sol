@@ -198,6 +198,10 @@ interface IArtCoinsTokenV2 {
     function totalSupply() external view returns (uint256);
     function approve(address spender, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
+    function imageUrl() external view returns (string memory);
+    function metadata() external view returns (string memory);
+    function context() external view returns (string memory);
+    function metadataRenderer() external view returns (address);
 }
 
 interface IArtCoinsLpLockerV2 {
