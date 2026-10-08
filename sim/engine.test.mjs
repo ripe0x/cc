@@ -631,4 +631,16 @@ const R0 = 1.54e13;
   near(q('whipsaw', 48), 1, 1e-12, 'whipsaw before the fall'); near(q('whipsaw', 60), 0.4, 1e-12, 'whipsaw falls 60 percent in 12 hours');
   near(q('whipsaw', 108), 1, 1e-12, 'whipsaw recovers over 2 days'); near(q('whipsaw', 300), 1, 1e-12, 'whipsaw flat after');
 }
+// clampCredits, ceilDecayHours, askFloor
+{
+  const R = 1e13, MIN = 60;
+  const c1 = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 50, ceilPct: 1000, spendCapBps: 2000 }, 0.1), c20 = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 50, ceilPct: 1000, spendCapBps: 2000, clampCredits: 20 }, 0.1);
+  near(c1.clamp(), 0.1 * W * 2000 / 4330000, 1e-12, 'clamp affords one average credit'); near(c20.clamp(), c1.clamp() / 20, 1e-12, 'clampCredits 20 divides the clamp by 20');
+  const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 150, ceilDecayHours: 1 }, 1000);
+  near(d.ethRate(10 * 3600), R * (1 + 0.5 * Math.pow(2, -10)), 1e-12, 'no fill yet: headroom halves every hour from time zero');
+  d.spend(0.001, 0); const lp = d.lastPaidRate;
+  near(d.ethRate(3600), Math.min(R * 0.995 * Math.pow(2, 60), lp * 1.25), 1e-9, 'after one half life the headroom is halved');
+  const f = simulate({ days: 3, seed: 2, askFloor: 0.8 });
+  const g = simulate({ days: 3, seed: 2 }); ok(f.stats.costVsMarket >= g.stats.costVsMarket - 0.2, 'a floor on seller asks does not lower the price paid');
+}
 console.log(`ok, ${n} checks passed`);

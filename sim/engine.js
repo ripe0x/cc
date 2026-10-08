@@ -126,6 +126,10 @@ export const SIM_DEFAULTS = {
   // seller model toggle: one seller with an unlimited supply sells one credit per step whenever the bid has reached throttleFrac of the market price
   throttler: false,
   throttleFrac: 0.95,
+  clampCredits: 1, // the climb stops where the hourly cap affords this many average credits (1 as built)
+  ceilDecayHours: 0, // stepped: half life of the ceiling headroom since the last fill, 0 = none
+  askFloor: 0, // lowest seller ask as a multiple of the market price (0: none, asks are lognormal around 1)
+  onStep: null, // optional callback (t, core, marketPrice, rate) after each step, for traces
   whipsawStartDay: 2, // pricePath 'whipsaw': day the fall starts
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
@@ -260,7 +264,7 @@ export class Core {
   clamp() {
     const s = this.s;
     if (this.p.fundedRule === 'old') return Infinity;
-    return Math.min((this.ethPot * W * s.spendCapBps) / s.avgScore, s.rateCap);
+    return Math.min((this.ethPot * W * s.spendCapBps) / (s.avgScore * (this.p.clampCredits || 1)), s.rateCap);
   }
   ethRate(now) {
     const s = this.s;
@@ -269,7 +273,11 @@ export class Core {
     let cap = this.clamp();
     const rule = this.p.bidRule;
     if (rule !== 'built') {
-      if (rule === 'stepped') cap = Math.min(cap, (this.lastPaidRate * this.p.ceilPct) / 100);
+      if (rule === 'stepped') {
+        // ceilDecayHours > 0: the headroom above the last rate paid halves every ceilDecayHours since the last fill
+        const decay = this.p.ceilDecayHours > 0 ? Math.pow(0.5, (now - this.lastFillTime) / (this.p.ceilDecayHours * 3600)) : 1;
+        cap = Math.min(cap, this.lastPaidRate * (1 + (this.p.ceilPct / 100 - 1) * decay));
+      }
       if (cap <= r) return r;
       return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), cap);
     }
@@ -696,7 +704,7 @@ export function simulate(userParams = {}) {
   // the engine prices the credit at, so a change of flatBps or avgScore re keys everything
   const newOffer = () => {
     const pts = 80 + 720 * rng();
-    const m = Math.exp(p.askSigma * normal(rng));
+    const m = Math.max(Math.exp(p.askSigma * normal(rng)), p.askFloor);
     const prem = pts >= 790 ? 2.0 : pts >= 740 ? 1.12 : 1.0;
     return { pts, m, prem, key: (m * prem) / core.epts(pts), listed: rng() < p.listedShare };
   };
@@ -1071,6 +1079,7 @@ export function simulate(userParams = {}) {
     }
     prevRate = rr;
     rateMaxRatio = Math.max(rateMaxRatio, (core.epts(440) * rr) / (peff(t1) * W));
+    if (p.onStep) p.onStep(t1, core, Pe, rr);
     if (t1 % 3600 === 0) record(t1 / 3600, t1);
   }
 
