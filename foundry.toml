@@ -20,6 +20,8 @@ compilation_restrictions = [
 ]
 fs_permissions = [{ access = "read", path = "./" }]
 ffi = false
+# test contracts are compiled unlinked and linked when they run, so a change in src/ does not relink them
+dynamic_test_linking = true
 
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"
