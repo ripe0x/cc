@@ -4,6 +4,8 @@ binding for branch `flow`. where it conflicts with SPEC.md or docs/ARCHITECTURE.
 
 naming rule: only `exitModule` and `exitToken`. never name or describe them.
 
+superseded in part by section 10 (the port to the artcoins v2 stack, with its amendments 10.6 and 10.7). every statement in sections 1 to 9 about the v1 launch is marked superseded below and no longer true: the skim hook pushing to the Core, the 9.5 and 0.5 skim split, the tax, the factory admin steps, `deployTokenWithProtocolBpsAndTax`. the economic rules of the Core (settings, the bid, the sale, the exit, the locks) are unchanged.
+
 ## 1. owner decisions (all confirmed by the owner)
 
 | # | decision |
@@ -15,7 +17,7 @@ naming rule: only `exitModule` and `exitToken`. never name or describe them.
 | 5 | the opening limit is set on launch day at about 75% of the market price of a credit |
 | 6 | the split of sale proceeds between the pot and the buyback is an adjustable setting |
 | 7 | REVOKED by section 9 (decision 15). there is no timelock: the owner sets the controller, the exit module and the allowed targets at once, with three one way locks (9.6) and a two step handover (9.7) |
-| 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key amended by section 10.2: the fee router's owner can redirect future fees until the router is locked. amended by section 10.6 decision 28: the owner can call `rescueCoin(to, amount)`, a transfer of coin the Core holds, never of eth, credits, statements or exit token |
+| 8 | the owner can never transfer eth, credits, statements, coin or exit token out directly: no call moves them to an address the owner picks. this stays true under every combination of settings. what it does not mean: the owner sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit. the owner accepted that economic control (every setting adjustable at once, no timelock, no raise guard). the bounds below cap how fast it goes: at most 50% of the pot per transaction (47.4% measured) and 99.99% per day with every setting loosened (98.96% per day with only `setRate` at the launch settings), measured in `test_ACCEPTED_ownerCanOverpayAnAccompliceSeller` and `test_ACCEPTED_ownerPerDayWorstCase`. holders therefore trust the owner key amended by section 10.2: the fee router's owner can redirect future fees until the router is locked. amended by section 10.6 decision 28: the owner can call `rescueCoin(to, amount)`, a transfer of coin the Core holds, never of eth, credits, statements or exit token amended by section 10 (decision 28 and 10.2): the router owner can direct the fee stream to any engine until `lock()`, and the owner can send stray coin out of the Core with `rescueCoin`. eth, credits, statements and exit token still never leave by an owner call |
 
 ## 2. settings
 
@@ -50,11 +52,11 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | exitSliceCredits | 20 | 1 to 1_000 | |
 | rateCap | 123_200_000_000_000 (8 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
 | exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot` (section 8) |
-| feeToBuybackBps | 0 | 0 to 10_000 | share of the eth booked from the hook in `receive()` that goes to the coin buyback, the rest to the pot. last field of the struct (section 9) |
+| feeToBuybackBps | 0 | 0 to 10_000 | share of the eth booked from the fee router in `receive()` (the hook in v1, superseded by section 10) that goes to the coin buyback, the rest to the pot. last field of the struct (section 9) |
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
-the skim split (9.5 points to the engine, 0.5 to the creator) is fixed inside the artcoins pool at launch and cannot be made adjustable here. say so in the docs.
+the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.21 to the router and 0.69 the protocol leg, fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
 
 ## 3. flat bid
 
@@ -128,7 +130,7 @@ trust note for the docs (ARCHITECTURE accepted list): superseded by section 9 (n
 |---|---|
 | 12 | the coin symbol is `CC` (script/config/mainnet.json). the name is still a placeholder |
 | 13 | launch keeps `exitToBuybackBps` 5_000 |
-| 14 | new setting `feeToBuybackBps`: share of swap fee eth booked from the hook in `receive()` that goes to `ethToBuyback`, the rest to `ethPot`. launch 0, bounds 0 to 10_000. eth booked later by `skim()` goes to the pot as today |
+| 14 | new setting `feeToBuybackBps`: share of swap fee eth booked in `receive()` that goes to `ethToBuyback` (from the hook in v1, from the fee router since section 10), the rest to `ethPot`. launch 0, bounds 0 to 10_000. eth booked later by `skim()` goes to the pot as today |
 | 15 | NO TIMELOCK anywhere. decision 7 of section 1 is revoked. the queue, the delay constant, the queue events and the cancel path are deleted. the owner sets the controller, the exitModule, allowed targets and whatever else was queued with plain owner functions that take effect at once and emit an event. the validity rules of each action stay exactly as they are (section 8 for the exitModule, the forbidden target list, and so on). if an action named freeze exists, keep its meaning, it is just immediate |
 | 16 | how a statement is priced and sold moves into the controller. the Core keeps custody, a hard floor and the booking of the money |
 | 17 | launch sale design: the asking price starts at 110 percent of cost and falls one point every 3 hours to 75 percent (hour 105). in auction mode (launch) a first bid at the asking price opens the english auction on the house. in buy only mode a buyer pays the asking price and gets the statement at once. the owner flips the mode in the controller |

@@ -28,7 +28,7 @@ the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the am
 | the buyback swap, the pool key, the delta check and `burn` work unchanged on v2, the hook's skim goes to the router | `Fees.t.sol`, `FeeShare.t.sol` |
 | the hook's push gas is the stipend whatever `pushGas` says (flag 8) | `V2Stack.t.sol` `test_writingRecipientIsCreditedInEscrowAndClaims` |
 | restricted coin: `burn` and `burnFrom` bypass the rule, wallets cannot move coin, a side pool cannot be seeded, a just in time position cannot be built | `Fees.t.sol` `RestrictedCoinTest`, `ReviewPort.t.sol`, `V2PortRestriction.t.sol` |
-| the factory's `deployTokenAsOwner` takes the fee as value, `predictToken` matches the returned token | `Launch.t.sol`, `LaunchV2.t.sol` |
+| the factory's `deployTokenAsOwner` takes the fee as value, `predictToken` matches the returned token | `Launch.t.sol` |
 | a compose and the launch fit the 16,777,216 gas cap | `GasCap.t.sol`: compose 55.4 percent cold, launch 21.0 percent |
 
 ### still open
