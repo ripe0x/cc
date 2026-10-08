@@ -11,6 +11,9 @@ import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, Mainnet} from "../src/interfaces/Interfaces.sol";
 import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
+import {V2Stack} from "./utils/V2Stack.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
+import {IArtCoinsFactoryV2, IArtCoinsTokenV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {LaunchConfig} from "../script/LaunchConfig.sol";
 
 interface IUniversalRouterR {
@@ -22,28 +25,27 @@ interface IPermit2R {
 }
 
 /// @notice the launch rehearsal. forks mainnet at the LATEST block (read from the rpc, not the pinned one), runs the
-/// preflight, the real deploy path as the factory owner enables the deployer, the postflight, and a short smoke:
-/// a buy and a sell through the universal router and a real credit sold into the bid. it skips cleanly unless the
-/// env var REHEARSAL is set, so the default suite stays pinned and fast. it reads the config file named by
-/// LAUNCH_CONFIG, like the scripts do, so the operator rehearses the exact file they will launch with.
+/// preflight, the real deploy path as the factory owner, the postflight, and a short smoke: a buy and a sell through the
+/// universal router, a flush of the router and a real credit sold into the bid. it skips cleanly unless the env var
+/// REHEARSAL is set, so the default suite stays pinned and fast. it reads the config file named by LAUNCH_CONFIG, like the
+/// scripts do, so the operator rehearses the exact file they will launch with. while the v2 stack addresses of the file
+/// are still zero (v2 is not on mainnet) the vendored v2 artifacts are deployed onto the fork with the config owner as
+/// the factory owner, and the rehearsal says so. it measures the gas of every transaction of the deploy and asserts each
+/// one fits under the per transaction gas cap
 /// `set -a; . ./.env; set +a; REHEARSAL=1 LAUNCH_CONFIG=script/config/local.json forge test --match-path test/Rehearsal.t.sol -vv`
 contract RehearsalTest is Test, ProdDeployer {
     LaunchConfig internal c;
     Deployed internal d;
     address internal deployer;
     address internal trader;
+    bool internal stackIsRehearsal;
 
     function _user(string memory label) internal returns (address a) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         a = makeAddr(string.concat("rehearsal.", label, ".7d3a"));
         assertEq(a.code.length, 0, "account has code on the fork");
-    */
     }
 
     function test_rehearsal() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         if (bytes(vm.envOr("REHEARSAL", string(""))).length == 0) vm.skip(true);
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
         console.log("rehearsal at block", block.number, "timestamp", block.timestamp);
@@ -55,56 +57,72 @@ contract RehearsalTest is Test, ProdDeployer {
         c = loadConfig(file);
         if (c.owner == address(0)) c.owner = _user("owner");
         if (c.creator == address(0)) c.creator = _user("creator");
+        if (c.creatorPayee == address(0)) c.creatorPayee = _user("payee");
         if (bytes(c.name).length == 0) c.name = "Rehearsal Coin";
         if (bytes(c.symbol).length == 0) c.symbol = "REH";
         if (c.salt == bytes32(0)) c.salt = keccak256("credits engine rehearsal");
+        deployer = c.owner;
+        trader = _user("trader");
+        _stack();
         console.log("config hash");
         console.logBytes32(configHash(c));
-        deployer = _user("deployer");
-        trader = _user("trader");
-        vm.deal(deployer, 2 ether);
+        vm.deal(deployer, 5 ether);
         vm.deal(trader, 20 ether);
 
         _preflight();
         _deploy();
-        postflight(c, d.core);
+        postflightAs(c, d.core, deployer);
         _print("postflight after the launch");
         assertEq(_failedNames(), "", "postflight");
         _smoke();
-    */
+    }
+
+    /// @dev the v2 stack of the config. zero addresses mean v2 is not live: deploy the artifacts onto the fork, owned by
+    /// the config owner, who is the factory owner and the deployer
+    function _stack() internal {
+        if (c.stack.factory != address(0)) {
+            console.log("v2 stack from the config file, factory", c.stack.factory);
+            return;
+        }
+        console.log("v2 is not live: the vendored v2 artifacts are deployed onto the fork for the rehearsal");
+        stackIsRehearsal = true;
+        V2Stack.Stack memory v2 = V2Stack.deploy(V2Stack.mainnetParams(deployer));
+        c.stack.hook = v2.hook;
+        c.stack.factory = v2.factory;
+        c.stack.locker = v2.locker;
+        c.stack.escrow = v2.escrow;
+        c.mevModule = v2.mev;
     }
 
     function _failedNames() internal view returns (string memory list) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         (list,) = _failed();
-    */
     }
 
     function _preflight() internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        // before the factory owner acts the only acceptable failure is the deployer enablement, and only while the
-        // factory is deprecated
+        // before the factory owner sets the minimum lp fee to 0 the preflight names exactly that
+        IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(c.stack.factory);
         preflight(c, deployer);
-        _print("preflight before the factory owner enables the deployer");
+        _print("preflight before the owner command setMinLpFee(0)");
         string memory before_ = _failedNames();
-        bool open = !IArtCoinsFactory(c.stack.factory).deprecated();
-        assertEq(before_, open ? "" : "factory: deployer may launch", "preflight before enablement");
-
-        vm.prank(c.factoryOwner);
-        IArtCoinsFactory(c.stack.factory).setAdmin(deployer, true);
+        if (f.minLpFee() != 0) {
+            assertEq(
+                before_,
+                "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)",
+                "preflight before the owner command"
+            );
+            vm.prank(deployer);
+            f.setMinLpFee(0);
+        } else {
+            assertEq(before_, "", "the minimum lp fee is already 0");
+        }
         preflight(c, deployer);
-        _print("preflight after the factory owner enabled the deployer");
-        assertEq(_failedNames(), "", "preflight after enablement");
-    */
+        _print("preflight after the owner command");
+        assertEq(_failedNames(), "", "preflight after the owner command");
     }
 
     function _deploy() internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         uint256 balBefore = deployer.balance;
-        // the linked library is deployed before the core, once, by the same deployer
+        // the linked library is deployed before the controller, once, by the same deployer
         uint256 lg = gasleft();
         address lib = deployCode("CoreLib.sol:CoreLib");
         uint256 libGas = lg - gasleft();
@@ -113,37 +131,44 @@ contract RehearsalTest is Test, ProdDeployer {
         vm.stopPrank();
         // each transaction costs its execution gas, 21000 intrinsic and its calldata (4 gas per zero byte, 16 per other byte)
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
-        uint256[6] memory txGas = [
+        uint256[9] memory txGas = [
             libGas + 21_000 + _calldataGas(libCode) + 512,
-            stepGas[0] + 21_000 + _calldataGas(vm.getCode("ControllerV1.sol:ControllerV1")) + 512,
-            stepGas[1] + 21_000 + _calldataGas(vm.getCode("Core.sol:Core")) + 16_384,
-            stepGas[2] + 21_000
+            stepGas[0] + _createGas("ControllerV1.sol:ControllerV1") + 512,
+            stepGas[1] + _createGas("FeeRouter.sol:FeeRouter") + 512,
+            stepGas[2] + _createGas("Core.sol:Core") + 16_384,
+            stepGas[3] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
-                        IArtCoinsFactory.deployTokenWithProtocolBpsAndTax,
-                        (buildConfig(c, deployer, d.core), 0, buildTaxConfig(c, d.core))
+                        IArtCoinsFactoryV2.deployTokenAsOwner, (buildConfig(c, c.owner, d.router, d.core), c.protocolBps)
                     )
                 ),
-            stepGas[3] + 21_000 + 2_048,
-            stepGas[4] + 21_000 + 1_024
+            stepGas[4] + 21_000 + 1_024,
+            stepGas[5] + 21_000 + 2_048,
+            stepGas[6] + 21_000 + 1_024,
+            stepGas[7] + 21_000 + 1_024
         ];
-        string[6] memory names = [
+        string[9] memory names = [
             "1 library CoreLib (create2 deployer)",
             "2 controller",
-            "3 core (house creation inside)",
-            "4 launch through the factory",
-            "5 lock the extension slot",
-            "6 hand the token admin to the owner"
+            "3 router",
+            "4 core (house creation inside)",
+            "5 launch through the factory (deployTokenAsOwner)",
+            "6 router setEngine",
+            "7 router setPayees",
+            "8 router setTip (skipped when the router already holds the config tip)",
+            "9 router setSplitStart"
         ];
         uint256 total;
-        for (uint256 i; i < 6; ++i) {
+        for (uint256 i; i < 9; ++i) {
             total += txGas[i];
             console.log(string.concat("deploy gas, tx ", names[i]), txGas[i]);
+            assertLt(txGas[i], TX_GAS_CAP, string.concat("over the per transaction gas cap: ", names[i]));
         }
-        uint256 fee = IArtCoinsFactory(c.stack.factory).deployFee();
+        uint256 fee = IArtCoinsFactoryV2(c.stack.factory).deployFee();
         console.log("library at", lib);
-        console.log("total deploy gas, six transactions", total);
-        console.log("factory deploy fee (wei, sent as value of tx 4)", fee);
+        console.log("total deploy gas, nine transactions", total);
+        console.log("per transaction gas cap", TX_GAS_CAP);
+        console.log("factory deploy fee (wei, sent as value of tx 5)", fee);
         uint256[3] memory gwei_ = [uint256(1), 5, 20];
         for (uint256 i; i < 3; ++i) {
             uint256 cost = total * gwei_[i] * 1 gwei;
@@ -154,14 +179,12 @@ contract RehearsalTest is Test, ProdDeployer {
         }
         console.log("deployer paid wei (the fee only, the test gas price is 0)", balBefore - deployer.balance);
         console.log("core", d.core);
+        console.log("router", d.router);
         console.log("coin", d.coin);
-    */
     }
 
     /// @dev wei as a decimal eth string with five places
     function _eth(uint256 weiAmount) internal pure returns (string memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         uint256 whole = weiAmount / 1 ether;
         uint256 frac = (weiAmount % 1 ether) / 1e13;
         string memory f = vm.toString(frac);
@@ -169,23 +192,24 @@ contract RehearsalTest is Test, ProdDeployer {
             f = string.concat("0", f);
         }
         return string.concat(vm.toString(whole), ".", f);
-    */
+    }
+
+    /// @dev what a creation transaction costs beyond the measured constructor run: intrinsic 21000, the create 32000,
+    /// 200 per byte of runtime code deposit, and the calldata of the creation code. the pranked `deployCode` of the
+    /// measured steps does not meter the deposit, so it is added here
+    function _createGas(string memory artifact) internal view returns (uint256) {
+        return 21_000 + 32_000 + 200 * vm.getDeployedCode(artifact).length + _calldataGas(vm.getCode(artifact));
     }
 
     function _calldataGas(bytes memory data) internal pure returns (uint256 g) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         for (uint256 i; i < data.length; ++i) {
             g += data[i] == 0 ? 4 : 16;
         }
-    */
     }
 
     // ------------------------------------------------------------------ smoke
 
     function _v4Swap(bool zeroForOne, uint256 amountIn) internal view returns (bytes[] memory inputs) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         bytes memory actions =
             abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
         PoolKey memory k = d.launchKey;
@@ -198,16 +222,14 @@ contract RehearsalTest is Test, ProdDeployer {
         params[2] = abi.encode(cOut, uint256(0));
         inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, params);
-    */
     }
 
     function _smoke() internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         ICore core = ICore(payable(d.core));
-        IArtCoinsToken coin = IArtCoinsToken(d.coin);
+        IArtCoinsTokenV2 coin = IArtCoinsTokenV2(d.coin);
+        IFeeRouter router = IFeeRouter(payable(d.router));
         IUniversalRouterR ur = IUniversalRouterR(Mainnet.UNIVERSAL_ROUTER);
-        // past the anti sniper window, so the skim is the 10 point baseline
+        // past the anti sniper window, so the skim is the 6.9 point baseline
         vm.warp(block.timestamp + c.sniperSeconds + 1);
 
         uint256 pot = core.ethPot();
@@ -217,9 +239,19 @@ contract RehearsalTest is Test, ProdDeployer {
         assertGt(bought, 0, "bought coin through the universal router");
         // the baseline skim of the config (hundredths of a basis point of volume) times the bounty share of it
         uint256 want = uint256(1 ether) * c.baselineSkimBps / 100_000 * c.bountyBps / 10_000;
-        assertEq(core.ethPot() - pot, want, "the bounty share of the baseline skim reached the pot");
+        assertEq(address(router).balance, want, "the bounty share of the baseline skim reached the router");
+        assertEq(core.ethPot(), pot, "nothing reaches the pot before the flush");
+        address keeper = _user("keeper");
+        vm.prank(keeper);
+        router.flush();
+        uint256 tip = want * c.tipPpm / 1e6;
+        if (tip > c.tipCap) tip = c.tipCap;
+        assertEq(keeper.balance, tip, "the flusher is paid the tip");
+        assertEq(core.ethPot() - pot, want - tip, "the rest reached the pot (no payee share before the split starts)");
         assertEq(address(core).balance, core.ethPot(), "pot equals balance");
+        assertFalse(router.splitOn(), "the split has not started");
 
+        uint256 deadBefore = coin.balanceOf(Mainnet.DEAD);
         uint256 sellIn = bought / 2;
         pot = core.ethPot();
         vm.startPrank(trader);
@@ -229,19 +261,34 @@ contract RehearsalTest is Test, ProdDeployer {
         ur.execute(hex"10", _v4Swap(false, sellIn), block.timestamp + 1 hours);
         vm.stopPrank();
         assertGt(trader.balance, ethBefore, "sold coin for eth");
+        vm.prank(keeper);
+        router.flush();
         assertGt(core.ethPot(), pot, "the sell skim reached the pot too");
-        assertEq(coin.balanceOf(Mainnet.DEAD), 0, "no tax on canonical swaps");
+        assertEq(coin.balanceOf(Mainnet.DEAD), deadBefore, "no tax and no burn on canonical swaps");
+
+        // the split starts at the first flush after splitStart, and shares only from the flush after that
+        vm.warp(router.splitStart());
+        uint256 payee0 = c.creatorPayee.balance;
+        vm.deal(trader, 2 ether);
+        vm.prank(trader);
+        ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
+        vm.prank(keeper);
+        router.flush();
+        assertTrue(router.splitOn(), "the first flush at the start turns the split on");
+        assertEq(c.creatorPayee.balance, payee0, "that flush shared nothing");
+        vm.prank(trader);
+        ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
+        vm.prank(keeper);
+        router.flush();
+        assertGt(c.creatorPayee.balance, payee0, "from now on the payee is paid its share");
 
         _sellRealCredit(core);
-    */
     }
 
     /// finds a real credit held by an account without code and sells it into the bid
     function _sellRealCredit(ICore core) internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         assertTrue(core.funded(), "funded after the fees");
-        assertEq(core.ethRate(), c.rateStart, "no climb yet");
+        assertGe(core.ethRate(), c.rateStart, "the rate never starts below the config start");
         ICredits credits = ICredits(Mainnet.CREDITS);
         uint256 cap = core.ethPot() * 2000 / 10_000;
         for (uint256 id = 1; id < 2000; ++id) {
@@ -269,6 +316,5 @@ contract RehearsalTest is Test, ProdDeployer {
             return;
         }
         revert("no sellable real credit found");
-    */
     }
 }
