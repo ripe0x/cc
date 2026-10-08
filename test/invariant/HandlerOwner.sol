@@ -7,6 +7,7 @@ import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interf
 import {HandlerHouse} from "./HandlerHouse.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
+import {CountingEngine, RefusingEngine} from "../attackers/FlushEngines.sol";
 
 /// @notice the owner as an adversarial actor. the owner calls `setSettings` with random valid settings across the
 /// whole allowed bounds, extreme corners included, `setRate` and `setXRate` anywhere in their bounds, and invalid
@@ -623,5 +624,50 @@ abstract contract HandlerOwner is HandlerHouse {
             _flag(V_AUCTION, "a module set moved the exit auction");
         }
         if (core.allowedTarget(address(next))) _flag(V_OWNER, "a module set left the allowed target flag of the module");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                           REPOINT THE FEE ROUTER
+    //////////////////////////////////////////////////////////////*/
+
+    /// the router owner as an adversary: points the engine at the core, at an engine that takes eth, at one that refuses it,
+    /// at an address with no code or the zero address (both refused), and now and then locks the router while the core is
+    /// the engine. a good set takes effect at once and moves no eth, not the router's and not the core's. after the lock
+    /// every set reverts and the engine stays
+    function repoint(uint256 seed, uint256 mode) external checked {
+        uint8 a = A_REPOINT;
+        if (otherEngine == address(0)) {
+            otherEngine = address(new CountingEngine());
+            refusingEngine = address(new RefusingEngine());
+        }
+        address ro = feeRouter.owner();
+        uint256 m = mode % 6;
+        address target = m == 0 ? address(core) : (m == 1 ? otherEngine : (m == 2 ? refusingEngine : (m == 3 ? address(uint160(seed | 0x10000)) : (m == 4 ? address(0) : address(core)))));
+        OPre memory pre = _opre();
+        uint256 held = address(feeRouter).balance;
+        _att(a);
+        if (m == 5 && !gRouterLocked && seed % 25 == 0 && gEngine == address(core)) {
+            vm.prank(ro);
+            try feeRouter.lock() {
+                gRouterLocked = true;
+            } catch {
+                _flag(V_ROUTER, "the router owner could not lock with an engine set");
+            }
+        }
+        vm.prank(ro);
+        try feeRouter.setEngine(target) {
+            routerRepoints++;
+            if (gRouterLocked) _flag(V_ROUTER, "setEngine worked on a locked router");
+            else if (target == address(0) || target.code.length == 0) _flag(V_ROUTER, "setEngine took an address with no code");
+            else gEngine = target;
+        } catch {
+            bool bad = !gRouterLocked && target != address(0) && target.code.length != 0;
+            if (bad) _flag(V_ROUTER, "setEngine refused a good engine");
+        }
+        if (feeRouter.engine() != gEngine) _flag(V_ROUTER, "the router engine is not the one set");
+        if (feeRouter.locked() != gRouterLocked) _flag(V_LOCK, "the router lock flag differs from the ghost");
+        if (address(feeRouter).balance != held) _flag(V_ROUTER, "setting the engine moved router eth");
+        _opost(pre, "repoint");
+        _ok(a);
     }
 }

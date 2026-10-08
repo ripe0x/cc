@@ -335,6 +335,9 @@ abstract contract InvariantFixture is Fixture {
         s[n++] = HandlerBase.controllerSwap.selector;
         s[n++] = HandlerBase.overprint.selector;
         s[n++] = HandlerBase.probeController.selector;
+        // the fee router: a flush by anyone (the router owner repointing the engine is in the owner list below)
+        s[n++] = HandlerBase.flush.selector;
+        s[n++] = HandlerBase.flush.selector;
         // the exit module is set in the phase 2 suites before the run starts, so the exit actions are listed only there
         if (phase2) {
             s[n++] = HandlerBase.sellForExit.selector;
@@ -364,6 +367,7 @@ abstract contract InvariantFixture is Fixture {
             s[n++] = HandlerOwner.setRate.selector;
             s[n++] = HandlerOwner.setXRate.selector;
             s[n++] = HandlerOwner.ownerMisc.selector;
+            s[n++] = HandlerOwner.repoint.selector;
             if (phase2) s[n++] = HandlerOwner.replaceModule.selector;
         }
         bytes4[] memory sel = new bytes4[](n);

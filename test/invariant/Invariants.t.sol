@@ -51,6 +51,8 @@ abstract contract InvariantsBase is InvariantFixture {
     uint256[] internal g11 = [7, 8, 30];
     /// locks and handovers
     uint256[] internal g12 = [31];
+    /// the fee router: its eth goes only to the engine set at that time, by the flush rule
+    uint256[] internal g13 = [32];
 
     function _zero(uint256[] storage codes) internal view {
         for (uint256 i; i < codes.length; ++i) {
@@ -389,6 +391,17 @@ abstract contract InvariantsBase is InvariantFixture {
         assertTrue(core.pendingOwner() != core.owner(), "the pending owner is the owner");
     }
 
+    /// 15. the fee router's eth only ever goes to the engine the owner set at that time (the tip to the caller, the payees'
+    /// parts, the rest to the engine), whichever engine that is. a flush against an engine that refuses reverts and the eth
+    /// waits, a lock is one way, and nothing the router owner does moves an asset or a pot of the core. what the core books
+    /// from the router is exactly the engine share of the flush when it is the engine, and nothing when it is not
+    function invariant_15_routerEthOnlyGoesToTheEngineSetAtThatTime() public view {
+        _zero(g13);
+        assertEq(feeRouter.engine(), handler.gEngine(), "the router engine differs from the last one set");
+        assertEq(feeRouter.locked(), handler.gRouterLocked(), "the router lock differs from the ghost");
+        assertGe(address(feeRouter).balance, handler.parked(), "eth that waited in the router is gone");
+    }
+
     /// 14. no exit module ever called the core, or the selling controller, successfully from inside an exit: every door is
     /// shut while the core is inside `exitStatement`, whatever the module does with its gas
     function invariant_14_noCallFromInsideAnExitEverWorked() public view {
@@ -463,6 +476,9 @@ abstract contract InvariantsBase is InvariantFixture {
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal virtual {
+        a = a % 42;
+        if (a == 40) return handler.flush(w, x);
+        if (a == 41) return handler.repoint(w, x);
         a = a % 32;
         if (a == 0) handler.buyCoin(w, x, y);
         else if (a == 1) handler.sellCoin(w, x, y);
@@ -543,6 +559,7 @@ abstract contract InvariantsBase is InvariantFixture {
     }
 
     function _available(uint256 a) internal view returns (bool) {
+        if (a >= 40) return true;
         if (a >= 32) return _saleSuite();
         if ((a >= 16 && a <= 20 || a == 31) && !handler.phase2()) return false;
         if (a == 13 && !handler.canSwapController()) return false;
@@ -594,6 +611,23 @@ abstract contract InvariantsBase is InvariantFixture {
         vm.roll(block.number + 200);
         assertTrue(_try(9, 60), "no buyback");
         _ownerSmoke();
+        _routerSmoke();
+    }
+
+    /// the router actions: flushes with the core as engine, then the router owner points the engine at every kind of
+    /// target (the core, an engine that takes eth, one that refuses it, bad addresses), flushes against each, swaps keep
+    /// working with an engine that refuses, and the engine goes back to the core
+    function _routerSmoke() internal {
+        assertTrue(_try(40, 20), "no flush");
+        for (uint256 m; m < 6; ++m) {
+            handler.repoint(m + 6 * 7, m);
+            handler.flush(m, 0);
+            handler.buyCoin(m, 1, 0);
+        }
+        assertTrue(_try(41, 20), "no repoint");
+        vm.prank(feeRouter.owner());
+        try feeRouter.setEngine(address(core)) {} catch {}
+        handler.flush(1, 0);
     }
 
     /// the owner's calls: valid settings across the bounds, refused ones, the rates and the other doors

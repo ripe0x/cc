@@ -25,8 +25,8 @@ abstract contract SaleSuite is InvariantsBase {
 
     /// the base actions as before, then the eight of `HandlerSale`
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal override {
-        a = a % 40;
-        if (a < 32) return super._act(a, w, x, y, z);
+        a = a % 42;
+        if (a < 32 || a >= 40) return super._act(a, w, x, y, z);
         if (a == 32) handler.buyOnlyBuy(w, x, y, z);
         else if (a == 33) handler.ownerSell(w, x, y, z);
         else if (a == 34) handler.repriceBid(w, x, y, z);

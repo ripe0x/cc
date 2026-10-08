@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {console2} from "forge-std/console2.sol";
 import {Test, Vm} from "forge-std/Test.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
@@ -107,7 +106,10 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_HOSTILE_OWNER = 37;
     uint8 internal constant A_LOCK = 38;
     uint8 internal constant A_HANDOVER = 39;
-    uint256 internal constant N_ACTIONS = 40;
+    // the fee router: a stranger's flush, and the hostile owner repointing the engine
+    uint8 internal constant A_FLUSH = 40;
+    uint8 internal constant A_REPOINT = 41;
+    uint256 internal constant N_ACTIONS = 42;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -141,7 +143,8 @@ abstract contract HandlerBase is Test {
     uint256 internal constant V_OWNER = 29; // an owner action moved assets or the books it must not touch
     uint256 internal constant V_SALE_PATH = 30; // a sellTo or buy sale outside the rules: price, booking, holder or record
     uint256 internal constant V_LOCK = 31; // a one way lock came undone, or a handover left a power behind
-    uint256 internal constant N_VIOL = 32;
+    uint256 internal constant V_ROUTER = 32; // router eth went somewhere but the engine set at that time, or a flush broke its rule
+    uint256 internal constant N_VIOL = 33;
 
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
@@ -174,6 +177,15 @@ abstract contract HandlerBase is Test {
     IFeeRouter public feeRouter;
     /// the account that flushes the router and collects the tips
     address internal flusher;
+    /// the engine the handler last saw the router owner set, and the two other engines the hostile owner can point it at:
+    /// one that takes eth and one that refuses it. `parked` is the eth waiting in the router since a flush failed
+    address public gEngine;
+    address public otherEngine;
+    address public refusingEngine;
+    uint256 public parked;
+    bool public gRouterLocked;
+    uint256 public routerFlushes;
+    uint256 public routerRepoints;
     address public owner;
     address public v1;
     FuzzController public fuzz;
@@ -314,6 +326,7 @@ abstract contract HandlerBase is Test {
         mev = w.mev;
         feeRouter = w.feeRouter;
         flusher = makeAddr("credeng.inv.flusher");
+        gEngine = w.feeRouter.engine();
         owner = w.owner;
         v1 = w.v1;
         fuzz = w.fuzz;
@@ -363,7 +376,9 @@ abstract contract HandlerBase is Test {
             "flipMode",
             "hostileOwner",
             "lockDoor",
-            "handover"
+            "handover",
+            "flush",
+            "repoint"
         ];
         names = n;
         controllers.push(w.v1);
@@ -850,12 +865,35 @@ abstract contract HandlerBase is Test {
         return rest;
     }
 
-    /// flushes the fee router as the flusher. returns the eth the router held and what the core must receive of it
-    function _flushRouter() internal returns (uint256 held, uint256 toCore) {
-        held = address(feeRouter).balance;
-        toCore = _routerEngine(held);
+    /// flushes the fee router as the flusher. returns the eth that arrived since the last flush (the router held that plus
+    /// what a failed flush left waiting) and what the core must receive. the router's eth may only go to the engine set at
+    /// that time, by the flush rule: the tip to the caller, the payees' parts, the rest to the engine. an engine that
+    /// refuses makes the flush revert and the eth waits
+    function _flushRouter() internal returns (uint256 fresh, uint256 toCore) {
+        uint256 held = address(feeRouter).balance;
+        uint256 owed = feeRouter.totalOwed();
+        address eng = feeRouter.engine();
+        if (eng != gEngine) _flag(V_ROUTER, "the router engine is not the one the owner set last");
+        uint256 want = _routerEngine(held - owed);
+        uint256 e0 = eng.balance;
+        uint256 w0 = parked;
         vm.prank(flusher);
-        feeRouter.flush();
+        try feeRouter.flush() {
+            routerFlushes++;
+            if (held != owed && eng.balance - e0 != want) _flag(V_ROUTER, "the engine got other than the flush rule gives");
+            if (address(feeRouter).balance != owed) _flag(V_ROUTER, "a flush left eth in the router");
+            parked = 0;
+            toCore = eng == address(core) ? want : 0;
+        } catch {
+            if (eng != refusingEngine) _flag(V_ROUTER, "a flush failed against an engine that takes eth");
+            if (address(feeRouter).balance != held || eng.balance != e0) _flag(V_ROUTER, "a failed flush moved eth");
+            parked = held - owed;
+        }
+        if (held - owed < w0) {
+            _flag(V_ROUTER, "the router holds less than what waited in it");
+            return (0, toCore);
+        }
+        fresh = held - owed - w0;
     }
 
     /// the selector a failed swap really died of. the pool manager wraps a revert of the hook, so look inside
@@ -1064,13 +1102,7 @@ abstract contract HandlerBase is Test {
             if (bounty != eb) _flag(V_POT, "skim bounty differs from the hook rules at the live rate");
             if (protocol != ep) _flag(V_POT, "skim creator leg differs from the hook rules at the live rate");
             if (!_skimTotalOk(volume, p.buy, p.bps, bounty + protocol)) {
-                emit log_named_string("DBG kind", what);
-                emit log_named_uint("DBG exactIn", p.exactIn ? 1 : 0);
-                emit log_named_uint("DBG volume", volume);
-                emit log_named_uint("DBG skim", bounty + protocol);
-                emit log_named_uint("DBG bps", p.bps);
                 _flag(V_POT, "skim total differs from the hook rules at the live rate");
-
             }
         }
         // the hook reports the pool eth amount, which is the eth spent less the skim on an exact input buy
@@ -1865,6 +1897,34 @@ abstract contract HandlerBase is Test {
             _failed(b0, pot0, rate0, "donate");
         }
         if (phase2() && amtSeed % 3 == 0) _xt().mint(address(core), amt * 1000);
+        _rsCheck(rs, 0);
+    }
+
+    /// anyone flushes the fee router, now and then after sending it some eth. whatever the engine is, only the engine set
+    /// at that time may receive router eth. with the core as engine the core books the engine share by the fee split, with
+    /// another engine the core's books do not move at all, with a refusing one nothing moves
+    function flush(uint256 aSeed, uint256 amtSeed) external checked {
+        uint8 a = A_FLUSH;
+        address who = _actor(aSeed);
+        uint256 b0 = address(core).balance;
+        uint256 pot0 = core.ethPot();
+        uint256 tb0 = core.ethToBuyback();
+        RS memory rs = _rs();
+        _att(a);
+        if (amtSeed % 3 == 0) {
+            uint256 amt = _logBound(amtSeed >> 4, 1, 3 ether);
+            vm.deal(who, who.balance + amt);
+            vm.prank(who);
+            (bool ok,) = address(feeRouter).call{value: amt}("");
+            if (!ok) _flag(V_ROUTER, "the router refused plain eth");
+        }
+        (, uint256 toCore) = _flushRouter();
+        uint256 fee = toCore * core.settings().feeToBuybackBps / 10_000;
+        _eth(b0, 0, toCore, "flush");
+        if (core.ethPot() != pot0 + toCore - fee || core.ethToBuyback() != tb0 + fee) {
+            _flag(V_POT, "a flush was booked wrongly");
+        }
+        _ok(a);
         _rsCheck(rs, 0);
     }
 
