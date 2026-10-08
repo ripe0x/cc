@@ -127,9 +127,18 @@ export const SIM_DEFAULTS = {
   throttler: false,
   throttleFrac: 0.95,
   clampCredits: 1, // the climb stops where the hourly cap affords this many average credits (1 as built)
+  idleLoosenPct: 0, // stepped: percent added to the ceiling anchor every idleLoosenMin minutes while no fill happens, 0 = none
+  idleLoosenMin: 10,
   ceilDecayHours: 0, // stepped: half life of the ceiling headroom since the last fill, 0 = none
   askFloor: 0, // lowest seller ask as a multiple of the market price (0: none, asks are lognormal around 1)
   onStep: null, // optional callback (t, core, marketPrice, rate) after each step, for traces
+  gapPct: 30, // pricePath 'gap': size of the jump, percent
+  gapHour: 6,
+  forceFillHour: null, // one forced fill at forceFillFrac of the market price at this hour: the bid is set to that level first (test hook)
+  forceFillFrac: 0.5,
+  botDrain: false, // test hook: at the first step of every hour a bot sells into the bid until the hourly cap room is used
+  holdPot: 0, // test hook: eth. the pot is topped up to this level after every step (accounting checks do not hold)
+  gateAt: 20, // counterfactual only: hours with at least this many unsold statements held are counted in gateClosedHours
   whipsawStartDay: 2, // pricePath 'whipsaw': day the fall starts
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
@@ -276,7 +285,9 @@ export class Core {
       if (rule === 'stepped') {
         // ceilDecayHours > 0: the headroom above the last rate paid halves every ceilDecayHours since the last fill
         const decay = this.p.ceilDecayHours > 0 ? Math.pow(0.5, (now - this.lastFillTime) / (this.p.ceilDecayHours * 3600)) : 1;
-        cap = Math.min(cap, this.lastPaidRate * (1 + (this.p.ceilPct / 100 - 1) * decay));
+        // idleLoosenPct: the anchor (last rate paid) grows by that percent every idleLoosenMin minutes since the last fill
+        const loosen = this.p.idleLoosenPct > 0 ? Math.pow(1 + this.p.idleLoosenPct / 100, Math.floor((now - this.lastFillTime) / (this.p.idleLoosenMin * 60))) : 1;
+        cap = Math.min(cap, this.lastPaidRate * loosen * (1 + (this.p.ceilPct / 100 - 1) * decay));
       }
       if (cap <= r) return r;
       return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), cap);
@@ -592,6 +603,7 @@ export function pathPrice(p, tSec) {
   const e = Math.exp(-d / p.priceTauDays);
   // log linear legs: 'falling' halves over the first day, 'rising' doubles over 7 days, 'whipsaw' falls 60 percent in 12 hours from
   // whipsawStartDay and recovers over the next 2 days
+  if (p.pricePath === 'gap') return tSec >= p.gapHour * 3600 ? p.priceP0 * (1 + p.gapPct / 100) : p.priceP0; // one jump of gapPct percent at gapHour
   if (p.pricePath === 'falling') return p.priceP0 * Math.pow(0.5, Math.min(d, 1));
   if (p.pricePath === 'rising') return p.priceP0 * Math.pow(2, Math.min(d / 7, 1));
   if (p.pricePath === 'whipsaw') {
@@ -728,7 +740,9 @@ export function simulate(userParams = {}) {
 
   const peff = (t) => pathPrice(p, t) * Math.exp(lnM);
   let stepW = 1, peffNow = 0; // weight of the current step in hours, market price in the step
-  let idle = 0, idleMax = 0;
+  let idle = 0, idleMax = 0, forceDone = false, botNow = false;
+  let stallRun = 0, stallTotal = 0, stallMax = 0, gapRun = 0, gapMax = 0, gateClosed = 0, rateCapSec = 0;
+  const stallRuns = [];
   let prevRate = p.rateStart, signChanges = 0, lastDir = 0, rateMaxRatio = 0, rateAbsMove = 0, rateMoves = 0;
 
   // ---- the engine buys: market offers through the bid or a listing, CreditStrategy listings, exitToken bid in phase 2.
@@ -769,6 +783,8 @@ export function simulate(userParams = {}) {
   }
   function engineBuys(now, Pe) {
     let spentEth = 0, thrDone = !p.throttler;
+    let forceNow = p.forceFillHour != null && !forceDone && now >= p.forceFillHour * 3600;
+    if (forceNow) forceDone = true;
     const Pw = Pe * W;
     for (let guard = 0; guard < 200000; guard++) {
       const r = core.ethRate(now);
@@ -790,6 +806,13 @@ export function simulate(userParams = {}) {
           c = { i: -1, need: r, ethFits: true, xFits: false, isStrat: false, it: { pts: tp, m: p.throttleFrac, prem: 1, listed: false }, ask: p.throttleFrac * Pe, listing: false, thr: true };
         }
       }
+      let inj = null;
+      if (forceNow) {
+        forceNow = false;
+        core.checkpoint(now); core.rateAtCheckpoint = (p.forceFillFrac * Pe * W) / core.epts(440); core.syncFunded();
+        inj = { forced: true };
+      } else if (botNow) inj = { bot: true };
+      if (inj) c = Object.assign(inj, { i: -1, need: r, ethFits: true, xFits: false, isStrat: false, it: { pts: 440, m: 1, prem: 1, listed: false }, ask: Pe, listing: false, thr: true });
       if (!c) { noteBind(r, xPerPt, Pw, roomLeft); break; }
       const it = c.it, useS = c.isStrat, ep = core.epts(it.pts);
       let door = c.ethFits && c.xFits ? (r >= xPerPt ? 'eth' : 'x') : c.ethFits ? 'eth' : 'x';
@@ -809,8 +832,8 @@ export function simulate(userParams = {}) {
           ok = cost > 0;
         }
       }
-      if (!ok) break;
-      if (!c.thr) { if (useS) strat.splice(c.i, 1); else book.splice(c.i, 1); holdPool -= 1; } else T.throttled++;
+      if (!ok) { if (c.bot) { botNow = false; continue; } break; }
+      if (!c.thr) { if (useS) strat.splice(c.i, 1); else book.splice(c.i, 1); holdPool -= 1; } else if (c.thr && !c.bot && !c.forced) T.throttled++;
       if (door === 'x') {
         T.boughtX++; T.xSpent += cost; xPile.push({ pts: it.pts });
       } else {
@@ -1054,7 +1077,22 @@ export function simulate(userParams = {}) {
     const capBefore = core.capHits;
     peffNow = Pe;
     const filledBefore = T.bought + T.boughtX;
+    botNow = p.botDrain && t0 % 3600 === 0;
     const spentEth = engineBuys(t1, Pe);
+    botNow = false;
+    if (p.holdPot > 0 && core.ethPot < p.holdPot) core.addFees(p.holdPot - core.ethPot, t1);
+    // stall: the pot affords the cheapest ask, no purchase for a stretch; a run longer than 2 hours counts. gap: the same run, any length
+    {
+      let cheapest = Infinity;
+      for (const arr of [book, strat]) for (let i = arr.length - 1, k = 0; i >= 0 && k < 400; i--, k++) { const it = arr[i], a = arr === strat ? it.price : it.m * it.prem * Pe; if (a < cheapest) cheapest = a; }
+      if (T.bought + T.boughtX === filledBefore && cheapest < Infinity && core.ethPot >= cheapest) { stallRun += dt; gapRun += dt; }
+      else {
+        if (stallRun > 7200) { stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); if (stallRuns.length < 300) stallRuns.push([t1 - stallRun - dt, stallRun]); }
+        stallRun = 0; gapMax = Math.max(gapMax, gapRun); gapRun = 0;
+      }
+      if (unbid.length + live.length >= p.gateAt) gateClosed += dt;
+      if (core.ethRate(t1) >= core.s.rateCap * (1 - 1e-9)) rateCapSec += dt;
+    }
     // idle: time since the last purchase that the pot held at least one bid
     if (T.bought + T.boughtX > filledBefore) idle = 0;
     else if (core.ethPot >= (core.epts(440) * core.ethRate(t1)) / W) { idle += dt; idleMax = Math.max(idleMax, idle); } else idle = 0;
@@ -1079,10 +1117,12 @@ export function simulate(userParams = {}) {
     }
     prevRate = rr;
     rateMaxRatio = Math.max(rateMaxRatio, (core.epts(440) * rr) / (peff(t1) * W));
-    if (p.onStep) p.onStep(t1, core, Pe, rr);
+    if (p.onStep) p.onStep(t1, core, Pe, rr, T);
     if (t1 % 3600 === 0) record(t1 / 3600, t1);
   }
 
+  if (stallRun > 7200) { stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); stallRuns.push([H * 3600 - stallRun, stallRun]); }
+  gapMax = Math.max(gapMax, gapRun);
   // ---- results
   const at = (d) => {
     const i = Math.min(H, Math.round(d * 24));
@@ -1111,6 +1151,7 @@ export function simulate(userParams = {}) {
     potCheck: T.fees + T.feesBuyback + T.feesTaker - core.feeToBuyback + T.saleToPot - T.spent - T.reimb - core.ethPot,
     buybackCheck: T.saleToBuyback + core.feeToBuyback - core.ethToBuyback - T.buybackSpent - T.buybackTips,
     houseCheck: T.saleGross - T.saleToPot - T.saleToBuyback - core.houseOwed,
+    stallHours: stallTotal / 3600, stallHoursMax: stallMax / 3600, gapHoursMax: gapMax / 3600, stallRuns, gateClosedHours: gateClosed / 3600, rateCapHours: rateCapSec / 3600,
     idleHoursMax: idleMax / 3600, maxPaidRatio: T.maxPaidRatio, throttled: T.throttled,
     finalRate: core.ethRate(H * 3600), finalPot: core.ethPot,
   };

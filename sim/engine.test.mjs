@@ -643,4 +643,29 @@ const R0 = 1.54e13;
   const f = simulate({ days: 3, seed: 2, askFloor: 0.8 });
   const g = simulate({ days: 3, seed: 2 }); ok(f.stats.costVsMarket >= g.stats.costVsMarket - 0.2, 'a floor on seller asks does not lower the price paid');
 }
+// idle loosening of the stepped ceiling anchor, gap path, forced fill, bot drain, stall metric
+{
+  const R = 1e13, MIN = 60;
+  const c = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 110, idleLoosenPct: 1, idleLoosenMin: 10 }, 1000);
+  near(c.ethRate(5 * MIN), R * 1.1, 1e-12, 'before the first interval the ceiling is ceilPct of the anchor');
+  near(c.ethRate(25 * MIN), R * 1.1 * 1.01 * 1.01, 1e-12, 'two idle intervals raise the anchor 1 percent each');
+  ok(c.spend(0.001, 25 * MIN)); const lp = c.lastPaidRate;
+  near(c.ethRate(25 * MIN + 9 * MIN), Math.min(c.rateAtCheckpoint * Math.pow(2, 9), lp * 1.1), 1e-12, 'a fill resets the idle clock');
+  near(c.ethRate(25 * MIN + 31 * MIN), lp * 1.1 * Math.pow(1.01, 3), 1e-12, 'three intervals after the fill');
+  const o = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 110 }, 1000);
+  near(o.ethRate(10000 * MIN), R * 1.1, 1e-12, 'idleLoosenPct 0 leaves the ceiling at ceilPct of the anchor');
+  const q = (h, g) => pathPrice(Object.assign({}, DEFAULTS, { pricePath: 'gap', gapPct: g, gapHour: 6 }), h * 3600) / DEFAULTS.priceP0;
+  near(q(5.9, 30), 1, 1e-12, 'gap path before the jump'); near(q(6, 30), 1.3, 1e-12, 'gap path after the jump'); near(q(80, 100), 2, 1e-12, 'gap path stays');
+  const rs = (share) => (share * 0.0089e18) / 433;
+  const base = { days: 2, seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 };
+  const ff = simulate(Object.assign({ forceFillHour: 6, forceFillFrac: 0.5 }, base));
+  ok(Math.abs(ff.stats.potCheck) < 1e-6, 'accounting closes with a forced fill'); ok(ff.T.throttled === 0, 'a forced fill is not counted as a throttler credit');
+  const bd = simulate(Object.assign({ botDrain: true, holdPot: 5, volScale: 0, strategyOn: false }, base));
+  ok(bd.S.credits[bd.H] > 0 && bd.stats.gapHoursMax <= 1.01, 'with a bot draining the hourly cap each hour the longest gap is about an hour (pacing)');
+  const st0 = simulate(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 0, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
+  const st1 = simulate(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 2, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
+  ok(st0.stats.stallHours > st1.stats.stallHours, 'idle loosening shortens the stall after a gap up'); ok(st0.stats.stallRuns.length >= 1 && st0.stats.stallHoursMax > 2, 'a stall run is recorded');
+  const hp = simulate(Object.assign({ holdPot: 0.1, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
+  ok(hp.stats.stallHours > 0, 'a pot of 0.1 eth at a 0.03 market with clampCredits 20 stalls');
+}
 console.log(`ok, ${n} checks passed`);
