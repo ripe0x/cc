@@ -7,6 +7,7 @@ import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {SeaportBase} from "./Seaport.t.sol";
 import {FeeBase} from "./Fees.t.sol";
+import {Fixture} from "./utils/Fixture.sol";
 import {OrderComponents} from "./utils/SeaportTypes.sol";
 
 /// independent review of the v2 port (docs/REVIEW-v2port.md). `test_FINDING_*` asserts a real defect as it behaves
@@ -339,5 +340,106 @@ contract ReviewFlushInPayoutTest is FeeBase {
         assertGt(price, 0);
         assertEq(core.ethPot(), pot0 - price + toEngine, "pot = old - price + the booked fees");
         _consistent();
+    }
+}
+
+/// F5. the carried question: can the Core pay more than `reimburseCapBps` of the statement cost (or of the notional cap on
+/// the exit lane), even by 1 wei. `_repay` pays `min(floor(gas * basefee * reimburseBps / BPS), floor(cap * reimburseCapBps / BPS),
+/// ethPot)` with `cap` the cost before the reimbursement is added (eth lane compose), the stored cost (exit of an eth lane
+/// statement) or `floor(80 * avgScore * RATE_START / 1e4)` (exit lane). every term is a floor, so the payment is at most
+/// the exact quotient. only a mirror that rounds up (or divides once instead of twice) can see 1 wei more
+contract ReviewReimburseTest is Fixture {
+    uint16[8] internal caps = [1, 7, 99, 333, 500, 777, 999, 1000];
+
+    function _cap(uint16 bps) internal {
+        Settings memory s = core.settings();
+        s.reimburseCapBps = bps;
+        _setSettings(s);
+    }
+
+    function _ethLane(uint16 bps, uint256 basefee, uint256 snap) internal returns (uint256 r, uint256 p, uint256 stored) {
+        vm.revertToState(snap);
+        _cap(bps);
+        vm.fee(basefee);
+        uint256 k0 = keeper.balance;
+        vm.prank(keeper);
+        core.compose();
+        r = keeper.balance - k0;
+        (,, stored,) = core.statementInfo(STATEMENTS.supply());
+        p = stored - r;
+    }
+
+    function test_OK_ethLaneComposeNeverPaysAboveTheCapAndFloorsTheQuotient() public {
+        _composeOnce();
+        uint256 snap = preComposeSnap;
+        uint256 inexact;
+        for (uint256 i; i < caps.length; ++i) {
+            (uint256 r, uint256 p, uint256 stored) = _ethLane(caps[i], 50 gwei, snap);
+            assertEq(r, p * caps[i] / 10_000, "the cap binds and is the floor of the exact quotient");
+            assertLe(r * 10_000, p * caps[i], "never above the exact cap");
+            assertLe(r * 10_000, stored * caps[i], "nor above the cap of the stored statement cost");
+            if (p * caps[i] % 10_000 != 0) {
+                ++inexact;
+                assertLt(r * 10_000, p * caps[i], "strictly below: the exact quotient has a fraction");
+                assertGt((r + 1) * 10_000, p * caps[i], "a mirror that rounds up sees exactly one wei more");
+            }
+        }
+        assertGt(inexact, 3, "the cases include inexact quotients");
+    }
+
+    /// forge-config: default.fuzz.runs = 24
+    function testFuzz_OK_ethLaneAnyBasefeeAnyCap(uint16 capSeed, uint256 feeSeed) public {
+        _composeOnce();
+        (uint256 r, uint256 p,) = _ethLane(uint16(bound(capSeed, 0, 1000)), bound(feeSeed, 1, 80 gwei), preComposeSnap);
+        assertLe(r * 10_000, p * core.settings().reimburseCapBps);
+        assertLe(r, core.ethPot() + r, "and within the pot");
+    }
+
+    function _exitLane(uint16 bps, uint256 sid, uint256 snap) internal returns (uint256 r) {
+        vm.revertToState(snap);
+        _cap(bps);
+        vm.fee(500 gwei);
+        uint256 k0 = keeper.balance;
+        vm.prank(keeper);
+        core.exitStatement(sid);
+        r = keeper.balance - k0;
+    }
+
+    function test_OK_exitLaneAndEthLaneExitNeverPayAboveTheirCaps() public {
+        _enterPhase2();
+        _fundPot(1 ether);
+        // eth lane statement, exited after the wait: cap is the stored cost
+        uint256 sid = _composeOnce().sid;
+        _warp(105 hours);
+        uint256 snap = vm.snapshotState();
+        (,, uint256 cost,) = core.statementInfo(sid);
+        for (uint256 i; i < caps.length; ++i) {
+            uint256 r = _exitLane(caps[i], sid, snap);
+            assertEq(r, cost * caps[i] / 10_000);
+            assertLe(r * 10_000, cost * caps[i]);
+        }
+        // exit lane statement: cap is the notional, floored once, then times the bps floored again
+        vm.revertToState(snap);
+        uint256[] memory ids = _credits(seller, 80);
+        xt.mint(address(core), 5e19);
+        core.skim();
+        vm.prank(seller);
+        core.sellForExitToken(ids);
+        vm.fee(composeBasefee);
+        vm.prank(keeper);
+        core.composeExit();
+        uint256 xsid = STATEMENTS.supply();
+        uint256 snap2 = vm.snapshotState();
+        uint256 notional = 80 * uint256(core.settings().avgScore) * core.RATE_START() / 1e4;
+        uint256 differs;
+        for (uint256 i; i < caps.length; ++i) {
+            uint256 r = _exitLane(caps[i], xsid, snap2);
+            assertEq(r, notional * caps[i] / 10_000, "the cap binds");
+            assertLe(r * 10_000, notional * caps[i]);
+            uint256 single = 80 * uint256(core.settings().avgScore) * core.RATE_START() * caps[i] / (1e4 * 1e4);
+            assertGe(single, r, "one division can only be bigger, never smaller");
+            if (single != r) ++differs;
+        }
+        emit log_named_uint("caps where a single division mirror differs by wei", differs);
     }
 }
