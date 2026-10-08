@@ -167,8 +167,10 @@ contract ReviewPort is Fixture {
         tick = t;
     }
 
-    /// a just in time position straddling the price for the buyback only deepens the book at the market price
-    function test_held_jitLiquidityDoesNotCheapenTheSlice() public {
+    /// v2 decision: the coin is restricted, so a stranger cannot put the coin into the pool as liquidity at all (the pool
+    /// manager is not a holder it may pay). the just in time position that v1 had to price (the burn never got less
+    /// coin for the slice) cannot be built, and the slice buys what it bought before
+    function test_held_jitLiquidityCannotBeBuiltOnARestrictedCoin() public {
         _stockPool();
         _forceBuyback(1 ether);
         uint256 snap = vm.snapshotState();
@@ -183,22 +185,10 @@ contract ReviewPort is Fixture {
         deal(address(coin), attacker, 2e27);
         vm.startPrank(attacker);
         coin.approve(address(lp), type(uint256).max);
-        BalanceDelta added = lp.modify{value: 500 ether}(launchKey, lo, hi, 4e24);
+        vm.expectRevert();
+        lp.modify{value: 500 ether}(launchKey, lo, hi, 4e24);
         vm.stopPrank();
-        uint256 burned = _burnOneSlice();
-        vm.prank(attacker);
-        BalanceDelta removed = lp.modify(launchKey, lo, hi, -4e24);
-        (uint256 px,) = _spot();
-        int256 dEth = int256(removed.amount0()) + int256(added.amount0());
-        int256 dCoin = int256(removed.amount1()) + int256(added.amount1());
-        int256 valueEth = dEth + dCoin * 1e18 / int256(px);
-        emit log_named_uint("burned, no lp", base);
-        emit log_named_uint("burned, with jit lp", burned);
-        emit log_named_int("lp eth delta", dEth);
-        emit log_named_int("lp coin delta", dCoin);
-        emit log_named_int("lp value delta in eth at the final price", valueEth);
-        assertGe(burned, base, "the core never gets less coin for the slice");
-        assertLe(valueEth, 0, "the lp does not gain");
+        assertEq(_burnOneSlice(), base, "the slice buys the same coin with the attempt made");
     }
 
     // ------------------------------------------------------------------ P-2 exit auction: stale clock prices injected funds
