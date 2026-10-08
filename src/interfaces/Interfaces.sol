@@ -169,7 +169,8 @@ struct Sale {
 }
 
 /// the artcoins stack a launch runs on. a deploy input of the Core, so a new artcoins version needs no code change.
-/// `hook` is the only address whose eth the Core books as fees. the rest feed the pool key and the forbidden targets
+/// `feeSource` (the fee router) is the only address whose eth the Core books as fees. the rest feed the pool key and the
+/// forbidden targets
 struct Stack {
     address poolManager;
     address hook;
@@ -180,6 +181,8 @@ struct Stack {
     address escrow;
     /// the pnd auction house factory. the Core creates its own house through it in the constructor
     address auctionFactory;
+    /// the fee router: the pool's bounty recipient. the Core books eth from it as fees and forbids it as a target
+    address feeSource;
 }
 
 library Mainnet {
@@ -195,14 +198,9 @@ library Mainnet {
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant UNIVERSAL_ROUTER = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
-    // the live artcoins stack at the pin. this is the DEFAULT config only (script/config/mainnet.json and the tests).
-    // nothing in `src/` reads these, the Core takes its stack as a constructor argument
-    address internal constant ARTCOINS_FACTORY = 0x49596c375c139E79bb937bcf826068a8F78D4e0e;
-    address internal constant ARTCOINS_FACTORY_OWNER = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
-    address internal constant SKIM_HOOK = 0x636c050296B5Cc528D8785169Bf8923716FCa9cc;
-    address internal constant LP_LOCKER = 0x866ea3Dc2bf7A3e77374619cf50EB697FA766aab;
-    address internal constant FEE_ESCROW = 0x7559689765aE86cBB38e68CD1294830CccB125F2;
-    address internal constant MEV_LINEAR_SKIM = 0xb038D597365FfD108D63C265Bb0621444a1D8B83;
+    // the artcoins v2 stack is not on mainnet yet (docs/V2-PORT.md). its addresses are config inputs, never constants:
+    // `defaultStack` leaves them zero, the Core refuses a zero member and the deploy script refuses a zero config.
+    // the tests take them from the stack the fixture deploys on the fork (test/utils/V2Stack.sol)
 
     /// the dynamic fee flag every artcoins pool uses, and its tick spacing
     uint24 internal constant POOL_FEE = 0x800000;
@@ -246,22 +244,24 @@ library Mainnet {
         });
     }
 
-    /// the default stack: the live artcoins deployment
     /// the launch sale: start at 110 percent, one point every 3 hours, down to 75 percent at hour 105, auction mode
     function defaultSale() internal pure returns (Sale memory) {
         return Sale({buyOnly: false, startBps: 11_000, stepBps: 100, stepEvery: 3 hours, floorBps: 7_500});
     }
 
+    /// the default stack: the fixed parts of mainnet. the v2 members (hook, factory, locker, escrow) and the fee router
+    /// are zero placeholders that must be filled before a launch
     function defaultStack() internal pure returns (Stack memory) {
         return Stack({
             poolManager: POOL_MANAGER,
-            hook: SKIM_HOOK,
+            hook: address(0),
             tickSpacing: TICK_SPACING,
             poolFee: POOL_FEE,
-            factory: ARTCOINS_FACTORY,
-            locker: LP_LOCKER,
-            escrow: FEE_ESCROW,
-            auctionFactory: AUCTION_FACTORY
+            factory: address(0),
+            locker: address(0),
+            escrow: address(0),
+            auctionFactory: AUCTION_FACTORY,
+            feeSource: address(0)
         });
     }
 }

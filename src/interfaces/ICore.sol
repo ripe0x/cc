@@ -103,6 +103,7 @@ interface ICore {
     function COIN() external view returns (address);
     function ESCROW() external view returns (address);
     function FACTORY() external view returns (address);
+    function FEE_SOURCE() external view returns (address);
     function HOOK() external view returns (address);
     function HOUSE() external view returns (address);
     function LOCKER() external view returns (address);
@@ -143,7 +144,6 @@ interface ICore {
     function lockController() external;
     function lockExitModule() external;
     function lockTargets() external;
-    function notify(address) external payable;
     function onERC721Received(address, address, uint256, bytes memory) external view returns (bytes4);
     function overprint() external;
     function overprintCount() external view returns (uint256);

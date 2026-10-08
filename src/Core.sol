@@ -34,7 +34,8 @@ import {SettingsStore} from "./lib/SettingsStore.sol";
 /// custody and every rule of the credits engine. the owner sets the controller, the exit module and the target list at
 /// once, and can lock each of the three for good (docs/ARCHITECTURE.md).
 /// credits and statements sent to the core outside its doors are not tracked and stay in the core.
-/// the core is the bounty recipient of the live skim hook: its `receive()` books the hook's eth into the pot.
+/// the pool's bounty recipient is the fee router, which flushes the fee eth here: `receive()` books eth from the fee
+/// source (the router) into the pot.
 contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     using FixedPointMathLib for uint256;
     using LibTransient for LibTransient.TBool;
@@ -227,9 +228,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// the pnd auction house factory and the house this core created through it. the core owns the house forever
     address public immutable AUCTION_FACTORY;
     IAuctionHouse public immutable HOUSE;
-    /// the artcoins stack this core launched on, fixed at deploy. HOOK is the only sender whose eth is booked as fees
+    /// the artcoins v2 stack this core launched on, fixed at deploy. FEE_SOURCE (the fee router) is the only sender whose
+    /// eth is booked as fees
     IPoolManager public immutable MANAGER;
     address public immutable HOOK;
+    address public immutable FEE_SOURCE;
     int24 public immutable TICK_SPACING;
     uint24 public immutable POOL_FEE;
     address public immutable FACTORY;
@@ -288,8 +291,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint64 public xStartTime;
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert OnlyOwner();
+        _onlyOwner();
         _;
+    }
+
+    function _onlyOwner() private view {
+        if (msg.sender != owner) revert OnlyOwner();
     }
 
     constructor(
@@ -311,6 +318,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         // the stack members must be contracts. the coin is not deployed yet when the core is created
         if (stack_.poolManager.code.length == 0) revert NoCode(stack_.poolManager);
         if (stack_.hook.code.length == 0) revert NoCode(stack_.hook);
+        if (stack_.feeSource.code.length == 0) revert NoCode(stack_.feeSource);
         if (stack_.factory.code.length == 0) revert NoCode(stack_.factory);
         if (stack_.locker.code.length == 0) revert NoCode(stack_.locker);
         if (stack_.escrow.code.length == 0) revert NoCode(stack_.escrow);
@@ -321,6 +329,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         RATE_START = rateStart_;
         MANAGER = IPoolManager(stack_.poolManager);
         HOOK = stack_.hook;
+        FEE_SOURCE = stack_.feeSource;
         TICK_SPACING = stack_.tickSpacing;
         POOL_FEE = stack_.poolFee;
         FACTORY = stack_.factory;
@@ -347,14 +356,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         CoreLib.setSettings(settings_);
     }
 
-    /// accepts eth and never reverts, because the hook pushes its bounty here with all gas and a revert would
-    /// brick every swap in the pool. eth from the hook is booked unless a measurement is in flight: `feeToBuybackBps`
-    /// of it to the coin buyback, the rest to the pot.
-    /// anything else, refunds from a purchase included, is booked later by `skim`. a measurement in flight books
-    /// nothing, so eth arriving then just lowers the measured cost. there is no fallback on purpose: the hook
-    /// calls `streamForward` here once the balance reaches 0.01 eth and relies on that call reverting.
+    /// accepts eth and never reverts. eth from the fee source (the router flushing the pool's fee eth) is booked unless a
+    /// measurement is in flight: `feeToBuybackBps` of it to the coin buyback, the rest to the pot.
+    /// anything else, the hook and the escrow included, refunds from a purchase included, is booked later by `skim`.
+    /// a measurement in flight books nothing, so eth arriving then just lowers the measured cost
     receive() external payable {
-        if (msg.sender != HOOK || _measuring().get()) return;
+        if (msg.sender != FEE_SOURCE || _measuring().get()) return;
         _checkpoint();
         uint256 toBuyback = msg.value * _st().feeToBuybackBps / BPS;
         if (toBuyback != 0) ethToBuyback += toBuyback;
@@ -362,10 +369,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         _syncFunded();
         emit FeesAdded(msg.value);
     }
-
-    /// the skim hook's referral payout target. with the referral cap at zero the hook never calls it. if the token
-    /// admin raises the cap it pays referrals here, and the eth is booked later by `skim`, so it can never revert.
-    function notify(address) external payable {}
 
     /// accepts statements and credits from their own contracts only.
     function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
@@ -684,7 +687,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// every forbidden target except the exitModule and the exitToken, which a later set may name again
     function _forbiddenBase(address t) private view returns (bool) {
         return t == address(CREDITS) || t == address(STATEMENTS) || t == address(this) || t == COIN || t == HOOK
-            || t == address(MANAGER) || t == FACTORY || t == LOCKER || t == ESCROW || t == address(HOUSE)
+            || t == address(MANAGER) || t == FACTORY || t == LOCKER || t == ESCROW || t == FEE_SOURCE || t == address(HOUSE)
             || t == AUCTION_FACTORY || t == Mainnet.PERMIT2 || t == Mainnet.POSITION_MANAGER
             || t == Mainnet.UNIVERSAL_ROUTER;
     }
@@ -1005,7 +1008,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// swaps up to one slice of the eth buyback pot for coin in the canonical pool, then burns the coin on the token
-    /// so the total supply falls. tips the caller. the hook's skim on this swap comes back through `receive`.
+    /// so the total supply falls. tips the caller. the core's own bounty share of the hook's skim on this swap reaches the pot
+    /// through the router (`flush`), and a partial fill refund through the escrow (`skim`, after anyone claims it).
     function buyback() external nonReentrant {
         // sale proceeds waiting in the house are collected first, so they are never stranded. a house that fails
         // does not block the buyback
@@ -1030,7 +1034,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// pool manager callback of `buyback`. swaps exact eth in for coin, which comes to the core. returns the eth
-    /// spent, skim included, and the coin bought. the core is exempt from the coin's tax.
+    /// spent, skim included, and the coin bought. the coin is restricted: the hook grants the allowance of the take.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(MANAGER)) revert OnlyPoolManager();
         (uint256 owed, uint256 bought) =
