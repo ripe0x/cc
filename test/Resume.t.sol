@@ -152,7 +152,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
 
     /// the split start needs the mined launch time: a run that sends the launch leaves it for the next run (V2R-7). the
     /// postflight of the first run warns about it, the second run, hours later, sets launchedAt plus the window exactly
-    function test_resumeAfterTheCore() public {
+    function test_FIXED_resumeAfterTheCoreLeavesTheSplitStartToTheNextRun() public {
         (address core,,) = _steps(4);
         assertEq(uint256(this.stageOf(core)), uint256(Stage.CoreOnly));
         assertEq(uint256(this.resume(deployer, base, core)), uint256(Stage.CoreOnly));
@@ -169,7 +169,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     }
 
     /// V2R-7: the launch mined hours before the setup run: the split start is still the launch time plus the window
-    function test_aLateRunSetsTheSplitStartFromTheMinedLaunch() public {
+    function test_FIXED_aLateRunSetsTheSplitStartFromTheMinedLaunch() public {
         (address core, address coin, address router) = _steps(7);
         (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(base.stack.factory, coin);
         vm.warp(block.timestamp + 3 hours);
@@ -178,7 +178,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     }
 
     /// a split start that is not launch time plus the window fails the postflight and prints the difference
-    function test_postflightFailsAWrongSplitStartAndNamesTheDifference() public {
+    function test_FIXED_postflightFailsAWrongSplitStartAndNamesTheDifference() public {
         (address core, address coin, address router) = _steps(7);
         (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(base.stack.factory, coin);
         uint256 want = uint256(info.launchedAt) + base.sniperSeconds;

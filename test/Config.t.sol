@@ -341,7 +341,7 @@ contract ConfigTest is Fixture {
 
     /// V2R-5: the postflight compares the runtime code of the Core and of the controller with the compiled artifacts
     /// (immutables and the library address masked). one changed byte in either fails exactly its row
-    function test_postflightComparesTheCoreAndControllerRuntime() public {
+    function test_FIXED_postflightComparesTheCoreAndControllerRuntime() public {
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "");
         string memory coreRow = "core: runtime code is the compiled Core (immutables and the library address masked)";
@@ -365,7 +365,7 @@ contract ConfigTest is Fixture {
 
     /// V2R-5: the coin's image, metadata and context are read back. the admin changing them fails the row until the
     /// operator names the change (COIN_CHANGED=1), then it is a warning
-    function test_postflightReadsTheCoinImageMetadataAndContext() public {
+    function test_FIXED_postflightReadsTheCoinImageMetadataAndContext() public {
         string memory row = "coin: image, metadata and context are empty as launched";
         postflightAs(lc, address(core), owner);
         assertTrue(_warnClean(row), "empty at launch");

@@ -21,7 +21,7 @@ contract V2PortRestrictionTest is FeeBase {
     /// the allowlisted Core leaves the allowance the hook granted for the take unconsumed: a stranger can spend it
     /// inside the same transaction, on a move to the pool manager, and not without a buyback in the transaction. the
     /// allowance is exactly the coin the buyback bought (transient, gone with the transaction)
-    function test_buybackLeavesAnAllowanceAStrangerCanSpendInTheSameTransaction() public {
+    function test_ACCEPTED_buybackLeavesAnAllowanceAStrangerCanSpendInTheSameTransaction() public {
         _fillEthBuyback();
         LeftoverSpender s = new LeftoverSpender(address(coin), address(core), Mainnet.POOL_MANAGER);
         _buyCoin(address(s), 2 ether);
