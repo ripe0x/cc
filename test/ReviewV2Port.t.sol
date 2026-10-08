@@ -109,6 +109,30 @@ contract ReviewSeaportFlushTest is SeaportBase {
         assertGt(maker.balance - maker0 + 1, price, "FINDING: self dealing through the door beats the sell door");
     }
 
+    /// the same flush, with the owner's `feeToBuybackBps` at 50 percent: the fees that lowered the cost never see the split,
+    /// so the buyback pot gets nothing from them. an honest flush of the same fees books half of them to the buyback pot
+    function test_FINDING_theMidCallFlushSkipsTheFeeToBuybackSplit() public {
+        Settings memory cs = core.settings();
+        cs.feeToBuybackBps = 5_000;
+        _setSettings(cs);
+        uint256 held = _queueFees(1.5 ether);
+        uint256 snap = vm.snapshotState();
+        uint256 bb0 = core.ethToBuyback();
+        _flush();
+        uint256 honest = core.ethToBuyback() - bb0;
+        assertGt(honest, held * 49 / 100, "an honest flush sends half of the fees to the buyback pot");
+        vm.revertToState(snap);
+
+        uint256 id = _list();
+        uint256 price = core.ceilingOf(id);
+        FlushingPayee atk = new FlushingPayee(address(feeRouter));
+        atk.arm();
+        bytes memory data = _order(id, price, atk);
+        vm.prank(maker);
+        core.buyListing(price, data, id, Mainnet.SEAPORT);
+        assertEq(core.ethToBuyback(), bb0, "FINDING: the buyback pot got none of the fees");
+    }
+
     function test_OK_theSameOrderWithAnEmptyRouterPaysNoTip() public {
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
