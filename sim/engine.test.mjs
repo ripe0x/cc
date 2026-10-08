@@ -554,4 +554,17 @@ const R0 = 1.54e13;
   ok(p2.T.exited > 0 && p2.T.exitedAge > 0, 'unbid listings exit through the exitModule');
   const s = summary(a); ok(s.credits > 0 && s.potGoneDay > 1 && s.statements > 0, 'summary reads the run');
 }
+// sub-hour step: the default is the hourly step, minute and five minute steps give the same economy within sampling noise, and the books close
+{
+  const h = simulate({ days: 30, seed: 1 }), h2 = simulate({ days: 30, seed: 1, stepSec: 3600 });
+  assert.deepEqual(h.S.credits, h2.S.credits); n++;
+  const m5 = simulate({ days: 30, seed: 1, stepSec: 300 }), m1 = simulate({ days: 30, seed: 1, stepSec: 60 });
+  for (const m of [m5, m1]) {
+    const c = m.S.credits[m.H], c0 = h.S.credits[h.H];
+    ok(c > 0.9 * c0 && c < 1.1 * c0, 'credits bought at a sub hour step stay within 10 percent of the hourly step');
+    ok(Math.abs(m.stats.potCheck) < 1e-6 && Math.abs(m.stats.houseCheck) < 1e-6, 'accounting closes at a sub hour step');
+    assert.equal(m.S.pot.length, h.S.pot.length); n++;
+  }
+  assert.throws(() => simulate({ days: 2, stepSec: 7 })); n++;
+}
 console.log(`ok, ${n} checks passed`);

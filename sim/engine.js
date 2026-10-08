@@ -112,6 +112,7 @@ export const CORE_PARAMS = {
 export const SIM_DEFAULTS = {
   seed: 7,
   days: 90,
+  stepSec: 3600, // time step after the first hour, seconds. a divisor of 3600. rates quoted per hour or per day, the hourly cap and arrival counts scale with the step
   rateStart: 1.54e13, // 75 percent of the market price over avgScore: 0.75 * 0.0089e18 / 433
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
@@ -618,7 +619,6 @@ function mergeDesc(a, b) {
 }
 
 // ---------------------------------------------------------------- the simulation
-// ---------------------------------------------------------------- the simulation
 export function simulate(userParams = {}) {
   const p = Object.assign({}, DEFAULTS, userParams);
   const rng = mulberry32(p.seed);
@@ -959,10 +959,11 @@ export function simulate(userParams = {}) {
     }
   }
 
-  // ---- the main loop. hour 0 runs in 120 s sub steps for the anti sniper window, then hourly
+  // ---- the main loop. hour 0 runs in 120 s sub steps for the anti sniper window, then steps of stepSec (an hour by default)
   const steps = [];
   for (let k = 0; k < 30; k++) steps.push([k * 120, (k + 1) * 120]);
-  for (let h = 1; h < H; h++) steps.push([h * 3600, (h + 1) * 3600]);
+  if (!(p.stepSec >= 1) || 3600 % p.stepSec !== 0) throw new Error('stepSec must divide 3600');
+  for (let t = 3600; t < H * 3600; t += p.stepSec) steps.push([t, t + p.stepSec]);
   record(0, 0);
   const collectEvery = Math.max(1, Math.round(p.keeperCollectHours)) * 3600;
   for (const [t0, t1] of steps) {
