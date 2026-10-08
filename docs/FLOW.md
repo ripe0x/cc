@@ -42,7 +42,7 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | exitAfter | 105 hours | 1 hour to 365 days | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 |
 | saleToBuybackBps | 5_000 | 0 to 10_000 | share of sale proceeds to the coin buyback, rest to the pot |
 | exitToBuybackBps | 5_000 | 0 to 10_000 | share of exit token from eth lane exits to the coin buyback |
-| buybackSlice | 1 ether | 0.01 to 5 ether | |
+| buybackSlice | 1 ether | 0.01 to 2 ether | |
 | buybackDelay | 25 | 1 to 7_200 blocks | |
 | keeperTipBps | 50 | 0 to 500 | |
 | xRateCap / xRateFloor | 9_700 / 3_000 | floor <= cap <= 10_000 | |
@@ -201,7 +201,7 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 
 ### 10.3 Core change (the only one)
 
-* `Stack` gains `feeSource`. `receive()` books eth as fees (checkpoint, `feeToBuybackBps` split, resync) when `msg.sender == FEE_SOURCE` and no measurement is in flight. eth from any other sender, the hook and the escrow included, is accepted and left for `skim()` as today.
+* `Stack` gains `feeSource`. `receive()` books eth as fees (checkpoint, `feeToBuybackBps` split, resync) when `msg.sender == FEE_SOURCE` and no measurement is in flight (while one is, the fee source reverts `Measuring` and the router flush fails whole, V2R-1). eth from any other sender, the hook and the escrow included, is accepted and left for `skim()` as today.
 * the forbidden target list takes the v2 addresses of V2-PORT.md section 7 plus the router.
 * eth the v2 escrow holds for the Core (partial fill refunds of the Core's own buyback) is claimed by anyone with the escrow's claim and then booked by `skim()` to the pot. document it, no code.
 * size: the Core must keep at least 60 bytes of headroom. if the change does not fit, move code to `CoreLib`, never drop a check.

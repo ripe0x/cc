@@ -108,6 +108,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error ForbiddenTarget();
     error AlreadyOwned();
     error CallFailed();
+    error Measuring();
     error NoCredit();
     error PotTooSmall();
     error AboveCeiling();
@@ -358,12 +359,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         CoreLib.setSettings(settings_);
     }
 
-    /// accepts eth and never reverts. eth from the fee source (the router flushing the pool's fee eth) is booked unless a
-    /// measurement is in flight: `feeToBuybackBps` of it to the coin buyback, the rest to the pot.
-    /// anything else, the hook and the escrow included, refunds from a purchase included, is booked later by `skim`.
-    /// a measurement in flight books nothing, so eth arriving then just lowers the measured cost
+    /// accepts eth from anyone but the fee source and leaves it unbooked (`skim` books it). eth from the fee source (the
+    /// router flushing the pool's fee eth) is booked: `feeToBuybackBps` of it to the coin buyback, the rest to the pot.
+    /// while a measurement is in flight the fee source REVERTS: a router flush started inside a measured call (by
+    /// the seller's callback, say) then fails as a whole and the fees wait in the router. every other sender is
+    /// accepted unbooked, so a refund or a sale payout can never fail a call
     receive() external payable {
-        if (msg.sender != FEE_SOURCE || _measuring().get()) return;
+        if (msg.sender != FEE_SOURCE) return;
+        if (_measuring().get()) revert Measuring();
         _checkpoint();
         uint256 toBuyback = msg.value * _st().feeToBuybackBps / BPS;
         if (toBuyback != 0) ethToBuyback += toBuyback;

@@ -242,7 +242,7 @@ contract ReviewFlowCoreTest is Fixture {
             365 days,
             10_000,
             10_000,
-            5 ether,
+            2 ether,
             7_200,
             500,
             10_000,
@@ -415,40 +415,38 @@ contract ReviewFlowCoreTest is Fixture {
         assertEq(core.ethRate(), 5e14, "a higher cap lets the climb continue to it");
     }
 
-    /// FC-3 (fixed by bounds): the buyback slice tops out at 5 eth. a sandwich around the 1 eth launch slice loses money
-    /// for the attacker after both skims, at the 5 eth cap it nets a small bounded gain at the 6.9 point skim (the 100 eth
-    /// slice that paid 46 eth is no longer reachable)
+    /// FC-3 (fixed by bounds, tightened by V2R-2): the buyback slice tops out at 2 eth. a sandwich around a slice at the
+    /// cap loses money for the attacker after both skims at the 6.9 point v2 skim, for every front run size tried
+    /// (the 100 eth slice that paid 46 eth is not reachable, and a 3 eth slice already profited)
     function test_FIXED_buybackSliceCapStopsTheSandwich() public {
         _skipSniperWindow();
         Settings memory big = core.settings();
-        big.buybackSlice = 5 ether + 1;
+        big.buybackSlice = 2 ether + 1;
         _expectBad(big, "buybackSlice");
-        uint256[2] memory slices = [uint256(1 ether), 5 ether];
+        uint256[2] memory slices = [uint256(1 ether), 2 ether];
+        uint256[6] memory mult = [uint256(1), 2, 3, 4, 6, 8];
         for (uint256 i; i < 2; ++i) {
-            uint256 snap = vm.snapshotState();
-            vm.deal(address(core), address(core).balance + slices[i]);
-            vm.store(address(core), bytes32(uint256(7)), bytes32(slices[i]));
-            Settings memory s = core.settings();
-            s.buybackSlice = uint128(slices[i]);
-            s.buybackDelay = 1;
-            _setSettings(s);
-            vm.roll(block.number + 100);
-            address mev = _user("mev");
-            uint256 front = slices[i] * 3;
-            uint256 got = _buyCoin(mev, front);
-            vm.prank(keeper);
-            core.buyback();
-            uint256 back = _sellCoin(mev, got);
-            emit log_named_uint("slice", slices[i]);
-            emit log_named_int("attacker net (wei)", int256(back) - int256(front));
-            if (slices[i] == 1 ether) {
-                assertLt(back, front, "the sandwich loses money at the launch slice");
-            } else {
-                // v2 launch: a trader pays 6.9 points each way (it was about 10), so at the 5 eth cap a 3x front run
-                // nets a few points of its stake. bounded by a fifth of the slice, far from the 46 eth outlier
-                assertLt(back, front + slices[i] / 5, "the sandwich at the cap stays small");
+            for (uint256 k; k < 6; ++k) {
+                uint256 snap = vm.snapshotState();
+                vm.deal(address(core), address(core).balance + slices[i]);
+                vm.store(address(core), bytes32(uint256(7)), bytes32(slices[i]));
+                Settings memory s = core.settings();
+                s.buybackSlice = uint128(slices[i]);
+                s.buybackDelay = 1;
+                _setSettings(s);
+                vm.roll(block.number + 100);
+                address mev = _user("mev");
+                uint256 front = slices[i] * mult[k];
+                uint256 got = _buyCoin(mev, front);
+                vm.prank(keeper);
+                core.buyback();
+                uint256 back = _sellCoin(mev, got);
+                emit log_named_uint("slice", slices[i]);
+                emit log_named_uint("front run", front);
+                emit log_named_int("attacker net (wei)", int256(back) - int256(front));
+                assertLt(back, front, "the sandwich loses money at or below the cap");
+                vm.revertToState(snap);
             }
-            vm.revertToState(snap);
         }
     }
 

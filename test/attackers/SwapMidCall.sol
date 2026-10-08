@@ -8,16 +8,24 @@ import {TestSwapRouter} from "../utils/TestSwapRouter.sol";
 import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
 
 /// the v2 hook pays the pool fee to the fee router, not to the core: these attackers flush the router right after each
-/// swap, which is the call that lands the eth in the core's `receive()`
+/// swap, which is the call that lands the eth in the core's `receive()`. inside a measured call the core refuses the
+/// router (V2R-1), so the flush fails whole and the attacker swallows the failure: `flushes` counts the tries,
+/// `flushFailed` the ones that reverted
 abstract contract Flushes {
     IFeeRouter public feeRouter;
+    uint256 public flushes;
+    uint256 public flushFailed;
 
     function setFeeRouter(address r) external {
         feeRouter = IFeeRouter(payable(r));
     }
 
     function _flush() internal {
-        if (address(feeRouter) != address(0)) feeRouter.flush();
+        if (address(feeRouter) == address(0)) return;
+        ++flushes;
+        try feeRouter.flush() {} catch {
+            ++flushFailed;
+        }
     }
 }
 

@@ -26,7 +26,7 @@ library SettingsBounds {
         if (s.exitAfter < 1 hours || s.exitAfter > 365 days) return "exitAfter";
         if (s.saleToBuybackBps > 10_000) return "saleToBuybackBps";
         if (s.exitToBuybackBps > 10_000) return "exitToBuybackBps";
-        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 5 ether) return "buybackSlice";
+        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 2 ether) return "buybackSlice";
         if (s.buybackDelay < 1 || s.buybackDelay > 7_200) return "buybackDelay";
         if (s.keeperTipBps > 500) return "keeperTipBps";
         if (s.xRateCap > 10_000) return "xRateCap";

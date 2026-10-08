@@ -540,8 +540,9 @@ contract ReceiveTest is FeeBase {
         assertEq(address(core).balance, core.ethPot(), "everything is booked");
     }
 
-    /// the hook pushes eth into the core while `buyListing` is measuring the cost. nothing is booked then, the
-    /// eth just lowers the measured cost, which keeps the pot and the balance consistent
+    /// the hook pushes eth to the router while `buyListing` is measuring the cost and the attacker flushes the router
+    /// inside the call. the core refuses the fee source then (V2R-1): the flush fails whole, the fees wait in the
+    /// router, the measured cost is the price paid and a flush right after books them
     function test_receiveMidBuyListing() public {
         SwapMidListing t = new SwapMidListing(router, address(core), launchKey);
         t.setFeeRouter(address(feeRouter));
@@ -556,16 +557,18 @@ contract ReceiveTest is FeeBase {
 
         uint256 pot = core.ethPot();
         uint256 balance = address(core).balance;
-        (,, uint256 bounty) = _routerSplit(swapEth * 6_900 / 100_000 * 9000 / 10_000);
-        uint256 cost = ceiling - bounty;
-        uint256 tip = (1000 * (ceiling - cost) / 10_000).min(200 * cost / 10_000);
+        uint256 routerBefore = address(feeRouter).balance;
         vm.prank(keeper);
         core.buyListing(ceiling, hex"deadbeef", id, address(t));
         assertEq(CREDITS.ownerOf(id), address(core));
-        assertEq(core.ethPot(), pot - cost - tip, "the hook push was not booked mid measurement");
-        // the push lowered the measured cost, so pot and balance moved together and nothing is left unbooked
+        assertEq(t.flushFailed(), 1, "the mid call flush failed");
+        assertGt(address(feeRouter).balance, routerBefore, "the fees wait in the router");
+        // no savings, so no tip: the cost is the price
+        assertEq(core.ethPot(), pot - ceiling, "the cost is exact");
+        assertEq(address(core).balance, balance - ceiling);
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "consistent");
-        assertEq(address(core).balance, balance - cost - tip);
+        assertGt(_flush(), 0, "the next flush delivers the fees");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "booked once");
     }
 
     /// the same during `exitStatement`
@@ -574,7 +577,6 @@ contract ReceiveTest is FeeBase {
         MockExitToken token = new MockExitToken("Exit Token", "XT");
         SwapMidExit m = new SwapMidExit(token, UNIT, router, launchKey, 1 ether);
         m.setFeeRouter(address(feeRouter));
-        (,, uint256 midBooked) = _routerSplit(0.0621 ether);
         vm.deal(address(m), 1 ether);
         _setExitModule(address(m));
         Composed memory c = _composeOnce();
@@ -582,9 +584,11 @@ contract ReceiveTest is FeeBase {
         uint256 pot = core.ethPot();
         uint256 gas0 = address(this).balance;
         core.exitStatement(c.sid);
-        // the swap mid exit booked nothing: the pot only fell by the gas repay the caller received
+        // the mid exit flush failed whole: the pot only fell by the gas repay the caller received, nothing is unbooked
+        assertEq(m.flushFailed(), 1, "the mid call flush failed");
+        assertGt(address(feeRouter).balance, 0, "the fees wait in the router");
         assertEq(core.ethPot(), pot - (address(this).balance - gas0), "nothing booked mid exit");
-        assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), midBooked);
+        assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), 0);
         assertGt(core.xToBuyback(), 0);
         core.skim();
         assertEq(core.ethPot() + core.ethToBuyback(), address(core).balance);
@@ -672,7 +676,7 @@ contract ReceiveSettingsTest is FeeBase {
     /// by the receive that runs inside the unlock, and the spend, the tip and the pot stay exact
     function test_receiveMidBuybackAcrossSettings() public {
         _stock();
-        uint256[3] memory slice = [uint256(0.02 ether), 0.05 ether, 5 ether];
+        uint256[3] memory slice = [uint256(0.02 ether), 0.05 ether, 2 ether];
         uint256[3] memory tips = [uint256(0), 200, 500];
         for (uint256 i; i < 3; ++i) {
             Settings memory s = core.settings();
@@ -745,15 +749,16 @@ contract ReceiveSettingsTest is FeeBase {
         vm.deal(address(t), swapEth);
         t.arm(id, swapEth);
         uint256 pot = core.ethPot();
-        (,, uint256 pushed) = _routerSplit(swapEth * 6_900 / 100_000 * 9000 / 10_000);
-        uint256 cost = ceiling - pushed;
-        uint256 tip = (tipSav * (ceiling - cost) / 10_000).min(tipCap * cost / 10_000);
+        // the mid call flush fails (V2R-1), so the cost is the price and there are no savings to tip
+        uint256 cost = ceiling;
+        uint256 tip = 0;
         uint256 keeper0 = keeper.balance;
         vm.prank(keeper);
         core.buyListing(ceiling, hex"deadbeef", id, address(t));
         assertEq(CREDITS.ownerOf(id), address(core));
         assertEq(keeper.balance - keeper0, tip, "tip by the settings");
-        assertEq(core.ethPot(), pot - cost - tip, "the push was not booked mid measurement");
+        assertEq(core.ethPot(), pot - cost - tip, "the cost is exact");
+        assertEq(t.flushFailed(), 1, "the mid call flush failed");
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "consistent");
     }
 
@@ -763,7 +768,6 @@ contract ReceiveSettingsTest is FeeBase {
         MockExitToken token = new MockExitToken("Exit Token", "XT");
         SwapMidExit m = new SwapMidExit(token, UNIT, router, launchKey, 1 ether);
         m.setFeeRouter(address(feeRouter));
-        (,, uint256 midBooked) = _routerSplit(0.0621 ether);
         vm.deal(address(m), 1 ether);
         _setExitModule(address(m));
         Settings memory s = core.settings();
@@ -779,8 +783,9 @@ contract ReceiveSettingsTest is FeeBase {
         uint256 gas0 = address(this).balance;
         core.exitStatement(c.sid);
         // the swap mid exit booked nothing: the pot only fell by the gas repay the caller received
+        assertEq(m.flushFailed(), 1, "the mid call flush failed");
         assertEq(core.ethPot(), pot - (address(this).balance - gas0), "nothing booked mid exit");
-        assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), midBooked);
+        assertEq(address(core).balance - core.ethPot() - core.ethToBuyback(), 0);
         assertEq(core.xPot(), 0);
         assertEq(core.xToBuyback(), STATEMENTS.creditScoreOf(c.sid) * UNIT, "the whole exit went to the buyback");
         core.skim();
@@ -1080,7 +1085,7 @@ contract BuybackSettingsTest is FeeBase {
         _buyback();
 
         // a slice above the pot takes the whole pot
-        _configure(5 ether, 7_200, 50);
+        _configure(2 ether, 7_200, 50);
         vm.roll(block.number + 7_200);
         uint256 rest = core.ethToBuyback();
         assertEq(_buyback(), rest);
@@ -1098,7 +1103,7 @@ contract BuybackSettingsTest is FeeBase {
     /// any slice, delay and tip inside the bounds: one buyback burns, tips and books exactly
     /// forge-config: default.fuzz.runs = 16
     function testFuzz_buybackAnySettings(uint256 slice, uint256 delay, uint256 tip) public {
-        _configure(bound(slice, 0.01 ether, 5 ether), bound(delay, 1, 7_200), bound(tip, 0, 500));
+        _configure(bound(slice, 0.01 ether, 2 ether), bound(delay, 1, 7_200), bound(tip, 0, 500));
         _fillEthBuyback();
         _buyback();
     }

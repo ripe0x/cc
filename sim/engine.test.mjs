@@ -369,10 +369,10 @@ const R0 = 1.54e13;
   const bad = (patch, name) => { assert.equal(firstViolation(Object.assign({}, SETTINGS, patch)), name); n++; };
   bad({ spendCapBps: 5001 }, 'spendCapBps'); bad({ dropBps: 499 }, 'dropBps'); bad({ avgScore: 6000001 }, 'avgScore');
   bad({ saleFloorBps: 999 }, 'saleFloorBps'); bad({ saleFloorBps: 40001 }, 'saleFloorBps'); bad({ feeToBuybackBps: 10001 }, 'feeToBuybackBps'); bad({ auctionDuration: 6 * 3600 - 1 }, 'auctionDuration');
-  bad({ buybackSlice: 5.01 }, 'buybackSlice'); bad({ exitAfter: 3599 }, 'exitAfter');
+  bad({ buybackSlice: 2.01 }, 'buybackSlice'); bad({ exitAfter: 3599 }, 'exitAfter');
   bad({ rateCap: 1e11 - 1 }, 'rateCap'); bad({ rateCap: 1e15 + 1 }, 'rateCap');
   bad({ exitLaneToBuybackBps: 10001 }, 'exitLaneToBuybackBps');
-  assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, saleFloorBps: 1000, feeToBuybackBps: 10000, auctionDuration: 6 * 3600, buybackSlice: 5, exitAfter: 3600, rateCap: 1e15 })), null); n++;
+  assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, saleFloorBps: 1000, feeToBuybackBps: 10000, auctionDuration: 6 * 3600, buybackSlice: 2, exitAfter: 3600, rateCap: 1e15 })), null); n++;
   assert.equal(SETTINGS.rateCap, 8 * DEFAULTS.rateStart); n++;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { xRateFloor: 9800 })), 'xRateFloor'); n++;
 }

@@ -209,7 +209,7 @@ function firstViolation(s) {
   if (s.exitAfter < h || s.exitAfter > 365 * d) return 'exitAfter';
   if (s.saleToBuybackBps > 10000) return 'saleToBuybackBps';
   if (s.exitToBuybackBps > 10000) return 'exitToBuybackBps';
-  if (s.buybackSlice < 0.01 || s.buybackSlice > 5) return 'buybackSlice';
+  if (s.buybackSlice < 0.01 || s.buybackSlice > 2) return 'buybackSlice';
   if (s.buybackDelay < 1 || s.buybackDelay > 7200) return 'buybackDelay';
   if (s.keeperTipBps > 500) return 'keeperTipBps';
   if (s.xRateCap > 10000) return 'xRateCap';

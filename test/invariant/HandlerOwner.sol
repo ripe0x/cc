@@ -60,7 +60,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.exitAfter = uint32(_f(_r(seed, 14), 1 hours, 365 days, c.exitAfter));
         s.saleToBuybackBps = uint16(_f(_r(seed, 15), 0, 10_000, c.saleToBuybackBps));
         s.exitToBuybackBps = uint16(_f(_r(seed, 16), 0, 10_000, c.exitToBuybackBps));
-        s.buybackSlice = uint128(_f(_r(seed, 17), 0.01 ether, 5 ether, c.buybackSlice));
+        s.buybackSlice = uint128(_f(_r(seed, 17), 0.01 ether, 2 ether, c.buybackSlice));
         s.buybackDelay = uint16(_f(_r(seed, 18), 1, 7_200, c.buybackDelay));
         s.keeperTipBps = uint16(_f(_r(seed, 19), 0, 500, c.keeperTipBps));
         s.xRateCap = uint16(_f(_r(seed, 20), 0, 10_000, c.xRateCap));
@@ -101,7 +101,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 10) {
             s.buybackSlice = 0.01 ether;
         } else if (k == 11) {
-            s.buybackSlice = 5 ether;
+            s.buybackSlice = 2 ether;
         } else if (k == 12) {
             s.exitAfter = 1 hours;
         } else if (k == 13) {
@@ -259,7 +259,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.exitAfter < 1 hours || s.exitAfter > 365 days) return "exitAfter";
         if (s.saleToBuybackBps > 10_000) return "saleToBuybackBps";
         if (s.exitToBuybackBps > 10_000) return "exitToBuybackBps";
-        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 5 ether) return "buybackSlice";
+        if (s.buybackSlice < 0.01 ether || s.buybackSlice > 2 ether) return "buybackSlice";
         if (s.buybackDelay < 1 || s.buybackDelay > 7_200) return "buybackDelay";
         if (s.keeperTipBps > 500) return "keeperTipBps";
         if (s.xRateCap > 10_000) return "xRateCap";
@@ -331,7 +331,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 23) {
             (s.buybackSlice, name) = (0.01 ether - 1, "buybackSlice");
         } else if (which == 24) {
-            (s.buybackSlice, name) = (5 ether + 1, "buybackSlice");
+            (s.buybackSlice, name) = (2 ether + 1, "buybackSlice");
         } else if (which == 25) {
             (s.buybackDelay, name) = (0, "buybackDelay");
         } else if (which == 26) {

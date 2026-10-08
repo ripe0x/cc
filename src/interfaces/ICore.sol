@@ -39,6 +39,7 @@ interface ICore {
     error HasBid();
     error HourlyCap();
     error Locked(bytes32 what);
+    error Measuring();
     error NoCode(address who);
     error NoCredit();
     error NoExitModule();

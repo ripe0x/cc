@@ -116,7 +116,7 @@ settings. one struct, `Settings`, in Core storage, in the config file under `set
 | `exitAfter` | 378000 | 3600 to 31536000 s | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 (105 hours, the hour the asking price reaches its floor) | yes |
 | `saleToBuybackBps` | 5000 | 0 to 10000 | share of sale proceeds to the coin buyback pot, the rest to the credit pot | yes |
 | `exitToBuybackBps` | 5000 | 0 to 10000 | share of exit token from an eth lane exit to the buyback pot | yes |
-| `buybackSlice`, `buybackDelay`, `keeperTipBps` | 1 eth, 25 blocks, 50 | 0.01 to 5 eth, 1 to 7200, 0 to 500 | coin buyback slice, minimum block gap, caller tip in bps of the slice | yes |
+| `buybackSlice`, `buybackDelay`, `keeperTipBps` | 1 eth, 25 blocks, 50 | 0.01 to 2 eth, 1 to 7200, 0 to 500 | coin buyback slice, minimum block gap, caller tip in bps of the slice | yes |
 | `xRateCap`, `xRateFloor` | 9700, 3000 | floor <= cap <= 10000 | exit token bid in bps of score, phase 2 | yes |
 | `xRateClimbPerHour`, `xRateDropPerCredit` | 100, 20 | 0 to 1000 each | exit bid climb per hour and drop per credit | yes |
 | `xAuctionHalfLife` | 21600 | 600 to 2592000 s | exit token dutch auction price half life | yes |

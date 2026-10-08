@@ -135,7 +135,7 @@ library SettingsFields {
             365 days,
             10_000,
             10_000,
-            5 ether,
+            2 ether,
             7_200,
             500,
             10_000,

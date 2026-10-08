@@ -12,29 +12,38 @@ import {OrderComponents} from "./utils/SeaportTypes.sol";
 import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 
 /// independent review of the v2 port (docs/REVIEW-v2port.md). `test_FINDING_*` asserts a real defect as it behaves
-/// today and passes today. `test_OK_*` confirms a property that holds. real contracts on the pinned fork, attacker
-/// contracts only where a third party needs code
+/// today. `test_FIXED_*` proves a finding is closed, `test_ACCEPTED_*` pins a behavior the owner accepted, `test_OK_*`
+/// confirms a property that holds. real contracts on the pinned fork, attacker contracts only where a third party needs code
 
-/// a seller side contract that flushes the fee router when Seaport pays it, i.e. inside the Core's measured call
+/// a seller side contract that flushes the fee router when Seaport pays it, i.e. inside the Core's measured call.
+/// `swallow` true catches the failure (the sale goes through), false lets it fail the payment
 contract FlushingPayee {
     IFeeRouter public immutable ROUTER;
     bool public armed;
-    uint256 public flushedTips;
+    bool public swallow = true;
+    bool public flushOk;
+    bool public tried;
 
     constructor(address router_) {
         ROUTER = IFeeRouter(payable(router_));
     }
 
-    function arm() external {
+    function arm(bool swallow_) external {
         armed = true;
+        swallow = swallow_;
     }
 
     receive() external payable {
-        if (armed) {
-            armed = false;
-            uint256 b = address(this).balance;
+        if (!armed) return;
+        armed = false;
+        tried = true;
+        if (swallow) {
+            try ROUTER.flush() {
+                flushOk = true;
+            } catch {}
+        } else {
             ROUTER.flush();
-            flushedTips = address(this).balance - b;
+            flushOk = true;
         }
     }
 }
@@ -74,14 +83,15 @@ contract ReviewSeaportFlushTest is SeaportBase {
         return _basicData(c);
     }
 
-    function test_FINDING_strangerFlushInsideBuyListingLowersCostBasisAndPaysASelfDealTip() public {
+    /// V2R-1 fixed: the Core refuses the fee source while it measures. the flush fails whole, the fees wait in the
+    /// router, the cost basis is the price and no tip is paid on a purchase at the ceiling
+    function test_FIXED_strangerFlushInsideBuyListingRevertsAndTheCostIsExact() public {
         uint256 held = _queueFees(1.5 ether);
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         assertGt(held, 0.05 ether);
-        assertLt(held, price / 3, "the queued fees stay under the price");
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm();
+        atk.arm(true);
         bytes memory data = _order(id, price, atk);
 
         uint256 pot0 = core.ethPot();
@@ -90,54 +100,89 @@ contract ReviewSeaportFlushTest is SeaportBase {
         vm.prank(maker);
         core.buyListing(price, data, id, Mainnet.SEAPORT);
 
+        assertTrue(atk.tried(), "the attacker tried the flush");
+        assertFalse(atk.flushOk(), "the flush inside the measured call reverted");
+        assertEq(address(feeRouter).balance, held, "the fees wait in the router, untouched");
         (,, uint256 booked,) = core.creditInfo(id);
-        uint256 tip = maker.balance - maker0 - (price - 1);
-        // eth the flush put into the Core during the call: balance after = before - price + flushed - tip
-        uint256 flushed = address(core).balance + price + tip - bal0;
-        emit log_named_uint("price", price);
-        emit log_named_uint("queued fees flushed mid call", flushed);
-        emit log_named_uint("buyListing tip", tip);
-        emit log_named_uint("recorded cost basis", booked - tip);
-        // the order was at the ceiling: with an honest measurement there is no savings and no tip
-        assertGt(tip, 0, "FINDING: a tip is paid on a purchase at the ceiling");
-        assertLt(booked - tip, price - 1, "FINDING: the cost basis is below the price the seller was paid");
-        assertEq(core.ethPot(), pot0 - booked, "the pot paid the understated cost plus the tip");
-        assertGt(flushed, held * 99 / 100, "what the flush delivered is what lowered the cost");
-        assertEq(booked - tip, price - flushed, "cost basis = price - the flushed fees (the fees paid for the credit)");
-        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "pots stay consistent: only the tip left");
-        // the sell door pays exactly the ceiling for the same credit, so the maker side now beats the door
-        assertGt(maker.balance - maker0 + 1, price, "FINDING: self dealing through the door beats the sell door");
+        assertEq(maker.balance - maker0, price - 1, "no tip at the ceiling");
+        assertEq(booked, price, "the cost basis is the price paid");
+        assertEq(core.ethPot(), pot0 - price, "the pot paid the exact cost");
+        assertEq(address(core).balance, bal0 - price, "the Core gained nothing mid call");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "pots stay consistent");
+        // the self dealing door never beats the sell door
+        assertLe(maker.balance - maker0 + 1, price, "the door does not beat the sell door");
     }
 
-    /// the same flush, with the owner's `feeToBuybackBps` at 50 percent: the fees that lowered the cost never see the split,
-    /// so the buyback pot gets nothing from them. an honest flush of the same fees books half of them to the buyback pot
-    function test_FINDING_theMidCallFlushSkipsTheFeeToBuybackSplit() public {
+    /// a flush that is not caught fails the payment, so the whole `buyListing` reverts
+    function test_FIXED_anUncaughtMidCallFlushFailsTheWholePurchase() public {
+        uint256 held = _queueFees(1.5 ether);
+        uint256 id = _list();
+        uint256 price = core.ceilingOf(id);
+        FlushingPayee atk = new FlushingPayee(address(feeRouter));
+        atk.arm(false);
+        bytes memory data = _order(id, price, atk);
+        vm.prank(maker);
+        vm.expectRevert(ICore.CallFailed.selector);
+        core.buyListing(price, data, id, Mainnet.SEAPORT);
+        assertEq(address(feeRouter).balance, held, "the fees wait in the router");
+    }
+
+    /// the fees that waited are booked by a normal flush right after, with the owner's buyback split. the fees skip
+    /// nothing: the mid call attempt only delayed them
+    function test_FIXED_aFlushRightAfterTheMeasuredCallBooksTheFeesWithTheSplit() public {
         Settings memory cs = core.settings();
         cs.feeToBuybackBps = 5_000;
         _setSettings(cs);
         uint256 held = _queueFees(1.5 ether);
-        uint256 snap = vm.snapshotState();
-        uint256 bb0 = core.ethToBuyback();
-        _flush();
-        uint256 honest = core.ethToBuyback() - bb0;
-        assertGt(honest, held * 49 / 100, "an honest flush sends half of the fees to the buyback pot");
-        vm.revertToState(snap);
-
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm();
+        atk.arm(true);
         bytes memory data = _order(id, price, atk);
         vm.prank(maker);
         core.buyListing(price, data, id, Mainnet.SEAPORT);
-        assertEq(core.ethToBuyback(), bb0, "FINDING: the buyback pot got none of the fees");
+        assertFalse(atk.flushOk());
+
+        uint256 bb0 = core.ethToBuyback();
+        uint256 pot0 = core.ethPot();
+        uint256 delivered = _flush();
+        assertGt(delivered, held * 90 / 100, "the engine part of the held fees arrived");
+        uint256 toBuyback = delivered * 5_000 / 10_000;
+        assertEq(core.ethToBuyback() - bb0, toBuyback, "half to the buyback pot");
+        assertEq(core.ethPot() - pot0, delivered - toBuyback, "the rest to the pot");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "booked once, nothing left over");
+        assertEq(address(feeRouter).balance, 0);
+    }
+
+    /// a legitimate keeper flush is never blocked for long: it fails only inside someone else's measured call, the
+    /// flag is gone when that call ends (success or revert), and the very next flush works, round after round
+    function test_FIXED_aKeeperFlushIsNeverBlockedOutsideAMeasuredCall() public {
+        for (uint256 round; round < 3; ++round) {
+            uint256 held = _queueFees(1 ether);
+            uint256 id = _list();
+            uint256 price = core.ceilingOf(id);
+            FlushingPayee atk = new FlushingPayee(address(feeRouter));
+            atk.arm(round != 1);
+            bytes memory data = _order(id, price, atk);
+            vm.prank(maker);
+            if (round == 1) vm.expectRevert(ICore.CallFailed.selector);
+            core.buyListing(price, data, id, Mainnet.SEAPORT);
+            assertEq(address(feeRouter).balance, held, "waiting");
+            // same transaction, right after the door (success or revert): the flush goes through
+            uint256 pot0 = core.ethPot();
+            uint256 delivered = _flush();
+            assertGt(delivered, 0, "the keeper flush is not blocked");
+            assertEq(core.ethPot() - pot0, delivered, "booked");
+            assertEq(address(feeRouter).balance, 0);
+            _warp(1 hours);
+        }
     }
 
     function test_OK_theSameOrderWithAnEmptyRouterPaysNoTip() public {
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm();
+        atk.arm(true);
         bytes memory data = _order(id, price, atk);
         assertEq(address(feeRouter).balance, 0);
         uint256 maker0 = maker.balance;
@@ -149,19 +194,15 @@ contract ReviewSeaportFlushTest is SeaportBase {
     }
 }
 
-/// F2. the buyback has no min out. FLOW 10.1 and ARCHITECTURE item 17 say a sandwich of a 1 or 5 eth slice loses money after
-/// both skims. at the v2 skim of 6.9 points that holds at the 1 eth launch slice and fails at the 5 eth cap (the
-/// engineer relaxed `test_FIXED_buybackSliceCapStopsTheSandwich` instead of the claim)
+/// F2. the buyback has no min out. FLOW 10.1 and ARCHITECTURE item 17 say a sandwich of a slice loses money after both
+/// skims. at the v2 skim of 6.9 points that failed at the old 5 eth bound (V2R-2). the bound is now 2 eth
 contract ReviewSandwichTest is FeeBase {
     function _sandwich(uint256 slice, uint256 mult) internal returns (int256 net) {
         uint256 snap = vm.snapshotState();
         vm.deal(address(core), address(core).balance + slice);
         vm.store(address(core), bytes32(uint256(7)), bytes32(slice));
         assertEq(core.ethToBuyback(), slice, "slot 7 is ethToBuyback");
-        Settings memory s = core.settings();
-        s.buybackSlice = uint128(slice);
-        s.buybackDelay = 1;
-        _setSettings(s);
+        _forceSlice(slice);
         vm.roll(block.number + 100);
         address mev = _user("mev");
         uint256 front = slice * mult;
@@ -173,31 +214,49 @@ contract ReviewSandwichTest is FeeBase {
         vm.revertToState(snap);
     }
 
-    function test_FINDING_sandwichOfTheFiveEthSliceProfitsAtTheLaunchSkim() public {
-        _skipToSplitStart();
+    /// writes `buybackSlice` (bits 96 to 223 of the second settings word) and `buybackDelay` 1 straight into storage, so
+    /// a slice above the bound can be simulated
+    function _forceSlice(uint256 slice) internal {
+        bytes32 at = bytes32(uint256(keccak256("credits.core.settings.v1")) + 1);
+        uint256 w = uint256(vm.load(address(core), at));
+        uint256 m128 = type(uint128).max;
+        w = (w & ~(m128 << 96)) | (slice << 96);
+        // buybackDelay: the 16 bits above the slice
+        w = (w & ~(uint256(type(uint16).max) << 224)) | (uint256(1) << 224);
+        vm.store(address(core), at, bytes32(w));
+        assertEq(core.settings().buybackSlice, slice, "slice written");
+        assertEq(core.settings().buybackDelay, 1, "delay written");
+    }
+
+    function _best(uint256 slice) internal returns (int256 best) {
         uint256[6] memory m = [uint256(1), 2, 3, 4, 6, 8];
-        int256 best1 = type(int256).min;
-        int256 best5 = type(int256).min;
+        best = type(int256).min;
         for (uint256 i; i < 6; ++i) {
-            int256 a = _sandwich(1 ether, m[i]);
-            int256 b = _sandwich(5 ether, m[i]);
-            emit log_named_int(string.concat("1 eth slice, front x", vm.toString(m[i])), a);
-            emit log_named_int(string.concat("5 eth slice, front x", vm.toString(m[i])), b);
-            if (a > best1) best1 = a;
-            if (b > best5) best5 = b;
+            int256 r = _sandwich(slice, m[i]);
+            emit log_named_int(string.concat(vm.toString(slice / 1 ether), " eth slice, front x", vm.toString(m[i])), r);
+            if (r > best) best = r;
         }
-        for (uint256 sl = 2; sl <= 4; ++sl) {
-            int256 best = type(int256).min;
-            for (uint256 i; i < 6; ++i) {
-                int256 r = _sandwich(sl * 1 ether, m[i]);
-                if (r > best) best = r;
-            }
-            emit log_named_int(string.concat("best net, slice ", vm.toString(sl), " eth"), best);
-        }
-        assertLt(best1, 0, "OK: the 1 eth launch slice cannot be sandwiched for a profit");
-        assertGt(best5, 0, "FINDING: the 5 eth slice (the settings bound) can be sandwiched for a profit");
+    }
+
+    /// V2R-2 fixed: the bound is 2 eth, and a sandwich of a slice at the bound loses for every front run size
+    function test_FIXED_sandwichOfTheSliceAtTheBoundLosesAtTheLaunchSkim() public {
+        _skipToSplitStart();
+        Settings memory s = core.settings();
+        s.buybackSlice = 2 ether + 1;
+        vm.prank(core.owner());
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, bytes32("buybackSlice")));
+        core.setSettings(s);
+        assertLt(_best(1 ether), 0, "the 1 eth launch slice loses");
+        assertLt(_best(2 ether), 0, "the 2 eth slice at the bound loses");
+    }
+
+    /// why the bound is not higher: a 3 eth slice (inside the old 5 eth bound) profited at the same state
+    function test_OK_aThreeEthSliceWouldHaveProfited() public {
+        _skipToSplitStart();
+        assertGt(_best(3 ether), 0, "3 eth slice profits, so it stays out of bounds");
     }
 }
+
 
 /// a payee that does real work on receipt (a splitter: three cold storage writes, about 70k gas)
 contract HeavyPayee {
