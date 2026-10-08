@@ -1,31 +1,29 @@
 # credits engine
 
-an erc20 on ethereum mainnet whose swap fees buy Credits nfts at a bid, compose them into Statements, and list each statement on an english auction. the engine exists to keep credits flowing into statements: sales do not need to profit, and unsold statements wait for phase 2, when the exitModule redeems them for an exitToken. sale proceeds refill the buying and buy and burn the coin. the coin, pool, hook and fee flow run on the live artcoins stack. every economic number is a setting the owner can change at once. status: unaudited, not deployed. this is branch `flow`.
+an erc20 on ethereum mainnet whose swap fees buy Credits nfts at a bid, compose them into Statements, and list each statement on an english auction. the engine exists to keep credits flowing into statements: sales do not need to profit, and unsold statements wait for phase 2, when the exitModule redeems them for an exitToken. sale proceeds refill the buying and buy and burn the coin. the coin, pool, hook and fee flow run on the artcoins v2 stack (restricted coin, skim hook, lp locker, fee escrow), with a fee router between the hook and the engine. every economic number is a setting the owner can change at once. status: unaudited, not deployed. this is branch `flow`.
 
 ## contracts
 
-we own three contracts. everything else is live and used as deployed. the artcoins rows are the default config at the pin, the Core takes the artcoins stack as a constructor argument.
+we own four contracts. everything else is live, or for the artcoins v2 stack a config input: v2 is not on mainnet yet, so its five addresses in `script/config/mainnet.json` are zero and the deploy refuses the file until they are filled. the Core takes the stack as a constructor argument.
 
 | name | role | address |
 |---|---|---|
-| Core | custody and every rule, the bounty recipient of the skim hook, owner of its auction house | ours, predicted at deploy |
-| CoreLib | linked library of the Core: settings write, rate and auction math, the buyback swap | ours, deployed before the Core |
+| Core | custody and every rule, books the router's flushes as fees, owner of its auction house | ours, predicted at deploy |
+| CoreLib | linked library of the Core: settings write, rate and auction math, the buyback swap, `rescueCoin` | ours, deployed before the Core |
 | ControllerV1 | first policy module, immutable | ours, predicted at deploy |
+| FeeRouter | bounty recipient of the pool. empty `receive`, permissionless `flush` (tip, payees, engine), owner setters closed by one way `lock` | ours, predicted at deploy |
 | Core's auction house | where statements are listed, created by the Core in its constructor, owned by it forever | created at deploy |
 | pnd auction factory | creates auction houses | 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 |
-| ArtCoinsToken | the coin, launched through the factory | created at launch |
-| ArtCoinsFactory | launches the coin and pool | 0x49596c375c139E79bb937bcf826068a8F78D4e0e (default config) |
-| skim hook | takes the swap fee in eth and pushes it to the Core | 0x636c050296B5Cc528D8785169Bf8923716FCa9cc |
-| lp locker | holds the launch liquidity | 0x866ea3Dc2bf7A3e77374619cf50EB697FA766aab |
-| fee escrow | creator and reward payouts | 0x7559689765aE86cBB38e68CD1294830CccB125F2 |
-| anti sniper module | linear skim decay for the first 30 minutes | 0xb038D597365FfD108D63C265Bb0621444a1D8B83 |
+| ArtCoinsTokenV2 | the coin, restricted, launched through the factory | created at launch |
+| ArtCoinsFactoryV2, skim hook, lp locker, fee escrow, anti sniper module | the v2 stack, reference commit 87a7522 of ripe0x/artcoins branch v2 | config input, not on mainnet yet |
 
 ## flow
 
 ```mermaid
 graph LR
     swap["swap in the coin/eth pool"]
-    hook["skim hook<br/>10 points of volume"]
+    hook["v2 skim hook<br/>6.9 points of volume"]
+    router["FeeRouter<br/>6.21 points, flush<br/>tip, payee, engine"]
     pot["Core.receive()<br/>eth pot"]
     buy["buy credits at the bid<br/>sellForEth or buyListing"]
     compose["compose 80 credits<br/>into a Statement"]
@@ -38,7 +36,8 @@ graph LR
     dutch["dutch auction<br/>exitToken for coin, coin burned"]
 
     swap --> hook
-    hook --> pot
+    hook --> router
+    router --> pot
     pot --> buy
     buy --> compose
     compose --> house
@@ -75,10 +74,10 @@ set -a; . ./.env; set +a
 forge test
 ```
 
-tests run on a mainnet fork pinned to block 26127622 (`FORK_BLOCK`). foundry caches fork state on disk, so the first run is slow. use `--match-path` while iterating, and run one forge command at a time.
+tests run on a mainnet fork pinned to block 26127622 (`FORK_BLOCK`). the v2 stack is not on mainnet, so the fixture deploys it onto the fork from prebuilt artifacts of the reference commit (`test/v2-artifacts/README.md`, `test/utils/V2Stack.sol`). foundry caches fork state on disk, so the first run is slow. use `--match-path` while iterating, and run one forge command at a time.
 
-* real contracts only, the pnd factory and the Core's house included. the two stand ins are `MockExitModule` and `MockExitToken` in `test/standins/`, attack contracts are in `test/attackers/`
-* `test/Flow.t.sol` covers the rework, `test/Launch.t.sol` the launch, `test/Rehearsal.t.sol` forks the latest block and skips unless `REHEARSAL` is set
+* real contracts only, the pnd factory, the v2 stack artifacts and the Core's house included. the two stand ins are `MockExitModule` and `MockExitToken` in `test/standins/`, attack contracts are in `test/attackers/`
+* `test/Flow.t.sol` covers the rework, `test/Launch.t.sol` the launch, `test/V2Port.t.sol`, `V2PortRestriction.t.sol` and `V2PortMigration.t.sol` the v2 fee path, the restricted coin and a second Core, `test/Rehearsal.t.sol` forks the latest block and skips unless `REHEARSAL` is set
 * build profiles: only the production contracts (`src/Core.sol`, `src/ControllerV1.sol`, `src/lib/CoreLib.sol`, any new `src/Name.sol`) and the deploy scripts that use `new` (`script/NewProd.sol`, `Deploy.s.sol`, `Resume.s.sol`) compile with via_ir. tests and the other scripts compile without it and reach the production contracts through `src/interfaces/ICore.sol`, `IControllerV1.sol` and `ICoreLib.sol` (generated by `script/tools/gen-interfaces.sh`, rerun it after an abi change, `--check` verifies) and the `Prod` helper in `test/utils/Prod.sol`. never import `src/Core.sol` or `src/ControllerV1.sol` in a test: it pulls the importing file onto via_ir. `test/BuildIdentity.t.sol` proves the fixture deploys the via_ir artifacts. a clean build takes about 4 minutes and 3 gb, a change in a test file about 3 seconds, a change in `src/Core.sol` about 35 seconds
 * check sizes with `forge build --sizes`. every runtime contract must stay under 24,576 bytes
 * the simulator needs only node: `node sim/engine.test.mjs` runs its checks, `node sim/build.mjs` rebuilds `sim/index.html`, `node sim/run.mjs q1` runs a batch
@@ -87,17 +86,17 @@ tests run on a mainnet fork pinned to block 26127622 (`FORK_BLOCK`). foundry cac
 
 warning: the owner confirmations in docs/ARCHITECTURE.md section 14 must be settled first.
 
-the system launches on whichever artcoins version is current at deploy time. everything a launch needs is in one config file, `script/config/mainnet.json`: the artcoins stack (with the pnd `auctionFactory`), `rateStart` and the whole `settings` block. copy it to the gitignored `script/config/local.json` and point `LAUNCH_CONFIG` at it. owner, creator, name, symbol and salt are placeholders that must be filled, the deploy refuses to run while any is unset, or unless `CONFIG_HASH` (printed by preflight) matches the file. secrets come from the environment only (`PRIVATE_KEY`, `ETHERSCAN_API_KEY`).
+the system launches on the artcoins v2 stack. everything a launch needs is in one config file, `script/config/mainnet.json`: the v2 stack (five addresses, zero until v2 is on mainnet, plus the pnd `auctionFactory`), `rateStart`, the `settings`, `sale`, `launch` and `router` blocks. copy it to the gitignored `script/config/local.json` and point `LAUNCH_CONFIG` at it. the deploy refuses to run while a v2 address is zero, or unless `CONFIG_HASH` (printed by preflight) matches the file. one key, the v2 factory owner, signs everything (`deployTokenAsOwner` is owner only). secrets come from the command line (`--ledger`) or the environment (`ETHERSCAN_API_KEY`).
 
 | step | action |
 |---|---|
 | 1 | fill the config. set `rateStart` on launch day to 75 percent of the market price of a credit (default 1.54e13 for 0.0089 eth), the rule is in docs/DEPLOY.md |
 | 2 | rehearse: `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv` |
-| 3 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
-| 4 | the factory owner enables the deployer, `setAdmin(deployer, true)` |
-| 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow` through a private relay, with `CONFIG_HASH` set. six transactions, the library first. a half finished deploy is finished with `script/Resume.s.sol` |
-| 6 | verify CoreLib, ControllerV1 and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
-| 7 | the factory owner revokes the deployer, `setAdmin(deployer, false)` |
+| 3 | owner command, once: `setMinLpFee(0)` on the v2 factory (the launch uses an lp fee of 0) |
+| 4 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
+| 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow --ledger` through a private relay, with `CONFIG_HASH` set. nine transactions, the library first, the router setup last. a half finished deploy is finished with `script/Resume.s.sol` |
+| 6 | verify CoreLib, ControllerV1, FeeRouter and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
+| 7 | after launch: keepers call `flush` on the router, owner commands on the router (payees, tip, split start, engine, lock) are in docs/DEPLOY.md section 4 |
 
 the full runbook is docs/DEPLOY.md.
 

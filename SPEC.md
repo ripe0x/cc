@@ -2,6 +2,8 @@
 
 this is the original handoff spec. the branch `flow` is the current implementation and docs/ARCHITECTURE.md lists what differs. superseded by docs/FLOW.md section 9: the timelock, the queue and the freeze action no longer exist, owner actions work at once with three one way locks and a two step owner handover. sections 8 and 9 below carry a note at each spot.
 
+stale notes after the port to the artcoins v2 stack (docs/FLOW.md section 10, docs/ARCHITECTURE.md): the `FeeHook` and `Core.addFees()` rows and bullets describe a hook of our own that does not exist. the pool, the skim hook and the factory are the live v2 artcoins contracts. the hook pays the bounty leg to a `FeeRouter` (a fourth contract of ours), whose `flush` sends the engine share to the Core's `receive()`, which books it as fees only from that router. the fee numbers are 6.9 points of volume (6.21 to the router, 0.69 the protocol leg), not the fee and creator split written below. the coin is the v2 restricted token, with no transfer tax, the Core on its allowlist and `rescueCoin` for stray coin. the Coin, FeeHook and Launcher sections do not apply. everything in this file about the exit module, the sale, the buybacks and the invariants holds as amended by docs/FLOW.md.
+
 ## 0. what this is
 
 an erc20 on ethereum mainnet whose swap fees buy Credits nfts, compose them into Statements, and exit each statement one of two ways: sold at a falling price auction for eth, or handed to an exit module for an exit token. proceeds buy and burn the coin and refill the buying.

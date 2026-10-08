@@ -1,3 +1,5 @@
+note: this file is the record of the artcoins v1 stack at block 26127622 and is kept as written. the engine now launches on the artcoins v2 stack (docs/FLOW.md section 10, docs/V2-PORT.md); nothing below describes v2.
+
 # artcoins launch recipe notes (skim hook + venue tax, modeled on 111)
 
 verified 2026 10 05 against mainnet block 26127622 (ts 1791220847), latest checked 26128926. nothing relevant changed between the two (no events on factory, escrow, locker, mev module, allowlist, controller after the pin). source reading is /home/claude/artcoins (head 003ee06). every live contract in the 111 stack (factory, hook, token, locker, escrow, controller) was pulled from sourcify and the `src/` files are byte identical to /home/claude/artcoins/src, so line pointers below are valid for the live bytecode. line numbers refer to /home/claude/artcoins unless a path says permanent collection (pc = /home/claude/permanent-collection).
