@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -24,6 +25,9 @@ library CoreLib {
     error BadSetting(bytes32 field);
     event SettingsSet(Settings settings);
     error BadSwap();
+    error ZeroAddress();
+    error OnlyOwner();
+    event CoinRescued(address indexed to, uint256 amount);
 
     /// @notice validates the settings, stores them and logs them. the Core forwards its own `setSettings` call here
     /// untouched (same selector), after it checkpointed both rates. the constructor calls it too
@@ -179,4 +183,30 @@ library CoreLib {
         pm.take(key.currency1, address(this), bought);
         // forge-lint: disable-end(unsafe-typecast)
     }
+
+    /// @notice sends coin the Core holds to `to`. the Core's `rescueCoin` forwards its call here untouched, so the owner
+    /// check and the reentrancy guard are here: `msg.sender` is the caller of the Core and the guard is the Core's own
+    /// (solady's storage guard, the same slot and values: a nonzero value other than the address is "free")
+    function rescueCoin(address to, uint256 amount) external {
+        ICoinOf core = ICoinOf(address(this));
+        if (msg.sender != core.owner()) revert OnlyOwner();
+        if (to == address(0)) revert ZeroAddress();
+        assembly {
+            if eq(sload(0x929eee149b4bd21268), address()) {
+                mstore(0x00, 0xab143c06) // `Reentrancy()`
+                revert(0x1c, 0x04)
+            }
+            sstore(0x929eee149b4bd21268, address())
+        }
+        SafeTransferLib.safeTransfer(core.COIN(), to, amount);
+        assembly {
+            sstore(0x929eee149b4bd21268, codesize())
+        }
+        emit CoinRescued(to, amount);
+    }
+}
+
+interface ICoinOf {
+    function COIN() external view returns (address);
+    function owner() external view returns (address);
 }

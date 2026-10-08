@@ -7,7 +7,10 @@ import {Settings} from "./Interfaces.sol";
 interface ICoreLib {
     error BadSetting(bytes32 field);
     error BadSwap();
+    error OnlyOwner();
+    error ZeroAddress();
 
+    event CoinRescued(address indexed to, uint256 amount);
     event SettingsSet(Settings settings);
 
     function climb(

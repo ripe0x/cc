@@ -148,7 +148,7 @@ struct Settings {
     uint64 rateCap;
     /// share of exit token from EXIT lane exits that goes to the coin buyback, bps, the rest to the exit bid pot
     uint16 exitLaneToBuybackBps;
-    /// share of the swap fee eth that the hook pays to the core (booked in `receive()`) that goes to the coin buyback,
+    /// share of the swap fee eth that the fee router flushes to the core (booked in `receive()`) that goes to the coin buyback,
     /// the rest to the pot, bps. eth booked later by `skim` goes to the pot whole
     uint16 feeToBuybackBps;
 }
