@@ -202,6 +202,72 @@ At `throttleFrac` 0.8 with an ask floor of 0.8 (so honest sellers and the thrott
 
 What it shows. Under `stepped` one sale moves the bid by at most the drop per credit (0.5 or 1 percent), which a 0.5 to 1 percent climb a minute recovers in a minute or two, so the throttler cannot hold the bid down: on the flat market it sells 456 of 26,689 credits. Under `dropToLast` the first honest sellers already hold the bid near 0.55 to 0.7 of market, so a throttler at 0.95 sells once. At the floor setting the throttler takes essentially all of the `dropToLast` volume (5,780 of 5,781 credits at drop 80, 25,141 of 25,145 at drop 95): the engine buys the same count at the same price and the honest sellers are displaced, because the volume of `dropToLast` is capped at one fill per climb cycle and a seller that is first at each cycle takes it. For `stepped` and `built` the throttler adds supply, and in the thin market it raises credits at day 90 from 15,734 to 24,978 (stepped) and lowers paid_vs_market from 1.47 to 1.04. In every measured case the credits the engine buys stay within 1 percent of the value without the throttler or rise. The measured effects are displacement of honest sellers and a lower price paid.
 
+## Idle loosening of the ceiling anchor
+
+A ceiling of 110 percent of the last price paid parks the bid when the market gaps up by more than the ceiling between two fills and no seller accepts the parked bid. The anchor stays at the last fill, so the bid stops at the ceiling until the market comes back. The `rising` market of the grid (doubling over 7 days) moves 1 percent an hour and never triggered this.
+
+Fix: `idleLoosenPct` percent is added to the anchor every `idleLoosenMin` minutes while no fill happens. A fill resets the idle clock. The anchor is the last rate paid, so the ceiling at idle time `k` intervals is `ceilPct x anchor x (1 + idleLoosenPct)^k`. All rows below use `clampCredits` 20 (the runaway guard). Setting A is drop 1, climb 1, ceiling 110. Setting B is drop 0.5, climb 0.5, ceiling 125. Market path `gap`: one jump at hour 6 of a flat day, then flat. Three seeds, minute steps, from `sim/results/bid-rule-stalls.csv` (scenario `a_gap_up`). "First fill" is minutes from the jump to the next purchase, "credits 24 h" and "paid/mkt 24 h" cover the 24 hours after the jump, "stall h" is the stall metric defined in the next section.
+
+| setting | first fill, 13% | first fill, 30% | 100%: first fill | credits 24 h | paid/mkt 24 h | stall h | 300%: first fill | credits 24 h | paid/mkt 24 h | stall h |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A, loosen 0% | 2 min | 7 min | 929 min | 446 | none | 16.2 | never | 0 | none | 66.0 |
+| A, loosen 0.5% | 3 min | 13 min | 117 min | 1199 | 0.82 | 1.8 | 856 min | 276 | 0.49 | 18.5 |
+| A, loosen 1% | 1 min | 3 min | 77 min | 1269 | 0.82 | 0.8 | 422 min | 812 | 0.67 | 8.0 |
+| A, loosen 2% | 4 min | 6 min | 76 min | 1291 | 0.84 | 0.0 | 193 min | 1071 | 0.70 | 3.9 |
+| B, loosen 0% | 2 min | 9 min | 102 min | 1210 | 0.83 | 1.0 | never | 0 | none | 66.0 |
+| B, loosen 0.5% | 2 min | 5 min | 27 min | 1270 | 0.85 | 0.0 | 447 min | 791 | 0.66 | 7.4 |
+| B, loosen 1% | 2 min | 8 min | 41 min | 1276 | 0.85 | 0.0 | 200 min | 1010 | 0.69 | 4.3 |
+| B, loosen 2% | 2 min | 8 min | 54 min | 1277 | 0.85 | 0.0 | 94 min | 1157 | 0.70 | 0.0 |
+
+Jumps of 13 and 30 percent resolve in under 15 minutes for every setting, because the lowest asks in the modeled book sit far below the bid and each cheap fill moves the anchor up 10 to 25 percent. Jumps of 100 and 300 percent separate the settings. Setting A without loosening waits 929 minutes after a 100 percent jump and never fills after a 300 percent jump (66 hours, the rest of the run). Setting B with 2 percent per 10 minutes fills within 54 minutes after 100 percent and 94 minutes after 300 percent with no stall hours.
+
+Runaway check over 90 days (the bid over market stays near market with the clamp at 20, loosening has little effect):
+
+| setting | flat: max bid/mkt | credits d90 | paid/mkt | falling: max bid/mkt | credits d90 | paid/mkt |
+|---|---|---|---|---|---|---|
+| A, loosen 0% | 1.03 | 30555 | 0.86 | 1.02 | 54512 | 0.89 |
+| A, loosen 0.5% | 1.03 | 30683 | 0.85 | 1.02 | 54056 | 0.89 |
+| A, loosen 1% | 1.05 | 30657 | 0.85 | 1.03 | 54509 | 0.89 |
+| A, loosen 2% | 1.08 | 30905 | 0.85 | 1.07 | 54000 | 0.89 |
+| B, loosen 0% | 1.23 | 30449 | 0.86 | 1.17 | 53121 | 0.90 |
+| B, loosen 0.5% | 1.18 | 30117 | 0.86 | 1.19 | 53578 | 0.89 |
+| B, loosen 1% | 1.20 | 30136 | 0.86 | 1.23 | 52803 | 0.90 |
+| B, loosen 2% | 1.17 | 30240 | 0.86 | 1.21 | 53221 | 0.90 |
+
+Recommended values: `idleLoosenPct` 2 and `idleLoosenMin` 10 on setting B (drop 0.5, climb 0.5, ceiling 125, `clampCredits` 20). Value 1 percent leaves a 4.3 hour stall at a 300 percent gap and 0.5 percent leaves 7.4 hours. Setting A shows a lower maximum bid (1.08 against 1.17 to 1.21) and a 3.9 hour stall at 300 percent with the 2 percent value.
+
+## Stalls
+
+Definition used by the simulator (`stallHours`, `stallHoursMax`, `stallRuns` in the run statistics): a step is stalled when the pot affords the cheapest ask in the book, the engine buys nothing in that step, and the stretch of such steps lasts longer than 2 hours. The total counts the full length of every stretch over 2 hours. `gapHoursMax` is the longest stretch of any length. Each stalled step is assigned a cause: `low_clamp` (the pot limited climb, which is `clampCredits`, is under the cheapest ask), `low_rateCap`, `low_ceiling` (the stepped ceiling), `low_climbing` (the bid is still climbing), `room` (the bid is at or above the cheapest ask and above what the pot and the hourly cap afford) or `other`. Rows are in `sim/results/bid-rule-stalls.csv` with one column per cause.
+
+Setting for all rows: stepped B, idleLoosenPct 2 every 10 minutes, `clampCredits` 20, unless the row names another clamp. Tests ran on minute steps with three seeds.
+
+| cause | trigger | duration | fix or accepted |
+|---|---|---|---|
+| ceiling anchor behind a gap (`low_ceiling`) | market jumps by 100 percent or more between fills | without loosening: setting A 929 minutes after +100 percent, 66 hours (to the end of the run) after +300 percent; with 2 percent per 10 minutes: no stall hours, first fill 54 and 94 minutes | fixed by `idleLoosenPct` 2 per 10 minutes |
+| low anchor after one cheap fill (`low_ceiling`) | one fill at 0.3 times market, then flat | without loosening a 24.4 hour stall (longest gap 32.9 hours); with loosening 0.9 hours total | fixed by loosening |
+| slow recovery after a cheap fill | one fill at 0.5 times market | no stall in either case; bid returns to 0.9 times market after 1,475 minutes without loosening and 969 minutes with it, because each fill lifts the anchor by at most the ceiling factor | accepted, about 16 hours |
+| pot accumulation under the clamp (`low_clamp`) | the pot affords fewer than N credits an hour at the cheapest ask, which is a pot under about 2.5 x N x market price in eth | N 20 at a 0.03 market: 365 to 381 stall hours of 480 at pots of 0.25 to 1 eth, none at 2 eth. Over 90 days on the five markets, N 20: 463 to 765 hours (longest single stretch 14.8 to 22.1 hours); N 80: 270 hours on flat | accepted: credits per day are the same across N (288 to 336 on flat) because purchases are limited by income, the engine waits for the pot instead of paying above its means |
+| bid above the hourly room (`room`) | clamp N of 1 (as built) or 5 and a starved pot: the bid sits at the clamp, 5.98 times market for N 1, and the pot cannot pay it | flat 90 days: N 1 1,099 hours (longest 28.4), N 5 902 hours (longest 24.7) | fixed by N 20 or more, which turns the stall into pot accumulation above and ends the 6 times overpay |
+| `rateCap` | market above the cap price, which is 5.99 times the launch market price (0.0533 eth at 433 points) | +700 percent (8x): 9 hours while the anchor loosens, then fills from sellers asking under 0.75 times market, 474 credits a day; +1500 percent (16x) and +3000 percent (31x): no fill until the end of the run (114 hours), 100 hours of `rateCapHours` | accepted by design: the owner raises `rateCap` with `setSettings`. With the strategy listings on (priced in eth, not following the market) the engine keeps buying 1,483 credits a day at 0.1 to 0.4 times market and the cap does not show |
+| hourly cap drained at the hour start by a bot | a bot sells into the bid at the first minute of each hour until the hourly room is used | longest gap 1.0 hour (0.7 hours at a 50 eth pot), 0 stall hours. Credits per hour allowed: 474 at a 20 eth pot and 839 at 50 eth with the bot, 66 and 64 without | pacing, accepted. The bot lowers the price paid to 0.57 times market because it sells at any ask |
+| inventory gate (`REVIEW-econ.md` E-4) | bid closed while unsold statements are held | 0 hours in the simulator. `docs/FLOW.md` rule 2 removed the gate and neither `src/Core.sol` nor the simulator has it. Counterfactual with a gate of 20 held statements the bid would be closed 2,146 of 2,160 hours in the 90 day flat run | simulator unchanged. A gate of 20 would dominate every other stall in this table |
+| supply limited overpay (not a stall) | the market cannot supply the throughput target, which is climb over drop credits a minute (1 for setting B) | pot held at 5 eth and a 0.0089 market: bid rises to 5.3 times market, 29 credits an hour, because the clamp for N 20 at a 5 eth pot is 5.6 times market | accepted, noted: the clamp bounds the bid by the pot, so at pots above about 0.9 eth (N 20) the bid is bounded by supply and the ceiling alone |
+| bid pulled down to the clamp (probe, removed) | a probe that cut the bid to the clamp whenever the pot was below it | the rate collapsed to 0 at launch, where the pot is empty, and never recovered | any such pull needs a floor on the rate |
+
+Smallest pot without a stall, by clampCredits, market price 0.03 eth, pot held constant for 20 days (480 hours), hours stalled and credits per day:
+
+| clampCredits | 0.1 eth | 0.25 eth | 0.5 eth | 1 eth | 2 eth | 5 eth | 10 eth | 20 eth |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 480 h, 0/day | 178 h, 18/day | 0 h, 26/day | 0 h, 76/day | 0 h, 179/day | 0 h, 471/day | 0 h, 1012/day | 0 h, 1357/day |
+| 5 | 480 h, 0/day | 2 h, 39/day | 0 h, 80/day | 0 h, 121/day | 0 h, 179/day | 0 h, 471/day | 0 h, 1012/day | 0 h, 1357/day |
+| 20 | 480 h, 0/day | 365 h, 11/day | 381 h, 16/day | 368 h, 19/day | 0 h, 270/day | 0 h, 518/day | 0 h, 1012/day | 0 h, 1357/day |
+| 80 | 480 h, 0/day | 377 h, 9/day | 419 h, 9/day | 434 h, 9/day | 441 h, 9/day | 378 h, 16/day | 0 h, 538/day | 0 h, 1322/day |
+
+From the grid: N 1 needs 0.5 eth, N 5 needs 0.5 eth (0.25 eth stalls 2 hours), N 20 needs 2 eth, N 80 needs 10 eth. The pot threshold scales with the market price: at the launch market of 0.0089 eth the thresholds are about 0.11 eth for N 5, 0.45 eth for N 20 and 1.8 eth for N 80.
+
+Other states searched for a bid that cannot reach the cheapest ask while the pot is funded. The hourly window opens with the pot at the first spend after the previous window ended, so a drained pot refilled by fees shortens the cap for at most one hour (pacing, longest gap 1.0 hour in the bot runs). After a large purchase burst the bid sits at 0.8 times the bid at the burst start and the anchor at the lowest fill, which recovers in minutes. Rate bounds apply to `setRate` and `rateStart` in `SettingsBounds`, and the climb path holds only the clamp and `rateCap`, so no run reached a rate floor.
+
 ## Where the numbers may be untrustworthy
 
 1. Seller asks are a lognormal around the market price. The cheap tail drives every low paid_vs_market value and is untested against real listing data (sensitivity above).
@@ -211,3 +277,4 @@ What it shows. Under `stepped` one sale moves the bid by at most the drop per cr
 5. The market price used for ratios includes the engine's own price lift (`impactElast`), which decays with a 48 hour half life, so the ratio is to the market as the engine moves it.
 6. In the whipsaw market the fall starts on day 2 so the engine is already buying; a fall at launch would be a different test.
 7. Order within a minute: the throttler sells first. Real transaction ordering in a block could differ.
+8. The stall rows use a held pot in the small pot and bot tests (topped up after every step), which breaks the pot accounting check for those runs only. The strategy listings are priced in eth and sit in the book at fixed prices, which hides market gaps unless switched off.

@@ -275,6 +275,15 @@ export class Core {
     if (this.p.fundedRule === 'old') return Infinity;
     return Math.min((this.ethPot * W * s.spendCapBps) / (s.avgScore * (this.p.clampCredits || 1)), s.rateCap);
   }
+  // stepped rule: the ceiling in rate terms, ceilPct of the anchor (the last rate paid), the anchor loosened while idle
+  stepCeil(now) {
+    const p = this.p;
+    // ceilDecayHours > 0: the headroom above the last rate paid halves every ceilDecayHours since the last fill
+    const decay = p.ceilDecayHours > 0 ? Math.pow(0.5, (now - this.lastFillTime) / (p.ceilDecayHours * 3600)) : 1;
+    // idleLoosenPct: the anchor grows by that percent every idleLoosenMin minutes since the last fill
+    const loosen = p.idleLoosenPct > 0 ? Math.pow(1 + p.idleLoosenPct / 100, Math.floor((now - this.lastFillTime) / (p.idleLoosenMin * 60))) : 1;
+    return this.lastPaidRate * loosen * (1 + (p.ceilPct / 100 - 1) * decay);
+  }
   ethRate(now) {
     const s = this.s;
     let r = this.rateAtCheckpoint;
@@ -282,13 +291,7 @@ export class Core {
     let cap = this.clamp();
     const rule = this.p.bidRule;
     if (rule !== 'built') {
-      if (rule === 'stepped') {
-        // ceilDecayHours > 0: the headroom above the last rate paid halves every ceilDecayHours since the last fill
-        const decay = this.p.ceilDecayHours > 0 ? Math.pow(0.5, (now - this.lastFillTime) / (this.p.ceilDecayHours * 3600)) : 1;
-        // idleLoosenPct: the anchor (last rate paid) grows by that percent every idleLoosenMin minutes since the last fill
-        const loosen = this.p.idleLoosenPct > 0 ? Math.pow(1 + this.p.idleLoosenPct / 100, Math.floor((now - this.lastFillTime) / (this.p.idleLoosenMin * 60))) : 1;
-        cap = Math.min(cap, this.lastPaidRate * loosen * (1 + (this.p.ceilPct / 100 - 1) * decay));
-      }
+      if (rule === 'stepped') cap = Math.min(cap, this.stepCeil(now));
       if (cap <= r) return r;
       return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), cap);
     }
@@ -743,6 +746,7 @@ export function simulate(userParams = {}) {
   let idle = 0, idleMax = 0, forceDone = false, botNow = false;
   let stallRun = 0, stallTotal = 0, stallMax = 0, gapRun = 0, gapMax = 0, gateClosed = 0, rateCapSec = 0;
   const stallRuns = [];
+  let runCause = {}; const stallCause = {};
   let prevRate = p.rateStart, signChanges = 0, lastDir = 0, rateMaxRatio = 0, rateAbsMove = 0, rateMoves = 0;
 
   // ---- the engine buys: market offers through the bid or a listing, CreditStrategy listings, exitToken bid in phase 2.
@@ -1085,10 +1089,26 @@ export function simulate(userParams = {}) {
     {
       let cheapest = Infinity;
       for (const arr of [book, strat]) for (let i = arr.length - 1, k = 0; i >= 0 && k < 400; i--, k++) { const it = arr[i], a = arr === strat ? it.price : it.m * it.prem * Pe; if (a < cheapest) cheapest = a; }
-      if (T.bought + T.boughtX === filledBefore && cheapest < Infinity && core.ethPot >= cheapest) { stallRun += dt; gapRun += dt; }
+      if (T.bought + T.boughtX === filledBefore && cheapest < Infinity && core.ethPot >= cheapest) {
+        stallRun += dt; gapRun += dt;
+        // cause of this step: why the bid cannot buy the cheapest ask. low_*: the bid sits under the ask and the named limit is the lowest of the climb limits
+        const rr2 = core.ethRate(t1), bidPrice = (core.epts(440) * rr2) / W, rm = core.room(0, t1);
+        const afford = Math.min(core.ethPot, (rm.wp * core.s.spendCapBps) / BPS - rm.wsp);
+        let cause;
+        if (bidPrice >= cheapest * (1 - 1e-9)) cause = bidPrice > afford ? 'room' : 'other';
+        else {
+          // the lowest of the climb limits names the cause: the pot (clampCredits), the rateCap or the stepped ceiling
+          const pc = (core.epts(440) * (core.ethPot * W * core.s.spendCapBps) / (core.s.avgScore * (p.clampCredits || 1))) / W;
+          const lim = { clamp: pc, rateCap: (core.epts(440) * core.s.rateCap) / W, ceiling: p.bidRule === 'stepped' ? (core.epts(440) * core.stepCeil(t1)) / W : Infinity };
+          cause = 'low_climbing';
+          let lo = cheapest * (1 - 1e-9);
+          for (const k of Object.keys(lim)) if (lim[k] < lo) { lo = lim[k]; cause = 'low_' + k; }
+        }
+        runCause[cause] = (runCause[cause] || 0) + dt;
+      }
       else {
-        if (stallRun > 7200) { stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); if (stallRuns.length < 300) stallRuns.push([t1 - stallRun - dt, stallRun]); }
-        stallRun = 0; gapMax = Math.max(gapMax, gapRun); gapRun = 0;
+        if (stallRun > 7200) { for (const k of Object.keys(runCause)) stallCause[k] = (stallCause[k] || 0) + runCause[k]; stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); if (stallRuns.length < 300) stallRuns.push([t1 - stallRun - dt, stallRun]); }
+        stallRun = 0; runCause = {}; gapMax = Math.max(gapMax, gapRun); gapRun = 0;
       }
       if (unbid.length + live.length >= p.gateAt) gateClosed += dt;
       if (core.ethRate(t1) >= core.s.rateCap * (1 - 1e-9)) rateCapSec += dt;
@@ -1121,7 +1141,7 @@ export function simulate(userParams = {}) {
     if (t1 % 3600 === 0) record(t1 / 3600, t1);
   }
 
-  if (stallRun > 7200) { stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); stallRuns.push([H * 3600 - stallRun, stallRun]); }
+  if (stallRun > 7200) { for (const k of Object.keys(runCause)) stallCause[k] = (stallCause[k] || 0) + runCause[k]; stallTotal += stallRun; stallMax = Math.max(stallMax, stallRun); stallRuns.push([H * 3600 - stallRun, stallRun]); }
   gapMax = Math.max(gapMax, gapRun);
   // ---- results
   const at = (d) => {
@@ -1151,7 +1171,7 @@ export function simulate(userParams = {}) {
     potCheck: T.fees + T.feesBuyback + T.feesTaker - core.feeToBuyback + T.saleToPot - T.spent - T.reimb - core.ethPot,
     buybackCheck: T.saleToBuyback + core.feeToBuyback - core.ethToBuyback - T.buybackSpent - T.buybackTips,
     houseCheck: T.saleGross - T.saleToPot - T.saleToBuyback - core.houseOwed,
-    stallHours: stallTotal / 3600, stallHoursMax: stallMax / 3600, gapHoursMax: gapMax / 3600, stallRuns, gateClosedHours: gateClosed / 3600, rateCapHours: rateCapSec / 3600,
+    stallHours: stallTotal / 3600, stallHoursMax: stallMax / 3600, gapHoursMax: gapMax / 3600, stallRuns, stallCauseHours: Object.fromEntries(Object.entries(stallCause).map(([k, v]) => [k, v / 3600])), gateClosedHours: gateClosed / 3600, rateCapHours: rateCapSec / 3600,
     idleHoursMax: idleMax / 3600, maxPaidRatio: T.maxPaidRatio, throttled: T.throttled,
     finalRate: core.ethRate(H * 3600), finalPot: core.ethPot,
   };

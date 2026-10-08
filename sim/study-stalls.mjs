@@ -10,7 +10,8 @@ const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ?
 const cfg = isMainThread ? { seeds: arg('seeds', '1,2,3').split(',').map(Number), phase: +arg('phase', 1), base: arg('base', 'A'), loosen: +arg('loosen', 1) } : workerData.cfg;
 const OUT = new URL('./results/bid-rule-stalls.csv', import.meta.url).pathname;
 const COLS = ['scenario', 'setting', 'trigger', 'first_fill_min', 'recover_min', 'credits_24h_after', 'paid_vs_market_24h', 'credits_per_day', 'credits_day90', 'paid_vs_market',
-  'max_bid_over_market', 'stall_hours', 'stall_hours_max', 'gap_hours_max', 'rate_cap_hours', 'gate_closed_hours', 'first_stall_start_h'];
+  'max_bid_over_market', 'stall_hours', 'stall_hours_max', 'gap_hours_max', 'rate_cap_hours', 'gate_closed_hours', 'first_stall_start_h',
+  'stall_low_clamp_h', 'stall_low_ceiling_h', 'stall_low_ratecap_h', 'stall_low_climbing_h', 'stall_room_h', 'stall_other_h'];
 
 const rateAt = (share, price = 0.0089) => (share * price * W) / 433;
 const BASES = { A: { dropPerCreditPct: 1, climbPerMin: 1, ceilPct: 110 }, B: { dropPerCreditPct: 0.5, climbPerMin: 0.5, ceilPct: 125 } };
@@ -37,6 +38,7 @@ function runSeed(job, seed) {
     stall_hours: st.stallHours, stall_hours_max: st.stallHoursMax, gap_hours_max: st.gapHoursMax, rate_cap_hours: st.rateCapHours, gate_closed_hours: st.gateClosedHours,
     first_stall_start_h: st.stallRuns.length ? st.stallRuns[0][0] / 3600 : NaN,
   };
+  for (const k of ['low_clamp', 'low_ceiling', 'low_ratecap', 'low_climbing', 'room', 'other']) m['stall_' + k + '_h'] = st.stallCauseHours[k === 'low_ratecap' ? 'low_rateCap' : k] || 0;
   if (E != null) {
     const h0 = job.event, h1 = Math.min(H, h0 + 24);
     m.credits_24h_after = S.credits[h1] - S.credits[h0];
@@ -66,7 +68,7 @@ function jobsPhase1() {
 function jobsPhase2(base, L) {
   const jobs = [];
   const S = label(base, L);
-  for (const g of [13, 30, 100]) jobs.push({ scenario: 'a_gap_up', setting: S, trigger: `market jumps ${g}% at hour 6`, days: 3, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6 }) });
+  for (const g of [13, 30, 100, 300]) jobs.push({ scenario: 'a_gap_up', setting: S, trigger: `market jumps ${g}% at hour 6`, days: 3, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6 }) });
   for (const loosen of [0, L]) for (const frac of [0.5, 0.3]) {
     jobs.push({ scenario: 'b_cheap_fill', setting: label(base, loosen), trigger: `one forced fill at ${frac}x market at hour 6, then flat`, days: 3, event: 6, over: stepped(base, loosen, { forceFillHour: 6, forceFillFrac: frac }) });
   }
@@ -74,7 +76,10 @@ function jobsPhase2(base, L) {
     jobs.push({ scenario: 'c_small_pot', setting: label(base, L, N), trigger: `pot held at ${pot} eth, market 0.03`, days: 20,
       over: stepped(base, L, { priceP0: 0.03, rateStart: rateAt(1, 0.03), volScale: 0, strategyOn: false, holdPot: pot, clampCredits: N }, 0.03) });
   }
-  for (const g of [700, 1500, 3000]) jobs.push({ scenario: 'd_rate_cap', setting: S, trigger: `market jumps ${g}% at hour 6 (${(1 + g / 100)}x)`, days: 3, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6 }) });
+  // the CreditStrategy listings are priced in eth and do not follow the market, so they are switched off to test rateCap; the strategy rows show the effect of leaving them on
+  for (const strat of [false, true]) for (const g of [700, 1500, 3000]) {
+    jobs.push({ scenario: 'd_rate_cap', setting: S, trigger: `market jumps ${g}% at hour 6 (${1 + g / 100}x), strategy listings ${strat ? 'on' : 'off'}`, days: 5, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6, strategyOn: strat }) });
+  }
   for (const pot of [5, 20, 50]) for (const bot of [false, true]) {
     jobs.push({ scenario: 'e_cap_bot', setting: S, trigger: `pot held at ${pot} eth, bot drains the hourly cap at each hour start: ${bot}`, days: 5,
       over: stepped(base, L, { volScale: 0, strategyOn: false, holdPot: pot, botDrain: bot }) });
@@ -90,11 +95,13 @@ if (!isMainThread) {
   for (const job of workerData.jobs) parentPort.postMessage(runJob(job));
 } else {
   const fmt = (x) => (typeof x === 'number' ? (Number.isFinite(x) ? +x.toPrecision(5) : '') : x);
-  const jobs = cfg.phase === 1 ? jobsPhase1() : jobsPhase2(cfg.base, cfg.loosen);
+  const only = arg('only', '');
+  const jobs = (cfg.phase === 1 ? jobsPhase1() : jobsPhase2(cfg.base, cfg.loosen)).filter((j) => j.scenario.startsWith(only));
   const rows = [];
-  if (cfg.phase === 2) {
+  if (cfg.phase >= 2) {
+    const mine = new Set(jobs.map((j) => j.scenario));
     const [, ...lines] = fs.readFileSync(OUT, 'utf8').trim().split('\n');
-    for (const l of lines) if (/^(a_gap_up|runaway_90d)/.test(l) && !l.includes(label(cfg.base, cfg.loosen))) rows.push(l);
+    for (const l of lines) { const sc = l.split(',')[0]; if (!mine.has(sc) || (sc === 'a_gap_up' && !l.includes(label(cfg.base, cfg.loosen)))) rows.push(l); }
   }
   const nW = Math.max(1, Math.min(os.availableParallelism() - 2, jobs.length));
   const slices = Array.from({ length: nW }, () => []);
