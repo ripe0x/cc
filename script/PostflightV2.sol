@@ -99,7 +99,11 @@ abstract contract PostflightV2 is SystemBuilder, Report {
             t.totalSupply() <= c.supply,
             string.concat("supply ", vm.toString(t.totalSupply()))
         );
-        _warn("warn: coin supply is the config supply", t.totalSupply() == c.supply, "coin was burned since launch");
+        _warn(
+            "warn: coin supply is the config supply (less the locker dust)",
+            t.totalSupply() + 1e6 >= c.supply,
+            "coin was burned since launch"
+        );
         _eq("coin: launcher is the factory", t.launcher(), c.stack.factory);
         _eq("coin: canonical hook", t.canonicalHook(), c.stack.hook);
         _eq("coin: canonical pool id", t.canonicalPoolId(), poolId);
