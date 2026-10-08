@@ -1,6 +1,50 @@
 # v2 port plan
 
-status: analysis only, nothing here is implemented. reviewed against v2 `origin/v2` HEAD 87a75228 (2026-10-07), source at `/home/claude/nmcl/v2`. engine at branch flow, Core runtime 24415 bytes, 161 bytes headroom (from `out/Core.sol/Core.json`).
+## status after the port (2026-10-08)
+
+the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the amendments win over the plan below). everything here was checked by building the engine and running the fork suites on the vendored v2 artifacts of commit 87a7522. where this file and section 10 differ, section 10 wins.
+
+### claims that were wrong or are superseded
+
+| plan claim | what is true | evidence |
+|---|---|---|
+| section 5.3: the coin address depends on the router address, not on the Core address | wrong once the Core is on the coin's allowlist (decision 29): the allowlist is in the config the factory hashes, so the coin address depends on the Core address too. controller (nonce n), router (n+1), Core (n+2) and the coin are all predicted from the owner nonce and checked after each deploy | `script/SystemDeployer.sol`, `Fixture.predictCoin(c, owner, router, core)` |
+| section 5.3 steps 7 and 8: `setEngine`, then lock | the deploy does not lock the router. a later engine migration needs `setEngine` open. the deploy runs `setEngine`, `setPayees`, `setTip` (skipped at the default) and `setSplitStart`, the owner locks when no migration is wanted | docs/DEPLOY.md, `V2PortMigration.t.sol` |
+| section 0.1 flags 2 and 3, section 5.1: bounty 9000 and lpFee 3000 as the nearest allowed values | superseded by decision 23: baseline skim 6.9 points, `bountyBps` 9000, `lpFee` 0, reached by the factory owner command `setMinLpFee(0)` before the launch. the protocol leg is 0.69 points (10 percent of the skim), not 0.5, and belongs to the launcher protocol | `V2Stack.t.sol` `test_v1LaunchValuesRevert`, preflight rows |
+| section 6, the lp income options A, B, C | moot. with `lpFee` 0 the locker has nothing to pay: no swapper, no lp income path, no escrow depositor registration. the locker slots are the creator 8,000 bps and the factory protocol slot 2,000 bps | `V2Port.t.sol` `test_noLpIncomeAtLpFeeZero` |
+| section 4.2 recommendation: do not allowlist the Core | the owner decided the opposite (decision 29). the plan's description of both cases is right and now tested: allowlisted, the buyback leaves an allowance of exactly the coin bought that a stranger can spend inside the same transaction, and anyone can donate coin (rescued by `rescueCoin`). not allowlisted (a delisted Core, a second Core), the take consumes the allowance exactly and a plain transfer reverts | `V2PortRestriction.t.sol`, `V2PortMigration.t.sol` |
+| section 2.2: the Core change is 0 to +90 bytes and the Core keeps 161 bytes | the Core runtime is 24,496 bytes with 80 bytes of headroom. the fee source immutable, the extra forbidden target and `rescueCoin` (delegated to `CoreLib`) cost 81 bytes in total. the plan's range held, its starting headroom was spent, FLOW 10.3 asked for 60 and has 80 | `forge build --sizes` |
+| section 9.1: simulator change is small | wrong. the skim (10 points to 6.9), the router tip and payee split and the missing lp income change the model's inflow. see docs/SIMULATION.md | sim/engine.js |
+| section 3: a partial fill refund of the Core's buyback arrives as an escrow credit | the mechanics after the credit are right and tested (anyone claims it into the Core, nobody redirects it, `skim()` books it). a partial fill itself could not be produced: on the launch pool it needs about 3e42 wei of input (an estimate, the position runs to the end of the tick range), over the int128 range of a pool amount. the credit is tested by crediting the Core through the real hook as depositor | `V2Port.t.sol` `test_escrowCreditOfTheCoreIsClaimedByAnyoneThenSkimmed` |
+
+### claims checked and right
+
+| claim | evidence |
+|---|---|
+| a push to a Core `receive()` that books cannot fit the 2,300 stipend (est over 15k gas) | the booking path costs 12,045 gas in the same block, 20,184 an hour later, 46,211 after 20 years at the worst rate (`Fees.t.sol` `test_receiveGas*`). the empty router `receive` fits exactly (`FeeRouter.t.sol` `test_receiveFitsExactly2300Gas`) |
+| the escrow claim reaches the Core with the escrow as sender, so it is not booked, and `skim()` books it to the pot | `V2Port.t.sol` |
+| a claim inside `buyListing` lowers the measured cost, keeps pots and balance consistent, tip at most 0.1 of E and 2 percent of cost, and E at or over the price reverts `BadCost` | `V2Port.t.sol` `test_claimMid*` |
+| a flush inside a measured call books nothing and the eth waits for `skim()` | `Fees.t.sol` `test_receiveMid*` |
+| the buyback swap, the pool key, the delta check and `burn` work unchanged on v2, the hook's skim goes to the router | `Fees.t.sol`, `FeeShare.t.sol` |
+| the hook's push gas is the stipend whatever `pushGas` says (flag 8) | `V2Stack.t.sol` `test_writingRecipientIsCreditedInEscrowAndClaims` |
+| restricted coin: `burn` and `burnFrom` bypass the rule, wallets cannot move coin, a side pool cannot be seeded, a just in time position cannot be built | `Fees.t.sol` `RestrictedCoinTest`, `ReviewPort.t.sol`, `V2PortRestriction.t.sol` |
+| the factory's `deployTokenAsOwner` takes the fee as value, `predictToken` matches the returned token | `Launch.t.sol`, `LaunchV2.t.sol` |
+| a compose and the launch fit the 16,777,216 gas cap | `GasCap.t.sol`: compose 55.4 percent cold, launch 21.0 percent |
+
+### still open
+
+| # | question | owner |
+|---|---|---|
+| 1 | v2 is not on mainnet and its audit is pending. the five stack addresses are zero in the tracked config. before the real preflight compare the live hook `constantsHash()` and the factory runtime code with the vendored artifacts (`test/v2-artifacts/README.md`) | owner, v2 team |
+| 2 | `payeePpm` is 161,030 where FLOW 10.7 says 161,031. rounded down, the payee never gets more than 1.0 point. one ppm | owner rules |
+| 3 | `predictToken` depends on mutable factory state (default allowlist, token deployer, hook escrow). preflight reads it, the config hash does not cover it: recompute right before the broadcast | operator |
+| 4 | the partial fill refund path of the Core's own buyback has never run on a real pool | v2 team, live check |
+| 5 | section 10.2 questions to the v2 developer stand as asked (seeded routers in D73 against the source, leftover allowance of an allowlisted taker, per launch overrides for the global knobs, `pushGas` unused, missing `factory()` and `feeEscrow()` getters on the hook, published artifact sets) | v2 team |
+| 6 | the stale lines of `CREDITS-ENGINE-INTERFACE.md` (section 11 below) are in the v2 repo, not ours | v2 team |
+| 7 | the split start margin (900 seconds after the window) and the single launch payee are launch choices the owner may change with `setSplitStart` and `setPayees` | owner |
+
+
+status of everything below this section: the analysis written before the port, kept unchanged. it was written without building anything. the port is done on branch `flow` and the section above it says what held and what did not. reviewed against v2 `origin/v2` HEAD 87a75228 (2026-10-07), source at `/home/claude/nmcl/v2`. engine at branch flow, Core runtime 24415 bytes, 161 bytes headroom (from `out/Core.sol/Core.json`).
 
 rules used: source beats docs. where `docs/v2/CREDITS-ENGINE-INTERFACE.md` or `DECISIONS.md` disagree with source, the source wins and the conflict is named. all line numbers are v2 unless prefixed `engine:`. byte and gas figures marked (est) are opcode arithmetic, not measured, because no build ran.
 
