@@ -45,8 +45,8 @@ advice from the previous session: v2 changed its whole tax model in one day. bui
 |---|---|
 | naming | the phase 2 contracts are referred to only as `exitModule` and `exitToken` in code, comments, tests, docs and commit messages. never name or describe them |
 | tests | mainnet fork tests pinned to a block, real contracts only. the only doubles are test/standins and attacker contracts |
-| toolchain | foundry 1.5.1, solc 0.8.30, via_ir, cancun. the suite is known to fail on foundry 1.8.1 (29 tests, not yet classified: gas meter assertions, library address assumptions, test linking). pin 1.5.1 or classify and fix |
-| memory | one compile of the test tree with via_ir peaks above 6 gb and takes over 10 minutes on 2 cores. on a small machine never run two forge processes at once |
+| toolchain | foundry 1.5.1, solc 0.8.30, via_ir for the production contracts only, cancun. the suite is known to fail on foundry 1.8.1 (29 tests, not yet classified: gas meter assertions, library address assumptions, test linking). pin 1.5.1 or classify and fix |
+| memory | a clean build is about 4 minutes and peaks near 3 gb on 2 cores (it was over 10 minutes and 6 gb when the tests used via_ir). on a small machine still never run two forge processes at once |
 | rpc | public endpoints rate limit (429, 408). rerun a suite alone with `-j 1` before treating that as a failure. an archive endpoint of your own removes this |
 | safety | no mainnet broadcast, no private key, without the owner's explicit instruction |
 | speed | see section 6 |
@@ -61,9 +61,6 @@ advice from the previous session: v2 changed its whole tax model in one day. bui
 | v2 doc mismatches | docs/V2-PORT.md section 0.1 lists places where the v2 docs and the v2 source disagree. pass them to the v2 developer |
 | launch day | `rateStart` is set from the market price of a credit on the day (docs/DEPLOY.md). it changes the signoff hash |
 
-## 6. making the build loop fast (not yet tried here)
+## 6. the build loop (done)
 
-1. compile tests without via_ir. foundry supports per path compiler profiles (`additional_compiler_profiles` and `compilation_restrictions` in foundry.toml): keep via_ir for `src/**`, drop it for `test/**` and `script/**`. the fixture already deploys the system from artifacts, so tests mostly need interfaces. expect some test functions to hit stack too deep and need small edits.
-2. turn on `dynamic_test_linking` so a change in src/ does not recompile every test.
-3. with more than 8 gb, run independent work in parallel git worktrees (each has its own cache and out directory).
-4. use a private archive rpc and raise `-j`.
+per path compiler profiles are in foundry.toml: the default profile has no via_ir, a second profile (via_ir, 200 runs, cancun, no metadata hash) is forced on `src/[A-Z]*.sol` and `src/lib/CoreLib.sol`, and foundry pulls any file that imports them onto it. tests and scripts therefore use the generated interfaces and deploy from artifacts (`test/utils/Prod.sol`); `dynamic_test_linking` is on and works on 1.5.1. measured: clean build 226 s and 2.9 gb, a test file change 3 s, a `src/Core.sol` change 34 s. the whole suite (except Rehearsal) still takes about 25 minutes (the four invariant suites alone are about 12), so run it by path in batches of under 10 minutes per call. a private archive rpc and a larger `-j` are the remaining levers; with more than 8 gb, independent work can use parallel git worktrees (each has its own cache and out directory).
