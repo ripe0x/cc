@@ -787,41 +787,35 @@ contract ReviewSaleTest is Fixture {
 
     /// S-5 fixed: a handover offered to an address shows as a warning row, which never fails the run
     function test_FIXED_postflightWarnsOnAPendingOwner() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (, uint256 n0) = _failed();
         assertFalse(_warned("no pending owner"), "clean at launch");
         vm.prank(owner);
         core.transferOwnership(bob);
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (, uint256 n1) = _failed();
         assertEq(n1, n0, "a warning never fails the run");
         assertTrue(_warned("no pending owner"), "the offer shows as a warning");
         assertEq(core.pendingOwner(), bob);
-    */
     }
 
     function test_OK_postflight_readsTheLiveOwnerAndTheLocks() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (, uint256 n0) = _failed();
         vm.startPrank(owner);
         core.transferOwnership(alice);
         vm.stopPrank();
         vm.prank(alice);
         core.acceptOwnership();
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (string memory afterHandover, uint256 n1) = _failed();
         assertGt(n1, n0, "an unannounced handover fails the owner row");
         emit log_string(afterHandover);
         vm.prank(alice);
         core.lockTargets();
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (, uint256 n2) = _failed();
         assertGt(n2, n1, "a lock fails the launch state row");
-    */
     }
 
     // ------------------------------------------------------------------ fee split in receive()
@@ -1066,14 +1060,12 @@ contract ReviewSaleTest is Fixture {
     }
 
     function test_OK_postflight_comparesEveryFieldOfTheSettingsAndTheSaleBlock() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (string memory clean,) = _failed();
         for (uint256 i; i < SettingsFields.N; ++i) {
             LaunchConfig memory c = lc;
             SettingsFields.set(c.settings, i, SettingsFields.get(c.settings, i) == 0 ? 1 : SettingsFields.get(c.settings, i) - 1);
-            postflight(c, address(core));
+            postflightAs(c, address(core), owner);
             (string memory dirty,) = _failed();
             assertTrue(keccak256(bytes(dirty)) != keccak256(bytes(clean)), _nm(SettingsFields.names()[i]));
         }
@@ -1084,11 +1076,10 @@ contract ReviewSaleTest is Fixture {
             if (i == 2) c.sale.stepBps += 1;
             if (i == 3) c.sale.stepEvery += 1;
             if (i == 4) c.sale.floorBps += 1;
-            postflight(c, address(core));
+            postflightAs(c, address(core), owner);
             (string memory dirty,) = _failed();
             assertTrue(keccak256(bytes(dirty)) != keccak256(bytes(clean)), "sale field unseen by postflight");
         }
-    */
     }
 
     function tryController(Sale memory k) external returns (bool) {
@@ -1133,31 +1124,35 @@ contract ReviewSaleTest is Fixture {
     }
 
     bool internal ownerChangedFlag;
+    bool internal coinChangedFlag;
+
+    function _coinChanged() internal view override returns (bool) {
+        return coinChangedFlag;
+    }
 
     function _ownerChanged() internal view override returns (bool) {
         return ownerChangedFlag;
     }
 
     /// S-6 fixed (postflight half, the Resume half is in test/Resume.t.sol): DEPLOY.md hands the Core to a multisig with
-    /// OWNER_CHANGED=1 and the token admin with updateAdmin. the flag now relaxes the coin admin row too
+    /// OWNER_CHANGED=1 and the token admin with updateAdmin, named by COIN_CHANGED=1 (decision: v2 has its own flag)
     function test_FIXED_ownerChangedFlagRelaxesTheCoinAdminRow() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         ownerChangedFlag = true;
+        coinChangedFlag = true;
         vm.prank(owner);
         core.transferOwnership(alice);
         vm.prank(alice);
         core.acceptOwnership();
         vm.prank(owner);
-        coin.updateAdmin(alice);
-        postflight(lc, address(core));
+        (bool ok,) = address(coin).call(abi.encodeWithSignature("updateAdmin(address)", alice));
+        assertTrue(ok, "the coin admin hands over");
+        postflightAs(lc, address(core), owner);
         (string memory failed, uint256 n) = _failed();
         assertEq(n, 0, failed);
-        ownerChangedFlag = false;
-        postflight(lc, address(core));
+        coinChangedFlag = false;
+        postflightAs(lc, address(core), owner);
         (failed,) = _failed();
-        assertTrue(vm.contains(failed, "coin: admin is owner"), "without the flag the row still fails");
-    */
+        assertTrue(vm.contains(failed, "coin: admin is the config owner"), "without the flag the row still fails");
     }
 
     bool internal locksChangedFlag;
@@ -1168,19 +1163,16 @@ contract ReviewSaleTest is Fixture {
 
     /// S-10 fixed: LOCKS_CHANGED=1 turns the launch state row into a report line
     function test_FIXED_locksChangedFlagTurnsTheLockRowIntoAReportLine() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.prank(owner);
         core.lockTargets();
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (string memory failed, uint256 n) = _failed();
         assertGt(n, 0);
         assertTrue(vm.contains(failed, "core: no locks, no exit module"), failed);
         locksChangedFlag = true;
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         (failed, n) = _failed();
         assertEq(n, 0, failed);
-    */
     }
 
     function test_OK_priceOf_refusesWhatIsNotForSale() public {
