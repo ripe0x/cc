@@ -27,10 +27,12 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 |---|---|---|---|
 | flatBps | 10_000 | 0 to 10_000 | share of the bid that is flat per credit. price = rate * (flatBps * avgScore + (10_000 - flatBps) * score) / 10_000 / 1e4, before the controller bonus |
 | avgScore | 4_330_000 | 800_000 to 6_000_000 | the score a flat credit is priced as, and the "average credit" in the funded rule |
-| climbBaseBps | 100 | 0 to 1_000 | per hour |
-| climbDoubleEvery | 24 hours | 1 hour to 30 days | |
-| climbMaxBps | 800 | climbBaseBps to 2_000 | per hour |
-| dropBps | 2_000 | 500 to 5_000 | |
+| dropPerCreditBps | 50 | 1 to 1_000 | each credit bought lowers the rate by this share of the rate before that credit |
+| dropFloorBps | 8_000 | 5_000 to 10_000 | within one minute bucket the rate does not fall below this share of the rate paid at the first fill of the bucket |
+| climbPerMinBps | 50 | 1 to 1_000 | rate climb per minute, compounded |
+| ceilBps | 12_500 | 10_000 to 30_000 | the rate stays at or below this share of the ceiling anchor |
+| idleLoosenBps | 200 | 0 to 2_000 | the ceiling anchor grows by this share of itself per full 10 minutes since the last fill |
+| clampCredits | 20 | 1 to 1_000 | the climb stops where the hourly cap affords this many average credits |
 | spendCapBps | 2_000 | 100 to 5_000 | per hour window |
 | bonusCapBps | 2_500 | 0 to 5_000 | |
 | tipSavingsBps | 1_000 | 0 to 2_500 | |
@@ -50,9 +52,16 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | xRateDropPerCredit | 20 | 0 to 1_000 | |
 | xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
 | exitSliceCredits | 20 | 1 to 1_000 | |
-| rateCap | 123_200_000_000_000 (8 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
+| rateCap | 123_200_000_000_000 (about 6 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, ceiling, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
 | exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot` (section 8) |
 | feeToBuybackBps | 0 | 0 to 10_000 | share of the eth booked from the fee router in `receive()` (the hook in v1, superseded by section 10) that goes to the coin buyback, the rest to the pot. last field of the struct (section 9) |
+
+the credit bid is a rate in wei per whole point. state: the rate at the last checkpoint, the rate paid at the last fill (`lastFillRate`, the ceiling anchor, `RATE_START` before the first fill), `lastFillTime`, and the rate paid at the first fill of the current minute bucket (`timestamp / 60`).
+
+* drop: each credit bought at rate `p` sets the rate to `p * (10_000 - dropPerCreditBps) / 10_000`, not below `min(dropFloorBps * minuteStart / 10_000, p)`, where `minuteStart` is the rate paid at the first fill of the same minute bucket. `p` becomes `lastFillRate` and `lastFillTime` is now. `buyListing` is one fill.
+* climb: while funded, the rate from checkpoint time `t` to `now` is `rate * (1 + climbPerMinBps / 10_000) ^ ((now - t) / 60)`, compounded per minute with a fractional minute as a fractional exponent. a rate at or above its limit is returned as stored.
+* limit: the lowest of `rateCap`, the funded clamp `ethPot * spendCapBps / (avgScore * clampCredits)`, and the ceiling `lastFillRate * (10_000 + idleLoosenBps * floor((now - lastFillTime) / 600)) / 10_000 * ceilBps / 10_000`. loosening is linear in the number of idle 10 minute intervals.
+* `buyListing` checks its price against the same rate.
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 

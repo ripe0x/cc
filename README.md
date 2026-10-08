@@ -90,7 +90,7 @@ the system launches on the artcoins v2 stack. everything a launch needs is in on
 
 | step | action |
 |---|---|
-| 1 | fill the config. set `rateStart` on launch day to 75 percent of the market price of a credit (default 1.54e13 for 0.0089 eth), the rule is in docs/DEPLOY.md |
+| 1 | fill the config. set `rateStart` on launch day to the market price of a credit (default 2.0554e13 for 0.0089 eth), the rule is in docs/DEPLOY.md |
 | 2 | rehearse: `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv` |
 | 3 | owner command, once: `setMinLpFee(0)` on the v2 factory (the launch uses an lp fee of 0) |
 | 4 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
