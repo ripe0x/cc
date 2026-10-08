@@ -9,6 +9,7 @@ import {SeaportBase} from "./Seaport.t.sol";
 import {FeeBase} from "./Fees.t.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {OrderComponents} from "./utils/SeaportTypes.sol";
+import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 
 /// independent review of the v2 port (docs/REVIEW-v2port.md). `test_FINDING_*` asserts a real defect as it behaves
 /// today and passes today. `test_OK_*` confirms a property that holds. real contracts on the pinned fork, attacker
@@ -441,5 +442,70 @@ contract ReviewReimburseTest is Fixture {
             if (single != r) ++differs;
         }
         emit log_named_uint("caps where a single division mirror differs by wei", differs);
+    }
+}
+
+/// pushes eth with the 2,300 gas stipend only (call with zero gas and a value), like the v2 hook does
+contract StipendPusher {
+    function push(address to) external payable returns (bool ok) {
+        assembly ("memory-safe") {
+            ok := call(0, to, callvalue(), 0, 0, 0, 0)
+        }
+    }
+}
+
+/// sends its balance to `to` by selfdestruct, which no `receive` can refuse
+contract Forcer {
+    constructor() payable {}
+
+    function boom(address payable to) external {
+        selfdestruct(to);
+    }
+}
+
+/// F6. the stipend push, forced eth, who can launch, who the Core books
+contract ReviewFeePathTest is FeeBase {
+    function test_OK_stipendPushReachesTheRouterTheCoreAndEveryStackSender() public {
+        StipendPusher p = new StipendPusher();
+        assertTrue(p.push{value: 1}(address(feeRouter)), "router receive fits the stipend");
+        assertTrue(p.push{value: 1}(address(core)), "the Core receive fits the stipend for a non source sender");
+        assertEq(core.ethPot(), 0, "and books nothing");
+        assertEq(address(feeRouter).balance, 1);
+    }
+
+    function test_OK_forcedEthInTheRouterAndTheCoreIsBookedExactlyOnce() public {
+        _skipToSplitStart();
+        Forcer a = new Forcer{value: 2 ether}();
+        a.boom(payable(address(feeRouter)));
+        Forcer b = new Forcer{value: 1 ether}();
+        b.boom(payable(address(core)));
+        uint256 held = address(feeRouter).balance;
+        assertGe(held, 2 ether);
+        assertLe(held, 2 ether + 10, "2 eth plus launch dust");
+        (uint256 tip,, uint256 toEngine) = _routerSplit(held);
+        _flush(); // the first flush at the split start: everything to the engine
+        assertEq(core.ethPot(), toEngine, "the forced router eth was booked as fees, after the tip");
+        assertEq(address(core).balance, toEngine + 1 ether, "the forced Core eth is not booked yet");
+        core.skim();
+        assertEq(core.ethPot(), toEngine + 1 ether);
+        core.skim();
+        assertEq(core.ethPot(), toEngine + 1 ether, "a second skim books nothing");
+        assertEq(flusher.balance, tip);
+        _solvent();
+    }
+
+    function test_OK_onlyTheFactoryOwnerCanLaunchAndTheFactoryIsDeprecated() public {
+        assertTrue(FACTORY.deprecated());
+        address stranger = _user("stranger");
+        vm.deal(stranger, 1 ether);
+        address coreAt = vm.computeCreateAddress(owner, vm.getNonce(owner) + 1);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, coreAt, creator, "S", "S", keccak256("s"));
+        uint256 fee = FACTORY.deployFee();
+        vm.prank(stranger);
+        vm.expectRevert();
+        FACTORY.deployTokenAsOwner{value: fee}(cfg, 2000);
+        vm.prank(stranger);
+        vm.expectRevert();
+        FACTORY.deployToken{value: fee}(cfg);
     }
 }
