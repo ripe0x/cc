@@ -172,3 +172,69 @@ contract ReviewSandwichTest is FeeBase {
         assertGt(best5, 0, "FINDING: the 5 eth slice (the settings bound) can be sandwiched for a profit");
     }
 }
+
+/// a payee that does real work on receipt (a splitter: three cold storage writes, about 70k gas)
+contract HeavyPayee {
+    uint256 public a;
+    uint256 public b;
+    uint256 public got;
+
+    receive() external payable {
+        got += msg.value;
+        a = 1;
+        b = 1;
+    }
+}
+
+/// F3. anyone chooses the gas of `flush`
+contract ReviewRouterGasTest is FeeBase {
+    HeavyPayee internal heavy;
+
+    function setUp() public override {
+        super.setUp();
+        heavy = new HeavyPayee();
+        _skipToSplitStart();
+        autoFlush = false;
+        _buyCoin(trader, 3 ether);
+        _flush(); // the first flush at the start turns the split on
+        assertTrue(feeRouter.splitOn());
+        address[] memory who = new address[](1);
+        who[0] = address(heavy);
+        uint32[] memory ppm = new uint32[](1);
+        ppm[0] = 161_030;
+        vm.prank(owner);
+        feeRouter.setPayees(who, ppm);
+    }
+
+    function _tryFlush(uint256 g) internal returns (bool ok) {
+        vm.prank(flusher);
+        (ok,) = address(feeRouter).call{gas: g}(abi.encodeCall(IFeeRouter.flush, ()));
+    }
+
+    function test_OK_aNormalFlushPaysTheHeavyPayeeDirectly() public {
+        _buyCoin(trader, 3 ether);
+        assertTrue(_tryFlush(1_000_000));
+        assertGt(heavy.got(), 0, "paid within the 100k cap");
+        assertEq(feeRouter.owed(address(heavy)), 0);
+    }
+
+    /// the flusher picks the gas limit. starving the payee call burns the 63/64 it was given, which leaves too little
+    /// for the engine call, so the flush reverts as a whole: there is no gas limit at which the flush passes and the payee
+    /// is credited instead of paid
+    function test_OK_noGasLimitDivertsAPayeeIntoOwedWhileTheFlushPasses() public {
+        _buyCoin(trader, 3 ether);
+        uint256 snap = vm.snapshotState();
+        uint256 passes;
+        for (uint256 g = 100_000; g <= 400_000; g += 2_500) {
+            if (_tryFlush(g)) {
+                ++passes;
+                assertEq(feeRouter.owed(address(heavy)), 0, "a passing flush paid the payee");
+                assertGt(heavy.got(), 0);
+            } else {
+                assertEq(heavy.got(), 0, "a reverted flush paid nothing");
+            }
+            vm.revertToState(snap);
+        }
+        assertGt(passes, 0);
+    }
+}
