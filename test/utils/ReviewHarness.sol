@@ -2,9 +2,10 @@
 pragma solidity ^0.8.28;
 
 import {ProdDeployer} from "./ProdDeployer.sol";
+import {V2Stack} from "./V2Stack.sol";
 import {Test, console} from "forge-std/Test.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
-import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
+import {IArtCoinsFactoryV2} from "../../src/interfaces/ArtCoinsV2.sol";
 import {SettingsFields} from "../../script/SettingsFields.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Mainnet, Stack, Settings} from "../../src/interfaces/Interfaces.sol";
@@ -13,17 +14,13 @@ import {SystemDeployer, Deployed} from "../../script/SystemDeployer.sol";
 import {LaunchConfig, ConfigReader} from "../../script/LaunchConfig.sol";
 import {Report} from "../../script/Report.sol";
 
-interface IFactoryAdmin {
-    function setDeprecated(bool d) external;
-}
-
-/// @notice independent review of the deploy package (docs/REVIEW-deploy.md), rebuilt for the flow rework: the config
-/// mutation matrix, the state mutations (factory, house, library, deployer), proofs of the readbacks and a fuzz of the
-/// funded rule. forks mainnet at FORK_BLOCK
+/// @notice independent review of the deploy package (docs/REVIEW-deploy.md), ported to the v2 stack: the config mutation
+/// matrix, the state mutations (factory, house, library, deployer), proofs of the readbacks and a fuzz of the funded
+/// rule. forks mainnet at FORK_BLOCK and deploys the v2 stack onto it. the deployer is the factory owner and the
+/// config owner (the only path into a deprecated v2 factory)
 abstract contract ReviewHarness is Test, ProdDeployer {
-    string internal constant MUT_TOKEN = "test/data/ReviewMutatedToken.creation.hex";
-    string internal constant EMPTY_TOKEN = "test/data/ReviewEmptyToken.creation.hex";
-    string internal constant GARBAGE_TOKEN = "test/data/ReviewGarbageToken.creation.hex";
+    V2Stack.Stack internal v2;
+    IArtCoinsFactoryV2 internal FACTORY;
     address internal deployer;
     address internal owner;
     address internal creator;
@@ -32,53 +29,55 @@ abstract contract ReviewHarness is Test, ProdDeployer {
     bool internal scriptMode;
 
     function _scriptContext() internal view override returns (bool) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return scriptMode;
-    */
     }
 
     function setUp() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
         deployer = makeAddr("review.deployer");
-        owner = makeAddr("review.owner");
+        owner = deployer;
         creator = makeAddr("review.creator");
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, true);
-        vm.deal(deployer, 2 ether);
+        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
+        FACTORY = IArtCoinsFactoryV2(v2.factory);
+        vm.prank(owner);
+        FACTORY.setMinLpFee(0);
+        vm.deal(deployer, 5 ether);
         base = defaultConfig();
         base.owner = owner;
         base.creator = creator;
+        base.creatorPayee = makeAddr("review.payee");
         base.name = "Review Coin";
         base.symbol = "REV";
         base.salt = keccak256("review deploy");
-    */
+        base.stack.hook = v2.hook;
+        base.stack.factory = v2.factory;
+        base.stack.locker = v2.locker;
+        base.stack.escrow = v2.escrow;
+        base.mevModule = v2.mev;
     }
 
     // ------------------------------------------------------------------ matrix harness
 
-    /// @dev external so a revert of the whole deploy can be caught and classified
-    function tryDeploy(LaunchConfig memory c) external returns (Deployed memory d) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        vm.startPrank(deployer);
-        d = deploySystem(deployer, c);
+    /// @dev external so a revert of the whole deploy can be caught and classified. as `Deploy.run`: the deploy, then the
+    /// postflight read back of its result, both inside the simulation
+    function tryDeploy(LaunchConfig memory c, address who) external returns (Deployed memory d) {
+        vm.startPrank(who);
+        d = deploySystem(who, c);
         vm.stopPrank();
-    */
+        postflightAs(c, d.core, who);
+        _require();
+    }
+
+    /// @dev a prank started inside a call that reverted lives on at that call depth: end it from the same depth
+    function stopPrankExt() external {
+        vm.stopPrank();
     }
 
     function _failedNames() internal view returns (string memory list) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         (list,) = _failed();
-    */
     }
 
     function _reason(bytes memory why) internal pure returns (string memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         if (why.length < 4) return "empty revert";
         bytes4 sel = bytes4(why);
         bytes memory body = new bytes(why.length - 4);
@@ -92,8 +91,18 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         if (sel == SystemDeployer.ConfigUnset.selector) {
             return string.concat("ConfigUnset(", abi.decode(body, (string)), ")");
         }
-        return string.concat("revert ", vm.toString(sel));
-    */
+        if (sel == SystemDeployer.NotFactoryOwner.selector) return "NotFactoryOwner";
+        return string.concat("revert 0x", _hex4(sel));
+    }
+
+    function _hex4(bytes4 b) internal pure returns (string memory) {
+        bytes memory h = "0123456789abcdef";
+        bytes memory out = new bytes(8);
+        for (uint256 i; i < 4; ++i) {
+            out[2 * i] = h[uint8(b[i]) >> 4];
+            out[2 * i + 1] = h[uint8(b[i]) & 0x0f];
+        }
+        return string(out);
     }
 
     /// the outcomes of one mutation, in the order the operator meets them. a slip is a launch that passed every check
@@ -110,53 +119,35 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         string label;
         LaunchConfig c;
         Class want;
+        /// the signer of the run, zero for the deployer
+        address who;
     }
 
     function _className(Class k) internal pure returns (string memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         if (k == Class.Pre) return "CAUGHT by preflight";
         if (k == Class.Revert) return "SAFE REVERT at deploy";
         if (k == Class.Post) return "CAUGHT by postflight";
         if (k == Class.Hash) return "CAUGHT ONLY by the config hash";
         return "SLIP";
-    */
     }
 
-    function runPre(LaunchConfig memory c) external returns (string memory) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        preflight(c, deployer);
+    function runPre(LaunchConfig memory c, address who) external returns (string memory) {
+        preflight(c, who);
         return _failedNames();
-    */
     }
 
     /// @dev runs preflight, then the deploy, on a snapshot, as `Deploy.run` does: the hash gate first (a stale hash
     /// stops everything), then preflight, then the deploy. logs one matrix row. `signed` is the hash of the base config
-    function _run(string memory label, LaunchConfig memory c, bytes32 signed) internal returns (Class k) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
+    function _run(string memory label, LaunchConfig memory c, bytes32 signed, address who) internal returns (Class k) {
         uint256 snap = vm.snapshotState();
         vm.stopPrank();
         string memory detail;
-        // a config that cannot even be hashed (a token file that is not hex) stops the script reading it
-        bool readable = true;
-        bool hashSame;
-        try this.hashOf(c) returns (bytes32 h) {
-            hashSame = h == signed;
-        } catch {
-            readable = false;
-        }
-        try this.runPre(c) returns (string memory names) {
-            detail = names;
-        } catch {
-            require(!readable, "preflight reverted on a config that can be read");
-            detail = "the script reverts while reading the config";
-        }
+        bool hashSame = configHash(c) == signed;
+        detail = this.runPre(c, who);
         if (bytes(detail).length != 0) {
             k = Class.Pre;
         } else {
-            try this.tryDeploy(c) returns (Deployed memory) {
+            try this.tryDeploy(c, who) returns (Deployed memory) {
                 (k, detail) = (hashSame ? Class.Slip : Class.Hash, "DEPLOYED, every check passed");
             } catch (bytes memory why) {
                 detail = _reason(why);
@@ -166,54 +157,46 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         console.log(string.concat("MUT ", label, " || ", _className(k), " || ", detail));
         vm.stopPrank();
         vm.revertToState(snap);
-    */
     }
 
     function _m(string memory l, Class w) internal view returns (Mut memory m) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         m.label = l;
         m.c = base;
         m.want = w;
-    */
     }
 
-    /// @dev the mutation of group `g` (0 stack, 1 launch, 2 settings, 3 rate, files and people), an empty label when none
+    /// @dev the mutation of group `g`, an empty label when none
     function _mut(uint256, uint256) internal view virtual returns (Mut memory m) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:*/
+        m.label = "";
     }
 
     /// @dev group 4: applies chain state mutation `i` and returns its label and the class it must land in
     function _state(uint256) internal virtual returns (string memory l, Class w) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        revert("no state group here");
-    */
+        (l, w) = ("", Class.Slip);
+    }
+
+    function _controllerAt() internal view returns (address) {
+        return vm.computeCreateAddress(deployer, vm.getNonce(deployer));
+    }
+
+    function _routerAt() internal view returns (address) {
+        return vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
     }
 
     function _coreAt() internal view returns (address) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
-        return vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
-    */
+        return vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 2);
     }
 
     /// @dev the library address the test build links the Core against
     function _linked() internal view returns (address lib) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         lib = findLibrary(vm.getCode("Core.sol:Core"));
         assertTrue(lib != address(0), "no linked library found in the Core creation code");
-    */
     }
 
     /// @dev the live auction factory with a default fee: its runtime code with every all zero 32 byte immutable word
     /// (PUSH32 of zero) set to `bps`. the default fee and the fee recipient are immutables of the factory and both are
     /// zero today, so both read `bps` afterwards. no mock contract: the real code, one value changed
     function _patchFactoryFee(address af, uint16 bps) internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         bytes memory code = af.code;
         uint256 patched;
         for (uint256 pc; pc < code.length;) {
@@ -234,45 +217,33 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         assertGt(patched, 0, "no immutable word found");
         vm.etch(af, code);
         assertEq(IAuctionFactory(af).defaultProtocolFeeBps(), bps, "the patched default fee");
-    */
     }
 
     function _count(Class got, Class want, string memory label, uint256[5] memory counts) internal pure {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         require(got == want, string.concat("unexpected outcome (", _className(got), "): ", label));
         ++counts[uint256(got)];
-    */
     }
 
     /// @dev one mutation, run in its own call frame (the memory of a deploy is freed when it returns, a whole matrix in
     /// one frame runs out of the 128 MB the EVM gives a test). group 4 is the chain state group. a config mutation must
-    /// change the hash (unless the file cannot even be read), then it runs through preflight and the deploy
+    /// change the hash, then it runs through preflight and the deploy
     function runOne(uint256 g, uint256 i, bytes32 signed) external returns (Class k, string memory label, Class want) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         if (g == 4) {
             uint256 snap = vm.snapshotState();
             (label, want) = _state(i);
-            k = _run(label, base, signed);
+            k = _run(label, base, signed, deployer);
             vm.revertToState(snap);
             return (k, label, want);
         }
         Mut memory m = _mut(g, i);
         if (bytes(m.label).length == 0) return (Class.Slip, "", Class.Slip);
-        // a config that cannot even be hashed (a token file that is not hex) stops the script reading it
-        try this.hashOf(m.c) returns (bytes32 h) {
-            assertTrue(h != signed, string.concat("the hash must change: ", m.label));
-        } catch {}
-        return (_run(m.label, m.c, signed), m.label, m.want);
-    */
+        assertTrue(configHash(m.c) != signed || m.who != address(0), string.concat("the hash must change: ", m.label));
+        return (_run(m.label, m.c, signed, m.who == address(0) ? deployer : m.who), m.label, m.want);
     }
 
     /// the mutation matrix on the fixed package. every mutation is caught by a preflight rule, reverts safely at
     /// deploy, is caught by the postflight, or changes the config hash (Deploy refuses a stale hash). nothing slips
     function _matrix(uint256 g, uint256 from, uint256 to) internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         bytes32 signed = configHash(base);
         uint256[5] memory counts;
         for (uint256 i = from; i < to; ++i) {
@@ -280,12 +251,9 @@ abstract contract ReviewHarness is Test, ProdDeployer {
             if (bytes(label).length != 0) _count(k, want, label, counts);
         }
         _report(counts);
-    */
     }
 
     function _report(uint256[5] memory counts) internal pure {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         uint256 total = counts[0] + counts[1] + counts[2] + counts[3] + counts[4];
         console.log("MATRIX mutations", total);
         console.log("MATRIX caught by preflight", counts[uint256(Class.Pre)]);
@@ -294,29 +262,19 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         console.log("MATRIX caught only by the config hash", counts[uint256(Class.Hash)]);
         console.log("MATRIX slips", counts[uint256(Class.Slip)]);
         assertEq(counts[uint256(Class.Slip)], 0, "something slipped");
-    */
     }
 
-    function hashOf(LaunchConfig memory c) external view returns (bytes32) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
+    function hashOf(LaunchConfig memory c) external pure returns (bytes32) {
         return configHash(c);
-    */
     }
 
     function requireDeployerExt(address want, address got) external pure {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         _requireDeployer(want, got);
-    */
     }
 
     function _row(string memory name) internal view returns (bool found, bool ok, string memory detail) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         for (uint256 i; i < rows.length; ++i) {
             if (keccak256(bytes(rows[i].name)) == keccak256(bytes(name))) return (true, rows[i].ok, rows[i].detail);
         }
-    */
     }
 }

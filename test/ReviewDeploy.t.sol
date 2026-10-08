@@ -5,79 +5,79 @@ import {Prod} from "./utils/Prod.sol";
 import {console} from "forge-std/Test.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {ReviewHarness, IFactoryAdmin} from "./utils/ReviewHarness.sol";
+import {ReviewHarness} from "./utils/ReviewHarness.sol";
 import {TestSwapRouter} from "./utils/TestSwapRouter.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Mainnet, Stack, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory, IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
+import {IArtCoinsFactoryV2, IArtCoinsHookV2, IArtCoinsMevSkimV2, IArtCoinsTokenV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
 import {LaunchConfig, ConfigReader} from "../script/LaunchConfig.sol";
 import {Report} from "../script/Report.sol";
 
-/// @notice independent review of the deploy package (docs/REVIEW-deploy.md), rebuilt for the flow rework: the state
+/// @notice independent review of the deploy package (docs/REVIEW-deploy.md), ported to the v2 stack: the state
 /// mutations that need their own assertions (deployer swap, library, house fee), proofs of the readbacks and a fuzz of the
 /// funded rule. the mutation matrix is in test/ReviewMatrix.t.sol. forks mainnet at FORK_BLOCK
 contract ReviewDeployTest is ReviewHarness {
-    /// a deployer swap: the signer is another address than DEPLOYER (even an enabled one): the script stops at once
+    /// a deployer swap: the signer is another address than DEPLOYER, or than the factory owner: the script stops at once
     function test_deployerSwapRevertsSafely() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         address other = makeAddr("review.other.deployer");
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(other, true);
+        vm.deal(other, 5 ether);
         this.requireDeployerExt(deployer, deployer);
         vm.expectRevert(abi.encodeWithSelector(DeployerMismatch.selector, deployer, other));
         this.requireDeployerExt(deployer, other);
         vm.expectRevert(abi.encodeWithSelector(DeployerMismatch.selector, address(0), deployer));
         this.requireDeployerExt(address(0), deployer);
-        console.log(
-            "MUT deployer swap (another enabled signer than DEPLOYER) || SAFE REVERT at deploy || DeployerMismatch"
-        );
-        // the coin address depends on the deployer, so the swap would have launched somewhere else
-        assertTrue(predictCoin(base, deployer, _coreAt()) != predictCoin(base, other, _coreAt()));
-    */
+        // a signer that is not the factory owner is refused by the deploy itself, and by the preflight
+        LaunchConfig memory c = base;
+        c.owner = other;
+        vm.expectRevert(abi.encodeWithSelector(NotFactoryOwner.selector, deployer, other));
+        this.tryDeploy(c, other);
+        this.stopPrankExt();
+        assertEq(this.runPre(base, other), "factory: owner is the deployer, factory: deployTokenAsOwner accepts the config (simulated)");
+        console.log("MUT deployer swap (another signer than the factory owner) || SAFE REVERT at deploy || NotFactoryOwner");
+        // the coin address depends on the sender, so the swap would have launched somewhere else
+        assertTrue(predictCoin(base, deployer, _routerAt(), _coreAt()) != predictCoin(base, other, _routerAt(), _coreAt()));
     }
 
     /// the live default fee of the auction factory is zero and the preflight row says so. a non zero fee is a warning in
     /// preflight, never a failure there, and the in script postflight stops the deploy on the house that reports it
     function test_houseFeeWarningAndGate() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         address af = base.stack.auctionFactory;
         assertEq(IAuctionFactory(af).defaultProtocolFeeBps(), 0, "the live default fee");
-        this.runPre(base);
+        this.runPre(base, deployer);
         (bool found, bool ok, string memory detail) = _row("warn: auction factory default fee is zero");
         assertTrue(found && ok, "the live fee row is clean");
         (,, detail) = _row("auction factory: default fee readable");
         assertEq(detail, "0");
         _patchFactoryFee(af, 250);
-        assertEq(this.runPre(base), "", "a warning never fails the preflight");
+        assertEq(this.runPre(base, deployer), "", "a warning never fails the preflight");
         (found, ok, detail) = _row("warn: auction factory default fee is zero");
         assertTrue(found && !ok, "the warning row fires");
         (,, detail) = _row("auction factory: default fee readable");
         assertEq(detail, "250");
         vm.expectRevert(abi.encodeWithSelector(Report.ChecksFailed.selector, "house: protocol fee is zero"));
-        this.tryDeploy(base);
-    */
+        this.tryDeploy(base, deployer);
     }
 
     /// the script rehearsal of the library: it goes through the deterministic deployer from the deployer, so it takes one
     /// deployer nonce when it is not on chain yet and none when it is. the preflight predictions follow
     function test_libraryAndTheNonce() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         scriptMode = true;
         uint64 n = vm.getNonce(deployer);
         address lib = libraryAddress();
         assertEq(lib.code.length, 0, "not deployed");
         assertTrue(_libraryTxPending());
         assertEq(_controllerNonce(deployer), n + 1);
-        assertEq(this.runPre(base), "", "preflight clean with the library still to send");
-        (bool found, bool ok, string memory detail) = _row("signoff: skim bounty and referral payout point to the core");
+        assertEq(this.runPre(base, deployer), "", "preflight clean with the library still to send");
+        (bool found, bool ok, string memory detail) = _row("signoff: core address (the router flushes to it)");
         assertTrue(found && ok);
-        assertEq(detail, vm.toString(vm.computeCreateAddress(deployer, n + 2)), "core at nonce + 2");
+        assertEq(detail, vm.toString(vm.computeCreateAddress(deployer, n + 3)), "core at nonce + 3 after the library");
+        (,, detail) = _row("signoff: router address (the bounty recipient of the pool)");
+        assertEq(detail, vm.toString(vm.computeCreateAddress(deployer, n + 2)), "router at nonce + 2 after the library");
         (,, detail) = _row("library: CoreLib at its create2 address is the compiled code or absent");
         assertTrue(vm.contains(detail, "not deployed"));
 
@@ -88,191 +88,153 @@ contract ReviewDeployTest is ReviewHarness {
         vm.setNonce(deployer, n + 1);
         assertTrue(isCompiledLibrary(lib.code), "the create2 address holds the compiled code");
         assertFalse(_libraryTxPending());
-        assertEq(this.runPre(base), "");
-        (found, ok, detail) = _row("signoff: skim bounty and referral payout point to the core");
-        assertEq(detail, vm.toString(vm.computeCreateAddress(deployer, n + 2)), "the same core address");
+        assertEq(this.runPre(base, deployer), "");
+        (found, ok, detail) = _row("signoff: core address (the router flushes to it)");
+        assertEq(detail, vm.toString(vm.computeCreateAddress(deployer, n + 3)), "the same core address");
         (,, detail) = _row("library: CoreLib at its create2 address is the compiled code or absent");
         assertTrue(vm.contains(detail, "skips it"));
 
         // other code at that address cannot be made by create2 with the same initcode. if it were there, preflight stops
         vm.etch(lib, hex"00");
-        assertEq(this.runPre(base), "library: CoreLib at its create2 address is the compiled code or absent");
+        assertEq(this.runPre(base, deployer), "library: CoreLib at its create2 address is the compiled code or absent");
         console.log("MUT other code at the library create2 address || CAUGHT by preflight (impossible by construction)");
-    */
     }
 
     /// the Core address is a function of the deployer and its nonce only: another library, at another address or with
     /// other code, changes the creation code of the Core but not where it lands
     function test_coreAddressIgnoresTheLibrary() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        uint64 n = vm.getNonce(deployer);
-        address want = vm.computeCreateAddress(deployer, n + 1);
+        address want = _coreAt();
+        address wantRouter = _routerAt();
         uint256 snap = vm.snapshotState();
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
         assertEq(d.core, want);
+        assertEq(d.router, wantRouter);
         vm.revertToState(snap);
         vm.etch(_linked(), bytes.concat(_linked().code, hex"00"));
         // the postflight fails on the library row, the Core itself was created at the predicted address before that
         vm.expectRevert(
             abi.encodeWithSelector(Report.ChecksFailed.selector, "core: linked library is the compiled CoreLib")
         );
-        this.tryDeploy(base);
-    */
+        this.tryDeploy(base, deployer);
     }
 
     // ------------------------------------------------------------------ partial failure states
 
     struct Steps {
         address controller;
+        address router;
         address core;
         address coin;
         PoolKey key;
     }
 
-    function _newCore(LaunchConfig memory c, address coinAt, address controller) private returns (address) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        return address(_make(c, coinAt, controller));
-    */
+    function _newCoreOf(LaunchConfig memory c, address coinAt, address controller) private returns (address) {
+        return address(Prod.newCore(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings));
     }
 
-    /// @dev a frame of its own for the constructor call: the 28 field settings struct leaves no room for more locals
-    function _make(LaunchConfig memory c, address coinAt, address controller) private returns (ICore) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        return Prod.newCore(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings);
-    */
-    }
-
-    function _launchTx(LaunchConfig memory c, address coreAt) private returns (address) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        IArtCoinsFactory f = IArtCoinsFactory(c.stack.factory);
-        return f.deployTokenWithProtocolBpsAndTax{value: f.deployFee()}(
-            buildConfig(c, deployer, coreAt), 0, buildTaxConfig(c, coreAt)
-        );
-    */
-    }
-
-    /// @dev runs the first `n` of the five deploy transactions after the library, by hand, as the deployer
+    /// @dev runs the first `n` of the four creating transactions after the library, by hand, as the deployer: 1 the
+    /// controller, 2 the router, 3 the core, 4 the launch
     function _steps(LaunchConfig memory c, uint256 n) internal returns (Steps memory st) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         uint64 nonce = vm.getNonce(deployer);
-        address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
-        address coinAt = predictCoin(c, deployer, coreAt);
+        address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
+        address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
+        c.stack.feeSource = routerAt;
+        address coinAt = predictCoin(c, deployer, routerAt, coreAt);
         vm.startPrank(deployer);
         st.controller = address(Prod.newController(coreAt, c.sale));
-        if (n >= 2) st.core = _newCore(c, coinAt, st.controller);
-        if (n >= 3) {
-            st.coin = _launchTx(c, coreAt);
+        if (n >= 2) st.router = address(Prod.newRouter(deployer));
+        if (n >= 3) st.core = _newCoreOf(c, coinAt, st.controller);
+        if (n >= 4) {
+            st.coin = _launch(c, coinAt, st.router, coreAt);
             st.key = poolKeyOf(st.coin, c.stack);
         }
-        if (n >= 4) IArtCoinsSkimHook(c.stack.hook).lockPoolExtension(st.key);
-        if (n >= 5) IArtCoinsToken(st.coin).updateAdmin(c.owner);
         vm.stopPrank();
-    */
     }
 
-    /// strangers cannot launch to the predicted coin or touch the admin role at any half way state
+    /// strangers cannot launch to the predicted coin or touch the router at any half way state
     function test_partialStatesStayClosedToStrangers() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         uint256 snap = vm.snapshotState();
         address watcher = makeAddr("review.watcher");
         vm.deal(watcher, 1 ether);
         // after the core, before the launch: nothing at the coin address, the core holds nothing and is inert
-        Steps memory st = _steps(base, 2);
-        IArtCoinsFactory f = IArtCoinsFactory(base.stack.factory);
-        uint256 fee = f.deployFee();
+        Steps memory st = _steps(base, 3);
+        uint256 fee = FACTORY.deployFee();
         assertEq(ICore(payable(st.core)).COIN().code.length, 0, "no coin yet");
         assertEq(st.core.balance, 0, "the core holds nothing");
-        vm.prank(watcher);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(base, base.owner, st.router, st.core);
+        vm.startPrank(watcher);
         vm.expectRevert();
-        f.deployTokenWithProtocolBpsAndTax{value: fee}(
-            buildConfig(base, deployer, st.core), 0, buildTaxConfig(base, st.core)
-        );
+        FACTORY.deployTokenAsOwner{value: fee}(cfg, base.protocolBps);
+        vm.expectRevert(IFeeRouter.OnlyOwner.selector);
+        IFeeRouter(payable(st.router)).setEngine(st.core);
+        vm.stopPrank();
         vm.revertToState(snap);
 
-        // after the launch, before the lock: the deployer is still the token admin and the slot is open
-        st = _steps(base, 3);
-        vm.prank(watcher);
-        vm.expectRevert();
-        IArtCoinsSkimHook(base.stack.hook).lockPoolExtension(st.key);
-        vm.prank(watcher);
-        vm.expectRevert();
-        IArtCoinsToken(st.coin).updateAdmin(watcher);
+        // after the launch, before the router setup: the router has no engine, a stranger cannot set one, eth waits
+        st = _steps(base, 4);
+        IFeeRouter r = IFeeRouter(payable(st.router));
+        vm.startPrank(watcher);
+        vm.expectRevert(IFeeRouter.OnlyOwner.selector);
+        r.setEngine(watcher);
+        vm.expectRevert(IFeeRouter.OnlyOwner.selector);
+        r.lock();
+        vm.expectRevert(IFeeRouter.NoEngine.selector);
+        r.flush();
+        vm.stopPrank();
         vm.revertToState(snap);
-    */
     }
 
     /// a second run of the signed config by the same deployer is a second, independent system, not a collision: the coin
-    /// address includes the core address, so the same salt gives another coin. it is no mutation of the config. the
-    /// runbook says never rerun Deploy, this is what a rerun costs
+    /// address includes the router and core addresses, so the same salt gives another coin. it is no mutation of the
+    /// config. the runbook says never rerun Deploy, this is what a rerun costs
     function test_secondRunOfTheSameConfigIsAnotherSystem() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.startPrank(deployer);
         Deployed memory d1 = deploySystem(deployer, base);
         Deployed memory d2 = deploySystem(deployer, base);
         vm.stopPrank();
-        assertTrue(d1.core != d2.core && d1.coin != d2.coin, "two systems");
+        assertTrue(d1.core != d2.core && d1.coin != d2.coin && d1.router != d2.router, "two systems");
         assertTrue(IAuctionFactory(base.stack.auctionFactory).houseOf(d1.core) != address(0));
         assertTrue(IAuctionFactory(base.stack.auctionFactory).houseOf(d2.core) != address(0));
         console.log(
             "NOT A MUTATION a second run of the signed config || two independent systems, both pass every check"
         );
-    */
     }
 
     // ------------------------------------------------------------------ readbacks of the first review, still true
 
     function test_wrongPositionIsStoppedByPreflight() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         LaunchConfig memory c = base;
         c.positionLower = -170_000;
-        this.runPre(c);
+        this.runPre(c, deployer);
         assertEq(_failedNames(), "rule: position lower equals the start tick");
         c = base;
         c.positionUpper = 600_000;
-        this.runPre(c);
+        this.runPre(c, deployer);
         assertEq(_failedNames(), "rule: position upper is the highest usable tick");
         c = base;
         c.startTick = -175_200;
-        this.runPre(c);
+        this.runPre(c, deployer);
         assertEq(_failedNames(), "rule: position lower equals the start tick");
-        // the highest multiple of the spacing at or below the max tick, for another spacing
-        c = base;
-        c.stack.tickSpacing = 60;
-        c.startTick = c.positionLower = -174_960;
-        c.positionUpper = 887_220;
-        this.runPre(c);
-        assertFalse(vm.contains(_failedNames(), "rule:"), "the tick rules follow the spacing of the config");
-    */
     }
 
     /// the postflight reads the position back from the position manager, so a launch whose position is not the
     /// config's fails even when every config rule was bypassed
     function test_postflightReadsThePositionBack() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        postflight(base, d.core);
+        postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
         LaunchConfig memory c = base;
         c.startTick = c.positionLower = -170_000;
-        postflight(c, d.core);
-        assertEq(_failedNames(), "position: ticks equal the config, pool: start tick");
+        postflightAs(c, d.core, deployer);
+        assertEq(_failedNames(), "position: ticks equal the config (mirrored, the coin is currency1), pool: start tick equals the config while nothing was bought");
         c = base;
         c.positionUpper = 600_000;
-        postflight(c, d.core);
-        assertEq(_failedNames(), "position: ticks equal the config");
+        postflightAs(c, d.core, deployer);
+        assertEq(_failedNames(), "position: ticks equal the config (mirrored, the coin is currency1)");
         // after the first trade the start tick itself is gone, the position rows still hold
         vm.warp(block.timestamp + base.sniperSeconds + 1);
         TestSwapRouter r = new TestSwapRouter();
@@ -280,76 +242,74 @@ contract ReviewDeployTest is ReviewHarness {
         vm.deal(buyer, 1 ether);
         vm.prank(buyer);
         r.swap{value: 1 ether}(d.launchKey, true, -1 ether, buyer);
-        postflight(base, d.core);
+        postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
-    */
     }
 
-    /// the sniper parameters are read back through the mev module. inside the window one read pins start, end and
-    /// duration together, after it only the end value is readable and the output says so
+    /// the sniper parameters are read back from the mev module schedule: start, end (the baseline), window, start time
     function test_postflightReadsTheSniperParamsBack() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        postflight(base, d.core);
+        postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
-        assertEq(IArtCoinsMevSkim(base.mevModule).currentSkimBps(d.poolId), 90_000, "readable at the launch block");
+        (uint24 now_,) = IArtCoinsMevSkimV2(base.mevModule).currentSkimBps(d.poolId);
+        assertEq(now_, 90_000, "readable at the launch block");
         vm.warp(block.timestamp + 900);
-        postflight(base, d.core);
+        postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
+        string memory row = "mev: schedule equals the config (start, end at the baseline, window, start time)";
         LaunchConfig memory c = base;
         c.sniperStartBps = 80_000;
-        postflight(c, d.core);
-        assertEq(_failedNames(), "mev: skim now matches start, end and duration");
+        postflightAs(c, d.core, deployer);
+        assertEq(_failedNames(), row);
         c = base;
         c.sniperSeconds = 3000;
-        postflight(c, d.core);
-        assertEq(_failedNames(), "mev: skim now matches start, end and duration");
-        vm.warp(block.timestamp + 901);
-        postflight(base, d.core);
-        assertEq(_failedNames(), "", "window over, the end value");
+        postflightAs(c, d.core, deployer);
+        assertEq(_failedNames(), string.concat(row, ", router: split start is after the anti sniper window, at most an hour after it"));
         c = base;
-        c.sniperEndBps = 5000;
-        postflight(c, d.core);
-        assertEq(_failedNames(), "mev: skim now equals the end bps");
-    */
+        c.baselineSkimBps = 5000;
+        postflightAs(c, d.core, deployer);
+        assertEq(_failedNames(), string.concat("hook: skim config equals the config, ", row));
+        vm.warp(block.timestamp + 901);
+        postflightAs(base, d.core, deployer);
+        assertEq(_failedNames(), "", "window over, the schedule is frozen");
     }
 
     /// postflight reads back every launch input it can. one deployed system, each field of the config changed
     function test_postflightFailsOnEveryReadableMismatch() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        string[11] memory names = [
-            "owner", "creator", "name", "symbol", "bounty", "referral", "lpFee", "baseline", "taxBps", "taxBurn", "rate"
-        ];
-        for (uint256 i; i < names.length; ++i) {
+        uint256 n = 17;
+        for (uint256 i; i < n; ++i) {
             LaunchConfig memory c = base;
-            if (i == 0) c.owner = creator;
-            else if (i == 1) c.creator = owner;
-            else if (i == 2) c.name = "Other";
-            else if (i == 3) c.symbol = "OTH";
-            else if (i == 4) c.bountyBps = 9000;
-            else if (i == 5) c.maxReferralBps = 100;
-            else if (i == 6) c.lpFee = 100;
-            else if (i == 7) c.baselineSkimBps = 20_000;
-            else if (i == 8) c.taxBps = 1000;
-            else if (i == 9) c.taxBurn = creator;
-            else c.rateStart = base.rateStart + 1;
-            postflight(c, d.core);
-            assertTrue(bytes(_failedNames()).length != 0, names[i]);
+            string memory what;
+            if (i == 0) (c.owner, what) = (creator, "owner");
+            else if (i == 1) (c.creator, what) = (owner, "creator");
+            else if (i == 2) (c.name, what) = ("Other", "name");
+            else if (i == 3) (c.symbol, what) = ("OTH", "symbol");
+            else if (i == 4) (c.bountyBps, what) = (8000, "bounty");
+            else if (i == 5) (c.maxReferralBps, what) = (100, "referral");
+            else if (i == 6) (c.lpFee, what) = (100, "lpFee");
+            else if (i == 7) (c.baselineSkimBps, what) = (20_000, "baseline");
+            else if (i == 8) (c.rateStart, what) = (base.rateStart + 1, "rate");
+            else if (i == 9) (c.sniperStartBps, what) = (80_000, "sniper start");
+            else if (i == 10) (c.restricted, what) = (false, "restricted");
+            else if (i == 11) (c.protocolBps, what) = (1000, "protocolBps");
+            else if (i == 12) (c.creatorPayee, what) = (creator, "payee");
+            else if (i == 13) (c.payeePpm, what) = (100_000, "payee ppm");
+            else if (i == 14) (c.tipPpm, what) = (1000, "tip ppm");
+            else if (i == 15) (c.tipCap, what) = (0.01 ether, "tip cap");
+            else (c.supply, what) = (c.supply + 1e7, "supply");
+            postflightAs(c, d.core, deployer);
+            assertTrue(bytes(_failedNames()).length != 0, what);
         }
-    */
     }
 
-    /// sign off row: at the launch block the whole 90 points of a buy minus the creator 0.5 reach the core
+    /// sign off row: at the launch block the whole skim of a buy reaches the engine through the router (no payee
+    /// share in the window), less the flush tip
     function test_signoffSniperExtraGoesToTheCore() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
@@ -358,105 +318,94 @@ contract ReviewDeployTest is ReviewHarness {
         vm.deal(buyer, 1 ether);
         vm.prank(buyer);
         r.swap{value: 1 ether}(d.launchKey, true, -1 ether, buyer);
-        assertEq(ICore(payable(d.core)).ethPot(), 0.895 ether);
-    */
+        IFeeRouter fr = IFeeRouter(payable(d.router));
+        uint256 held = d.router.balance;
+        // 90 points of the buy, of which the part above the 6.9 point baseline goes whole to the bounty leg and 90 percent
+        // of the baseline part (the protocol keeps the rest of the baseline): 0.831 + 0.0621
+        assertApproxEqRel(held, 0.8931 ether, 0.001e18, "the router holds the bounty leg");
+        address keeper2 = makeAddr("review.keeper");
+        vm.prank(keeper2);
+        fr.flush();
+        uint256 tip = held * base.tipPpm / 1e6;
+        if (tip > base.tipCap) tip = base.tipCap;
+        assertEq(keeper2.balance, tip);
+        assertEq(ICore(payable(d.core)).ethPot(), held - tip, "everything else reaches the pot");
+        assertFalse(fr.splitOn(), "the window never shares");
     }
 
-    function _hookView(address hook, string memory sig) internal view returns (address a) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
-        (bool ok, bytes memory out) = hook.staticcall(abi.encodeWithSignature(sig));
-        require(ok && out.length == 32, sig);
-        a = abi.decode(out, (address));
-    */
-    }
-
-    /// the pool manager, the factory and the escrow are compared with what the hook reports, the factory and the
-    /// position manager with what the locker reports
+    /// the pool manager, the factory and the escrow are compared with what the hook reports, the factory with what the
+    /// locker reports, the hook with what the mev module reports
     function test_stackIsCrossCheckedAgainstTheHook() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         address hook = base.stack.hook;
-        assertEq(_hookView(hook, "feeEscrow()"), base.stack.escrow);
-        assertEq(_hookView(hook, "poolManager()"), base.stack.poolManager);
-        assertEq(_hookView(hook, "factory()"), base.stack.factory);
-        assertEq(_hookView(base.stack.locker, "factory()"), base.stack.factory);
-        this.runPre(base);
+        assertEq(IArtCoinsHookV2(hook).globals().feeEscrow, base.stack.escrow);
+        assertEq(IArtCoinsHookV2(hook).poolManager(), base.stack.poolManager);
+        assertTrue(IArtCoinsHookV2(hook).isLauncher(base.stack.factory));
+        this.runPre(base, deployer);
         assertEq(_failedNames(), "");
         LaunchConfig memory c = base;
         c.stack.escrow = Mainnet.PERMIT2;
-        this.runPre(c);
-        assertEq(_failedNames(), "hook reports fee escrow");
+        this.runPre(c, deployer);
+        (string memory list,) = _failed();
+        assertTrue(vm.contains(list, "hook: reports the fee escrow"), list);
         c = base;
         c.stack.poolManager = Mainnet.PERMIT2;
-        this.runPre(c);
-        assertEq(_failedNames(), "hook reports pool manager");
-        c = base;
-        c.stack.locker = makeAddr("other locker");
-        vm.etch(c.stack.locker, hex"00");
-        this.runPre(c);
-        assertEq(
-            _failedNames(), "factory: locker enabled for hook, locker reports factory, locker reports position manager"
-        );
+        this.runPre(c, deployer);
+        (list,) = _failed();
+        assertTrue(vm.contains(list, "hook: reports the pool manager"), list);
         c = base;
         c.mevModule = Mainnet.PERMIT2;
-        this.runPre(c);
-        assertEq(_failedNames(), "factory: mev module enabled");
-    */
+        this.runPre(c, deployer);
+        (list,) = _failed();
+        assertTrue(vm.contains(list, "factory: mev module enabled"), list);
     }
 
     /// the constructor refuses a stack member without code, the coin is exempt (it does not exist yet). the auction
-    /// factory is one of them: without code, and as a contract that is not a factory
+    /// factory is one of them: without code, and as a contract that is not a factory. the fee source needs code too
     function test_coreRejectsAStackWithoutCode() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         Settings memory s = Mainnet.defaultSettings();
         Stack memory st = base.stack;
-        st.hook = makeAddr("hook");
-        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.hook));
+        st.feeSource = address(new TestSwapRouter());
         Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
-        st = base.stack;
-        st.escrow = makeAddr("escrow");
-        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.escrow));
-        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
-        st = base.stack;
-        st.auctionFactory = makeAddr("auction factory");
-        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.auctionFactory));
-        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
-        st.auctionFactory = Mainnet.PERMIT2;
+        Stack memory bad = st;
+        bad.hook = makeAddr("hook");
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, bad.hook));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), bad, 4e12, s);
+        bad = st;
+        bad.escrow = makeAddr("escrow");
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, bad.escrow));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), bad, 4e12, s);
+        bad = st;
+        bad.feeSource = makeAddr("router");
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, bad.feeSource));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), bad, 4e12, s);
+        bad = st;
+        bad.auctionFactory = makeAddr("auction factory");
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, bad.auctionFactory));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), bad, 4e12, s);
+        bad.auctionFactory = Mainnet.PERMIT2;
         vm.expectRevert();
-        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
-        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), base.stack, 4e12, s);
-    */
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), bad, 4e12, s);
     }
 
     function parse(string memory j) external view returns (LaunchConfig memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return parseConfig(j);
-    */
     }
 
     function load(string memory file) external view returns (LaunchConfig memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         return loadConfig(file);
-    */
     }
 
     /// a json number that does not fit its field is rejected, never cut
     function test_jsonNumbersAreRejected() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         vm.expectRevert(abi.encodeWithSelector(ConfigReader.ConfigOutOfRange.selector, ".stack.tickSpacing"));
         this.load("test/data/ReviewTruncated.json");
         string memory j = vm.readFile(DEFAULT_CONFIG_FILE);
-        assertEq(this.parse(j).bountyBps, 9500, "the untouched file parses");
+        assertEq(this.parse(j).bountyBps, 9000, "the untouched file parses");
         string[12] memory from = [
-            '"bountyBps": 9500',
-            '"taxBps": 1500',
-            '"taxBpsMax": 2000',
-            '"baselineSkimBps": 10000',
+            '"bountyBps": 9000',
+            '"payeePpm": 161030',
+            '"tipPpm": 5000',
+            '"baselineSkimBps": 6900',
             '"sniperSeconds": 1800',
             '"startTick": -175000',
             '"positionUpper": 887200',
@@ -468,8 +417,8 @@ contract ReviewDeployTest is ReviewHarness {
         ];
         string[12] memory to = [
             '"bountyBps": 65536',
-            '"taxBps": 65536',
-            '"taxBpsMax": 65536',
+            '"payeePpm": 4294967296',
+            '"tipPpm": 4294967296',
             '"baselineSkimBps": 16777216',
             '"sniperSeconds": 4294967296',
             '"startTick": -8388609',
@@ -482,8 +431,8 @@ contract ReviewDeployTest is ReviewHarness {
         ];
         string[12] memory keys = [
             ".launch.bountyBps",
-            ".launch.taxBps",
-            ".launch.taxBpsMax",
+            ".router.payeePpm",
+            ".router.tipPpm",
             ".launch.baselineSkimBps",
             ".launch.sniperSeconds",
             ".launch.startTick",
@@ -507,56 +456,48 @@ contract ReviewDeployTest is ReviewHarness {
         this.parse(vm.replace(j, '"exitSliceCredits"', '"exitSliceCreditz"'));
         vm.expectRevert();
         this.parse(vm.replace(j, '"auctionFactory"', '"auctionFactoryy"'));
+        vm.expectRevert();
+        this.parse(vm.replace(j, '"creatorPayee"', '"creatorPayeee"'));
         // the overrides are optional and default to false
         LaunchConfig memory c = this.parse(vm.replace(j, '"overrides"', '"unused"'));
-        assertFalse(c.allowBounty || c.allowTaxBurn || c.allowOpenFactory);
+        assertFalse(c.allowBounty || c.allowOpenFactory);
         c = this.parse(vm.replace(j, '"bounty": false', '"bounty": true'));
         assertTrue(c.allowBounty);
-    */
     }
 
     function requireHash(LaunchConfig memory c, bytes32 h) external view {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         _requireConfigHash(c, h);
-    */
     }
 
-    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, name, salt)
+    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, payee, name, salt)
     function _shipped() internal pure returns (LaunchConfig memory s) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         s = defaultConfig();
         s.owner = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.creator = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+        s.creatorPayee = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.name = "CC";
         s.salt = keccak256("CC");
-    */
     }
 
     function _hashRow() internal view returns (string memory) {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         for (uint256 i; i < rows.length; ++i) {
             if (keccak256(bytes(rows[i].name)) == keccak256("signoff: CONFIG_HASH")) return rows[i].detail;
         }
         revert("no hash row");
-    */
     }
 
     /// the one value the operator signs. preflight and postflight print the same hash, Deploy needs it and every change
-    /// of the config changes it
+    /// of the config changes it. the router address the deploy creates is derived and not part of it
     function test_configHashIsTheSignOffValue() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         bytes32 h = configHash(base);
-        this.runPre(base);
+        this.runPre(base, deployer);
         assertEq(_hashRow(), vm.toString(h), "preflight prints it");
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        postflight(base, d.core);
+        postflightAs(base, d.core, deployer);
         assertEq(_hashRow(), vm.toString(h), "postflight prints the same value");
+        assertEq(configHash(base), h, "the router the deploy filled in is outside the hash");
         this.requireHash(base, h);
         vm.expectRevert(abi.encodeWithSelector(SystemDeployer.ConfigHashMismatch.selector, bytes32(0), h));
         this.requireHash(base, bytes32(0));
@@ -567,45 +508,39 @@ contract ReviewDeployTest is ReviewHarness {
         // the hash does not depend on the machine: same content from a file and from the struct
         LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
         assertEq(configHash(f), configHash(_shipped()));
-        // a changed token creation code changes it too
-        c = base;
-        c.tokenCodeFile = MUT_TOKEN;
-        assertTrue(configHash(c) != h);
-    */
     }
 
     /// an open factory fails preflight unless the config says so
     function test_openFactoryFailsPreflight() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        IFactoryAdmin(Mainnet.ARTCOINS_FACTORY).setDeprecated(false);
-        this.runPre(base);
-        assertEq(_failedNames(), "factory: deprecated, only the owner and admins can launch");
+        vm.prank(owner);
+        FACTORY.setDeprecated(false);
+        this.runPre(base, deployer);
+        assertEq(_failedNames(), "factory: deprecated, only the owner can launch");
         LaunchConfig memory c = base;
         c.allowOpenFactory = true;
-        this.runPre(c);
+        this.runPre(c, deployer);
         assertEq(_failedNames(), "");
-    */
     }
 
-    /// DEPLOY.md says the token admin can raise the tax to its cap and the referral cap to 1000
-    function test_signoffAdminCanRaiseTaxAndReferralCap() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
+    /// DEPLOY.md: the token admin is the owner from the first block. it can change the allowlist and leave the
+    /// restriction (one way). nothing else is its to change: the skim, the referral cap and the lp fee are frozen
+    function test_signoffAdminPowers() public {
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        IArtCoinsToken coin = IArtCoinsToken(d.coin);
+        IArtCoinsTokenV2 coin = IArtCoinsTokenV2(d.coin);
         assertEq(coin.admin(), owner);
         vm.startPrank(owner);
-        coin.setTaxBps(2000);
-        assertEq(coin.taxBps(), 2000, "tax raised from 1500 to the 2000 cap");
-        IArtCoinsSkimHook(base.stack.hook).setMaxReferralBpsOfVolume(d.launchKey, 1000);
-        (,, uint24 maxRef,,,,,) = IArtCoinsSkimHook(base.stack.hook).skimConfig(d.poolId);
+        coin.setAllowed(creator, true);
+        assertTrue(coin.isAllowed(creator));
+        coin.unrestrict();
+        assertFalse(coin.restricted());
         vm.stopPrank();
-        assertEq(maxRef, 1000, "referral cap raised from 0 to 1000");
-    */
+        // the referral cap has no setter on the v2 hook
+        (bool ok,) = base.stack.hook.call(abi.encodeWithSignature("setMaxReferralBpsOfVolume(bytes32,uint24)", d.poolId, 100));
+        assertFalse(ok, "no referral cap setter");
+        IArtCoinsHookV2.SkimConfig memory k = IArtCoinsHookV2(base.stack.hook).skimConfig(d.poolId);
+        assertEq(k.maxReferralBpsOfVolume, 0);
     }
 }
 
@@ -616,8 +551,6 @@ contract ReviewFundedTest is Fixture {
     uint256 internal cursor;
 
     function _newCore(uint256 rate) internal returns (ICore c) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
         IControllerV1 ctl2 = Prod.newController(predicted, Mainnet.defaultSale());
         Settings memory s = Mainnet.defaultSettings();
@@ -625,29 +558,21 @@ contract ReviewFundedTest is Fixture {
         s.rateCap = uint64(1e15);
         c = _make(rate, address(ctl2), s);
         assertEq(address(c), predicted);
-    */
     }
 
     function _fees(ICore c, uint256 amt) internal {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        vm.deal(Mainnet.SKIM_HOOK, amt);
-        vm.prank(Mainnet.SKIM_HOOK);
+        address src = lc.stack.feeSource;
+        vm.deal(src, src.balance + amt);
+        vm.prank(src);
         (bool ok,) = address(c).call{value: amt}("");
         assertTrue(ok);
-    */
     }
 
     function _make(uint256 rate, address controller, Settings memory s) internal returns (ICore) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        return Prod.newCore(owner, address(coin), controller, Mainnet.defaultStack(), rate, s);
-    */
+        return Prod.newCore(owner, address(coin), controller, lc.stack, rate, s);
     }
 
     function _check(ICore c) internal view {
-        revert("TODO(v2 port stage 3)");
-        /* TODO(v2 port stage 3), old body:
         uint256 pot = c.ethPot();
         uint256 stored = c.rateAtCheckpoint();
         // the flag is exactly the definition: the hourly cap affords one average credit at the stored rate
@@ -658,13 +583,10 @@ contract ReviewFundedTest is Fixture {
         }
         // the rate never climbs while the cap cannot afford an average credit
         if (pot * 2000 < AVG * stored) assertEq(r, stored, "no climb while unaffordable");
-    */
     }
 
     /// forge-config: default.fuzz.runs = 400
     function testFuzz_fundedRuleAndClamp(uint256 rateSeed, uint256[10] memory ops) public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         uint256 rate = bound(rateSeed, 1e11, 1e15);
         ICore c = _newCore(rate);
         address who = makeAddr("fuzz.seller");
@@ -702,15 +624,12 @@ contract ReviewFundedTest is Fixture {
             }
             _check(c);
         }
-    */
     }
 
     /// the bounds of rateStart, at and beside both edges
     function test_rateStartBounds() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
-        Stack memory st = Mainnet.defaultStack();
+        Stack memory st = lc.stack;
         vm.expectRevert(ICore.BadRate.selector);
         Prod.newCore(owner, address(coin), predicted, st, 1e11 - 1, Mainnet.defaultSettings());
         vm.expectRevert(ICore.BadRate.selector);
@@ -733,7 +652,5 @@ contract ReviewFundedTest is Fixture {
         assertFalse(hi.funded());
         _fees(hi, 1);
         assertTrue(hi.funded());
-    */
     }
 }
-

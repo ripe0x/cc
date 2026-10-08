@@ -401,6 +401,8 @@ abstract contract LaunchChecks is PostflightChecks {
         address r;
         (ok, r) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.referralPayout, ()));
         _check("factory: referral payout is a contract", ok && r.code.length != 0, vm.toString(r));
+        (bool okf, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
+        _info("factory: deploy fee paid by the launch", okf ? vm.toString(fee) : "unreadable");
         (ok, p) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.teamFeeRecipient, ()));
         _info("factory: the deploy fee goes to the team fee recipient", vm.toString(p));
         (bool okp, uint256 fb) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.defaultProtocolFeeBps, ()));
@@ -411,10 +413,10 @@ abstract contract LaunchChecks is PostflightChecks {
         );
         (bool oka, bytes memory out) = fa.staticcall(abi.encodeCall(IArtCoinsFactoryV2.defaultAllowed, ()));
         uint256 n = oka && out.length >= 64 ? abi.decode(out, (address[])).length : type(uint256).max;
-        _warn(
-            "warn: factory default allowlist is empty",
+        _check(
+            "factory: default allowlist is empty",
             n == 0,
-            "the coin allowlist then holds the stack seeds and the Core only"
+            "the coin allowlist then holds the stack seeds and the Core only (owner: setDefaultAllowed([]))"
         );
     }
 
