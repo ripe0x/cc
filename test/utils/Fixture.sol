@@ -292,6 +292,14 @@ abstract contract Fixture is Test, ProdDeployer {
         if (block.timestamp < end) vm.warp(end);
     }
 
+    /// @notice moves past the sniper window and the router split start (the window end plus the deploy margin). the first
+    /// flush at or after the start turns the split on
+    function _skipToSplitStart() internal {
+        _skipSniperWindow();
+        uint256 at = feeRouter.splitStart();
+        if (block.timestamp < at) vm.warp(at);
+    }
+
     /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.2 percent
     /// of every buy reaches the pot (6.9 points of skim, 90 percent to the router, minus the payees and the tip), inside
     /// the sniper window more

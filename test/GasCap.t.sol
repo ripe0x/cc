@@ -195,7 +195,7 @@ contract GasCapTest is SeaportBase {
 
     /// @dev `flush` with the split on and two payees, cold, the call that moves the pool fees into the Core
     function test_gas_routerFlush() public {
-        _skipSniperWindow();
+        _skipToSplitStart();
         _buyCoin(funder, 20 ether);
         autoFlush = false;
         _buyCoin(funder, 5 ether);

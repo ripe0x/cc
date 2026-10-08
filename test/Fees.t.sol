@@ -122,14 +122,6 @@ abstract contract FeeBase is Fixture {
         toProtocol = skim - toRouter;
     }
 
-    /// @dev moves past the sniper window and the router split start (the window end plus the deploy margin). the first
-    /// flush at or after the start turns the split on
-    function _skipToSplitStart() internal {
-        _skipSniperWindow();
-        uint256 at = feeRouter.splitStart();
-        if (block.timestamp < at) vm.warp(at);
-    }
-
     /// @dev moves past the sniper window, then gives the trader coin and the pool about 18 eth of depth
     function _stock() internal {
         _skipToSplitStart();
