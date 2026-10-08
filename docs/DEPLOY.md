@@ -50,6 +50,12 @@ why the fallback is acceptable. while the factory is deprecated, `deployTokenWit
 
 ## 1. commands in order
 
+stage 2 of the v2 port (the launch builder, the router and the fixture) is in. the deploy, preflight, postflight and resume scripts are stubbed until stage 3 and carry the marker `TODO(v2 port stage 3)`. what the v2 launch needs from the people running it:
+
+- the v2 stack addresses in script/config/mainnet.json (`stack.hook`, `stack.factory`, `stack.locker`, `stack.escrow`, `stack.mevModule`) are zero placeholders. they are filled when the v2 stack is live and the deploy refuses the file until then.
+- the factory owner runs one command first: `cast send $FACTORY "setMinLpFee(uint24)" 0` from the factory owner. v2 enforces a minimum lp fee and the launch uses an lp fee of 0 (docs/FLOW.md 10.6). preflight must check that the factory accepts the config.
+- the fee router is deployed first, then the controller, then the Core, then the coin through `deployTokenAsOwner`. the router is wired by the owner afterwards (engine, one payee, tip, split start) and is not locked by the deploy. the owner locks it when ready.
+
 all commands run from the repo root after `set -a; . ./.env; set +a` and the variables of section 0. read rpc commands use `$MAINNET_RPC_URL`, the one broadcast uses `$PRIVATE_RPC`.
 
 | step | action | command or owner |
