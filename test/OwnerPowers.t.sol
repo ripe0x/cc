@@ -252,12 +252,13 @@ contract OwnerFormerQueueTest is OwnerBase {
     }
 
     function test_target_forbiddenAddressesAreRefused() public {
-        address[14] memory bad = [
+        address[15] memory bad = [
             address(CREDITS),
             address(STATEMENTS),
             address(core),
             address(coin),
             core.HOOK(),
+            core.FEE_SOURCE(),
             address(PM),
             core.FACTORY(),
             core.LOCKER(),

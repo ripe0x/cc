@@ -1248,9 +1248,9 @@ contract FlowTest is Fixture {
         uint256 r = core.ethRate();
         assertLt(g - gasleft(), 400_000, "bounded work");
         assertLe(r, uint256(1 ether) * 2_000 / 4_330_000, "clamped at the hourly cap");
-        vm.deal(core.HOOK(), 1 ether);
+        vm.deal(core.FEE_SOURCE(), 1 ether);
         uint256 pot = core.ethPot();
-        vm.prank(core.HOOK());
+        vm.prank(core.FEE_SOURCE());
         (bool ok,) = address(core).call{value: 1e15}("");
         assertTrue(ok, "receive does not revert");
         assertEq(core.ethPot(), pot + 1e15, "booked");

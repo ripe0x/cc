@@ -479,7 +479,7 @@ contract ReviewFlowCoreTest is Fixture {
     function test_receiveGasByGap() public {
         _skipSniperWindow();
         _fundPot(5 ether);
-        address hook = core.HOOK();
+        address hook = core.FEE_SOURCE();
         uint256[4] memory gaps = [uint256(1 hours), 5 days, 400 days, 36_500 days];
         for (uint256 j; j < 2; ++j) {
             if (j == 1) {

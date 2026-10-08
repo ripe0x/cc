@@ -263,7 +263,7 @@ contract FeeFlowTest is FeeBase {
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
         uint256 base = 1 ether * 6_900 / 100_000;
         uint256 bountyShare = base * 9000 / 10_000;
-        uint256 extra = 1 ether * bps / 100_000 - base;
+        uint256 extra = 1 ether * uint256(bps) / 100_000 - base;
         assertEq(f.routerRise, bountyShare + extra, "the whole extra goes to the bounty recipient");
         assertEq(f.skimProtocol, base - bountyShare, "the protocol leg does not grow in the window");
         assertEq(f.toPayees, 0);
@@ -276,7 +276,7 @@ contract FeeFlowTest is FeeBase {
         (bps,) = IArtCoinsMevSkimV2(v2.mev).currentSkimBps(poolId);
         assertEq(bps, 90_000 - (90_000 - 6_900) / 2);
         f = _flow(Kind.BuyExactIn, 1 ether, "");
-        assertEq(f.routerRise, bountyShare + 1 ether * bps / 100_000 - base);
+        assertEq(f.routerRise, bountyShare + 1 ether * uint256(bps) / 100_000 - base);
         assertEq(f.toPayees, 0);
 
         // sells pay the extra too
@@ -507,7 +507,7 @@ contract ReceiveTest is FeeBase {
             (bool ok,) = address(core).call{value: 1 ether}("");
             assertTrue(ok);
             assertEq(core.ethPot(), 0);
-            assertEq(address(core).balance, i + 1 ether);
+            assertEq(address(core).balance, (i + 1) * 1 ether);
         }
         core.skim();
         assertEq(core.ethPot(), 3 ether);
@@ -523,6 +523,7 @@ contract ReceiveTest is FeeBase {
     /// swaps keep working while the core holds 0.01 eth, the pot a real run builds, and 1000 eth
     function test_swapsKeepWorkingWithALargeCoreBalance() public {
         _skipSniperWindow();
+        _flow(Kind.BuyExactIn, 1 ether, ""); // the first flush after the window turns the split on
         uint256[3] memory held = [uint256(0.01 ether), 0.5 ether, 1000 ether];
         for (uint256 i; i < held.length; ++i) {
             vm.deal(address(core), held[i]);
