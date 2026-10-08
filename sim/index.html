@@ -253,7 +253,7 @@ const SIM_DEFAULTS = {
   // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
   routerTipPpm: 5000, // 0.5 percent. the cap of 0.005 eth a flush is ignored, which makes the tip an upper bound
   routerPayeePpm: 161031, // the one launch payee, 1.0 point of volume at the baseline (of the gross router inflow)
-  routerSplitStartSec: 2700, // launch time plus the 30 minute window plus the 900 second margin
+  routerSplitStartSec: 1800, // the mined launch time plus the 30 minute window, no margin
   startTick: -175000,
   positionUpper: 887200,
   // coin market

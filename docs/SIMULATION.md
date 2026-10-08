@@ -21,7 +21,7 @@ before is the previous version of this file (fixed auction reserve of 90 percent
 
 the new rules sell 37 more statements (158 against 121) at the same average price over cost (91 against 92 percent), so eth recycled by sales rises from 62.6 to 84.4 and eth to burn from 31.3 to 42.2 (10.0 percent of the coin, was 8.1). credits rise 6 percent (28,800 against 27,110) because half of every sale goes back to the pot. the launch pot is spent on day 6.5 in both: the sale side does not touch week one. why more sell: the old reserve was one price, 90 percent of cost. the buyers' willingness to pay is a multiple of the market cost of the parts, median 0.84, and the engine paid about 1.04 times market, so the median buyer can pay about 81 percent of cost. under the new curve that price is reached at about hour 90 and that buyer buys. a statement is now offered to every buyer from 110 percent down to 75 percent of cost, and the oldest statements sit at the cheapest price.
 
-the third column is the v2 launch (docs/FLOW.md section 10). a trader pays 6.9 points of volume, not 10, and the engine no longer gets 9.5 of them. the pool pays 6.21 points (90 percent of the baseline skim, plus all of the anti sniper extra) to the fee router. a flush tip takes 0.5 percent of that, and from 45 minutes after launch (the 30 minute window plus a 900 second margin) the single payee takes 161,030 parts per million of what is left. the engine therefore books 5.18 points of volume in steady state, and the whole router inflow less the tip inside the window. there is no lp income: the launch lp fee is 0 and no fee swapper exists. the rerun, 5 seeds, day 90: fees booked fall from 297 eth to 220 (down 26 percent), credits bought from 28,800 to 23,840 (down 17 percent), statements created from 359 to 298, sold from 158 to 137, eth to burn from 42.2 to 35.9 and the share of the coin burned from 10.0 to 9.2 percent. the sale side per statement does not move (average price 91 percent of cost). the launch pot is spent on day 5.9 where it was 6.5, because the window extra is unchanged and the baseline share is smaller. the model sets the tip at its 0.5 percent upper bound (the 0.005 eth cap per flush is ignored) and assumes the router is flushed as fees arrive.
+the third column is the v2 launch (docs/FLOW.md section 10). a trader pays 6.9 points of volume, not 10, and the engine no longer gets 9.5 of them. the pool pays 6.21 points (90 percent of the baseline skim, plus all of the anti sniper extra) to the fee router. a flush tip takes 0.5 percent of that, and from 30 minutes after launch (the end of the anti sniper window, the split start is the mined launch time plus the window) the single payee takes 161,031 parts per million of the gross inflow, and the tip comes out of the engine's part. the engine therefore books 5.18 points of volume in steady state, and the whole router inflow less the tip inside the window. there is no lp income: the launch lp fee is 0 and no fee swapper exists. the rerun, 5 seeds, day 90: fees booked fall from 297 eth to 220 (down 26 percent), credits bought from 28,800 to 23,840 (down 17 percent), statements created from 359 to 298, sold from 158 to 137, eth to burn from 42.2 to 35.9 and the share of the coin burned from 10.0 to 9.2 percent. the sale side per statement does not move (average price 91 percent of cost). the launch pot is spent on day 5.9 where it was 6.5, because the window extra is unchanged and the baseline share is smaller. (the model now follows the final router: payee on the gross inflow, 161,031 ppm, split start at the window end; the stored results were generated just before that refinement, which moves the engine share from 5.184 to 5.179 points, 0.1 percent, below seed noise.) the model sets the tip at its 0.5 percent upper bound (the 0.005 eth cap per flush is ignored) and assumes the router is flushed as fees arrive.
 
 ## sensitivity rows (comparable volume, 5 seeds, day 90)
 
@@ -159,6 +159,8 @@ reading it:
 
 ## 2. the opening limit
 
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
+
 `rateStart` as a share of the market price of a credit (0.0089 eth, so 75 percent is 1.54e13).
 
 | share | rateStart | hours to first buy | credits day 1 | day 3 | day 7 | day 14 | day 30 | first 80 cost over market | all credits over market |
@@ -182,6 +184,8 @@ confirm 75 percent. it sits on the plateau for total credits, buys at once, and 
 
 ## 3. flat, blended or per point
 
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
+
 `flatBps` 10000 prices every credit as an average one (433 points), 0 prices it by its own score. comparable volume, 90 days.
 
 | flatBps | credits acquired | price paid over market | price per point over market | average score bought | statements created | sold | credits day 7 |
@@ -200,6 +204,8 @@ sustained 17 eth a day: 47,210 / 45,740 / 43,030 / 40,360 / 39,140 credits at 10
 4. the switch on day 30 does little. the pot is gone by day 7, so the bid has little to buy with. flat to 5000 on day 30: credits 28,660 (28,800 unchanged), average score 454, steady flow 53 a day (49). flat to 0: 28,590, score 458, steady flow 51. in sustained 17 eth a day a switch to 5000 costs 3 percent of credits (45,620 against 47,210) and a switch to 0 costs 6 percent (44,380). if score matters later, a blend of 7500 is the cheap step.
 
 ## 4. the statement sale: asking price, floors, mode and the buyers
+
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
 
 this section replaces the old reserve sweep. the sale design has five dials (`startBps`, `stepBps` with `stepEvery`, `floorBps`, `saleFloorBps`, `buyOnly`) and two inputs that are not settings (the pick rule and the buyers' willingness to pay). the rows against launch are in the table at the top of this file. what they say, with the extra sweeps:
 
@@ -290,6 +296,8 @@ recommendation for the sale design: **keep the launch values** (11000, 3 hours, 
 
 ## 5. the proceeds split
 
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
+
 `saleToBuybackBps` is the share of sale proceeds that goes to the coin buyback, the rest to the pot. it applies the same in auction mode (at `collectSales`) and in buy only mode (at the sale). the fee share is a separate setting (section 4, row 4).
 
 | saleToBuybackBps | credits day 7 | day 30 | day 90 | statements created | sold | eth spent buying $CC | percent of supply burned | steady credits a day |
@@ -309,6 +317,8 @@ sustained 17 eth a day: credits at day 90 52,640 / 49,610 / 47,210 / 44,510 / 41
 5. against the fee share: an extra eth of burn through `feeToBuybackBps` costs about 45 credits (section 4, row 4), about a quarter of the sale share price, but fees come on day one, so that lever has to be set at launch while the sale split can be turned any week.
 
 ## 6. dropBps, climbBaseBps, spendCapBps
+
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
 
 comparable volume, 90 days, launch values 2000 / 100 / 2000. the bounds were tightened after the first runs: `dropBps` 500 to 5000 and `spendCapBps` 100 to 5000, so the `dropBps` 0 and `spendCapBps` 10000 rows are counterfactuals the Core now refuses.
 
@@ -365,6 +375,8 @@ coin volume that decays from day two to the stated constant by about day 10 (cus
 
 ## 8. phase 2
 
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
+
 the owner sets the exitModule at once, on day 14, 30 or 60. the keeper exits every eligible unbid listing (older than `exitAfter`, 105 hours) at once. an exit pays `rating * unitPerPoint` of exitToken, so the value in eth is the rating times the exitToken price per point (`xp`). a typical exited statement rates about 34,100 points and cost 1.21 eth (the unsold ones are the dear ones, the average statement cost 0.94), so the break even exitToken price is about 3.5e-5 eth per point, and the price at which an exit returns the hard floor of 75 percent of cost is about 2.6e-5.
 
 | module on day | exitToken price per point | stock waiting before | statements exited by day 90 | exit value over cost | exit bid pot after 7 days | exit bid rate after 7 days, bps of score | credits bought through the exit bid by day 90 | credits acquired by day 90 | percent of supply burned |
@@ -390,6 +402,8 @@ the owner sets the exitModule at once, on day 14, 30 or 60. the keeper exits eve
 6. a keeper that exits only when the module pays at least the asking price (instead of at once) exits nothing at 1e-5 and sells 162 statements by day 90 against 131 when it exits at once. `exitStatement` is permissionless, so at a low exitToken price anyone can force the exit of listings that a buyer would still have bought. the owner controls this only through `exitAfter` and the moment the exitModule is set.
 
 ## 9. sensitivity ranking
+
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
 
 low and high value of each input against the base case (28,800 credits and 359 statements at day 90, 158 sold at 91 percent of cost, 42 eth burned; 3 seed rows, base 3 seeds 28,910 credits and 162 sold). statements created move by the same share as credits, because 80 credits make one statement. ranked by the swing in credits.
 
@@ -432,6 +446,8 @@ low and high value of each input against the base case (28,800 credits and 359 s
 4. `rateStart`, `spendCapBps`, `exitAfter` and the whole sale design (the curve, the floors, the mode) move credits acquired by 5 percent or less. the sale design acts on statements sold and eth recycled, not on credits or on statements created.
 
 ## 10. what the model cannot tell us, and its weakest assumptions
+
+note: the numbers in this section are from the run before the v2 fee change (10 percent skim, 9.5 points to the engine). the headline table in section 1 and sim/results/*.json hold the current run.
 
 1. the ask distribution. only fills are visible, not asks. the cheap tail of sellers (lognormal spread 0.27) sets how cheap the first credits are and how fast the price climbs. a thinner tail means the engine overpays from the first fill. the engine pays its bid to every seller that clears, so the first fill price is a bid, not an ask.
 2. statement demand and buyer behaviour. 42 priced sales over 5 days, all at fixed prices, none at auction and none on a falling price. arrivals are fixed at 8 a day decaying to 2 and **do not respond to the price level or to the curve**, so a lower price in the model only sells to the same buyers. in reality a cheaper statement may draw more, and a buyer who sees a falling price may wait for it: the pessimistic run is that case with every buyer waiting for the floor, and it still sells 167 to 179 statements because the buyers keep arriving. a real buyer that waits also stops arriving at high prices, which the model does not show. the pick rule decides the second bidder share (4 percent when buyers pick any, 19 percent when they pick the lowest ask) and a large part of eth recycled (84 against 128).

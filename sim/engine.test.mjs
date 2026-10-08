@@ -497,7 +497,7 @@ const R0 = 1.54e13;
   near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0621 * (1 - 5000 / 1e6 - 161031 / 1e6), 1e-12, 'engine share after the split start');
   near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 51.7905, 1e-3, 'engine 5.18 points of 1 eth is 51.79 finney');
   near(engineFeeFraction(DEFAULTS, 0.9, 0), (0.0621 + 0.831) * tip, 1e-12, 'the window is not shared with the payee');
-  near(engineFeeFraction(DEFAULTS, 0.069, 2699), 0.0621 * tip, 1e-12, 'nor is anything before the split start');
+  near(engineFeeFraction(DEFAULTS, 0.069, 1799), 0.0621 * tip, 1e-12, 'nor is anything before the split start');
   let d0 = 0;
   for (let t = 0; t < 3600; t += 120) d0 += stepVolume(DEFAULTS, t, 120);
   near(d0, 1557 * 0.586, 1e-9, 'first hour volume');
