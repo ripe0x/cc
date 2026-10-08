@@ -303,6 +303,15 @@ abstract contract Fixture is Test, ProdDeployer {
         assertGe(core.ethPot(), eth, "pot not funded");
     }
 
+    /// @notice like `_fundPot` but never buys more than the gap needs (the guess is the first flush rate, the highest one),
+    /// so the pot lands just over `eth`. for tests that need a pot close to an exact figure
+    function _fundPotNear(uint256 eth) internal {
+        for (uint256 i; i < 12 && core.ethPot() < eth; ++i) {
+            _buyCoin(funder, (eth - core.ethPot()) * 10_000 / 620 + 1e12);
+        }
+        assertGe(core.ethPot(), eth, "pot not funded");
+    }
+
     // ------------------------------------------------------------------ credits
 
     /// @notice moves `n` real credits from the CreditStrategy to `to` and approves the core for them

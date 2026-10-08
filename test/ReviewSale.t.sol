@@ -832,8 +832,9 @@ contract ReviewSaleTest is Fixture {
         _setSettings(s);
     }
 
+    /// the fee source (the router) pays the core, which is what `receive` books
     function _hookPays(uint256 amount) internal {
-        address hook = lc.stack.hook;
+        address hook = lc.stack.feeSource;
         vm.deal(hook, hook.balance + amount);
         vm.prank(hook);
         (bool ok,) = address(core).call{value: amount}("");
@@ -1127,7 +1128,8 @@ contract ReviewSaleTest is Fixture {
     function test_OK_sizeMarginOfTheCore() public {
         uint256 size = vm.getDeployedCode("Core.sol:Core").length;
         emit log_named_uint("core runtime bytes", size);
-        assertGe(24_576 - size, 150, "the brief asks for a margin of at least 150");
+        // the v2 brief (docs/FLOW.md 10.6) asks for at least 60 bytes of headroom, `rescueCoin` took the old 150 (decision)
+        assertGe(24_576 - size, 60, "the brief asks for a margin of at least 60");
     }
 
     bool internal ownerChangedFlag;
