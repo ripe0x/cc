@@ -34,11 +34,11 @@ contract V2PortFeeTest is FeeBase {
     }
 
     /// 1 eth buy in steady state at each split. 6.9 points skim: 0.69 to the protocol, 6.21 to the router, of which
-    /// the tip is 0.5 percent, the payee 161,030 ppm of the rest (0.99499 points) and the engine 5.18395 points
+    /// the tip is 0.5 percent, the payee 161,031 ppm of the gross (1.0000025 points, exactly its share of the inflow) and the engine the rest, 5.17895 points (the tip comes out of the engine's part)
     function test_exactNumbersAtEachSplit() public {
         _stock();
         uint256[3] memory bps = [uint256(0), 5_000, 10_000];
-        uint256[3] memory toBb = [uint256(0), 25_919_768_407_500_000, 51_839_536_815_000_000];
+        uint256[3] memory toBb = [uint256(0), 25_894_737_450_000_000, 51_789_474_900_000_000];
         for (uint256 i; i < 3; ++i) {
             _share(uint16(bps[i]));
             uint256 payee0 = lc.creatorPayee.balance;
@@ -52,11 +52,11 @@ contract V2PortFeeTest is FeeBase {
             assertEq(f.routerRise, 0.0621 ether);
             assertEq(f.tip, 310_500_000_000_000, "tip is 0.5 percent");
             assertEq(flusher.balance - flusher0, 310_500_000_000_000);
-            assertEq(f.toPayees, 9_949_963_185_000_000, "the single payee");
-            assertEq(lc.creatorPayee.balance - payee0, 9_949_963_185_000_000);
-            assertEq(f.balanceRise, 51_839_536_815_000_000, "5.18395 points to the engine");
+            assertEq(f.toPayees, 10_000_025_100_000_000, "the single payee");
+            assertEq(lc.creatorPayee.balance - payee0, 10_000_025_100_000_000);
+            assertEq(f.balanceRise, 51_789_474_900_000_000, "5.17895 points to the engine");
             assertEq(core.ethToBuyback() - bb0, toBb[i]);
-            assertEq(core.ethPot() - pot0, 51_839_536_815_000_000 - toBb[i]);
+            assertEq(core.ethPot() - pot0, 51_789_474_900_000_000 - toBb[i]);
             assertEq(address(feeRouter).balance, 0, "the router is empty");
             _solvent();
         }

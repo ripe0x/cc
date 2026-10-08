@@ -48,7 +48,7 @@ struct LaunchConfig {
     // the fee router (docs/FLOW.md 10.6): one payee at launch, by parts per million of a flush, the tip of the caller of
     // `flush`. later payees are set through `setPayees`
     address creatorPayee;
-    /// the payee's share of a flush after the tip, ppm. the router receives 6.21 points of 6.9, so 161_030 is 1.0 point
+    /// the payee's share of the gross flush, ppm. the router receives 6.21 points of 6.9, so 161_031 is 1.0 point of volume
     uint32 payeePpm;
     uint32 tipPpm;
     uint96 tipCap;
@@ -89,7 +89,7 @@ abstract contract ConfigReader is CommonBase {
         c.sniperSeconds = 1800;
         c.protocolBps = 2000;
         c.restricted = true;
-        c.payeePpm = 161_030;
+        c.payeePpm = 161_031;
         c.tipPpm = 5_000;
         c.tipCap = 0.005 ether;
     }

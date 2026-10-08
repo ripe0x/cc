@@ -155,7 +155,7 @@ config values (`script/config/mainnet.json`). the owner signs off each row.
 | `launch.sniperStartBps`, `launch.sniperSeconds` | 90000, 1800 | the mev module skim decays linearly from 90 points to the baseline over 30 minutes |
 | `launch.protocolBps` | 2000 | the `protocolBps` argument of `deployTokenAsOwner`, pinned to 2000. the protocol leg belongs to the launcher protocol, a separate business from this engine: it is never the engine owner's income. preflight warns when the factory default differs |
 | `launch.restricted`, `launch.allowed` | true, empty | the coin launches restricted. the allowlist holds only what the factory and this launch add: the Core (decision 29), the locker and the escrow. no config entries, the factory default allowlist must be empty |
-| `router.creatorPayee`, `payeePpm` | 0xCB43...17F9, 161030 | the one payee of the router at launch: 161,030 parts per million of the router inflow after the tip, which is 1.0 point of volume out of the 6.21 the router receives. the owner repoints it later with `setPayees`. rounded down from 161,030.6, so the payee never gets more than the 1.0 point (the brief states 161,031, decision recorded here) |
+| `router.creatorPayee`, `payeePpm` | 0xCB43...17F9, 161031 | the one payee of the router at launch: 161,031 parts per million of the gross amount of each flush, which is 1.0 point of volume out of the 6.21 the router receives (the tip is taken from the engine's part, not from the payee). the owner repoints it later with `setPayees` |
 | `router.tipPpm`, `tipCap` | 5000, 0.005 eth | the `flush` caller's tip: 0.5 percent of the flush, capped. the router default, so no `setTip` is sent |
 | `overrides.bounty`, `overrides.openFactory` | false, false | `bounty` allows any bounty bps below 10000, `openFactory` allows a non deprecated factory. both inside the hash |
 
@@ -264,7 +264,7 @@ cast call $ROUTER "locked()(bool)" --rpc-url $MAINNET_RPC_URL; cast call $ROUTER
 
 | command (as the router owner, `--ledger` or `--account`) | effect |
 |---|---|
-| `cast send $ROUTER "setPayees(address[],uint32[])" "[$SPLITTER]" "[161030]"` | replaces the payee list. up to four entries, each nonzero, total at most 200,000 ppm of what is left after the tip. this is how the launch payee (the creator address) is pointed at a splitter contract later, or split in two: `"[$A,$B]" "[80515,80515]"`. a payee contract is called with 100,000 gas and a plain call; a payee that reverts or runs out is credited in `owed` and pulls it with `claim(payee)`, it can never block a flush |
+| `cast send $ROUTER "setPayees(address[],uint32[])" "[$SPLITTER]" "[161031]"` | replaces the payee list. up to four entries, each nonzero, total at most 200,000 ppm of the gross amount flushed. this is how the launch payee (the creator address) is pointed at a splitter contract later, or split in two: `"[$A,$B]" "[80515,80515]"`. a payee contract is called with 100,000 gas and a plain call; a payee that reverts or runs out is credited in `owed` and pulls it with `claim(payee)`, it can never block a flush |
 | `cast send $ROUTER "setTip(uint32,uint96)" 5000 5000000000000000` | the flush caller's tip: parts per million (at most 20,000) and a cap in wei (at most 0.05 eth) |
 | `cast send $ROUTER "setSplitStart(uint64)" $TS` | the time of the first flush that turns the split on. only while the split is off |
 | `cast send $ROUTER "setEngine(address)" $NEW_ENGINE` | points every future flush at another contract (it must have code). the old engine keeps what it already holds. this is the one owner switch that directs value to an address the owner picks: a stolen router owner key can redirect the fee stream until the router is locked |
@@ -463,7 +463,7 @@ export LAUNCH_INPUT=$(jq -r '[.transactions[] | select((.function // "") | start
 cast send $FACTORY $LAUNCH_INPUT --value $(cast call $FACTORY "deployFee()(uint256)" --rpc-url $MAINNET_RPC_URL) --rpc-url $PRIVATE_RPC --ledger
 # points 3 to 5: the router setup, the commands of section 4
 cast send $ROUTER "setEngine(address)" $CORE --rpc-url $PRIVATE_RPC --ledger
-cast send $ROUTER "setPayees(address[],uint32[])" "[$OWNER]" "[161030]" --rpc-url $PRIVATE_RPC --ledger
+cast send $ROUTER "setPayees(address[],uint32[])" "[$OWNER]" "[161031]" --rpc-url $PRIVATE_RPC --ledger
 cast send $ROUTER "setSplitStart(uint64)" $(( $(cast block --field timestamp --rpc-url $MAINNET_RPC_URL) + 2700 )) --rpc-url $PRIVATE_RPC --ledger   # the launch time plus 1800 plus a margin
 ```
 

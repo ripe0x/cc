@@ -488,14 +488,14 @@ const R0 = 1.54e13;
   ok(p.sell(1).eth < 1e-9); // nothing to sell below the start tick
 }
 // skim schedule: anti sniper 90 points falling to the 6.9 point baseline over 30 minutes. the router gets 90 percent of the baseline
-// plus the whole extra, a flush tip comes off the top and after the split start the payee takes 161,030 ppm of the rest
+// plus the whole extra, a flush tip comes out of the engine's part and after the split start the payee takes 161,031 ppm of the gross inflow
 {
   near(skimFraction(DEFAULTS, 0), 0.9, 1e-12, 'launch skim'); near(skimFraction(DEFAULTS, 900), (0.9 + 0.069) / 2, 1e-12, 'midway');
   near(skimFraction(DEFAULTS, 1800), 0.069, 1e-12, 'end of window'); near(skimFraction(DEFAULTS, 99999), 0.069, 1e-12, 'baseline');
   near(routerFeeFraction(DEFAULTS, 0.069), 0.0621, 1e-12, 'router 6.21 points'); near(routerFeeFraction(DEFAULTS, 0.9), 0.0621 + 0.831, 1e-12, 'extra to the router');
   const tip = 1 - 5000 / 1e6;
-  near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0621 * tip * (1 - 161030 / 1e6), 1e-12, 'engine share after the split start');
-  near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 51.84, 1e-3, 'engine 5.18 points of 1 eth is 51.84 finney');
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0621 * (1 - 5000 / 1e6 - 161031 / 1e6), 1e-12, 'engine share after the split start');
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 51.7905, 1e-3, 'engine 5.18 points of 1 eth is 51.79 finney');
   near(engineFeeFraction(DEFAULTS, 0.9, 0), (0.0621 + 0.831) * tip, 1e-12, 'the window is not shared with the payee');
   near(engineFeeFraction(DEFAULTS, 0.069, 2699), 0.0621 * tip, 1e-12, 'nor is anything before the split start');
   let d0 = 0;

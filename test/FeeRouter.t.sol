@@ -266,7 +266,7 @@ contract FeeRouterTest is Test {
         assertFalse(r.splitOn());
     }
 
-    function test_payeesGetTheirShareOfWhatIsLeftAfterTheTip() public {
+    function test_payeesGetTheirShareOfTheGrossAndTheTipComesOutOfTheEngine() public {
         _payees2();
         _set(address(eng));
         vm.prank(ownerA);
@@ -277,9 +277,12 @@ contract FeeRouterTest is Test {
         r.flush(); // starts the split
         assertTrue(r.splitOn());
         vm.deal(address(r), 1 ether);
-        uint256 rest = 1 ether - 1 ether * 5_000 / 1e6;
+        uint256 engine0 = address(eng).balance;
         r.flush();
-        assertEq(payeeA.balance, rest * 80_515 / 1e6);
+        // each payee has exactly its parts per million of the 1 eth inflow, the tip (0.5 percent) is not taken from them
+        assertEq(payeeA.balance, 80_515_000_000_000_000);
+        assertEq(payeeB.balance, 80_515_000_000_000_000);
+        assertEq(address(eng).balance - engine0, 1 ether - 5_000_000_000_000_000 - 2 * 80_515_000_000_000_000);
     }
 
     function test_setSplitStartOnlyWhileTheSplitIsOff() public {

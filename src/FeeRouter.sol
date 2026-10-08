@@ -9,7 +9,7 @@ pragma solidity ^0.8.28;
 contract FeeRouter {
     uint256 internal constant PPM = 1_000_000;
     uint256 internal constant MAX_PAYEES = 4;
-    /// the payees' total share of a flush after the tip, at most. the engine keeps at least the rest
+    /// the payees' total share of a flush, at most. the engine keeps at least the rest
     uint256 internal constant MAX_PAYEE_PPM = 200_000;
     uint256 internal constant MAX_TIP_PPM = 20_000;
     uint256 internal constant MAX_TIP_CAP = 0.05 ether;
@@ -89,9 +89,9 @@ contract FeeRouter {
 
     /// pays out the balance, except what is owed to payees. anyone may call. reverts while no engine is set (a call to
     /// the zero address would burn the eth) and when the engine call fails. an empty balance is a no op.
-    /// the tip comes off the top. before the split starts, and in the one flush that starts it, everything else goes to
-    /// the engine, so eth that arrived during the anti sniper window is never shared. after that each payee gets its
-    /// parts per million of what is left after the tip and the engine gets the rest
+    /// payee shares are parts per million of the gross amount flushed, so a payee gets exactly its share of the inflow.
+    /// the tip comes out of the engine's part. before the split starts, and in the one flush that starts it, the payees
+    /// get nothing, so eth that arrived during the anti sniper window is never shared
     function flush() external {
         if (_busy) revert Reentered();
         address to = engine;
@@ -100,18 +100,19 @@ contract FeeRouter {
         if (amount == 0) return;
         _busy = true;
         uint256 tip = _tip(amount);
-        uint256 rest = amount - tip;
         uint256 shared;
         if (splitOn) {
-            shared = _payPayees(rest);
+            shared = _payPayees(amount);
         } else if (splitStart != 0 && block.timestamp >= splitStart) {
             splitOn = true;
             emit SplitStarted(block.timestamp);
         }
-        (bool ok,) = to.call{value: rest - shared}("");
+        // tip and shares are at most 2 percent and 20 percent of the amount: the engine part cannot underflow
+        uint256 toEngine = amount - tip - shared;
+        (bool ok,) = to.call{value: toEngine}("");
         _busy = false;
         if (!ok) revert FlushFailed();
-        emit Flushed(to, rest - shared, tip, shared);
+        emit Flushed(to, toEngine, tip, shared);
     }
 
     function _tip(uint256 amount) private returns (uint256 tip) {
@@ -172,7 +173,7 @@ contract FeeRouter {
         engine = engine_;
     }
 
-    /// replaces the payee list: up to four, each with a nonzero address and share, at most 200,000 ppm in total
+    /// replaces the payee list (ppm of the gross amount flushed): up to four, each with a nonzero address and share, at most 200,000 ppm in total
     function setPayees(address[] calldata who, uint32[] calldata ppm) external onlyOwner unlocked {
         uint256 n = who.length;
         if (n != ppm.length || n > MAX_PAYEES) revert BadPayees();

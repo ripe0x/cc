@@ -286,7 +286,7 @@ contract ReviewRouterGasTest is FeeBase {
         address[] memory who = new address[](1);
         who[0] = address(heavy);
         uint32[] memory ppm = new uint32[](1);
-        ppm[0] = 161_030;
+        ppm[0] = 161_031;
         vm.prank(owner);
         feeRouter.setPayees(who, ppm);
     }

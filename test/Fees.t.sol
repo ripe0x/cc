@@ -58,14 +58,13 @@ abstract contract FeeBase is Fixture {
     function _routerSplit(uint256 amount) internal view returns (uint256 tip, uint256 toPayees, uint256 toEngine) {
         tip = amount * feeRouter.tipPpm() / 1_000_000;
         if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
-        uint256 rest = amount - tip;
         if (feeRouter.splitOn()) {
             (, uint32[] memory ppm) = feeRouter.payees();
             for (uint256 i; i < ppm.length; ++i) {
-                toPayees += rest * ppm[i] / 1_000_000;
+                toPayees += amount * ppm[i] / 1_000_000;
             }
         }
-        toEngine = rest - toPayees;
+        toEngine = amount - tip - toPayees;
     }
 
     /// @dev runs one swap of `kind`, then flushes the router. `amount` is eth in for BuyExactIn, coin out for
@@ -175,14 +174,14 @@ contract FeeFlowTest is FeeBase {
         _stock();
         _checkSteady(Kind.BuyExactIn, 3 ether);
         // an exact figure: 1 eth in is 0.0621 to the router (6.21 points). the split is on after the stock buy, the tip is
-        // 0.5 percent, the one payee takes 161_030 ppm of the rest, the pot gets the remainder
+        // 0.5 percent (out of the engine's part), the one payee takes 161_031 ppm of the gross, the pot gets the remainder
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(f.routerRise, 0.0621 ether);
         assertEq(f.skimProtocol, 0.0069 ether);
-        uint256 rest = 0.0621 ether - 0.0621 ether * 5_000 / 1_000_000;
-        assertEq(f.potRise, rest - rest * 161_030 / 1_000_000);
-        // 5.21 points of the buy in total, and the payee has 1.0 point
-        assertApproxEqAbs(f.potRise, 0.0521 ether, 0.0003 ether);
+        assertEq(f.potRise, 0.0621 ether - 0.0621 ether * 5_000 / 1_000_000 - 0.0621 ether * 161_031 / 1_000_000);
+        // 5.179 points of the buy in total (5.21 less the tip), and the payee has 1.0 point exactly
+        assertEq(f.toPayees, 10_000_025_100_000_000, "the payee: 1.0000025 points of the buy, its share of the inflow");
+        assertEq(f.potRise, 51_789_474_900_000_000);
         assertEq(feeRouter.splitOn(), true);
     }
 
@@ -201,24 +200,23 @@ contract FeeFlowTest is FeeBase {
         _checkSteady(Kind.SellExactOut, 0.5 ether);
     }
 
-    /// the one launch payee is paid by the flush, 1.0 point of volume (a touch less: the tip comes off first), and the
-    /// tip goes to the flusher
+    /// the one launch payee is paid by the flush, 1.0 point of volume exactly (its share is of the gross
+    /// inflow, the tip comes out of the engine's part), and the tip goes to the flusher
     function test_flushPaysThePayeeAndTheTip() public {
         _stock();
         (address[] memory who, uint32[] memory ppm) = feeRouter.payees();
         assertEq(who.length, 1, "one payee at launch");
         assertEq(who[0], lc.creatorPayee);
-        assertEq(ppm[0], 161_030);
+        assertEq(ppm[0], 161_031);
         address a = lc.creatorPayee;
         uint256 a0 = a.balance;
         uint256 f0 = flusher.balance;
         Flow memory f = _flow(Kind.BuyExactIn, 10 ether, "");
-        uint256 rest = f.routerRise - f.tip;
-        assertEq(a.balance - a0, rest * 161_030 / 1_000_000);
+        assertEq(a.balance - a0, f.routerRise * 161_031 / 1_000_000);
         assertEq(flusher.balance - f0, f.tip);
         assertEq(f.tip, f.routerRise * 5_000 / 1_000_000);
         assertApproxEqRel(a.balance - a0, 0.1 ether, 0.01e18);
-        assertEq(f.toPayees, rest * 161_030 / 1_000_000);
+        assertEq(f.toPayees, f.routerRise * 161_031 / 1_000_000);
     }
 
     /// the owner replaces the payees through `setPayees` and the flush pays both of them, the pot gets the rest
@@ -236,11 +234,11 @@ contract FeeFlowTest is FeeBase {
         feeRouter.setPayees(who, ppm);
         uint256 a0 = a.balance;
         Flow memory f = _flow(Kind.BuyExactIn, 10 ether, "");
-        uint256 rest = f.routerRise - f.tip;
-        assertEq(a.balance - a0, rest * 80_515 / 1_000_000);
-        assertEq(b.balance, rest * 80_515 / 1_000_000);
-        assertEq(f.toPayees, 2 * (rest * 80_515 / 1_000_000));
-        assertEq(f.potRise, rest - f.toPayees);
+        uint256 gross = f.routerRise;
+        assertEq(a.balance - a0, gross * 80_515 / 1_000_000);
+        assertEq(b.balance, gross * 80_515 / 1_000_000);
+        assertEq(f.toPayees, 2 * (gross * 80_515 / 1_000_000));
+        assertEq(f.potRise, gross - f.tip - f.toPayees);
     }
 
     /// the protocol leg of the skim (0.69 points) is not the engine's: it goes to the v2 protocol controller, by push

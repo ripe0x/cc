@@ -261,8 +261,8 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("router payee ppm 100000 (valid, wrong)", Class.Hash);
             m.c.payeePpm = 100_000;
         } else if (i == 13) {
-            m = _m("router payee ppm 161031 (off by one)", Class.Hash);
-            m.c.payeePpm = 161_031;
+            m = _m("router payee ppm 161030 (off by one)", Class.Hash);
+            m.c.payeePpm = 161_030;
         } else if (i == 14) {
             m = _m("router payee ppm 200000 (the top edge)", Class.Hash);
             m.c.payeePpm = 200_000;

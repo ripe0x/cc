@@ -52,7 +52,7 @@ contract ConfigTest is Fixture {
         assertEq(f.sniperSeconds, 1800);
         assertTrue(f.restricted);
         assertEq(f.allowed.length, 0);
-        assertEq(f.payeePpm, 161_030);
+        assertEq(f.payeePpm, 161_031);
         assertEq(f.tipPpm, 5_000);
         assertEq(f.tipCap, 0.005 ether);
         // the v2 stack is not live: its addresses are placeholders the deploy refuses

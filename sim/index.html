@@ -252,7 +252,7 @@ const SIM_DEFAULTS = {
   // the fee router (docs/FLOW.md 10.6, 10.7): a flush pays the caller a tip off the top, then, once the split has started, the
   // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
   routerTipPpm: 5000, // 0.5 percent. the cap of 0.005 eth a flush is ignored, which makes the tip an upper bound
-  routerPayeePpm: 161030, // the one launch payee, 1.0 point of volume at the baseline
+  routerPayeePpm: 161031, // the one launch payee, 1.0 point of volume at the baseline (of the gross router inflow)
   routerSplitStartSec: 2700, // launch time plus the 30 minute window plus the 900 second margin
   startTick: -175000,
   positionUpper: 887200,
@@ -707,10 +707,11 @@ function routerFeeFraction(p, f) {
   return base * (p.bountyBps / BPS) + Math.max(0, f - base);
 }
 // share of a swap's notional that lands in the engine's pot at t seconds after launch: the router's inflow less the flush tip,
-// and after the split start less the payee's parts per million of the rest. 5.18 points at the baseline once the split is on
+// and after the split start less the payee's parts per million of the gross inflow (the tip comes out of the engine's part).
+// 5.18 points at the baseline once the split is on
 function engineFeeFraction(p, f, t) {
-  const left = routerFeeFraction(p, f) * (1 - p.routerTipPpm / 1e6);
-  return t >= p.routerSplitStartSec ? left * (1 - p.routerPayeePpm / 1e6) : left;
+  const inflow = routerFeeFraction(p, f);
+  return inflow * (1 - p.routerTipPpm / 1e6 - (t >= p.routerSplitStartSec ? p.routerPayeePpm / 1e6 : 0));
 }
 // volume in a step [t, t+dt). the first hour runs in 120 s sub steps, 15 of them inside the anti sniper window
 function stepVolume(p, t, dt) {
