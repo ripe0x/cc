@@ -692,13 +692,17 @@ contract ReceiveSettingsTest is FeeBase {
             uint256 take = pool.min(slice[i]);
             uint256 keeper0 = keeper.balance;
             uint256 supply = coin.totalSupply();
+            uint256 rbal = address(feeRouter).balance;
             vm.recordLogs();
             vm.prank(keeper);
             core.buyback();
             Flow memory f;
             _readSkim(f, vm.getRecordedLogs());
-            assertEq(core.ethPot() - pot, f.skimBounty, "the push inside the unlock was booked");
-            assertEq(f.skimVolume, take - take * tips[i] / 10_000, "the swap spent the slice less the tip");
+            assertEq(core.ethPot(), pot, "the skim went to the router, nothing came back inside the unlock");
+            assertEq(address(feeRouter).balance - rbal, f.skimBounty, "the bounty leg reached the router");
+            _flush();
+            uint256 spent = take - take * tips[i] / 10_000;
+            assertApproxEqAbs(f.skimVolume + f.skimBounty + f.skimProtocol, spent, 2, "the swap spent the slice less the tip");
             assertEq(keeper.balance - keeper0, take * tips[i] / 10_000);
             assertEq(core.ethToBuyback(), pool - take);
             assertLt(coin.totalSupply(), supply);
@@ -934,8 +938,10 @@ contract BuybackTest is FeeBase {
         assertEq(address(feeRouter).balance - b.routerBal, f.skimBounty);
         (,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         _flush();
-        assertEq(core.ethPot() - b.pot, toEngine, "the flush returns the engine share to the pot");
-        assertEq(f.skimVolume, budget);
+        uint256 feeShare = toEngine * core.settings().feeToBuybackBps / 10_000;
+        assertEq(core.ethPot() - b.pot, toEngine - feeShare, "the flush returns the engine share to the pot, less the buyback share");
+        // the v2 hook reports the volume net of its own skim, so volume plus both legs is the eth spent
+        assertApproxEqAbs(f.skimVolume + f.skimBounty + f.skimProtocol, budget, 2);
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "nothing left unbooked");
     }
 
@@ -1023,12 +1029,15 @@ contract BuybackSettingsTest is FeeBase {
         uint256 supply = coin.totalSupply();
         uint256 keeper0 = keeper.balance;
         uint256 pot = core.ethPot();
+        uint256 rbal = address(feeRouter).balance;
         vm.prank(keeper);
         core.buyback();
         assertEq(keeper.balance - keeper0, slice * s.keeperTipBps / 10_000, "tip of the slice at the setting");
         assertEq(core.ethToBuyback(), pool - slice, "the pot fell by the slice at the setting");
         assertLt(coin.totalSupply(), supply, "burned");
-        assertGt(core.ethPot(), pot, "the skim of the swap came back through receive");
+        assertEq(core.ethPot(), pot, "the skim of the swap went to the router");
+        assertGt(address(feeRouter).balance, rbal, "the skim of the swap reached the router");
+        _flush();
         assertEq(core.lastBuybackBlock(), block.number);
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "no surplus, no deficit");
     }
