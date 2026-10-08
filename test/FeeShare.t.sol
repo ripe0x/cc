@@ -7,9 +7,9 @@ import {ICore} from "../src/interfaces/ICore.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 
-/// `feeToBuybackBps`: the share of the hook's eth that `receive()` books to the coin buyback, the rest to the pot.
+/// `feeToBuybackBps`: the share of the router's eth that `receive()` books to the coin buyback, the rest to the pot.
 /// every number comes from real swaps through the live pool and the live skim hook, which pays its bounty leg into the
-/// core. `skim()` books what `receive()` did not, to the pot only
+/// fee router; a flush sends the engine share to the core. `skim()` books what `receive()` did not, to the pot only
 contract FeeShareTest is FeeBase {
     uint256 internal constant BASIS = 10_000;
 
@@ -21,28 +21,32 @@ contract FeeShareTest is FeeBase {
 
     struct Books {
         uint256 bounty;
+        uint256 inflow;
         uint256 dPot;
         uint256 dBb;
         uint256 dBal;
     }
 
-    /// one swap, and what it did to the core's books. the bounty is what the hook itself reports it pushed in
+    /// one swap and a flush, and what they did to the core's books. the bounty is what the hook itself reports it pushed
+    /// to the router, the inflow is what the flush sent on to the core (less the tip and the payees' parts)
     function _swap(Kind kind, uint256 amount) internal returns (Books memory b) {
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
         uint256 bal = address(core).balance;
         Flow memory f = _flow(kind, amount, "");
         b.bounty = f.skimBounty;
+        b.inflow = f.balanceRise;
+        assertEq(b.inflow, f.routerRise - f.tip - f.toPayees, "the core got the router inflow less tip and payees");
         b.dPot = core.ethPot() - pot;
         b.dBb = core.ethToBuyback() - bb;
         b.dBal = address(core).balance - bal;
     }
 
     function _check(Books memory b, uint16 bps) internal pure {
-        uint256 toBb = b.bounty * bps / BASIS;
-        assertEq(b.dBb, toBb, "buyback share is floor(bounty * bps / 10000)");
-        assertEq(b.dPot, b.bounty - toBb, "the rest is the pot share");
-        assertEq(b.dBal, b.bounty, "the balance rose by the bounty");
+        uint256 toBb = b.inflow * bps / BASIS;
+        assertEq(b.dBb, toBb, "buyback share is floor(inflow * bps / 10000)");
+        assertEq(b.dPot, b.inflow - toBb, "the rest is the pot share");
+        assertEq(b.dBal, b.inflow, "the balance rose by the inflow");
     }
 
     function test_split_atZeroHalfAndAllOnExactBuys() public {
@@ -51,10 +55,11 @@ contract FeeShareTest is FeeBase {
         for (uint256 i; i < 3; ++i) {
             _share(bps[i]);
             Books memory b = _swap(Kind.BuyExactIn, 1 ether);
-            assertEq(b.bounty, 0.095 ether, "9.5 points of one eth");
-            uint256 want = uint256(0.095 ether) * bps[i] / BASIS;
+            assertEq(b.bounty, 0.0621 ether, "6.21 points of one eth reach the router");
+            uint256 want = b.inflow * bps[i] / BASIS;
             assertEq(b.dBb, want, "exact buyback share");
-            assertEq(b.dPot, 0.095 ether - want, "exact pot share");
+            assertEq(b.dPot, b.inflow - want, "exact pot share");
+            assertApproxEqAbs(b.inflow, 0.0518 ether, 0.0003 ether, "5.2 points of the buy reach the engine");
             _check(b, bps[i]);
             _solvent();
         }
@@ -70,18 +75,20 @@ contract FeeShareTest is FeeBase {
         _solvent();
     }
 
-    /// inside the anti sniper window the hook pushes 89.5 points: the split applies to the whole of it
+    /// inside the anti sniper window the router gets 89.31 points (the bounty share of the baseline plus the whole
+    /// extra), none of it shared with the payees, and the engine share is split by the setting
     function test_split_insideTheSniperWindowTakesTheWholeBounty() public {
         _share(5_000);
         Books memory b = _swap(Kind.BuyExactIn, 1 ether);
-        assertEq(b.bounty, 0.895 ether);
-        assertEq(b.dBb, 0.4475 ether);
-        assertEq(b.dPot, 0.4475 ether);
+        assertEq(b.bounty, 0.8931 ether);
+        assertEq(b.inflow, 0.8931 ether - 0.8931 ether * 5_000 / 1_000_000);
+        assertEq(b.dBb, b.inflow / 2);
+        assertEq(b.dPot, b.inflow - b.inflow / 2);
         _check(b, 5_000);
     }
 
-    function test_split_dustAmountsFromTheHookAddress() public {
-        address hook = lc.stack.hook;
+    function test_split_dustAmountsFromTheFeeSource() public {
+        address hook = lc.stack.feeSource;
         vm.deal(hook, 10 ether);
         _share(5_000);
         uint256[5] memory v = [uint256(0), 1, 3, 4, 10_001];
@@ -129,7 +136,7 @@ contract FeeShareTest is FeeBase {
         assertEq(core.ethPot() - pot, 1.5 ether);
     }
 
-    /// the referral leg arrives through the hook's notify as unbooked eth: skim books it to the pot
+    /// the exit token sent to the core is booked by skim to its own pot, whatever the share
     function test_skim_theExitTokenGoesToItsPotWhateverTheShare() public {
         _enterPhase2();
         _share(10_000);
@@ -148,23 +155,23 @@ contract FeeShareTest is FeeBase {
         _share(0);
         Books memory b = _swap(Kind.BuyExactIn, 1 ether);
         assertEq(b.dBb, 0);
-        assertEq(b.dPot, 0.095 ether);
+        assertEq(b.dPot, b.inflow);
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
         _share(10_000);
         assertEq(core.ethPot(), pot, "the change moves no books");
         assertEq(core.ethToBuyback(), bb);
         b = _swap(Kind.BuyExactIn, 1 ether);
-        assertEq(b.dBb, 0.095 ether);
+        assertEq(b.dBb, b.inflow);
         assertEq(b.dPot, 0);
         _share(2_500);
         b = _swap(Kind.BuyExactIn, 1 ether);
-        assertEq(b.dBb, 0.095 ether * 2_500 / BASIS);
-        assertEq(b.dPot, 0.095 ether - 0.095 ether * 2_500 / BASIS);
+        assertEq(b.dBb, b.inflow * 2_500 / BASIS);
+        assertEq(b.dPot, b.inflow - b.inflow * 2_500 / BASIS);
         _share(0);
         b = _swap(Kind.SellExactIn, coin.balanceOf(trader) / 10);
         assertEq(b.dBb, 0);
-        assertEq(b.dPot, b.bounty);
+        assertEq(b.dPot, b.inflow);
         _solvent();
     }
 
@@ -229,10 +236,13 @@ contract FeeShareBuybackTest is FeeBase {
         Flow memory f;
         _readSkim(f, logs);
         (uint256 spent, uint256 tip) = _event(logs);
-        // the skim of the buyback swap is split by the share
-        uint256 toBb = f.skimBounty * bps / 10_000;
         assertGt(f.skimBounty, 0, "the buyback swap paid the hook");
-        assertEq(core.ethPot() - pot0, f.skimBounty - toBb, "pot share of the returning skim");
+        assertEq(core.ethPot(), pot0, "the skim of the swap went to the router, not back inside the call");
+        // the flush sends the engine share to the core, split by the share
+        uint256 inflow = _flush();
+        assertGt(inflow, 0);
+        uint256 toBb = inflow * bps / 10_000;
+        assertEq(core.ethPot() - pot0, inflow - toBb, "pot share of the returning skim");
         assertEq(core.ethToBuyback(), pool - slice + toBb + (slice - spent - tip), "buyback pot");
         assertEq(keeper.balance - keeperEth, tip, "the keeper is tipped as before");
         assertLt(coin.totalSupply(), supply, "coin was bought and burned");
@@ -276,9 +286,10 @@ contract FeeShareBuybackTest is FeeBase {
         Flow memory f;
         _readSkim(f, logs);
         (uint256 spent, uint256 tip) = _event(logs);
+        uint256 inflow = _flush();
         assertEq(core.ethPot(), pot0, "the pot did not move");
         uint256 slice = pool < 1 ether ? pool : 1 ether;
-        assertEq(core.ethToBuyback(), pool - slice + f.skimBounty + (slice - spent - tip));
+        assertEq(core.ethToBuyback(), pool - slice + inflow + (slice - spent - tip));
         assertEq(spent + tip + (slice - spent - tip), slice, "the slice is spent, tipped or returned");
     }
 }
