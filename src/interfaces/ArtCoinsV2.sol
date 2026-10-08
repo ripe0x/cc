@@ -173,6 +173,10 @@ interface IArtCoinsHookV2 {
 }
 
 interface IArtCoinsTokenV2 {
+    function name() external view returns (string memory);
+    function symbol() external view returns (string memory);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function restricted() external view returns (bool);
     function locked() external view returns (bool);
     function isAllowed(address account) external view returns (bool);

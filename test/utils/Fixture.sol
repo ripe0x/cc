@@ -8,7 +8,14 @@ import {ICore} from "../../src/interfaces/ICore.sol";
 import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, IStatements, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse, IAuctionFactory} from "../../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
+import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
+import {
+    IArtCoinsFactoryV2,
+    IArtCoinsTokenV2,
+    IArtCoinsFeeEscrowV2,
+    IArtCoinsHookV2
+} from "../../src/interfaces/ArtCoinsV2.sol";
+import {V2Stack} from "./V2Stack.sol";
 import {Deployed} from "../../script/SystemDeployer.sol";
 import {ProdDeployer} from "./ProdDeployer.sol";
 import {LaunchConfig} from "../../script/LaunchConfig.sol";
@@ -17,10 +24,12 @@ import {MockExitModule} from "../standins/MockExitModule.sol";
 import {CreditIds} from "./CreditIds.sol";
 import {TestSwapRouter} from "./TestSwapRouter.sol";
 
-/// @notice the full system on a mainnet fork, built only from real contracts. Core and ControllerV1 are deployed
-/// through `SystemDeployer.deploySystem`, the coin is launched through the live artcoins factory, the pool lives in
-/// the live pool manager under the live skim hook. the only state forced on artcoins is what the real factory owner
-/// does in production: marking the deployer as a factory admin so it may launch while the factory is deprecated.
+/// @notice the full system on a mainnet fork, built only from real contracts. the artcoins v2 stack is deployed onto the
+/// fork from the vendored v2 artifacts (`V2Stack`, test/v2-artifacts), the factory owner (`owner`, who is also the engine
+/// owner) sets the factory minimum lp fee to 0 as the launch needs, then Core, ControllerV1 and the fee router are
+/// deployed through `SystemDeployer.deploySystem` and the coin is launched with `deployTokenAsOwner`. the pool lives in
+/// the live pool manager under the v2 hook. fees reach the Core through the fee router: `_buyCoin` and `_sellCoin`
+/// flush it right after the swap (set `autoFlush` false to hold the eth in the router), `_flush` does it on demand.
 /// the only stand ins are the exit module and exit token, which appear only after `_enterPhase2`.
 /// the sniper window is OPEN after setUp (the pool was just born). call `_skipSniperWindow` for steady state fees.
 /// @dev every address is namespaced because common labels are delegated accounts on mainnet that sweep eth
@@ -28,8 +37,6 @@ abstract contract Fixture is Test, ProdDeployer {
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
     IPoolManager internal constant PM = IPoolManager(Mainnet.POOL_MANAGER);
-    IArtCoinsFactory internal constant FACTORY = IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY);
-    IArtCoinsFeeEscrow internal constant ESCROW = IArtCoinsFeeEscrow(Mainnet.FEE_ESCROW);
     address internal constant STRATEGY = Mainnet.CREDIT_STRATEGY;
     address internal constant DEAD = Mainnet.DEAD;
 
@@ -46,7 +53,7 @@ abstract contract Fixture is Test, ProdDeployer {
     uint256 internal constant SNIPER_WINDOW = 1800;
     bytes32 internal constant FIXTURE_SALT = keccak256("credits-engine fixture coin");
 
-    // ------------------------------------------------------------------ swap attribution hook data
+    // ------------------------------------------------------------------ swap attribution hook data (same encoding on v2)
 
     struct PoolSwapData {
         bytes mevModuleSwapData;
@@ -70,7 +77,17 @@ abstract contract Fixture is Test, ProdDeployer {
     /// @dev the launch config of the fixture: the default (live artcoins stack) with the placeholders filled
     LaunchConfig internal lc;
     ICore internal core;
-    IArtCoinsToken internal coin;
+    IArtCoinsTokenV2 internal coin;
+    /// @dev the v2 stack the fixture deployed on the fork, and its factory and escrow
+    V2Stack.Stack internal v2;
+    IArtCoinsFactoryV2 internal FACTORY;
+    IArtCoinsFeeEscrowV2 internal ESCROW;
+    /// @dev the fee router: the pool's bounty recipient. `_flush` forwards its eth to the Core
+    IFeeRouter internal feeRouter;
+    /// @dev the account that calls `flush` in the helpers and so collects the tips
+    address internal flusher;
+    /// @dev when true the swap helpers flush the router right after the swap, so the Core books the fees at once
+    bool internal autoFlush = true;
     IControllerV1 internal ctl;
     /// @dev the pnd auction house the core created in its constructor, through the real live factory
     IAuctionHouse internal house;
@@ -135,29 +152,41 @@ abstract contract Fixture is Test, ProdDeployer {
         keeper = _user("keeper");
         seller = _user("seller");
         funder = _user("funder");
+        flusher = _user("flusher");
         router = new TestSwapRouter();
 
-        // the real factory owner lets the deployer launch while the factory is deprecated
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        FACTORY.setAdmin(deployer, true);
-        vm.deal(deployer, 1 ether);
+        // the v2 stack, deployed by `owner`, who is its owner. the launch needs the factory minimum lp fee at 0
+        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
+        FACTORY = IArtCoinsFactoryV2(v2.factory);
+        ESCROW = IArtCoinsFeeEscrowV2(v2.escrow);
+        vm.prank(owner);
+        FACTORY.setMinLpFee(0);
+        vm.deal(owner, 1 ether);
 
-        vm.startPrank(deployer);
         lc = defaultConfig();
         // the core tests are written against this opening bid, whatever the launch default is
         lc.rateStart = 4e12;
         lc.settings = _settings();
         lc.owner = owner;
         lc.creator = creator;
+        lc.creatorPayee = _user("creatorPayee");
+        lc.artistPayee = _user("artistPayee");
         lc.name = "Fixture Coin";
         lc.symbol = "FIXT";
         lc.salt = FIXTURE_SALT;
-        Deployed memory d = deploySystem(deployer, lc);
+        lc.stack.hook = v2.hook;
+        lc.stack.factory = v2.factory;
+        lc.stack.locker = v2.locker;
+        lc.stack.escrow = v2.escrow;
+        lc.mevModule = v2.mev;
+        vm.startPrank(owner);
+        Deployed memory d = deploySystem(owner, lc);
         vm.stopPrank();
 
         core = ICore(payable(d.core));
-        coin = IArtCoinsToken(d.coin);
+        coin = IArtCoinsTokenV2(d.coin);
         ctl = IControllerV1(d.controller);
+        feeRouter = IFeeRouter(payable(d.router));
         house = IAuctionHouse(core.HOUSE());
         launchKey = d.launchKey;
         poolId = d.poolId;
@@ -178,7 +207,9 @@ abstract contract Fixture is Test, ProdDeployer {
         view
         returns (address)
     {
-        return predictCoin(_cfg(name, symbol, salt), tokenAdmin, core_);
+        LaunchConfig memory l = _cfg(name, symbol, salt);
+        l.owner = tokenAdmin;
+        return predictCoin(l, owner, address(feeRouter), core_);
     }
 
     function buildConfig(
@@ -188,14 +219,10 @@ abstract contract Fixture is Test, ProdDeployer {
         string memory name,
         string memory symbol,
         bytes32 salt
-    ) internal view returns (IArtCoinsFactory.DeploymentConfig memory) {
+    ) internal view returns (IArtCoinsFactoryV2.DeploymentConfigV2 memory) {
         LaunchConfig memory l = _cfg(name, symbol, salt);
         l.creator = creator_;
-        return buildConfig(l, tokenAdmin, core_);
-    }
-
-    function buildTaxConfig(address core_) internal view returns (IArtCoinsFactory.TaxConfig memory) {
-        return buildTaxConfig(lc, core_);
+        return buildConfig(l, tokenAdmin, address(feeRouter), core_);
     }
 
     function poolKeyOf(address coin_) internal view returns (PoolKey memory) {
@@ -218,6 +245,7 @@ abstract contract Fixture is Test, ProdDeployer {
         vm.prank(who);
         router.swap{value: ethIn}(launchKey, true, -int256(ethIn), who);
         coinOut = coin.balanceOf(who) - before;
+        if (autoFlush) _flush();
     }
 
     /// @notice sells `coinIn` coin for eth, exact in, through the real pool
@@ -229,6 +257,26 @@ abstract contract Fixture is Test, ProdDeployer {
         vm.prank(who);
         router.swap(launchKey, false, -int256(coinIn), who);
         ethOut = who.balance - before;
+        if (autoFlush) _flush();
+    }
+
+    /// @notice flushes the fee router as `flusher`, which collects the tip. the Core books what the router sends.
+    /// returns the eth the Core received from the router (zero when the router held nothing)
+    function _flush() internal returns (uint256 toCore) {
+        uint256 before = address(core).balance;
+        vm.prank(flusher);
+        feeRouter.flush();
+        toCore = address(core).balance - before;
+    }
+
+    /// @notice sends `amount` eth to the Core from the fee source (the router address), the way a flush does. the Core
+    /// books it as fees. for tests that need an exact amount booked
+    function _feePays(uint256 amount) internal {
+        address src = core.FEE_SOURCE();
+        vm.deal(src, src.balance + amount);
+        vm.prank(src);
+        (bool ok,) = address(core).call{value: amount}("");
+        require(ok, "fee push failed");
     }
 
     /// @notice swap hook data that names `referrer` and asks for `bps` of volume (100k denominator)
@@ -243,12 +291,13 @@ abstract contract Fixture is Test, ProdDeployer {
         if (block.timestamp < end) vm.warp(end);
     }
 
-    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state 9.5 percent
-    /// of every buy reaches the pot, inside the sniper window more
+    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.2 percent
+    /// of every buy reaches the pot (6.9 points of skim, 90 percent to the router, minus the payees and the tip), inside
+    /// the sniper window more
     function _fundPot(uint256 eth) internal {
         for (uint256 i; i < 8 && core.ethPot() < eth; ++i) {
             uint256 need = eth - core.ethPot();
-            _buyCoin(funder, need * 10_000 / 950 + 1000);
+            _buyCoin(funder, need * 10_000 / 450 + 1000);
         }
         assertGe(core.ethPot(), eth, "pot not funded");
     }

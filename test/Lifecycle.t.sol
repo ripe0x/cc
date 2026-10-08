@@ -329,15 +329,15 @@ contract LifecycleDoorsTest is Fixture {
     /// the system's own contracts can never become targets, even by the owner.
     function test_buyListing_forbiddenTargetsCannotBeAdded() public {
         address[11] memory forbidden = [
-            Mainnet.SKIM_HOOK,
+            lc.stack.hook,
             address(coin),
             address(PM),
             address(core),
             Mainnet.CREDITS,
             Mainnet.STATEMENTS,
-            Mainnet.ARTCOINS_FACTORY,
-            Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW,
+            lc.stack.factory,
+            lc.stack.locker,
+            lc.stack.escrow,
             address(house),
             Mainnet.AUCTION_FACTORY
         ];
@@ -349,7 +349,7 @@ contract LifecycleDoorsTest is Fixture {
         }
         vm.prank(keeper);
         vm.expectRevert(ICore.TargetNotAllowed.selector);
-        core.buyListing(1, "", LISTED_A, Mainnet.SKIM_HOOK);
+        core.buyListing(1, "", LISTED_A, lc.stack.hook);
     }
 }
 

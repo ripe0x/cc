@@ -10,9 +10,9 @@ import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 /// arguments
 struct LaunchConfig {
     // the artcoins stack. the only block that changes when a new artcoins version ships
+    /// `feeSource` is not read from the config file: the deploy creates the fee router and fills it in
     Stack stack;
     address mevModule;
-    address factoryOwner;
     // placeholders that must be filled before a launch
     address owner;
     address creator;
@@ -31,24 +31,33 @@ struct LaunchConfig {
     int24 positionLower;
     int24 positionUpper;
     uint24 baselineSkimBps;
+    /// the engine's share of the baseline skim, bps. the protocol keeps the rest
     uint16 bountyBps;
     uint24 maxReferralBps;
+    /// pips (1e6). the v2 factory floors it at its `minLpFee`
     uint24 lpFee;
+    /// the anti sniper skim at the first block, falling to the baseline (v2 has no end value) over `sniperSeconds`
     uint24 sniperStartBps;
-    uint24 sniperEndBps;
     uint32 sniperSeconds;
-    uint16 taxBps;
-    uint16 taxBpsMax;
-    address taxBurn;
+    /// the protocol's share of the locker rewards, bps. 0 appends no protocol slot. the factory default is 2_000
+    uint16 protocolBps;
+    /// the coin is launched restricted (docs/FLOW.md 18) and the extra allowlist entries beyond the factory's own seeds
+    /// and the Core, which the builder always adds (docs/FLOW.md 29)
+    bool restricted;
+    address[] allowed;
+    // the fee router (docs/FLOW.md 10.6): two payees by parts per million of a flush, the tip of the caller of `flush`
+    address creatorPayee;
+    /// a placeholder the deploy refuses until it is set
+    address artistPayee;
+    /// each payee's share of a flush after the tip, ppm. the router receives 6.21 points of 6.9, so 80_515 is 0.5 points
+    uint32 payeePpm;
+    uint32 tipPpm;
+    uint96 tipCap;
     // explicit overrides of pinned preflight rules. all false by default. each one is part of the config hash
-    /// allow a bountyBps other than 9500
+    /// allow a bountyBps other than 9000
     bool allowBounty;
-    /// allow a tax recipient other than the dead address
-    bool allowTaxBurn;
     /// allow launching while the factory is not deprecated (a future public factory)
     bool allowOpenFactory;
-    /// creation bytecode of the token implementation of this artcoins version, without constructor arguments
-    string tokenCodeFile;
 }
 
 /// @notice reads and checks a `LaunchConfig`
@@ -61,12 +70,10 @@ abstract contract ConfigReader is CommonBase {
     uint256 internal constant RATE_START_MIN = RATE_START_MIN_WEI;
     uint256 internal constant RATE_START_MAX = RATE_START_MAX_WEI;
 
-    /// @notice the default config in memory: the live artcoins stack and the launch parameters of
-    /// docs/ARCHITECTURE.md section 2, with owner, creator, name and salt left unset (the symbol is CC). tests fill them
+    /// @notice the default config in memory: the fixed mainnet parts and the launch parameters of
+    /// docs/FLOW.md sections 10.1 and 10.6, with the v2 stack addresses, owner, creator, payees, name and salt left unset (the symbol is CC). tests fill them
     function defaultConfig() internal pure returns (LaunchConfig memory c) {
         c.stack = Mainnet.defaultStack();
-        c.mevModule = Mainnet.MEV_LINEAR_SKIM;
-        c.factoryOwner = Mainnet.ARTCOINS_FACTORY_OWNER;
         c.symbol = "CC";
         c.rateStart = 15_400_000_000_000;
         c.settings = Mainnet.defaultSettings();
@@ -75,17 +82,17 @@ abstract contract ConfigReader is CommonBase {
         c.startTick = -175_000;
         c.positionLower = -175_000;
         c.positionUpper = 887_200;
-        c.baselineSkimBps = 10_000;
-        c.bountyBps = 9500;
+        c.baselineSkimBps = 6_900;
+        c.bountyBps = 9000;
         c.maxReferralBps = 0;
         c.lpFee = 0;
         c.sniperStartBps = 90_000;
-        c.sniperEndBps = 10_000;
         c.sniperSeconds = 1800;
-        c.taxBps = 1500;
-        c.taxBpsMax = 2000;
-        c.taxBurn = Mainnet.DEAD;
-        c.tokenCodeFile = "script/data/ArtCoinsToken.creation.hex";
+        c.protocolBps = 2000;
+        c.restricted = true;
+        c.payeePpm = 80_515;
+        c.tipPpm = 5_000;
+        c.tipCap = 0.005 ether;
     }
 
     /// @notice parses a config file. a missing key reverts inside the cheatcode, a number that does not fit its field
@@ -104,10 +111,10 @@ abstract contract ConfigReader is CommonBase {
             factory: vm.parseJsonAddress(j, ".stack.factory"),
             locker: vm.parseJsonAddress(j, ".stack.locker"),
             escrow: vm.parseJsonAddress(j, ".stack.escrow"),
-            auctionFactory: vm.parseJsonAddress(j, ".stack.auctionFactory")
+            auctionFactory: vm.parseJsonAddress(j, ".stack.auctionFactory"),
+            feeSource: address(0)
         });
         c.mevModule = vm.parseJsonAddress(j, ".stack.mevModule");
-        c.factoryOwner = vm.parseJsonAddress(j, ".factoryOwner");
         c.owner = vm.parseJsonAddress(j, ".owner");
         c.creator = vm.parseJsonAddress(j, ".creator");
         c.name = vm.parseJsonString(j, ".name");
@@ -119,7 +126,6 @@ abstract contract ConfigReader is CommonBase {
         _loadLaunch(c, j);
         // the overrides are optional, a missing key means false
         c.allowBounty = _flag(j, ".overrides.bounty");
-        c.allowTaxBurn = _flag(j, ".overrides.taxBurn");
         c.allowOpenFactory = _flag(j, ".overrides.openFactory");
     }
 
@@ -179,12 +185,16 @@ abstract contract ConfigReader is CommonBase {
         c.maxReferralBps = _u24(j, ".launch.maxReferralBps");
         c.lpFee = _u24(j, ".launch.lpFee");
         c.sniperStartBps = _u24(j, ".launch.sniperStartBps");
-        c.sniperEndBps = _u24(j, ".launch.sniperEndBps");
         c.sniperSeconds = _u32(j, ".launch.sniperSeconds");
-        c.taxBps = _u16(j, ".launch.taxBps");
-        c.taxBpsMax = _u16(j, ".launch.taxBpsMax");
-        c.taxBurn = vm.parseJsonAddress(j, ".launch.taxBurn");
-        c.tokenCodeFile = vm.parseJsonString(j, ".launch.tokenCodeFile");
+        c.protocolBps = _u16(j, ".launch.protocolBps");
+        c.restricted = vm.parseJsonBool(j, ".launch.restricted");
+        c.allowed = vm.parseJsonAddressArray(j, ".launch.allowed");
+        c.creatorPayee = vm.parseJsonAddress(j, ".router.creatorPayee");
+        c.artistPayee = vm.parseJsonAddress(j, ".router.artistPayee");
+        c.payeePpm = _u32(j, ".router.payeePpm");
+        c.tipPpm = _u32(j, ".router.tipPpm");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        c.tipCap = uint96(_uint(j, ".router.tipCap", type(uint96).max));
     }
 
     // every narrowing below follows a bounds check, so the casts cannot truncate
@@ -221,13 +231,21 @@ abstract contract ConfigReader is CommonBase {
 
     /// @notice the placeholders every launch must fill: returns the names of those still unset
     function unsetFields(LaunchConfig memory c) internal pure returns (string[] memory out) {
-        string[] memory tmp = new string[](5);
+        string[] memory tmp = new string[](12);
         uint256 n;
         if (c.owner == address(0)) tmp[n++] = "owner";
         if (c.creator == address(0)) tmp[n++] = "creator";
         if (bytes(c.name).length == 0) tmp[n++] = "name";
         if (bytes(c.symbol).length == 0) tmp[n++] = "symbol";
         if (c.salt == bytes32(0)) tmp[n++] = "salt";
+        if (c.creatorPayee == address(0)) tmp[n++] = "router.creatorPayee";
+        if (c.artistPayee == address(0)) tmp[n++] = "router.artistPayee";
+        // the v2 stack is not live yet: its addresses are zero placeholders until it is
+        if (c.stack.hook == address(0)) tmp[n++] = "stack.hook";
+        if (c.stack.factory == address(0)) tmp[n++] = "stack.factory";
+        if (c.stack.locker == address(0)) tmp[n++] = "stack.locker";
+        if (c.stack.escrow == address(0)) tmp[n++] = "stack.escrow";
+        if (c.mevModule == address(0)) tmp[n++] = "stack.mevModule";
         out = new string[](n);
         for (uint256 i; i < n; ++i) {
             out[i] = tmp[i];

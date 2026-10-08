@@ -81,7 +81,7 @@ contract FeeShareTest is FeeBase {
     }
 
     function test_split_dustAmountsFromTheHookAddress() public {
-        address hook = Mainnet.SKIM_HOOK;
+        address hook = lc.stack.hook;
         vm.deal(hook, 10 ether);
         _share(5_000);
         uint256[5] memory v = [uint256(0), 1, 3, 4, 10_001];

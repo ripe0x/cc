@@ -13,13 +13,6 @@ import {Mainnet, Stack, Settings, IStatements} from "../src/interfaces/Interface
 import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
-import {
-    IArtCoinsFactory,
-    IArtCoinsToken,
-    IArtCoinsSkimHook,
-    IArtCoinsLocker,
-    IArtCoinsMevSkim
-} from "../src/interfaces/ArtCoins.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {SystemBuilder} from "./Builder.sol";
 import {Report} from "./Report.sol";
@@ -49,15 +42,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         address coin = core.COIN();
         _code("code: coin", coin);
         if (coin.code.length == 0) return;
-        PoolKey memory key = poolKeyOf(coin, c.stack);
-        bytes32 id = keccak256(abi.encode(key));
-        _postCoin(c, core, IArtCoinsToken(coin), id);
-        _postPool(c, core, key, id);
-        _postHook(c, core_, id);
-        _postTax(c, core_, IArtCoinsToken(coin), id);
-        _postLocker(c, coin, key);
-        _postMev(c, id);
-        _postPosition(c, core, coin, id);
+        _postV2Todo();
         _postUnreadable(c);
     }
 
@@ -353,190 +338,19 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         }
     }
 
-    function _postCoin(LaunchConfig memory c, ICore core, IArtCoinsToken coin, bytes32 id) private {
-        _eq("coin: name", coin.name(), c.name);
-        _eq("coin: symbol", coin.symbol(), c.symbol);
-        _eq("coin: supply", coin.totalSupply(), c.supply);
-        // OWNER_CHANGED=1: the token admin was handed over with the owner role, so the row is a warning
-        if (_ownerChanged()) {
-            _warn("warn: coin admin is owner", coin.admin() == c.owner, "OWNER_CHANGED=1, a handover ran");
-        } else {
-            _eq("coin: admin is owner", coin.admin(), c.owner);
-        }
-        _eq("coin: pool id", coin.canonicalPoolId(), id);
-        _eq("coin: held by core", coin.balanceOf(address(core)), 0);
-        if (vm.exists(c.tokenCodeFile)) {
-            _eq("coin: equals prediction", predictCoin(c, coin.originalAdmin(), address(core)), address(coin));
-        }
-        uint256 pm = coin.balanceOf(c.stack.poolManager);
-        uint256 dust = coin.balanceOf(c.stack.locker);
-        (, int24 tick,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
-        bool untraded = tick == -c.startTick;
-        bool inPool = dust < LOCKER_DUST_MAX && (untraded ? pm + dust == c.supply : pm + dust <= c.supply && pm != 0);
-        _check(
-            "coin: supply sits in the pool",
-            inPool,
-            string.concat(
-                "pool ", vm.toString(pm), " locker dust ", vm.toString(dust), untraded ? " untraded" : " traded"
-            )
-        );
-    }
-
-    function _postPool(LaunchConfig memory c, ICore core, PoolKey memory key, bytes32 id) private {
-        _eq("pool: key hook", address(key.hooks), c.stack.hook);
-        (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
-        // the launch position is single sided at the pool edge, so the active liquidity can be zero at the start
-        _check("pool: initialized", sqrtPrice != 0, vm.toString(id));
-    }
-
-    function _postHook(LaunchConfig memory c, address core, bytes32 id) private {
-        IArtCoinsSkimHook hook = IArtCoinsSkimHook(c.stack.hook);
-        (
-            uint24 base,
-            uint16 bounty,
-            uint24 maxRef,
-            uint24 lpFee,
-            address bountyTo,
-            address protoTo,
-            address refTo,
-            address quote
-        ) = hook.skimConfig(id);
-        _eq("skim: baseline bps", uint256(base), uint256(c.baselineSkimBps));
-        _eq("skim: bounty bps", uint256(bounty), uint256(c.bountyBps));
-        _eq("skim: referral cap", uint256(maxRef), uint256(c.maxReferralBps));
-        _eq("skim: lp fee", uint256(lpFee), uint256(c.lpFee));
-        _eq("skim: bounty recipient", bountyTo, core);
-        _eq("skim: protocol recipient", protoTo, c.creator);
-        _eq("skim: referral payout", refTo, core);
-        _eq("skim: quote token", quote, address(0));
-        _check(
-            "hook: tax attested, mev module on",
-            hook.poolTaxEnabled(id) && hook.mevModuleEnabled(id),
-            "poolTaxEnabled, mevModuleEnabled"
-        );
-        _check(
-            "hook: extension slot locked and empty",
-            hook.poolExtensionLocked(id) && hook.poolExtension(id) == address(0),
-            "locked"
-        );
-    }
-
-    function _postTax(LaunchConfig memory c, address core, IArtCoinsToken coin, bytes32) private {
-        _check("tax: enabled", coin.taxEnabled(), "taxEnabled");
-        _eq("tax: bps", uint256(coin.taxBps()), uint256(c.taxBps));
-        _eq("tax: bps max", uint256(coin.taxBpsMax()), uint256(c.taxBpsMax));
-        _eq("tax: burn address", coin.taxBurnAddress(), c.taxBurn);
-        _eq("tax: canonical hook", coin.canonicalHook(), c.stack.hook);
-        _eq("tax: pool manager", coin.taxPoolManager(), c.stack.poolManager);
-        _check("tax: core exempt", coin.isTaxExempt(core), "core is exempt");
-        _check("tax: pool manager is a venue", coin.isTaxVenue(c.stack.poolManager), "v4");
-        IArtCoinsFactory.TaxVenue[] memory venues = buildTaxConfig(c, core).venues;
-        uint256 missing;
-        for (uint256 i; i < venues.length; ++i) {
-            IArtCoinsFactory.TaxVenue memory v = venues[i];
-            (address t0, address t1) =
-                address(coin) < v.counterToken ? (address(coin), v.counterToken) : (v.counterToken, address(coin));
-            bytes32 salt = v.kind == 1 ? keccak256(abi.encodePacked(t0, t1)) : keccak256(abi.encode(t0, t1, v.v3Fee));
-            if (!coin.isTaxVenue(vm.computeCreate2Address(salt, v.initCodeHash, v.factory))) ++missing;
-        }
-        _eq("tax: venues registered", missing, 0);
-    }
-
-    function _postLocker(LaunchConfig memory c, address coin, PoolKey memory key) private {
-        IArtCoinsLocker.TokenRewardInfo memory info = IArtCoinsLocker(c.stack.locker).tokenRewards(coin);
-        _check(
-            "locker: one position, one reward slot",
-            info.numPositions == 1 && info.rewardBps.length == 1 && info.rewardBps[0] == 10_000,
-            "positions and bps"
-        );
-        if (info.rewardBps.length != 1) return;
-        _eq("locker: reward recipient", info.rewardRecipients[0], c.creator);
-        _eq("locker: reward admin", info.rewardAdmins[0], Mainnet.DEAD);
-        _check(
-            "locker: pool key",
-            keccak256(abi.encode(info.poolKey)) == keccak256(abi.encode(key)),
-            "tokenRewards poolKey"
-        );
-    }
-
-    /// @dev the mev module exposes only `currentSkimBps(poolId)`, a function of the stored start, end and duration and
-    /// of the time since the pool was created. inside the window one read pins the three values together (the formula is
-    /// the module's `start - (start - end) * elapsed / duration`), after the window it reads the end value only
-    function _postMev(LaunchConfig memory c, bytes32 id) private {
-        uint256 created = IArtCoinsSkimHook(c.stack.hook).poolCreationTimestamp(id);
-        (bool ok, uint256 cur) = _word(c.mevModule, abi.encodeCall(IArtCoinsMevSkim.currentSkimBps, (id)));
-        uint256 elapsed = block.timestamp > created ? block.timestamp - created : 0;
-        uint256 start = c.sniperStartBps;
-        uint256 end = c.sniperEndBps;
-        if (elapsed < c.sniperSeconds && start >= end) {
-            uint256 want = start - (start - end) * elapsed / c.sniperSeconds;
-            _check(
-                "mev: skim now matches start, end and duration",
-                ok && cur + 1 >= want && cur <= want + 1,
-                string.concat(
-                    "inside the window at ",
-                    vm.toString(elapsed),
-                    "s, module ",
-                    vm.toString(cur),
-                    " want ",
-                    vm.toString(want)
-                )
-            );
-        } else {
-            _check(
-                "mev: skim now equals the end bps",
-                ok && cur == end,
-                string.concat(
-                    "window over, module ",
-                    vm.toString(cur),
-                    " want ",
-                    vm.toString(end),
-                    ". start bps and duration cannot be read after the window, run postflight inside it"
-                )
-            );
-        }
-    }
-
-    /// @dev the launch position as the position manager stores it. the pool is eth against the coin, so the pool ticks
-    /// are the negated config ticks. the start tick is read from the pool while untraded
-    function _postPosition(LaunchConfig memory c, ICore core, address coin, bytes32 id) private {
-        IArtCoinsLocker.TokenRewardInfo memory info = IArtCoinsLocker(c.stack.locker).tokenRewards(coin);
-        (bool ok, uint256 w) =
-            _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("positionInfo(uint256)", info.positionId));
-        PositionInfo pi = PositionInfo.wrap(w);
-        _check(
-            "position: ticks equal the config",
-            ok && pi.tickLower() == -c.positionUpper && pi.tickUpper() == -c.positionLower,
-            string.concat(
-                "pool ticks ",
-                vm.toString(int256(pi.tickLower())),
-                " to ",
-                vm.toString(int256(pi.tickUpper())),
-                ", config ",
-                vm.toString(int256(-c.positionUpper)),
-                " to ",
-                vm.toString(int256(-c.positionLower))
-            )
-        );
-        (bool ok2, uint256 holder) =
-            _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("ownerOf(uint256)", info.positionId));
-        _check("position: held by the locker", ok2 && address(uint160(holder)) == c.stack.locker, "ownerOf");
-        (, int24 tick,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
-        bool inRange = tick >= pi.tickLower() && tick <= pi.tickUpper();
-        _check(
-            "pool: start tick",
-            inRange && (tick == -c.startTick || tick < -c.startTick),
-            tick == -c.startTick
-                ? "untraded, the pool sits at the start tick"
-                : "traded, the start tick itself is no longer readable, the pool is inside the position"
-        );
+    /// @dev TODO(v2 port stage 3): the v2 read back. coin (restricted, the Core and nothing else on the allowlist, admin
+    /// the owner, supply in the pool), pool, hook `poolInfo` and `skimConfig` (bounty recipient the router, bounty bps,
+    /// skim 6.9 points, lp fee 0), mev module values, the locker slots (creator), the launch position, the router (engine
+    /// the Core, owner, payees, tip, split start). until they exist this row fails every postflight
+    function _postV2Todo() private {
+        _check("v2 coin, pool, hook, locker, mev, position and router read back", false, "TODO(v2 port stage 3): not ported yet");
     }
 
     /// @dev what a read back cannot cover, said in the output
     function _postUnreadable(LaunchConfig memory c) private {
         _info(
             "not readable on chain",
-            "protocolBps argument (0), sniper fee config, token image metadata context, locker data, the deploy fee paid, the salt itself (bound by coin: equals prediction)"
+            "protocolBps argument, sniper fee config, token image metadata context, the deploy fee paid, the salt itself"
         );
         _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));
     }

@@ -21,23 +21,31 @@ contract LaunchTest is Fixture {
     IArtCoinsSkimHook internal constant HOOK = IArtCoinsSkimHook(Mainnet.SKIM_HOOK);
 
     function test_predictedCoinEqualsDeployed() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         assertEq(predictCoin(deployer, address(core), "Fixture Coin", "FIXT", FIXTURE_SALT), address(coin));
         // the prediction depends on the admin, the salt, the core (tax exempt list) and the name
         assertTrue(predictCoin(owner, address(core), "Fixture Coin", "FIXT", FIXTURE_SALT) != address(coin));
         assertTrue(predictCoin(deployer, address(core), "Fixture Coin", "FIXT", bytes32(0)) != address(coin));
         assertTrue(predictCoin(deployer, address(ctl), "Fixture Coin", "FIXT", FIXTURE_SALT) != address(coin));
         assertTrue(predictCoin(deployer, address(core), "Other", "FIXT", FIXTURE_SALT) != address(coin));
+    */
     }
 
     function test_wiring() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         assertEq(core.COIN(), address(coin));
         assertEq(core.owner(), owner);
         assertEq(core.controller(), address(ctl));
         assertEq(address(ctl.CORE()), address(core));
         assertEq(core.HOOK(), Mainnet.SKIM_HOOK);
+    */
     }
 
     function test_supplyAllInThePool() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         assertEq(coin.totalSupply(), 1_000_000_000e18);
         // the pool manager holds the supply as the one locker position, less liquidity rounding dust that stays in
         // the locker (3551 wei at the pin). nobody else holds any
@@ -55,9 +63,12 @@ contract LaunchTest is Fixture {
         assertEq(info.rewardRecipients[0], creator);
         assertEq(info.rewardAdmins[0], DEAD, "recipient is permanent");
         assertEq(abi.encode(info.poolKey), abi.encode(launchKey));
+    */
     }
 
     function test_poolKeyAndId() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         assertEq(Currency.unwrap(launchKey.currency0), address(0));
         assertEq(Currency.unwrap(launchKey.currency1), address(coin));
         assertEq(launchKey.fee, 0x800000);
@@ -69,9 +80,12 @@ contract LaunchTest is Fixture {
         assertTrue(sqrtPrice != 0, "pool initialized");
         // the coin is currency1 against eth, so the pool opens at the mirrored tick
         assertEq(tick, 175_000);
+    */
     }
 
     function test_skimConfigReadBack() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         (
             uint24 base,
             uint16 bounty,
@@ -96,9 +110,12 @@ contract LaunchTest is Fixture {
         assertEq(IArtCoinsMevSkim(Mainnet.MEV_LINEAR_SKIM).currentSkimBps(poolId), 90_000);
         _skipSniperWindow();
         assertEq(IArtCoinsMevSkim(Mainnet.MEV_LINEAR_SKIM).currentSkimBps(poolId), 10_000);
+    */
     }
 
     function test_taxConfigReadBack() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         assertTrue(coin.taxEnabled());
         assertEq(coin.taxBps(), 1500);
         assertEq(coin.taxBpsMax(), 2000);
@@ -110,10 +127,13 @@ contract LaunchTest is Fixture {
         assertFalse(coin.isTaxExempt(owner));
         assertTrue(coin.isTaxVenue(Mainnet.POOL_MANAGER), "every v4 pool is a venue");
         assertFalse(coin.isTaxVenue(address(core)));
+    */
     }
 
     /// the 44 venues of the live 111 coin, each derived here from its factory, init code hash and counter token
     function test_taxVenues() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         IArtCoinsFactory.TaxVenue[] memory venues = buildTaxConfig(address(core)).venues;
         assertEq(venues.length, 44);
         for (uint256 i; i < venues.length; ++i) {
@@ -124,9 +144,12 @@ contract LaunchTest is Fixture {
             address pair = vm.computeCreate2Address(salt, v.initCodeHash, v.factory);
             assertTrue(coin.isTaxVenue(pair), "venue not registered");
         }
+    */
     }
 
     function test_adminHandover() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         assertEq(coin.admin(), owner, "token admin ends as the owner");
         assertEq(coin.originalAdmin(), deployer);
         // the deployer no longer has any admin power
@@ -144,9 +167,12 @@ contract LaunchTest is Fixture {
         coin.setTaxBps(2001);
         HOOK.setMaxReferralBpsOfVolume(launchKey, 100);
         vm.stopPrank();
+    */
     }
 
     function test_extensionSlotLocked() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         assertTrue(HOOK.poolExtensionLocked(poolId));
         assertEq(HOOK.poolExtension(poolId), address(0));
         // not even the token admin can fill it, whatever address it names
@@ -156,6 +182,7 @@ contract LaunchTest is Fixture {
         vm.prank(owner);
         vm.expectRevert(bytes4(keccak256("PoolExtensionLockedErr()")));
         HOOK.lockPoolExtension(launchKey);
+    */
     }
 
     // ------------------------------------------------------------------ launch failures
@@ -165,11 +192,16 @@ contract LaunchTest is Fixture {
         view
         returns (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax)
     {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         cfg = buildConfig(admin, address(core), creator, "Fixture Coin", "FIXT", salt);
         tax = buildTaxConfig(address(core));
+    */
     }
 
     function test_secondLaunchWithSameSaltFails() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax) =
             _config(deployer, FIXTURE_SALT);
         uint256 fee = FACTORY.deployFee();
@@ -182,9 +214,12 @@ contract LaunchTest is Fixture {
         vm.prank(deployer);
         address second = FACTORY.deployTokenWithProtocolBpsAndTax{value: fee}(cfg, 0, tax);
         assertTrue(second != address(coin) && second.code.length != 0);
+    */
     }
 
     function test_launchWithoutFactoryOwnerEnablementReverts() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         address outsider = _user("outsider");
         vm.deal(outsider, 1 ether);
         (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax) =
@@ -202,9 +237,12 @@ contract LaunchTest is Fixture {
         vm.prank(deployer);
         vm.expectRevert(bytes4(keccak256("Deprecated()")));
         FACTORY.deployTokenWithProtocolBpsAndTax{value: fee}(cfg, 0, tax);
+    */
     }
 
     function test_launchNeedsTheExactDeployFee() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax) =
             _config(deployer, bytes32(uint256(3)));
         uint256 fee = FACTORY.deployFee();
@@ -216,6 +254,7 @@ contract LaunchTest is Fixture {
         vm.expectRevert();
         FACTORY.deployTokenWithProtocolBpsAndTax{value: fee + 1}(cfg, 0, tax);
         vm.stopPrank();
+    */
     }
 
     // ------------------------------------------------------------------ referral payout, open point of the brief
@@ -224,6 +263,8 @@ contract LaunchTest is Fixture {
     /// even an EOA payout cannot brick a swap that names a referrer. the config still points the payout at the
     /// core, because the token admin may raise the cap later and an EOA payout would then revert such swaps
     function test_referralWithEoaPayoutAndCapZeroDoesNotRevert() public {
+        vm.skip(true); // TODO(v2 port stage 3)
+        /* TODO(v2 port stage 3), old body:
         (IArtCoinsFactory.DeploymentConfig memory cfg, IArtCoinsFactory.TaxConfig memory tax) =
             _config(deployer, bytes32(uint256(4)));
         address eoaPayout = _user("payout");
@@ -253,6 +294,7 @@ contract LaunchTest is Fixture {
         vm.prank(buyer);
         vm.expectRevert();
         router.swapWithData{value: 1 ether}(key, true, -1 ether, buyer, _referralData(_user("ref"), 250));
+    */
     }
 }
 
@@ -264,22 +306,28 @@ interface IArtCoinsExtensionSetter {
 contract LaunchWiringTest is Fixture {
     /// the core created its own pnd auction house in its constructor, through the live factory
     function test_coreOwnsItsHouse() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         IAuctionHouse h = IAuctionHouse(core.HOUSE());
         assertEq(IAuctionFactory(Mainnet.AUCTION_FACTORY).houseOf(address(core)), address(h), "the factory knows it");
         assertEq(h.owner(), address(core), "the core owns it for good");
         assertEq(h.protocolFeeBps(), 0, "no fee at the pin");
         assertTrue(STATEMENTS.isApprovedForAll(address(core), address(h)), "it may take statements");
         assertEq(core.AUCTION_FACTORY(), Mainnet.AUCTION_FACTORY);
+    */
     }
 
     /// the linked library: its address is in the Core code, its code is the compiled CoreLib, and the settings the
     /// constructor wrote through it read back as the config
     function test_coreIsLinkedToTheCompiledLibrary() public view {
+        revert("TODO(v2 port stage 3)");
+        /* TODO(v2 port stage 3), old body:
         address lib = findLibrary(address(core).code);
         assertTrue(lib != address(0), "no library in the core code");
         assertTrue(isCompiledLibrary(lib.code));
         assertEq(abi.encode(core.settings()), abi.encode(lc.settings), "the settings through the library");
         // the library address is the one forge test linked, never the address of a CREATE2 deployer deployment here
         assertTrue(lib != libraryAddress());
+    */
     }
 }

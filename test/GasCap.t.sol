@@ -6,7 +6,8 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, ICreditStrategy, IStatements, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
-import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
+import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
@@ -88,7 +89,7 @@ contract GasCapTest is SeaportBase {
     /// @dev marks every account the system touches as cold, with its slots, then warms only the account of `target`
     /// (a transaction starts with its target warm). the sender is not cooled
     function _cool(address target) internal {
-        address[17] memory a = [
+        address[18] memory a = [
             address(core),
             address(ctl),
             address(house),
@@ -98,12 +99,13 @@ contract GasCapTest is SeaportBase {
             STRATEGY,
             Mainnet.SEAPORT,
             address(PM),
-            Mainnet.SKIM_HOOK,
+            v2.hook,
             address(coin),
-            Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW,
-            Mainnet.ARTCOINS_FACTORY,
-            Mainnet.MEV_LINEAR_SKIM,
+            v2.locker,
+            v2.escrow,
+            v2.factory,
+            v2.mev,
+            address(feeRouter),
             address(mod),
             address(xt)
         ];
@@ -147,37 +149,68 @@ contract GasCapTest is SeaportBase {
         _row("deploy 3 core (house creation inside)", g, code);
     }
 
-    /// @dev tx 4, 5, 6 on a fresh launch (new salt), as the deployer: launch, lockPoolExtension, updateAdmin
-    function test_gas_deploy_4_5_6_launchLockHandover() public {
-        IArtCoinsFactory.DeploymentConfig memory cfg =
-            buildConfig(deployer, address(core), creator, "Gas Coin", "GASC", keccak256("gas cap coin"));
-        IArtCoinsFactory.TaxConfig memory tax = buildTaxConfig(address(core));
+    /// @dev tx 4 and 5 on a fresh launch (new salt), as the owner: `deployTokenAsOwner`, then the router setup (a second
+    /// router, so the set up transactions are the first ones)
+    function test_gas_deploy_4_5_launchAndRouterSetup() public {
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg =
+            buildConfig(owner, address(core), creator, "Gas Coin", "GASC", keccak256("gas cap coin"));
         uint256 fee = FACTORY.deployFee();
-        bytes memory data = abi.encodeCall(IArtCoinsFactory.deployTokenWithProtocolBpsAndTax, (cfg, 0, tax));
-        vm.deal(deployer, 1 ether);
+        bytes memory data = abi.encodeCall(IArtCoinsFactoryV2.deployTokenAsOwner, (cfg, lc.protocolBps));
+        vm.deal(owner, 1 ether);
         _cool(address(FACTORY));
-        vm.prank(deployer);
+        vm.prank(owner);
         uint256 g = gasleft();
-        address c2 = FACTORY.deployTokenWithProtocolBpsAndTax{value: fee}(cfg, 0, tax);
+        FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps);
         g -= gasleft();
-        _row("deploy 4 launch through the factory", g, data);
+        _row("deploy 4 launch through the factory (deployTokenAsOwner)", g, data);
 
-        PoolKey memory key = poolKeyOf(c2);
-        data = abi.encodeCall(IArtCoinsSkimHook.lockPoolExtension, (key));
-        _cool(Mainnet.SKIM_HOOK);
-        vm.prank(deployer);
+        // the router set up: engine, payees, tip, split start (four owner transactions)
+        IFeeRouter r2 = IFeeRouter(payable(deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
+        address[] memory who = new address[](2);
+        who[0] = lc.creatorPayee;
+        who[1] = lc.artistPayee;
+        uint32[] memory ppm = new uint32[](2);
+        ppm[0] = lc.payeePpm;
+        ppm[1] = lc.payeePpm;
+        data = abi.encodeCall(IFeeRouter.setEngine, (address(core)));
+        _cool(address(r2));
+        vm.prank(owner);
         g = gasleft();
-        IArtCoinsSkimHook(Mainnet.SKIM_HOOK).lockPoolExtension(key);
+        r2.setEngine(address(core));
         g -= gasleft();
-        _row("deploy 5 lockPoolExtension", g, data);
+        _row("deploy 5a router setEngine", g, data);
+        data = abi.encodeCall(IFeeRouter.setPayees, (who, ppm));
+        _cool(address(r2));
+        vm.prank(owner);
+        g = gasleft();
+        r2.setPayees(who, ppm);
+        g -= gasleft();
+        _row("deploy 5b router setPayees", g, data);
+        data = abi.encodeCall(IFeeRouter.lock, ());
+        _cool(address(r2));
+        vm.prank(owner);
+        g = gasleft();
+        r2.lock();
+        g -= gasleft();
+        _row("deploy 5c router lock", g, data);
+    }
 
-        data = abi.encodeCall(IArtCoinsToken.updateAdmin, (owner));
-        _cool(c2);
-        vm.prank(deployer);
-        g = gasleft();
-        IArtCoinsToken(c2).updateAdmin(owner);
+    /// @dev `flush` with the split on and two payees, cold, the call that moves the pool fees into the Core
+    function test_gas_routerFlush() public {
+        _skipSniperWindow();
+        _buyCoin(funder, 20 ether);
+        autoFlush = false;
+        _buyCoin(funder, 5 ether);
+        _flush();
+        _buyCoin(funder, 5 ether);
+        assertTrue(feeRouter.splitOn(), "the split is on");
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
+        _cool(address(feeRouter));
+        vm.prank(flusher);
+        uint256 g = gasleft();
+        feeRouter.flush();
         g -= gasleft();
-        _row("deploy 6 updateAdmin", g, data);
+        _row("flush with the split on (tip, two payees, the Core books the fees)", g, data);
     }
 
     // ------------------------------------------------------------------ compose, exit, overprint

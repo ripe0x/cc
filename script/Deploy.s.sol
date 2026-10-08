@@ -31,8 +31,10 @@ contract Deploy is Script, NewProd {
         _print("preflight");
         _require();
         // refuse to deploy a Core against a coin address that is already taken
-        address coreAt = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
-        address coinAt = predictCoin(c, deployer, coreAt);
+        // the router takes the next nonce, then the controller, then the Core
+        uint64 nonce = vm.getNonce(deployer);
+        address coinAt =
+            predictCoin(c, deployer, vm.computeCreateAddress(deployer, nonce), vm.computeCreateAddress(deployer, nonce + 2));
         if (coinAt.code.length != 0) revert CoinAlreadyDeployed(coinAt);
         d = deploySystem(deployer, c);
         vm.stopBroadcast();

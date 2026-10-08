@@ -144,7 +144,7 @@ abstract contract HandlerBase is Test {
     address internal constant STRATEGY = Mainnet.CREDIT_STRATEGY;
     IPoolManager internal constant PM = IPoolManager(Mainnet.POOL_MANAGER);
     address internal constant DEAD = Mainnet.DEAD;
-    address internal constant HOOK = Mainnet.SKIM_HOOK;
+    address internal constant HOOK = lc.stack.hook;
     bytes32 internal constant SKIM_SPLIT = keccak256("SkimSplit(bytes32,uint256,uint256,uint256,uint256)");
     bytes32 internal constant TRANSFER = keccak256("Transfer(address,address,uint256)");
 
@@ -797,7 +797,7 @@ abstract contract HandlerBase is Test {
     /// the skim rate the live anti sniper module reports for the next swap, in hundred thousandths. 90 percent at
     /// launch, falling linearly to the 10 percent baseline over the window
     function _skimBps() internal view returns (uint256 bps) {
-        bps = IArtCoinsMevSkim(Mainnet.MEV_LINEAR_SKIM).currentSkimBps(poolId);
+        bps = IArtCoinsMevSkim(lc.mevModule).currentSkimBps(poolId);
         if (bps < 10_000) bps = 10_000;
     }
 

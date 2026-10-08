@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Vm} from "forge-std/Vm.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
+import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
 import {Stack, Settings, Sale} from "../../src/interfaces/Interfaces.sol";
 
 /// @notice creates the production contracts from their via_ir artifacts. the tests never import the production sources
@@ -26,5 +27,9 @@ library Prod {
 
     function newController(address core, Sale memory sale) internal returns (IControllerV1) {
         return IControllerV1(vm.deployCode("ControllerV1.sol:ControllerV1", abi.encode(core, sale)));
+    }
+
+    function newRouter(address owner) internal returns (IFeeRouter) {
+        return IFeeRouter(payable(vm.deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
     }
 }

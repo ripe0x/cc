@@ -716,7 +716,7 @@ contract InvariantsPhase1Window is InvariantsBase {
     }
 
     function _skimBpsNow() internal view returns (uint256) {
-        return IArtCoinsMevSkim(Mainnet.MEV_LINEAR_SKIM).currentSkimBps(poolId);
+        return IArtCoinsMevSkim(lc.mevModule).currentSkimBps(poolId);
     }
 
     /// everything the money side does inside the window first, then the standard smoke after a week

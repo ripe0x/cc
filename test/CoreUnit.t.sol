@@ -116,7 +116,7 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.owner(), owner);
         assertEq(core.pendingOwner(), address(0));
         assertEq(core.COIN(), address(coin));
-        assertEq(core.HOOK(), Mainnet.SKIM_HOOK);
+        assertEq(core.HOOK(), lc.stack.hook);
         assertEq(core.controller(), address(ctl));
         assertTrue(core.allowedTarget(Mainnet.SEAPORT));
         assertTrue(core.allowedTarget(Mainnet.CREDIT_STRATEGY));
@@ -234,8 +234,8 @@ contract CoreUnitTest is CoreBase {
         (bool ok,) = address(c2).call{value: 1 ether}("");
         assertTrue(ok);
         assertEq(c2.ethPot(), 1 ether);
-        vm.deal(Mainnet.SKIM_HOOK, 1 ether);
-        vm.prank(Mainnet.SKIM_HOOK);
+        vm.deal(lc.stack.hook, 1 ether);
+        vm.prank(lc.stack.hook);
         (ok,) = address(c2).call{value: 1 ether}("");
         assertTrue(ok);
         assertEq(c2.ethPot(), 1 ether, "the default hook is not special to this core");
@@ -984,11 +984,11 @@ contract CoreUnitTest is CoreBase {
             address(STATEMENTS),
             address(core),
             address(coin),
-            Mainnet.SKIM_HOOK,
+            lc.stack.hook,
             Mainnet.POOL_MANAGER,
-            Mainnet.ARTCOINS_FACTORY,
-            Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW,
+            lc.stack.factory,
+            lc.stack.locker,
+            lc.stack.escrow,
             address(house),
             Mainnet.AUCTION_FACTORY,
             Mainnet.PERMIT2,
@@ -1334,11 +1334,11 @@ contract CoreUnitTest is CoreBase {
         MockExitModule coinModule = new MockExitModule(address(coin), 1e10);
         MockExitModule ghost = new MockExitModule(address(0x5678), 1e10);
         address[7] memory badTokens = [
-            Mainnet.SKIM_HOOK,
+            lc.stack.hook,
             Mainnet.POOL_MANAGER,
-            Mainnet.ARTCOINS_FACTORY,
-            Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW,
+            lc.stack.factory,
+            lc.stack.locker,
+            lc.stack.escrow,
             address(CREDITS),
             address(STATEMENTS)
         ];
@@ -1377,11 +1377,11 @@ contract CoreUnitTest is CoreBase {
             address(STATEMENTS),
             address(core),
             address(coin),
-            Mainnet.SKIM_HOOK,
+            lc.stack.hook,
             Mainnet.POOL_MANAGER,
-            Mainnet.ARTCOINS_FACTORY,
-            Mainnet.LP_LOCKER,
-            Mainnet.FEE_ESCROW,
+            lc.stack.factory,
+            lc.stack.locker,
+            lc.stack.escrow,
             address(0),
             address(house),
             Mainnet.AUCTION_FACTORY,

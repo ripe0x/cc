@@ -41,9 +41,9 @@ contract ConfigTest is Fixture {
         assertEq(unsetFields(f).length, 0, "no placeholder is left in the shipped file");
         assertEq(f.rateStart, 1.54e13);
         assertEq(f.supply, 1_000_000_000e18);
-        assertEq(f.stack.factory, Mainnet.ARTCOINS_FACTORY);
+        assertEq(f.stack.factory, lc.stack.factory);
         assertEq(f.stack.auctionFactory, Mainnet.AUCTION_FACTORY);
-        assertEq(f.factoryOwner, Mainnet.ARTCOINS_FACTORY_OWNER);
+        assertEq(f.factoryOwner, owner);
         assertEq(abi.encode(f.settings), abi.encode(Mainnet.defaultSettings()), "settings block is the launch values");
     }
 
@@ -102,7 +102,7 @@ contract ConfigTest is Fixture {
 
     function _enabledDeployer() internal returns (address d2) {
         d2 = _user("second deployer");
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
+        vm.prank(owner);
         FACTORY.setAdmin(d2, true);
         vm.deal(d2, 5 ether);
     }

