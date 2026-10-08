@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {console2} from "forge-std/console2.sol";
 import {Test, Vm} from "forge-std/Test.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
@@ -823,10 +824,15 @@ abstract contract HandlerBase is Test {
     /// whether `skim` is the skim the hook takes on a swap whose pool eth amount was `volume`. a buy (eth in) skims
     /// on top of the pool amount, a sell skims out of it. exact input swaps round down once, so two wei of play
     function _skimTotalOk(uint256 volume, bool buy, uint256 bps, uint256 skim) internal pure returns (bool) {
-        uint256 total = buy ? volume * bps / (100_000 - bps) : volume * bps / 100_000;
-        // the rounding of the pool amount is scaled by bps / (100_000 - bps) on a buy, which is 9 at the 90 point start
-        uint256 tol = buy ? 2 + 2 * bps / (100_000 - bps) + 1 : 2;
-        return skim + tol >= total && skim <= total + tol;
+        // a buy skims on top of the pool amount. a sell reports either the gross eth out (skim = volume * bps / 1e5) or
+        // the net one (skim = volume * bps / (1e5 - bps)), by the kind of exact swap. the rounding of the pool amount is
+        // scaled by bps / (100_000 - bps), which is 9 at the 90 point start
+        uint256 tol = 3 + 2 * bps / (100_000 - bps);
+        uint256 onTop = volume * bps / (100_000 - bps);
+        if (skim + tol >= onTop && skim <= onTop + tol) return true;
+        if (buy) return false;
+        uint256 gross = volume * bps / 100_000;
+        return skim + 2 >= gross && skim <= gross + 2;
     }
 
     /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip comes off the top,
@@ -1058,7 +1064,13 @@ abstract contract HandlerBase is Test {
             if (bounty != eb) _flag(V_POT, "skim bounty differs from the hook rules at the live rate");
             if (protocol != ep) _flag(V_POT, "skim creator leg differs from the hook rules at the live rate");
             if (!_skimTotalOk(volume, p.buy, p.bps, bounty + protocol)) {
+                emit log_named_string("DBG kind", what);
+                emit log_named_uint("DBG exactIn", p.exactIn ? 1 : 0);
+                emit log_named_uint("DBG volume", volume);
+                emit log_named_uint("DBG skim", bounty + protocol);
+                emit log_named_uint("DBG bps", p.bps);
                 _flag(V_POT, "skim total differs from the hook rules at the live rate");
+
             }
         }
         // the hook reports the pool eth amount, which is the eth spent less the skim on an exact input buy
