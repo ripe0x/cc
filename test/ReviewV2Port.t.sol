@@ -403,6 +403,13 @@ contract ReviewReimburseTest is Fixture {
             assertEq(r, p * caps[i] / 10_000, "the cap binds and is the floor of the exact quotient");
             assertLe(r * 10_000, p * caps[i], "never above the exact cap");
             assertLe(r * 10_000, stored * caps[i], "nor above the cap of the stored statement cost");
+            if (caps[i] == 333) {
+                emit log_named_uint("example: pulled cost P", p);
+                emit log_named_uint("example: cap bps C", caps[i]);
+                emit log_named_uint("example: P*C", p * caps[i]);
+                emit log_named_uint("example: P*C mod 10000", p * caps[i] % 10_000);
+                emit log_named_uint("example: paid r", r);
+            }
             if (p * caps[i] % 10_000 != 0) {
                 ++inexact;
                 assertLt(r * 10_000, p * caps[i], "strictly below: the exact quotient has a fraction");
