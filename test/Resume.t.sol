@@ -81,7 +81,8 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     }
 
     /// @dev the first `n` of the transactions, by hand, as the deployer: 1 library, 2 controller, 3 router, 4 core,
-    /// 5 launch, 6 router engine, 7 router payees, 8 router split start (the tip is the router default, no transaction)
+    /// 5 launch, 6 router engine, 7 router payees, 8 router split start from the mined launch time (the tip is the router
+    /// default, no transaction)
     function _steps(uint256 n) internal returns (address core, address coin, address router) {
         scriptMode = true;
         if (n >= 1) _sendLibrary();
@@ -105,7 +106,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
             ppm[0] = base.payeePpm;
             r.setPayees(who, ppm);
         }
-        if (n >= 8) r.setSplitStart(uint64(block.timestamp + base.sniperSeconds + SPLIT_MARGIN));
+        if (n >= 8) startSplitAfterLaunch(base, router, coin);
         vm.stopPrank();
         scriptMode = false;
     }
@@ -135,6 +136,12 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     function _assertDone(address core, Stage expectFrom) internal {
         Stage from = this.resume(deployer, base, core);
         assertEq(uint256(from), uint256(expectFrom), "stage found");
+        if (expectFrom == Stage.CoreOnly) {
+            // the run that sent the launch leaves the split start for the next run, after the launch is mined
+            assertEq(uint256(detectStage(base, core)), uint256(Stage.Setup), "only the split start is missing");
+            vm.warp(block.timestamp + 1 hours);
+            assertEq(uint256(this.resume(deployer, base, core)), uint256(Stage.Setup), "the second run");
+        }
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
         address coin = ICore(payable(core)).COIN();
         assertEq(IArtCoinsTokenV2(coin).admin(), owner, "the owner is the token admin");
@@ -143,10 +150,60 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         assertEq(list, "", "postflight is clean");
     }
 
+    /// the split start needs the mined launch time: a run that sends the launch leaves it for the next run (V2R-7). the
+    /// postflight of the first run warns about it, the second run, hours later, sets launchedAt plus the window exactly
     function test_resumeAfterTheCore() public {
         (address core,,) = _steps(4);
         assertEq(uint256(this.stageOf(core)), uint256(Stage.CoreOnly));
-        _assertDone(core, Stage.CoreOnly);
+        assertEq(uint256(this.resume(deployer, base, core)), uint256(Stage.CoreOnly));
+        IFeeRouter r = IFeeRouter(payable(ICore(payable(core)).FEE_SOURCE()));
+        assertEq(r.splitStart(), 0, "the launch run does not guess the split start");
+        assertEq(uint256(detectStage(base, core)), uint256(Stage.Setup), "only the split start is missing");
+        (string memory first,) = _failed();
+        assertEq(first, "", "the pending split start is a warning, not a failure");
+        vm.warp(block.timestamp + 5 hours);
+        _assertDone(core, Stage.Setup);
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(base.stack.factory, ICore(payable(core)).COIN());
+        assertEq(r.splitStart(), uint256(info.launchedAt) + base.sniperSeconds, "launch time plus the window, no margin");
+        assertLt(r.splitStart(), block.timestamp, "derived from the launch, not from the clock of the run");
+    }
+
+    /// V2R-7: the launch mined hours before the setup run: the split start is still the launch time plus the window
+    function test_aLateRunSetsTheSplitStartFromTheMinedLaunch() public {
+        (address core, address coin, address router) = _steps(7);
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(base.stack.factory, coin);
+        vm.warp(block.timestamp + 3 hours);
+        _assertDone(core, Stage.Setup);
+        assertEq(IFeeRouter(payable(router)).splitStart(), uint256(info.launchedAt) + base.sniperSeconds);
+    }
+
+    /// a split start that is not launch time plus the window fails the postflight and prints the difference
+    function test_postflightFailsAWrongSplitStartAndNamesTheDifference() public {
+        (address core, address coin, address router) = _steps(7);
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(base.stack.factory, coin);
+        uint256 want = uint256(info.launchedAt) + base.sniperSeconds;
+        string memory row = "router: split start is the launch time plus the anti sniper window, exactly";
+        vm.startPrank(deployer);
+        IFeeRouter(payable(router)).setSplitStart(uint64(want + 900));
+        vm.stopPrank();
+        postflightAs(base, core, deployer);
+        (string memory list,) = _failed();
+        assertEq(list, row);
+        for (uint256 i; i < rows.length; ++i) {
+            if (keccak256(bytes(rows[i].name)) == keccak256(bytes(row))) {
+                assertEq(
+                    rows[i].detail,
+                    string.concat(
+                        "splitStart ", vm.toString(want + 900), " want launchedAt plus window ", vm.toString(want), ", late by 900"
+                    )
+                );
+            }
+        }
+        vm.prank(deployer);
+        IFeeRouter(payable(router)).setSplitStart(uint64(want - 1));
+        postflightAs(base, core, deployer);
+        (list,) = _failed();
+        assertEq(list, row, "early fails too");
     }
 
     function test_resumeAfterTheLaunch() public {

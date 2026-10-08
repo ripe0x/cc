@@ -180,6 +180,8 @@ abstract contract Fixture is Test, ProdDeployer {
         lc.mevModule = v2.mev;
         vm.startPrank(owner);
         Deployed memory d = deploySystem(owner, lc);
+        // the launch is mined in this block: the split starts when the anti sniper window ends
+        startSplitAfterLaunch(lc, d.router, d.coin);
         vm.stopPrank();
 
         // `deploySystem` filled the router into its own copy of the config

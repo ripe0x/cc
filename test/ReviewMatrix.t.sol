@@ -484,7 +484,13 @@ contract ReviewMatrixConfigTest is ReviewHarness {
     }
 
     function test_matrix_launchB() public {
-        _matrix(1, 40, N_LAUNCH);
+        _matrix(1, 40, 60);
+    }
+
+    /// @dev split from launchB: with the runtime code rows of the postflight (V2R-5) the second half no longer fits one
+    /// test under the 2^30 gas limit
+    function test_matrix_launchC() public {
+        _matrix(1, 60, N_LAUNCH);
     }
 
     function test_matrix_ratePeople() public {

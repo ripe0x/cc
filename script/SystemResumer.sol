@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
-import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {SystemDeployer, Deployed} from "./SystemDeployer.sol";
 
@@ -12,12 +11,13 @@ enum Stage {
     NoCore, // no code at the core address, nothing to resume (run Deploy again)
     CoreOnly, // controller, router and core deployed, the launch through the factory is not sent
     Launched, // coin launched, the router does not point at the core yet
-    Setup, // router engine set, payees, tip or split start still missing
+    Setup, // router engine, payees, tip or the split start still missing (the split start waits for a mined launch)
     Done // router set up as in the config
 }
 
 /// @notice finishes a deploy that stopped half way: detects the stage on chain and sends only the missing steps, as the
-/// factory owner. shared by the `Resume` script and the tests
+/// factory owner. the split start is set here, in the run after the launch is mined, from the launch time on chain.
+/// shared by the `Resume` script and the tests
 abstract contract SystemResumer is SystemDeployer {
     /// @notice the core at the given address was not built from this config
     error CoreMismatch(string what);
@@ -83,6 +83,7 @@ abstract contract SystemResumer is SystemDeployer {
         returns (Deployed memory d)
     {
         ICore core = ICore(payable(core_));
+        splitStartPending = false;
         c.stack.feeSource = core.FEE_SOURCE();
         d.router = c.stack.feeSource;
         d.core = core_;
@@ -98,8 +99,10 @@ abstract contract SystemResumer is SystemDeployer {
         if (from != Stage.Done) {
             address ro = IFeeRouter(payable(d.router)).owner();
             if (ro != deployer) revert NotRouterOwner(ro, deployer);
-            (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, d.coin);
-            _setupRouter(c, d.router, core_, info.launchedAt);
+            _setupRouter(c, d.router, core_);
+            // the split start needs the mined launch time. a run that sent the launch cannot know it: the next run does
+            if (from == Stage.CoreOnly) splitStartPending = true;
+            else startSplitAfterLaunch(c, d.router, d.coin);
         }
         postflightAs(c, core_, deployer);
         _require();

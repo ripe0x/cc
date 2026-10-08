@@ -64,6 +64,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         vm.startPrank(who);
         d = deploySystem(who, c);
         vm.stopPrank();
+        splitStartPending = true;
         postflightAs(c, d.core, who);
         _require();
     }

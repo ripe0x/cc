@@ -145,8 +145,11 @@ contract ReviewSeaportFlushTest is SeaportBase {
 
         uint256 bb0 = core.ethToBuyback();
         uint256 pot0 = core.ethPot();
+        uint256 tip = held * feeRouter.tipPpm() / 1e6;
+        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
+        uint256 shared = feeRouter.splitOn() ? held * 161_031 / 1e6 : 0;
         uint256 delivered = _flush();
-        assertGt(delivered, held * 90 / 100, "the engine part of the held fees arrived");
+        assertEq(delivered, held - tip - shared, "the engine part of the held fees arrived, exactly");
         uint256 toBuyback = delivered * 5_000 / 10_000;
         assertEq(core.ethToBuyback() - bb0, toBuyback, "half to the buyback pot");
         assertEq(core.ethPot() - pot0, delivered - toBuyback, "the rest to the pot");

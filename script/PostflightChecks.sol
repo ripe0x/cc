@@ -64,8 +64,10 @@ abstract contract PostflightChecks is PostflightPool {
         _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
     }
 
-    /// @dev the most the deploy may add to the launch time plus the window for the split start (a block time margin)
-    uint256 internal constant SPLIT_MARGIN_MAX = 1 hours;
+    /// @notice the postflight of a run that has not set the split start yet (the Deploy script, a Resume that launches)
+    /// reports a split start of zero as a warning, not a failure. the split start is set by the next Resume, after the
+    /// launch is mined
+    bool internal splitStartPending;
 
     /// @dev nonces to scan down from the deployer nonce when looking for the creation of the Core
     uint256 internal constant NONCE_SCAN = 4096;
@@ -386,7 +388,7 @@ abstract contract PostflightChecks is PostflightPool {
     }
 
     /// @dev the router: the compiled code, created by the deployer right before the Core, the engine is the Core, the
-    /// owner is the config owner, payees and tip as signed, the split start after the anti sniper window, not locked by the
+    /// owner is the config owner, payees and tip as signed, the split start exactly the launch time plus the anti sniper window, not locked by the
     /// deploy. the owner can change every setting afterwards: ROUTER_CHANGED=1 turns those rows into warnings
     function _postRouter(LaunchConfig memory c, ICore core, address deployer, address coin_) private {
         IFeeRouter r = IFeeRouter(payable(core.FEE_SOURCE()));
@@ -424,17 +426,33 @@ abstract contract PostflightChecks is PostflightPool {
             string.concat("tip ppm ", vm.toString(r.tipPpm()), " cap ", vm.toString(r.tipCap())),
             "ROUTER_CHANGED=1"
         );
-        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, coin_);
-        _soft(
-            ch || r.splitOn(),
-            "router: split start is after the anti sniper window, at most an hour after it",
-            info.launchedAt != 0 && r.splitStart() >= uint256(info.launchedAt) + c.sniperSeconds
-                && r.splitStart() <= uint256(info.launchedAt) + c.sniperSeconds + SPLIT_MARGIN_MAX,
-            string.concat("splitStart ", vm.toString(r.splitStart())),
-            "ROUTER_CHANGED=1 or the split is on"
-        );
+        _postSplitStart(c, r, ch, coin_);
         _info("router: split", r.splitOn() ? "on" : "not started, everything goes to the engine");
         _info("router: eth held", string.concat(vm.toString(address(r).balance), " wei, owed to payees ", vm.toString(r.totalOwed())));
+    }
+
+    /// @dev the split start is the launch time recorded by the factory plus the anti sniper window, exactly. a difference
+    /// is a failure and is printed. zero (not set yet) is a warning only in a run that has not set it, i.e. the Deploy
+    /// script and a Resume that sent the launch (`splitStartPending`): the next Resume sets it from the mined launch time
+    function _postSplitStart(LaunchConfig memory c, IFeeRouter r, bool ch, address coin_) private {
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, coin_);
+        uint256 want = uint256(info.launchedAt) + c.sniperSeconds;
+        uint256 got = r.splitStart();
+        string memory detail = string.concat("splitStart ", vm.toString(got), " want launchedAt plus window ", vm.toString(want));
+        if (got != want && got != 0) {
+            detail = string.concat(detail, got > want ? ", late by " : ", early by ", vm.toString(got > want ? got - want : want - got));
+        }
+        if (got == 0 && splitStartPending) {
+            _warn("warn: router split start is not set yet, run Resume after the launch is mined", false, detail);
+            return;
+        }
+        _soft(
+            ch || r.splitOn(),
+            "router: split start is the launch time plus the anti sniper window, exactly",
+            info.launchedAt != 0 && got == want,
+            detail,
+            "ROUTER_CHANGED=1 or the split is on"
+        );
     }
 
     /// @dev what a read back cannot cover, said in the output

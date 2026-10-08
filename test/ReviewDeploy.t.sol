@@ -224,6 +224,7 @@ contract ReviewDeployTest is ReviewHarness {
     function test_postflightReadsThePositionBack() public {
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
+        startSplitAfterLaunch(base, d.router, d.coin);
         vm.stopPrank();
         postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
@@ -250,6 +251,7 @@ contract ReviewDeployTest is ReviewHarness {
     function test_postflightReadsTheSniperParamsBack() public {
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
+        startSplitAfterLaunch(base, d.router, d.coin);
         vm.stopPrank();
         postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
@@ -266,7 +268,7 @@ contract ReviewDeployTest is ReviewHarness {
         c = base;
         c.sniperSeconds = 3000;
         postflightAs(c, d.core, deployer);
-        assertEq(_failedNames(), string.concat(row, ", router: split start is after the anti sniper window, at most an hour after it"));
+        assertEq(_failedNames(), string.concat(row, ", router: split start is the launch time plus the anti sniper window, exactly"));
         c = base;
         c.baselineSkimBps = 5000;
         postflightAs(c, d.core, deployer);

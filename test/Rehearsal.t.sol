@@ -128,7 +128,16 @@ contract RehearsalTest is Test, ProdDeployer {
         uint256 libGas = lg - gasleft();
         vm.startPrank(deployer);
         d = deploySystem(deployer, c);
+        // the Deploy script ends here. the split start is the first transaction of the Resume run, after the launch is
+        // mined: it reads the launch time from the factory record (the rehearsal mines in the same block)
+        startSplitAfterLaunch(c, d.router, d.coin);
         vm.stopPrank();
+        (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, d.coin);
+        assertEq(
+            IFeeRouter(payable(d.router)).splitStart(),
+            uint256(info.launchedAt) + c.sniperSeconds,
+            "split start: the mined launch time plus the window, no margin"
+        );
         // each transaction costs its execution gas, 21000 intrinsic and its calldata (4 gas per zero byte, 16 per other byte)
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
         uint256[9] memory txGas = [
@@ -156,7 +165,7 @@ contract RehearsalTest is Test, ProdDeployer {
             "6 router setEngine",
             "7 router setPayees",
             "8 router setTip (skipped when the router already holds the config tip)",
-            "9 router setSplitStart"
+            "9 router setSplitStart (the Resume run, after the launch is mined)"
         ];
         uint256 total;
         for (uint256 i; i < 9; ++i) {
@@ -233,6 +242,7 @@ contract RehearsalTest is Test, ProdDeployer {
         vm.warp(block.timestamp + c.sniperSeconds + 1);
 
         uint256 pot = core.ethPot();
+        uint256 payeeStart = c.creatorPayee.balance;
         vm.prank(trader);
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
         uint256 bought = coin.balanceOf(trader);
@@ -247,9 +257,11 @@ contract RehearsalTest is Test, ProdDeployer {
         uint256 tip = want * c.tipPpm / 1e6;
         if (tip > c.tipCap) tip = c.tipCap;
         assertEq(keeper.balance, tip, "the flusher is paid the tip");
-        assertEq(core.ethPot() - pot, want - tip, "the rest reached the pot (no payee share before the split starts)");
+        assertEq(core.ethPot() - pot, want - tip, "the rest reached the pot (no payee share in the flush that starts the split)");
         assertEq(address(core).balance, core.ethPot(), "pot equals balance");
-        assertFalse(router.splitOn(), "the split has not started");
+        // the split start is the end of the window: this first flush after it turns the split on and shares nothing
+        assertTrue(router.splitOn(), "the first flush after the window starts the split");
+        assertEq(c.creatorPayee.balance, payeeStart, "that flush shared nothing");
 
         uint256 deadBefore = coin.balanceOf(Mainnet.DEAD);
         uint256 sellIn = bought / 2;
@@ -266,21 +278,16 @@ contract RehearsalTest is Test, ProdDeployer {
         assertGt(core.ethPot(), pot, "the sell skim reached the pot too");
         assertEq(coin.balanceOf(Mainnet.DEAD), deadBefore, "no tax and no burn on canonical swaps");
 
-        // the split starts at the first flush after splitStart, and shares only from the flush after that
-        vm.warp(router.splitStart());
+        // from the flush after that the payee is paid its parts per million of the gross amount flushed
         uint256 payee0 = c.creatorPayee.balance;
         vm.deal(trader, 2 ether);
         vm.prank(trader);
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
-        vm.prank(keeper);
-        router.flush();
-        assertTrue(router.splitOn(), "the first flush at the start turns the split on");
-        assertEq(c.creatorPayee.balance, payee0, "that flush shared nothing");
-        vm.prank(trader);
-        ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
+        uint256 gross = address(router).balance;
         vm.prank(keeper);
         router.flush();
         assertGt(c.creatorPayee.balance, payee0, "from now on the payee is paid its share");
+        assertEq(c.creatorPayee.balance - payee0, gross * c.payeePpm / 1e6, "exactly its share of the inflow");
 
         _sellRealCredit(core);
     }

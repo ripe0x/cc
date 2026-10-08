@@ -21,8 +21,9 @@ struct Deployed {
 /// `owner`, who must be the v2 factory owner and the config owner (a deprecated v2 factory takes only its owner, through
 /// `deployTokenAsOwner`). order (docs/FLOW.md 10.4): the library `CoreLib` (linked by `forge script` before `run`), the
 /// controller, the router (engine unset), the Core (fee source the router, coin predicted by the factory), the launch,
-/// then the router is set up in four transactions: engine, payees, tip, split start. the router is NOT locked here, the
-/// owner closes it as a separate step. the controller, router, Core and coin addresses are predicted and every
+/// then the router is set up in three transactions: engine, payees, tip. the fourth, the split start, is a separate step
+/// that runs after the launch is mined (`startSplitAfterLaunch`, the Resume script): it reads the launch time from the chain.
+/// the router is NOT locked here, the owner closes it as a separate step. the controller, router, Core and coin addresses are predicted and every
 /// prediction is checked after creation
 abstract contract SystemDeployer is LaunchChecks {
     /// @notice a created contract did not land at its predicted address
@@ -41,14 +42,15 @@ abstract contract SystemDeployer is LaunchChecks {
     /// @dev what a transaction costs on top of the execution gas measured inside the call: the base 21_000 and the
     /// calldata of the largest creation (about 30 kb at 16 gas a byte, a bound)
     uint256 internal constant TX_OVERHEAD = 520_000;
-    /// @dev seconds added to the split start, so a launch that mines a little after the simulation still starts the split
-    /// after the anti sniper window. the first flush after the start sends everything to the engine anyway
-    uint256 internal constant SPLIT_MARGIN = 900;
+    /// @notice the launch is not recorded by the factory yet, so there is no launch time to derive the split start from
+    error LaunchNotMined();
+
     /// @dev the steps of `stepGas`, in the order they are sent
     uint256 internal constant STEPS = 8;
 
     /// @notice execution gas of the transactions of the last `deploySystem`: controller, router, core, launch, setEngine,
-    /// setPayees, setTip, setSplitStart. the library goes first and is measured by the rehearsal
+    /// setPayees, setTip, setSplitStart (the last one is measured by `startSplitAfterLaunch`, not by `deploySystem`). the library
+    /// goes first and is measured by the rehearsal
     uint256[8] internal stepGas;
 
     /// @notice creates the router, the controller and the core. the script (`NewProd`) uses `new`, a test base uses
@@ -91,7 +93,7 @@ abstract contract SystemDeployer is LaunchChecks {
         d.coin = _launch(c, coinAt, d.router, coreAt);
         d.launchKey = poolKeyOf(d.coin, c.stack);
         d.poolId = keccak256(abi.encode(d.launchKey));
-        _setupRouter(c, d.router, d.core, 0);
+        _setupRouter(c, d.router, d.core);
     }
 
     function _step(uint256 i, uint256 gasBefore) internal {
@@ -120,11 +122,9 @@ abstract contract SystemDeployer is LaunchChecks {
         if (coin != coinAt) revert AddressMismatch("coin");
     }
 
-    /// @notice the four router transactions, each one only when the router does not hold the value yet: engine, payees,
-    /// tip, split start (the launch time plus the anti sniper window plus a margin). the caller is the router owner.
-    /// `launchedAt` is the launch time on chain, zero to use the current block time (the deploy sends the launch in the
-    /// same run)
-    function _setupRouter(LaunchConfig memory c, address router, address core, uint256 launchedAt) internal {
+    /// @notice the three router transactions, each one only when the router does not hold the value yet: engine, payees,
+    /// tip. the caller is the router owner. the split start is not here: it needs the mined launch time (`startSplitAfterLaunch`)
+    function _setupRouter(LaunchConfig memory c, address router, address core) internal {
         IFeeRouter r = IFeeRouter(payable(router));
         uint256 g = gasleft();
         if (r.engine() != core) r.setEngine(core);
@@ -142,12 +142,18 @@ abstract contract SystemDeployer is LaunchChecks {
         g = gasleft();
         if (r.tipPpm() != c.tipPpm || r.tipCap() != c.tipCap) r.setTip(c.tipPpm, c.tipCap);
         _step(6, g);
-        g = gasleft();
-        if (r.splitStart() == 0) {
-            uint256 base = launchedAt == 0 ? block.timestamp : launchedAt;
-            // forge-lint: disable-next-line(unsafe-typecast)
-            r.setSplitStart(uint64(base + c.sniperSeconds + SPLIT_MARGIN));
-        }
+    }
+
+    /// @notice the last router transaction, only after the launch transaction is mined: the split starts when the anti
+    /// sniper window ends, the launch time read from the factory record of the coin plus the window, no margin. only
+    /// when the router has no split start yet. the caller is the router owner
+    function startSplitAfterLaunch(LaunchConfig memory c, address router, address coin) internal {
+        (bool ok, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, coin);
+        if (!ok || info.launchedAt == 0) revert LaunchNotMined();
+        uint256 g = gasleft();
+        IFeeRouter r = IFeeRouter(payable(router));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (r.splitStart() == 0) r.setSplitStart(uint64(uint256(info.launchedAt) + c.sniperSeconds));
         _step(7, g);
     }
 

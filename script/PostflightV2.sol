@@ -11,63 +11,93 @@ import {Report} from "./Report.sol";
 abstract contract PostflightV2 is SystemBuilder, Report {
     // ------------------------------------------------------------------ runtime code identity
 
-    /// @dev the {start, length} pairs (packed start << 128 | length) of the immutable slots and the library address
-    /// slots of an artifact, read once from its json and kept: the json is large and a postflight may run many times
-    mapping(bytes32 => uint256[]) private _idMasks;
-
     /// @dev json objects decode in key order: length, then start
     struct IdRef {
         uint256 length;
         uint256 start;
     }
 
-    function _idCollect(string memory j, string memory path, uint256[] storage out) private {
+    /// @dev the {start, length} pairs (packed start << 128 | length) of the immutable slots and the library address
+    /// slots of an artifact. the artifact json is large (a postflight runs hundreds of times in the mutation matrix, and
+    /// a snapshot revert would drop contract storage), so the masks, the length and the masked hash of the compiled
+    /// runtime code are read once and kept in the process environment, which a snapshot revert does not touch
+    function _idCollect(string memory j, string memory path, uint256[] memory acc) private view returns (uint256[] memory) {
         IdRef[] memory refs = abi.decode(vm.parseJson(j, path), (IdRef[]));
-        for (uint256 i; i < refs.length; ++i) {
-            out.push((refs[i].start << 128) | refs[i].length);
+        uint256[] memory out = new uint256[](acc.length + refs.length);
+        for (uint256 i; i < acc.length; ++i) {
+            out[i] = acc[i];
         }
+        for (uint256 i; i < refs.length; ++i) {
+            out[acc.length + i] = (refs[i].start << 128) | refs[i].length;
+        }
+        return out;
     }
 
-    function _idMaskOf(string memory name) private returns (uint256[] storage m) {
-        m = _idMasks[keccak256(bytes(name))];
-        if (m.length != 0) return m;
+    function _idKey(string memory name, string memory what) private pure returns (string memory) {
+        return string.concat("POSTFLIGHT_CODE_", what, "_", name);
+    }
+
+    /// @dev reads the artifact once: the slots to mask and the hash of the masked compiled runtime code
+    function _idLoad(string memory name) private {
         string memory j = vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));
+        uint256[] memory m = new uint256[](0);
         string[] memory ids = vm.parseJsonKeys(j, ".deployedBytecode.immutableReferences");
         for (uint256 i; i < ids.length; ++i) {
-            _idCollect(j, string.concat(".deployedBytecode.immutableReferences.", ids[i]), m);
+            m = _idCollect(j, string.concat(".deployedBytecode.immutableReferences.", ids[i]), m);
         }
         string[] memory files = vm.parseJsonKeys(j, ".deployedBytecode.linkReferences");
         for (uint256 i; i < files.length; ++i) {
             string memory fp = string.concat(".deployedBytecode.linkReferences['", files[i], "']");
             string[] memory libs = vm.parseJsonKeys(j, fp);
             for (uint256 k; k < libs.length; ++k) {
-                _idCollect(j, string.concat(fp, ".", libs[k]), m);
+                m = _idCollect(j, string.concat(fp, ".", libs[k]), m);
             }
         }
+        bytes memory built = vm.getDeployedCode(string.concat(name, ".sol:", name));
+        _idZero(built, m);
+        string memory list;
+        for (uint256 i; i < m.length; ++i) {
+            list = i == 0 ? vm.toString(m[i]) : string.concat(list, ",", vm.toString(m[i]));
+        }
+        vm.setEnv(_idKey(name, "LEN"), vm.toString(built.length));
+        vm.setEnv(_idKey(name, "HASH"), vm.toString(keccak256(built)));
+        vm.setEnv(_idKey(name, "MASK"), list);
     }
 
-    function _idZero(bytes memory code, uint256[] storage m) private view {
+    function _idZero(bytes memory code, uint256[] memory m) private pure {
         for (uint256 i; i < m.length; ++i) {
             uint256 start = m[i] >> 128;
-            uint256 end = start + uint128(m[i]);
-            for (uint256 x = start; x < end; ++x) {
-                code[x] = 0;
+            uint256 len = uint128(m[i]);
+            require(start + len <= code.length, "mask outside the code");
+            // calldata past its end reads as zeros: one copy zeroes the whole range
+            assembly {
+                calldatacopy(add(add(code, 0x20), start), calldatasize(), len)
             }
         }
     }
 
     /// @notice whether the runtime code at `at` is the runtime code of the compiled artifact `name` (`Core`,
     /// `ControllerV1`), the immutable slots and the linked library address masked in both (the method of
-    /// test/BuildIdentity.t.sol). false when `at` has no code
-    function runtimeMatchesArtifact(address at, string memory name) internal returns (bool) {
+    /// test/BuildIdentity.t.sol). false when `at` has no code. the artifact side is read once and kept, and the copy
+    /// of the live code is released, so a run of hundreds of postflights stays cheap
+    function runtimeMatchesArtifact(address at, string memory name) internal returns (bool ok) {
         if (at.code.length == 0) return false;
+        if (!vm.envExists(_idKey(name, "HASH"))) _idLoad(name);
+        uint256[] memory m = vm.envUint(_idKey(name, "MASK"), ",");
+        bytes32 want = vm.envBytes32(_idKey(name, "HASH"));
+        uint256 len = vm.envUint(_idKey(name, "LEN"));
+        uint256 fmp;
+        assembly {
+            fmp := mload(0x40)
+        }
         bytes memory live = at.code;
-        bytes memory built = vm.getDeployedCode(string.concat(name, ".sol:", name));
-        if (live.length != built.length) return false;
-        uint256[] storage m = _idMaskOf(name);
-        _idZero(live, m);
-        _idZero(built, m);
-        return keccak256(live) == keccak256(built);
+        if (live.length == len) {
+            _idZero(live, m);
+            ok = keccak256(live) == want;
+        }
+        assembly {
+            mstore(0x40, fmp)
+        }
     }
 
     /// @dev a staticcall that never reverts. ok is false when the call failed or returned less than a word

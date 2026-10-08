@@ -12,7 +12,8 @@ import {NewProd} from "./NewProd.sol";
 /// LAUNCH_CONFIG. refuses to run while owner, creator, name, symbol or salt is unset, unless CONFIG_HASH is the hash
 /// that preflight printed for this config, and unless the signer is the factory owner. the order of the transactions
 /// (docs/FLOW.md 10.4): the library, the controller, the router, the Core, the launch, then the router setup (engine,
-/// payees, tip, split start). preflight runs first and postflight runs on the simulated result, both before anything is
+/// payees, tip). the split start is NOT sent here: it is derived from the launch time as mined, so it is the one step of
+/// the Resume script (run it after this one, docs/DEPLOY.md). preflight runs first and postflight runs on the simulated result, both before anything is
 /// sent. the full runbook is docs/DEPLOY.md
 contract Deploy is Script, NewProd {
     /// @notice runs the deploy as the broadcaster
@@ -35,8 +36,8 @@ contract Deploy is Script, NewProd {
         d = deploySystem(deployer, c);
         vm.stopBroadcast();
         // the same read back as the Postflight script, on the result of the run. a failure reverts the simulation, so
-        // nothing is sent. the factory's launch time is the simulation time here, the margin on the split start covers
-        // the difference to the mined time
+        // nothing is sent. the split start is still zero here (a warning): Resume sets it from the mined launch time
+        splitStartPending = true;
         postflightAs(c, d.core, deployer);
         _print("postflight of the simulated launch");
         _require();
@@ -44,6 +45,7 @@ contract Deploy is Script, NewProd {
         console.log("coin", d.coin);
         console.log("controller", d.controller);
         console.log("router", d.router);
+        console.log("split start NOT set: run script/Resume.s.sol once the launch is mined (docs/DEPLOY.md)");
         for (uint256 i; i < STEPS; ++i) {
             console.log(string.concat("gas of step ", vm.toString(i)), stepGas[i]);
         }
