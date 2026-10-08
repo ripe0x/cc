@@ -625,8 +625,8 @@ abstract contract InvariantsBase is InvariantFixture {
             handler.buyCoin(m, 1, 0);
         }
         assertTrue(_try(41, 20), "no repoint");
-        vm.prank(feeRouter.owner());
-        try feeRouter.setEngine(address(core)) {} catch {}
+        handler.repoint(0, 0);
+        assertEq(feeRouter.engine(), address(core), "the engine is back at the core");
         handler.flush(1, 0);
     }
 
