@@ -122,3 +122,53 @@ contract ReviewSeaportFlushTest is SeaportBase {
         assertEq(booked, price, "the cost basis is the price");
     }
 }
+
+/// F2. the buyback has no min out. FLOW 10.1 and ARCHITECTURE item 17 say a sandwich of a 1 or 5 eth slice loses money after
+/// both skims. at the v2 skim of 6.9 points that holds at the 1 eth launch slice and fails at the 5 eth cap (the
+/// engineer relaxed `test_FIXED_buybackSliceCapStopsTheSandwich` instead of the claim)
+contract ReviewSandwichTest is FeeBase {
+    function _sandwich(uint256 slice, uint256 mult) internal returns (int256 net) {
+        uint256 snap = vm.snapshotState();
+        vm.deal(address(core), address(core).balance + slice);
+        vm.store(address(core), bytes32(uint256(7)), bytes32(slice));
+        assertEq(core.ethToBuyback(), slice, "slot 7 is ethToBuyback");
+        Settings memory s = core.settings();
+        s.buybackSlice = uint128(slice);
+        s.buybackDelay = 1;
+        _setSettings(s);
+        vm.roll(block.number + 100);
+        address mev = _user("mev");
+        uint256 front = slice * mult;
+        uint256 got = _buyCoin(mev, front);
+        vm.prank(keeper);
+        core.buyback();
+        uint256 back = _sellCoin(mev, got);
+        net = int256(back) - int256(front);
+        vm.revertToState(snap);
+    }
+
+    function test_FINDING_sandwichOfTheFiveEthSliceProfitsAtTheLaunchSkim() public {
+        _skipToSplitStart();
+        uint256[6] memory m = [uint256(1), 2, 3, 4, 6, 8];
+        int256 best1 = type(int256).min;
+        int256 best5 = type(int256).min;
+        for (uint256 i; i < 6; ++i) {
+            int256 a = _sandwich(1 ether, m[i]);
+            int256 b = _sandwich(5 ether, m[i]);
+            emit log_named_int(string.concat("1 eth slice, front x", vm.toString(m[i])), a);
+            emit log_named_int(string.concat("5 eth slice, front x", vm.toString(m[i])), b);
+            if (a > best1) best1 = a;
+            if (b > best5) best5 = b;
+        }
+        for (uint256 sl = 2; sl <= 4; ++sl) {
+            int256 best = type(int256).min;
+            for (uint256 i; i < 6; ++i) {
+                int256 r = _sandwich(sl * 1 ether, m[i]);
+                if (r > best) best = r;
+            }
+            emit log_named_int(string.concat("best net, slice ", vm.toString(sl), " eth"), best);
+        }
+        assertLt(best1, 0, "OK: the 1 eth launch slice cannot be sandwiched for a profit");
+        assertGt(best5, 0, "FINDING: the 5 eth slice (the settings bound) can be sandwiched for a profit");
+    }
+}
