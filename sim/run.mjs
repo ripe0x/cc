@@ -165,7 +165,7 @@ batches.q7 = () => {
   const out = { volume: [], stmtDemand: [], wtp: [] };
   for (const v of [1, 5, 17, 50, 150]) {
     const o = { volPreset: 'custom', volTail: v, volHalfLifeDays: 2 };
-    out.volume.push(Object.assign({ ethPerDay: v, feesPerDay: v * 0.095 }, many(o, SEEDS5)));
+    out.volume.push(Object.assign({ ethPerDay: v, feesPerDay: v * 0.0518 }, many(o, SEEDS5)));
     // statement demand 5 times higher, to see what the sale side can do when the buyers are there
     out.stmtDemand.push(Object.assign({ ethPerDay: v }, many(Object.assign({ stmtPerDay: 40, stmtFloorPerDay: 10 }, o), SEEDS3)));
   }

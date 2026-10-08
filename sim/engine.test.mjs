@@ -1,7 +1,7 @@
 // unit checks that the port matches src/Core.sol on hand computed cases. run: node engine.test.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { Core, Pool, DEFAULTS, SETTINGS, CONTROLLER, simulate, controllerViolation, summary, firstViolation, skimFraction, engineFeeFraction, stepVolume, W } from './engine.js';
+import { Core, Pool, DEFAULTS, SETTINGS, CONTROLLER, simulate, controllerViolation, summary, firstViolation, skimFraction, routerFeeFraction, engineFeeFraction, stepVolume, W } from './engine.js';
 
 let n = 0;
 const near = (a, b, tol, msg) => {
@@ -33,6 +33,12 @@ const R0 = 1.54e13;
   for (const k of Object.keys(SETTINGS)) ok(cfg.settings[k] !== undefined || (moved && (newFields.includes(k) || k === 'reserveBps')), 'the config carries ' + k);
   if (cfg.controller) for (const k of Object.keys(CONTROLLER)) near(+CONTROLLER[k], +cfg.controller[k], 1e-12, 'controller ' + k);
   near(DEFAULTS.rateStart, cfg.rateStart, 1e-12, 'rateStart');
+  // the pool and router values of the v2 launch
+  for (const k of ['baselineSkimBps', 'bountyBps', 'sniperStartBps']) near(DEFAULTS[k], cfg.launch[k], 1e-12, 'launch ' + k);
+  near(DEFAULTS.sniperSeconds, cfg.launch.sniperSeconds, 1e-12, 'launch sniperSeconds');
+  near(DEFAULTS.sniperEndBps, cfg.launch.baselineSkimBps, 1e-12, 'the sniper skim falls to the baseline');
+  ok(cfg.launch.lpFee === 0, 'no lp fee, so no lp income in the model');
+  near(DEFAULTS.routerPayeePpm, cfg.router.payeePpm, 1e-12, 'router payeePpm'); near(DEFAULTS.routerTipPpm, cfg.router.tipPpm, 1e-12, 'router tipPpm');
   near(DEFAULTS.rateStart, (0.75 * 0.0089 * W) / 433, 2e-3, 'rateStart is 75 percent of the market price over avgScore');
   assert.equal(firstViolation(SETTINGS), null); n++;
   assert.equal(controllerViolation(CONTROLLER), null); n++;
@@ -481,11 +487,17 @@ const R0 = 1.54e13;
   near(p.price, 2.5131970949402153e-8, 1e-9, 'back at the start');
   ok(p.sell(1).eth < 1e-9); // nothing to sell below the start tick
 }
-// skim schedule: anti sniper 90 points falling to 10 over 30 minutes, 9.5 of the baseline to the engine
+// skim schedule: anti sniper 90 points falling to the 6.9 point baseline over 30 minutes. the router gets 90 percent of the baseline
+// plus the whole extra, a flush tip comes off the top and after the split start the payee takes 161,030 ppm of the rest
 {
-  near(skimFraction(DEFAULTS, 0), 0.9, 1e-12, 'launch skim'); near(skimFraction(DEFAULTS, 900), 0.5, 1e-12, 'midway');
-  near(skimFraction(DEFAULTS, 1800), 0.1, 1e-12, 'end of window'); near(skimFraction(DEFAULTS, 99999), 0.1, 1e-12, 'baseline');
-  near(engineFeeFraction(DEFAULTS, 0.1), 0.095, 1e-12, 'engine 9.5 points'); near(engineFeeFraction(DEFAULTS, 0.9), 0.095 + 0.8, 1e-12, 'extra to the engine');
+  near(skimFraction(DEFAULTS, 0), 0.9, 1e-12, 'launch skim'); near(skimFraction(DEFAULTS, 900), (0.9 + 0.069) / 2, 1e-12, 'midway');
+  near(skimFraction(DEFAULTS, 1800), 0.069, 1e-12, 'end of window'); near(skimFraction(DEFAULTS, 99999), 0.069, 1e-12, 'baseline');
+  near(routerFeeFraction(DEFAULTS, 0.069), 0.0621, 1e-12, 'router 6.21 points'); near(routerFeeFraction(DEFAULTS, 0.9), 0.0621 + 0.831, 1e-12, 'extra to the router');
+  const tip = 1 - 5000 / 1e6;
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0621 * tip * (1 - 161030 / 1e6), 1e-12, 'engine share after the split start');
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 51.84, 1e-3, 'engine 5.18 points of 1 eth is 51.84 finney');
+  near(engineFeeFraction(DEFAULTS, 0.9, 0), (0.0621 + 0.831) * tip, 1e-12, 'the window is not shared with the payee');
+  near(engineFeeFraction(DEFAULTS, 0.069, 2699), 0.0621 * tip, 1e-12, 'nor is anything before the split start');
   let d0 = 0;
   for (let t = 0; t < 3600; t += 120) d0 += stepVolume(DEFAULTS, t, 120);
   near(d0, 1557 * 0.586, 1e-9, 'first hour volume');

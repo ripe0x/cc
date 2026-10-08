@@ -6,60 +6,64 @@ sim/engine.js is a deterministic hourly model of the engine in src/Core.sol and 
 
 before is the previous version of this file (fixed auction reserve of 90 percent of cost, `exitAfter` 72 hours, all fees to the pot). after is the launch settings of docs/FLOW.md section 9: asking price 110 percent of cost falling one point every 3 hours to 75 percent at hour 105, auction mode, hard floor 7500, `exitAfter` 105 hours, `feeToBuybackBps` 0. comparable coin volume, 5 seeds, day 90.
 
-| base case, comparable volume, day 90 | before (old rules) | after (launch settings) |
-| --- | --- | --- |
-| credits bought | 27,110 | 28,800 |
-| statements created | 339 | 359 |
-| statements sold | 121 | 158 |
-| average sale price over cost | 92% | 91% |
-| statements waiting | 216 | 201 |
-| eth to burn | 31.3 | 42.2 |
-| eth recycled by sales | 62.6 | 84.4 |
-| launch pot spent on day | 6.5 | 6.5 |
-| percent of supply burned | 8.1% | 10.0% |
-| steady credits a day after the pot | 46 | 49 |
+| base case, comparable volume, day 90 | before (old rules) | launch rules, v1 fee path (9.5 points) | v2 launch (6.9 points, router) |
+| --- | --- | --- | --- |
+| credits bought | 27,110 | 28,800 | 23,840 |
+| statements created | 339 | 359 | 298 |
+| statements sold | 121 | 158 | 137 |
+| average sale price over cost | 92% | 91% | 91% |
+| statements waiting | 216 | 201 | 159 |
+| eth to burn | 31.3 | 42.2 | 35.9 |
+| eth recycled by sales | 62.6 | 84.4 | 71.9 |
+| launch pot spent on day | 6.5 | 6.5 | 5.9 |
+| percent of supply burned | 8.1% | 10.0% | 9.2% |
+| steady credits a day after the pot | 46 | 49 | 44 |
 
 the new rules sell 37 more statements (158 against 121) at the same average price over cost (91 against 92 percent), so eth recycled by sales rises from 62.6 to 84.4 and eth to burn from 31.3 to 42.2 (10.0 percent of the coin, was 8.1). credits rise 6 percent (28,800 against 27,110) because half of every sale goes back to the pot. the launch pot is spent on day 6.5 in both: the sale side does not touch week one. why more sell: the old reserve was one price, 90 percent of cost. the buyers' willingness to pay is a multiple of the market cost of the parts, median 0.84, and the engine paid about 1.04 times market, so the median buyer can pay about 81 percent of cost. under the new curve that price is reached at about hour 90 and that buyer buys. a statement is now offered to every buyer from 110 percent down to 75 percent of cost, and the oldest statements sit at the cheapest price.
 
+the third column is the v2 launch (docs/FLOW.md section 10). a trader pays 6.9 points of volume, not 10, and the engine no longer gets 9.5 of them. the pool pays 6.21 points (90 percent of the baseline skim, plus all of the anti sniper extra) to the fee router. a flush tip takes 0.5 percent of that, and from 45 minutes after launch (the 30 minute window plus a 900 second margin) the single payee takes 161,030 parts per million of what is left. the engine therefore books 5.18 points of volume in steady state, and the whole router inflow less the tip inside the window. there is no lp income: the launch lp fee is 0 and no fee swapper exists. the rerun, 5 seeds, day 90: fees booked fall from 297 eth to 220 (down 26 percent), credits bought from 28,800 to 23,840 (down 17 percent), statements created from 359 to 298, sold from 158 to 137, eth to burn from 42.2 to 35.9 and the share of the coin burned from 10.0 to 9.2 percent. the sale side per statement does not move (average price 91 percent of cost). the launch pot is spent on day 5.9 where it was 6.5, because the window extra is unchanged and the baseline share is smaller. the model sets the tip at its 0.5 percent upper bound (the 0.005 eth cap per flush is ignored) and assumes the router is flushed as fees arrive.
+
 ## sensitivity rows (comparable volume, 5 seeds, day 90)
+
+the rows here and the tables of sections 1 and 7 are rerun on the v2 fee path (all batches in sim/results were regenerated with `node sim/run.mjs`). the reading notes under the tables and every figure quoted in prose, and the tables of sections 2 to 6 and 8 to 10, still quote the previous run on the v1 fee path (9.5 points to the engine): treat their figures as stale and read the direction; the json files hold the new numbers. the direction of every effect named in them holds in the rerun (checked against the rows: `startBps` and `stepEvery` move the average price and eth recycled, the hard floor binds when only `floorBps` is lowered, buy only sells more than auction, `feeToBuybackBps` is a strong burn dial that costs credits, the pessimistic buyer sells more at the floor). absolute credits are 17 percent lower at comparable volume.
 
 launch is `startBps` 11000, `stepEvery` 3 hours, `stepBps` 100, `floorBps` 7500, `saleFloorBps` 7500, auction mode, `feeToBuybackBps` 0. eth to burn is eth spent buying and burning the coin. differences in credits under 2 percent are seed noise.
 
 | setting | credits bought | statements created | sold | avg sale price over cost | waiting | eth to burn | eth recycled by sales | sold at the lowest price |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **launch: 11000 / 3h / 7500, auction, fee share 0** | 28,800 | 359 | 158 | 91% | 201 | 42.2 | 84.4 | 23% |
-| `startBps` 9000 | 27,620 | 345 | 141 | 82% | 202 | 33.9 | 67.7 | 34% |
-| `startBps` 13000 | 29,460 | 368 | 165 | 96% | 201 | 46.1 | 92.2 | 17% |
-| `stepEvery` 1 hour | 27,690 | 346 | 142 | 84% | 203 | 34.7 | 69.3 | 40% |
-| `stepEvery` 6 hours | 29,200 | 364 | 159 | 95% | 204 | 43.8 | 87.5 | 13% |
-| `floorBps` 7500 with `saleFloorBps` 7500 | 28,800 | 359 | 158 | 91% | 201 | 42.2 | 84.4 | 23% |
-| `floorBps` 6000 with `saleFloorBps` 7500 | 28,800 | 359 | 158 | 91% | 201 | 42.2 | 84.4 | 23% |
-| `floorBps` 5000 with `saleFloorBps` 7500 | 28,800 | 359 | 158 | 91% | 201 | 42.2 | 84.4 | 23% |
-| `floorBps` and `saleFloorBps` both 6000 | 28,920 | 361 | 174 | 80% | 186 | 42.4 | 84.7 | 22% |
-| `floorBps` and `saleFloorBps` both 5000 | 29,690 | 371 | 201 | 73% | 168 | 46.7 | 93.4 | 24% |
-| buy only mode | 29,660 | 370 | 185 | 89% | 186 | 49.1 | 98.2 | 27% |
-| `feeToBuybackBps` 1000 | 27,500 | 343 | 157 | 90% | 185 | 71.1 | 82.0 | 24% |
-| `feeToBuybackBps` 2500 | 25,230 | 315 | 155 | 91% | 159 | 117.1 | 81.7 | 22% |
-| `feeToBuybackBps` 5000 | 20,720 | 259 | 148 | 92% | 109 | 194.8 | 77.7 | 23% |
-| pessimistic: every buyer waits for the floor, auction mode | 29,420 | 367 | 179 | 75% | 187 | 40.8 | 81.7 | 100% |
-| pessimistic: every buyer waits for the floor, buy only mode | 28,540 | 356 | 167 | 75% | 190 | 37.8 | 75.5 | 100% |
+| **launch: 11000 / 3h / 7500, auction, fee share 0** | 23,840 | 298 | 137 | 91% | 159 | 35.9 | 71.9 | 25% |
+| `startBps` 9000 | 23,510 | 293 | 140 | 81% | 152 | 33.9 | 67.8 | 36% |
+| `startBps` 13000 | 25,390 | 317 | 159 | 100% | 157 | 45.3 | 90.6 | 17% |
+| `stepEvery` 1 hour | 23,680 | 295 | 139 | 85% | 155 | 34.7 | 69.4 | 38% |
+| `stepEvery` 6 hours | 24,540 | 306 | 147 | 96% | 159 | 40.5 | 81.0 | 13% |
+| `floorBps` 7500 with `saleFloorBps` 7500 | 23,840 | 298 | 137 | 91% | 159 | 35.9 | 71.9 | 25% |
+| `floorBps` 6000 with `saleFloorBps` 7500 | 23,840 | 298 | 137 | 91% | 159 | 35.9 | 71.9 | 25% |
+| `floorBps` 5000 with `saleFloorBps` 7500 | 23,840 | 298 | 137 | 91% | 159 | 35.9 | 71.9 | 25% |
+| `floorBps` and `saleFloorBps` both 6000 | 24,730 | 309 | 170 | 80% | 138 | 41.1 | 82.1 | 25% |
+| `floorBps` and `saleFloorBps` both 5000 | 25,440 | 318 | 200 | 70% | 117 | 45.3 | 90.7 | 26% |
+| buy only mode | 25,410 | 317 | 179 | 90% | 138 | 48.6 | 97.3 | 29% |
+| `feeToBuybackBps` 1000 | 22,950 | 286 | 143 | 91% | 143 | 60.0 | 75.4 | 25% |
+| `feeToBuybackBps` 2500 | 21,380 | 267 | 149 | 91% | 117 | 95.6 | 78.9 | 24% |
+| `feeToBuybackBps` 5000 | 18,000 | 225 | 153 | 92% | 70 | 154.1 | 80.7 | 25% |
+| pessimistic: every buyer waits for the floor, auction mode | 25,050 | 313 | 172 | 75% | 139 | 39.0 | 78.1 | 100% |
+| pessimistic: every buyer waits for the floor, buy only mode | 24,260 | 303 | 159 | 75% | 143 | 35.6 | 71.3 | 100% |
 
 the same rows at 17 eth a day of coin volume, 3 seeds (the launch row is the 5 seed run):
 
 | sustained 17 eth a day, day 90 | credits bought | statements created | sold | avg sale price over cost | waiting | eth to burn | eth recycled by sales | sold at the lowest price |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| launch (5 seed run) | 47,210 | 590 | 226 | 79% | 362 | 51.5 | 103.0 | 67% |
-| `startBps` 9000 | 47,020 | 587 | 231 | 77% | 354 | 50.1 | 100.3 | 76% |
-| `startBps` 13000 | 47,250 | 590 | 220 | 81% | 367 | 51.1 | 102.1 | 65% |
-| `stepEvery` 1 hour | 46,850 | 585 | 224 | 77% | 361 | 48.1 | 96.3 | 84% |
-| `stepEvery` 6 hours | 47,320 | 591 | 219 | 83% | 370 | 52.7 | 105.4 | 48% |
-| both floors 6000 | 46,400 | 580 | 236 | 66% | 341 | 45.8 | 91.5 | 67% |
-| both floors 5000 | 45,760 | 571 | 241 | 58% | 329 | 41.5 | 82.9 | 61% |
-| buy only | 46,750 | 584 | 229 | 79% | 355 | 51.5 | 103.1 | 67% |
-| `feeToBuybackBps` 1000 | 44,010 | 550 | 212 | 78% | 336 | 87.1 | 92.7 | 68% |
-| `feeToBuybackBps` 2500 | 40,040 | 500 | 227 | 81% | 271 | 154.8 | 102.8 | 56% |
-| `feeToBuybackBps` 5000 | 31,470 | 393 | 220 | 83% | 173 | 259.3 | 96.0 | 49% |
-| pessimistic, auction | 46,540 | 581 | 204 | 75% | 376 | 43.0 | 86.0 | 100% |
+| launch (5 seed run) | 35,560 | 444 | 219 | 83% | 224 | 48.5 | 97.0 | 54% |
+| `startBps` 9000 | 34,750 | 434 | 205 | 79% | 228 | 42.4 | 84.8 | 59% |
+| `startBps` 13000 | 35,410 | 442 | 210 | 83% | 229 | 47.5 | 95.1 | 56% |
+| `stepEvery` 1 hour | 35,230 | 440 | 219 | 79% | 218 | 45.8 | 91.6 | 68% |
+| `stepEvery` 6 hours | 35,130 | 439 | 198 | 85% | 239 | 45.1 | 90.1 | 44% |
+| both floors 6000 | 34,790 | 434 | 228 | 68% | 204 | 42.9 | 85.9 | 48% |
+| both floors 5000 | 34,350 | 429 | 235 | 61% | 193 | 40.0 | 80.0 | 51% |
+| buy only mode | 35,980 | 449 | 244 | 84% | 205 | 55.8 | 111.6 | 45% |
+| `feeToBuybackBps` 1000 | 33,320 | 416 | 212 | 82% | 203 | 74.9 | 93.7 | 54% |
+| `feeToBuybackBps` 2500 | 30,350 | 379 | 219 | 84% | 159 | 119.7 | 97.8 | 46% |
+| `feeToBuybackBps` 5000 | 24,180 | 302 | 205 | 89% | 95 | 191.1 | 95.3 | 21% |
+| pessimistic, auction | 35,340 | 441 | 217 | 75% | 222 | 43.8 | 87.5 | 100% |
 
 reading the rows:
 
@@ -113,7 +117,7 @@ port checks: node engine.test.mjs runs 456 numeric checks against hand computed 
 
 | piece | what it does | calibration |
 |---|---|---|
-| coin market | exogenous daily volume, buy share, skim 10 percent with 9.5 points to the pot, anti sniper 90 to 10 percent over 30 minutes, single sided position tick -175000 to 887200 | model price after day one 4.48e-7, observed 4.44e-7 |
+| coin market | exogenous daily volume, buy share, skim 6.9 percent with 5.18 points to the pot after the router's tip and payee (6.21 points to the router), anti sniper 90 to 6.9 percent over 30 minutes, single sided position tick -175000 to 887200 | model price after day one 4.48e-7, observed 4.44e-7 |
 | credit sellers | uniform scores 80 to 800, flat ask per credit with lognormal spread 0.27, top tier premium above 740, 150 offers an hour, 5 percent leave an hour, more offers when the bid is above market, a float of 96,800 credits | median 0.0089 eth, p10 0.0069, p90 0.0138 |
 | doors | the sell door pays the bid for any credit whose ceiling clears its ask, cheapest ask per bid point first. CreditStrategy listings clear through the listing door with the tip | 13,132 listings at median 0.036 eth |
 | statement buyers | arrivals 8 a day decaying to 2, willingness to pay as a multiple of 80 times the MARKET flat price, rating insensitive, one purchase each, no waiting for a lower price. the price they meet is a share of what the engine PAID (assumptions above) | median 0.84, 21 percent at 1.2 or more, max 1.32, from fixed price sales. no data on the curve or on auctions |
@@ -124,25 +128,25 @@ port checks: node engine.test.mjs runs 456 numeric checks against hand computed 
 
 | preset | day | credits acquired | statements created | sold | avg sale price over cost | eth spent buying $CC | percent of supply burned | waiting for phase 2 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| comparable decay | 30 | 25,410 | 317 | 103 | 89% | 28.5 | 7.3% | 213 |
-|  | 60 | 27,330 | 341 | 134 | 91% | 36.3 | 8.9% | 206 |
-|  | 90 | 28,800 | 359 | 158 | 91% | 42.2 | 10.0% | 201 |
-| sustained 17 eth a day | 30 | 28,720 | 358 | 116 | 83% | 30.2 | 4.8% | 239 |
-|  | 60 | 38,030 | 475 | 173 | 81% | 41.3 | 6.2% | 300 |
-|  | 90 | 47,210 | 590 | 226 | 79% | 51.5 | 7.2% | 362 |
-| sustained 50 eth a day | 30 | 37,170 | 464 | 111 | 80% | 30.3 | 4.9% | 351 |
-|  | 60 | 57,690 | 720 | 170 | 78% | 43.7 | 6.4% | 548 |
-|  | 90 | 77,950 | 974 | 220 | 77% | 55.1 | 7.6% | 753 |
-| dead after week one | 30 | 23,990 | 299 | 86 | 90% | 24.3 | 6.1% | 212 |
-|  | 60 | 25,590 | 319 | 114 | 90% | 31.2 | 7.5% | 204 |
-|  | 90 | 27,080 | 338 | 140 | 91% | 37.8 | 8.6% | 198 |
+| comparable decay | 30 | 20,930 | 261 | 86 | 91% | 23.3 | 6.4% | 174 |
+|  | 60 | 22,520 | 281 | 115 | 91% | 30.4 | 8.0% | 165 |
+|  | 90 | 23,840 | 298 | 137 | 91% | 35.9 | 9.2% | 159 |
+| sustained 17 eth a day | 30 | 23,380 | 292 | 108 | 88% | 28.2 | 4.7% | 181 |
+|  | 60 | 29,490 | 368 | 164 | 85% | 38.5 | 6.0% | 203 |
+|  | 90 | 35,560 | 444 | 219 | 83% | 48.5 | 7.1% | 224 |
+| sustained 50 eth a day | 30 | 28,620 | 357 | 111 | 80% | 27.9 | 4.7% | 243 |
+|  | 60 | 41,750 | 521 | 171 | 78% | 40.4 | 6.2% | 349 |
+|  | 90 | 54,580 | 682 | 220 | 78% | 50.5 | 7.3% | 460 |
+| dead after week one | 30 | 20,390 | 255 | 83 | 90% | 22.7 | 5.9% | 171 |
+|  | 60 | 22,010 | 275 | 113 | 91% | 30.3 | 7.5% | 161 |
+|  | 90 | 23,490 | 293 | 141 | 91% | 37.4 | 8.8% | 152 |
 
 | preset | fees in | launch pot spent on day | steady credits a day | steady statements a day | steady sold a day | price paid over market | average score bought | eth recycled by sales, 90 days |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| comparable decay | 297 | 6.5 | 49 | 0.61 | 0.81 | 1.04x | 427 | 84.4 |
-| sustained 17 eth a day | 403 | 6.3 | 306 | 3.83 | 1.77 | 0.92x | 426 | 103.0 |
-| sustained 50 eth a day | 683 | 6.6 | 675 | 8.45 | 1.67 | 0.91x | 425 | 110.1 |
-| dead after week one | 289 | 6.5 | 50 | 0.62 | 0.86 | 1.05x | 427 | 75.5 |
+| comparable decay | 220 | 5.9 | 44 | 0.56 | 0.75 | 0.99x | 427 | 71.9 |
+| sustained 17 eth a day | 278 | 5.8 | 202 | 2.54 | 1.83 | 0.90x | 425 | 97.0 |
+| sustained 50 eth a day | 430 | 5.9 | 428 | 5.35 | 1.64 | 0.87x | 424 | 100.9 |
+| dead after week one | 216 | 5.9 | 49 | 0.61 | 0.92 | 1.00x | 427 | 74.9 |
 
 reading it:
 
@@ -347,17 +351,17 @@ coin volume that decays from day two to the stated constant by about day 10 (cus
 
 | coin volume, eth a day | fees a day, eth | launch pot spent on day | steady credits a day | steady statements a day | steady sold a day | eth a day buying $CC | credits acquired by day 90 | waiting for phase 2 at day 90 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 0.095 | 6.4 | 64 | 0.8 | 0.9 | 0.22 | 28,670 | 202 |
-| 5 | 0.475 | 6.5 | 134 | 1.7 | 1.5 | 0.27 | 34,410 | 226 |
-| 17 | 1.615 | 6.5 | 304 | 3.8 | 1.7 | 0.33 | 48,350 | 374 |
-| 50 | 4.750 | 6.6 | 672 | 8.4 | 1.5 | 0.35 | 78,420 | 758 |
-| 150 | 14.250 | 7.1 | 431 | 5.4 | 1.4 | 0.42 | 109,700 | 1,172 |
+| 1 | 0.052 | 5.8 | 55 | 0.7 | 0.9 | 0.23 | 24,220 | 157 |
+| 5 | 0.259 | 5.8 | 100 | 1.3 | 1.3 | 0.28 | 28,070 | 173 |
+| 17 | 0.881 | 5.9 | 195 | 2.4 | 1.6 | 0.28 | 35,850 | 240 |
+| 50 | 2.590 | 5.9 | 433 | 5.4 | 1.9 | 0.40 | 55,220 | 456 |
+| 150 | 7.770 | 6.2 | 889 | 11.1 | 1.5 | 0.38 | 96,780 | 1,012 |
 
-1. sale proceeds carry about 45 to 55 credits a day at any volume, and coin fees add to that, about 15 credits a day per eth of daily volume at 17 eth a day and 12 at 50 (fees are 9.5 percent of volume, a credit costs 0.0089 eth). the flow grows with volume up to 50 eth a day.
+1. sale proceeds carry about 45 to 55 credits a day at any volume, and coin fees add to that, about 8 credits a day per eth of daily volume at 17 eth a day and 8 at 50 (fees reaching the pot are 5.18 percent of volume in steady state, a credit costs 0.0089 eth). the flow grows with volume up to 50 eth a day.
 2. statements a day are credits over 80. sold a day saturates at 1 to 2 whatever the volume, because buyers do not grow with supply (8 a day decaying to 2, 30 percent of them find no price). the waiting stock grows by the difference.
-3. at 150 eth a day the model hits the float: the engine has bought 109,700 credits, about all of the 110,000 live credits, and falls to 431 a day with a price of 1.28x. a bigger float is a hard cap on credits acquired. at 50 eth a day it holds 71 percent of the live credits by day 90.
-4. five times more statement buyers (40 a day decaying to 10) lift steady flow at 17 eth a day from 304 to 486 credits a day (sale proceeds) and sold from 229 to 679 in 90 days. the sale side is the lever below 17 eth a day.
-5. the buyback spends 0.22 to 0.42 eth a day after the launch pot.
+3. at 150 eth a day the engine has bought 96,780 credits by day 90, 88 percent of the 110,000 live credits, and its steady flow is 889 a day. a bigger float is a hard cap on credits acquired. at 50 eth a day it holds 50 percent of the live credits by day 90 (55,220).
+4. five times more statement buyers (40 a day decaying to 10) lift steady flow at 17 eth a day from 195 to 320 credits a day (sale proceeds) and sold from 206 to 510 in 90 days. the sale side is the lever below 17 eth a day.
+5. the buyback spends 0.23 to 0.40 eth a day after the launch pot.
 
 ## 8. phase 2
 

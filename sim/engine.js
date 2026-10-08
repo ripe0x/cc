@@ -115,11 +115,16 @@ export const SIM_DEFAULTS = {
   rateStart: 1.54e13, // 75 percent of the market price over avgScore: 0.75 * 0.0089e18 / 433
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
-  baselineSkimBps: 10000, // of 100000
-  bountyBps: 9500, // of the skim, to the engine
+  baselineSkimBps: 6900, // of 100000: 6.9 points of volume (script/config/mainnet.json launch.baselineSkimBps)
+  bountyBps: 9000, // of the baseline skim, to the fee router. the other 10 percent is the protocol leg, never the engine's
   sniperStartBps: 90000,
-  sniperEndBps: 10000,
+  sniperEndBps: 6900, // falls to the baseline
   sniperSeconds: 1800,
+  // the fee router (docs/FLOW.md 10.6, 10.7): a flush pays the caller a tip off the top, then, once the split has started, the
+  // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
+  routerTipPpm: 5000, // 0.5 percent. the cap of 0.005 eth a flush is ignored, which makes the tip an upper bound
+  routerPayeePpm: 161030, // the one launch payee, 1.0 point of volume at the baseline
+  routerSplitStartSec: 2700, // launch time plus the 30 minute window plus the 900 second margin
   startTick: -175000,
   positionUpper: 887200,
   // coin market
@@ -567,10 +572,16 @@ export function skimFraction(p, t) {
   const f = (p.sniperStartBps - ((p.sniperStartBps - p.sniperEndBps) * t) / p.sniperSeconds) / 1e5;
   return Math.max(base, f);
 }
-// share of a swap's notional that lands in the engine's pot: 9.5 of the 10 base points plus all of the anti sniper extra
-export function engineFeeFraction(p, f) {
+// share of a swap's notional the fee router receives: 90 percent of the baseline skim plus all of the anti sniper extra
+export function routerFeeFraction(p, f) {
   const base = p.baselineSkimBps / 1e5;
   return base * (p.bountyBps / BPS) + Math.max(0, f - base);
+}
+// share of a swap's notional that lands in the engine's pot at t seconds after launch: the router's inflow less the flush tip,
+// and after the split start less the payee's parts per million of the rest. 5.18 points at the baseline once the split is on
+export function engineFeeFraction(p, f, t) {
+  const left = routerFeeFraction(p, f) * (1 - p.routerTipPpm / 1e6);
+  return t >= p.routerSplitStartSec ? left * (1 - p.routerPayeePpm / 1e6) : left;
 }
 // volume in a step [t, t+dt). the first hour runs in 120 s sub steps, 15 of them inside the anti sniper window
 export function stepVolume(p, t, dt) {
@@ -881,7 +892,7 @@ export function simulate(userParams = {}) {
       core.xFill(tf);
       const gross = poolEth * (1 + f);
       pool.buy(poolEth);
-      const fee = poolEth * engineFeeFraction(p, f);
+      const fee = poolEth * engineFeeFraction(p, f, now);
       core.addFees(fee, now);
       T.feesTaker += fee; T.burnedX += coinIn; T.xFills++; T.xCoin += coinIn; T.xValue += slice; T.xGross += gross;
       T.xDiscSum += 1 - gross / slice;
@@ -901,7 +912,7 @@ export function simulate(userParams = {}) {
       const notional = info.budget / (1 + f);
       T.burned += pool.buy(notional);
       T.buybackSpent += info.budget; T.buybackTips += info.tip;
-      feeBack += notional * engineFeeFraction(p, f);
+      feeBack += notional * engineFeeFraction(p, f, tb);
       tb += delay;
     }
     if (feeBack > 0) { core.addFees(feeBack, now); T.feesBuyback += feeBack; }
@@ -961,7 +972,7 @@ export function simulate(userParams = {}) {
     const V = stepVolume(p, t0, dt), f = skimFraction(p, mid), b = t0 < 86400 ? p.buyShare0 : bLate;
     const net = b * V - (1 - b) * V; // notional is the pool's own delta, the skim comes on top
     if (net > 0) pool.buy(net); else if (net < 0) pool.sell(-net);
-    const fee = V * engineFeeFraction(p, f);
+    const fee = V * engineFeeFraction(p, f, mid);
     core.addFees(fee, mid);
     T.fees += fee; T.vol += V;
     if (!core.moduleSet && t1 >= phase2At) core.setExitModule(t1, p.xp);
