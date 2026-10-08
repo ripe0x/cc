@@ -12,8 +12,8 @@ src = src.replace("// SPDX-License-Identifier: UNLICENSED", "// SPDX-License-Ide
 if name == "ICoreLib":
     # state changing library functions are not in the library abi: added from the source signatures, selectors are
     # pinned by test/BuildIdentity.t.sol against the artifact
-    extra = ("\n    function setSettings(Settings calldata ns) external;\n"
-             "    function swapIn(address manager, address coin, uint24 fee, int24 spacing, address hook, uint256 amountIn)\n"
+    # setSettings is left out on purpose: a library selector names the struct (`setSettings(Settings)`)
+    extra = ("\n    function swapIn(address manager, address coin, uint24 fee, int24 spacing, address hook, uint256 amountIn)\n"
              "        external\n        returns (uint256 owed, uint256 bought);\n")
     i = src.rstrip().rfind("}")
     src = src[:i] + extra + "}\n"

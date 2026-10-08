@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-write}"
 tmp="$(mktemp -d)"
-forge build src/Core.sol src/ControllerV1.sol src/lib/CoreLib.sol >/dev/null
+forge build --quiet src/Core.sol src/ControllerV1.sol src/lib/CoreLib.sol 2>/dev/null
 for pair in Core:ICore ControllerV1:IControllerV1 CoreLib:ICoreLib; do
   c="${pair%%:*}"; i="${pair##*:}"
   python3 -c "import json,sys;print(json.dumps(json.load(open('out/$c.sol/$c.json'))['abi']))" > "$tmp/$c.json"

@@ -260,7 +260,7 @@ contract ReviewFlowCoreTest is Fixture {
     /// the library is never usable directly, and the packed words round trip at both ends of every bound
     function test_libraryDirectCallsRevertAndPackingRoundTrips() public {
         address lib = findLibrary(address(core).code);
-        (bool ok,) = lib.call(abi.encodeWithSelector(ICoreLib.setSettings.selector, _allMax()));
+        (bool ok,) = lib.call(abi.encodeWithSelector(bytes4(keccak256("setSettings(Settings)")), _allMax()));
         assertFalse(ok, "setSettings direct");
         (ok,) = lib.call(
             abi.encodeWithSelector(
