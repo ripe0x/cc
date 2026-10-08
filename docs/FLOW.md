@@ -211,3 +211,24 @@ rewritten for `IArtCoinsFactoryV2`: `DeploymentConfigV2`, the factory's own `pre
 ### 10.5 tests
 
 real contracts on the fork as before. the v2 stack is not on mainnet, so the fixture deploys it onto the pinned fork from prebuilt v2 artifacts (built from the v2 repo at the reference commit with the v2 repo's own compiler settings, vendored under test/v2-artifacts/ with the commit hash and the build command recorded in a README there), following the v2 repo's own deploy library. no hand written copy of a v2 contract and no mock of one. when v2 is live the fixture switches to the mainnet addresses by config.
+
+### 10.6 amendments (owner, 2026-10-08). these win over 10.1 to 10.5
+
+| # | decision |
+|---|---|
+| 23 | a trader pays 6.9 percent in total. skim `baselineSkimBps` 6_900 (6.9 points of volume), `lpFee` 0. v2's factory enforces a minimum lp fee, so the launch needs the factory owner to set that minimum to 0 first: an explicit owner command in docs/DEPLOY.md and a preflight check that the factory accepts the config. decision 20 is revoked: with no lp fee there is no lp income and no fee swapper anywhere in the launch package |
+| 24 | `bountyBps` stays 9_000. the protocol leg (the factory floor, 10 percent of the skim, 0.69 points of volume) belongs to the launcher protocol. it is a separate business from this engine and its owner's share: never describe it as the engine owner's income |
+| 25 | the router pays two payees out of what it receives: 0.5 points of volume to the creator payee and 0.5 points to the artist payee. the router receives 6.21 points (9_000 of 6_900), so each share is 80_515 parts per million of router inflow. the rest goes to the engine (5.21 points). both payee addresses are config inputs; the artist payee is a placeholder the deploy script refuses until it is set |
+| 26 | everything the router receives during the anti sniper window goes to the engine, with no payee share. the anti sniper skim starts at 90 points and falls to the baseline 6.9 over 30 minutes if the v2 module allows it (else nearest allowed, reported) |
+| 27 | `flush` pays its caller a small tip out of what it forwards |
+| 28 | the Core gains `rescueCoin(address to, uint256 amount)`, owner only, guarded, with an event: it transfers coin the Core holds. the Core only holds coin in passing (the buyback burns what it buys in the same call), so this reaches only coin that arrived some other way. FLOW decision 8 is amended: this is an owner directed transfer of the coin only, never of eth, credits, statements or exitToken |
+| 29 | the Core is on the restricted coin's allowlist at launch (`restriction.allowed` holds the predicted Core). owner decision, it overrides decision 18 for the Core only (router: still not listed). accepted effects, to be written in ARCHITECTURE: anyone can send coin to the Core (it sits there until rescued), and after each buyback an allowance equal to the bought amount stays usable by anyone until the end of that transaction |
+
+FeeRouter, replacing 10.2 where they differ:
+* `receive() external payable {}` stays empty.
+* modes. until the split starts every flush sends everything (after the tip) to the engine. `splitStart` is a timestamp the owner sets (the deploy script sets it to the launch block time plus the anti sniper window). the first `flush` at or after `splitStart` still sends everything to the engine and then turns the split on, so eth that arrived during the window is never shared. from then on each flush pays the payees their parts per million and the engine the rest.
+* tip: `min(amount * tipPpm / 1e6, tipCap)` to `msg.sender`, taken off the top. launch 5_000 ppm (0.5 percent) capped at 0.005 ether. a failed tip send is skipped, never a revert.
+* payees: up to 4 `(address, ppm)` entries, total at most 200_000 ppm (the engine always keeps at least 80 percent of a flush). a payee is paid by a plain call with a fixed gas cap; if that fails the amount is credited to `owed[payee]` and `claim()` lets the payee (or anyone, sending to the payee) pull it. a payee can never block a flush.
+* the engine gets the rest by a plain call with all gas. if that call fails the whole flush reverts and the eth waits.
+* owner setters, each with an event, all frozen by the one way `lock()`: `setEngine`, `setPayees`, `setTip` (ppm at most 20_000, cap at most 0.05 ether), `setSplitStart` (only while the split is not on).
+* flush is guarded against reentry and reverts while the engine is unset.
