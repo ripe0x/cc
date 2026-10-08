@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Vm} from "forge-std/Test.sol";
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {HandlerHouse} from "./HandlerHouse.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
@@ -396,8 +396,8 @@ abstract contract HandlerOwner is HandlerHouse {
             _failed(p.bal, p.pot, p.rate, "setSettingsInvalid");
             _opost(p, "setSettingsInvalid");
             if (stranger) {
-                if (bytes4(why) != Core.OnlyOwner.selector) _unexpected(a, why);
-            } else if (bytes4(why) != Core.BadSetting.selector || why.length != 36) {
+                if (bytes4(why) != ICore.OnlyOwner.selector) _unexpected(a, why);
+            } else if (bytes4(why) != ICore.BadSetting.selector || why.length != 36) {
                 _unexpected(a, why);
             } else {
                 bytes32 field;
@@ -448,7 +448,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "setRate");
             if (good && !stranger) _unexpected(a, why);
-            else if (bytes4(why) != (stranger ? Core.OnlyOwner.selector : Core.BadRate.selector)) _unexpected(a, why);
+            else if (bytes4(why) != (stranger ? ICore.OnlyOwner.selector : ICore.BadRate.selector)) _unexpected(a, why);
             else _ok(a);
         }
     }
@@ -480,7 +480,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } catch (bytes memory why) {
             _failed(p.bal, p.pot, p.rate, "setXRate");
             if (good && !stranger) _unexpected(a, why);
-            else if (bytes4(why) != (stranger ? Core.OnlyOwner.selector : Core.BadRate.selector)) _unexpected(a, why);
+            else if (bytes4(why) != (stranger ? ICore.OnlyOwner.selector : ICore.BadRate.selector)) _unexpected(a, why);
             else _ok(a);
         }
     }
@@ -508,8 +508,8 @@ abstract contract HandlerOwner is HandlerHouse {
                 core.removeTarget(t);
             } catch (bytes memory why) {
                 // the stack contracts and the exit side are refused, nothing else is
-                bool shut = core.targetsLocked() && bytes4(why) == Core.Locked.selector;
-                if (bytes4(why) != Core.ForbiddenTarget.selector && !shut) _unexpected(a, why);
+                bool shut = core.targetsLocked() && bytes4(why) == ICore.Locked.selector;
+                if (bytes4(why) != ICore.ForbiddenTarget.selector && !shut) _unexpected(a, why);
             }
             vm.stopPrank();
         } else if (m == 2) {
@@ -524,17 +524,17 @@ abstract contract HandlerOwner is HandlerHouse {
             try core.addTarget(t) {
                 _flag(V_OWNER, "a stranger added a target");
             } catch (bytes memory why) {
-                if (bytes4(why) != Core.OnlyOwner.selector) _unexpected(a, why);
+                if (bytes4(why) != ICore.OnlyOwner.selector) _unexpected(a, why);
             }
             try core.lockTargets() {
                 _flag(V_OWNER, "a stranger locked the targets");
             } catch (bytes memory why) {
-                if (bytes4(why) != Core.OnlyOwner.selector) _unexpected(a, why);
+                if (bytes4(why) != ICore.OnlyOwner.selector) _unexpected(a, why);
             }
             try core.acceptOwnership() {
                 _flag(V_OWNER, "a stranger accepted a handover that was not offered");
             } catch (bytes memory why) {
-                if (bytes4(why) != Core.OnlyPendingOwner.selector) _unexpected(a, why);
+                if (bytes4(why) != ICore.OnlyPendingOwner.selector) _unexpected(a, why);
             }
             vm.stopPrank();
         }
@@ -560,7 +560,7 @@ abstract contract HandlerOwner is HandlerHouse {
         uint256 oldUnit = core.unitPerPoint();
         (MockExitModule next, bytes4 want) = _nextModule(seed, mode % 8, token);
         // a locked module door refuses every set, whatever the module
-        if (core.exitModuleLocked()) want = Core.Locked.selector;
+        if (core.exitModuleLocked()) want = ICore.Locked.selector;
         _att(a);
         OPre memory p = _opre();
         uint256 start0 = core.xStartPrice();
@@ -593,18 +593,18 @@ abstract contract HandlerOwner is HandlerHouse {
             next = module;
         } else if (m == 4) {
             next = new MockExitModule(address(new MockExitToken("Other", "OTH")), 1e10);
-            want = Core.ExitTokenChanged.selector;
+            want = ICore.ExitTokenChanged.selector;
         } else if (m == 5) {
             next = new MockExitModule(token, seed % 2 == 0 ? 0 : uint256(type(uint128).max) + 1);
-            want = Core.BadModule.selector;
+            want = ICore.BadModule.selector;
         } else if (m == 6) {
             // the opening price asks the supply for one slice (exitSliceCredits * avgScore * unit, at least 8e5 times the
             // unit): above 1.25e27 per point it falls under 1e12 under any setting
             next = new MockExitModule(token, 1e28);
-            want = Core.BadModule.selector;
+            want = ICore.BadModule.selector;
         } else {
             next = MockExitModule(address(uint160(uint256(keccak256(abi.encode("nocode", seed))))));
-            want = Core.BadModule.selector;
+            want = ICore.BadModule.selector;
         }
     }
 

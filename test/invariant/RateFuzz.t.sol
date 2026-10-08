@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {Settings, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {Fixture} from "../utils/Fixture.sol";
 
@@ -73,7 +73,7 @@ contract RateFuzzTest is Fixture {
     /// the refusal of a sale at `price`: the pot is checked before the hourly cap, so a sale the pot cannot pay is
     /// PotTooSmall even when the cap would refuse it too
     function _refusal(uint256 price) internal view returns (bytes4) {
-        return price > core.ethPot() ? Core.PotTooSmall.selector : Core.HourlyCap.selector;
+        return price > core.ethPot() ? ICore.PotTooSmall.selector : ICore.HourlyCap.selector;
     }
 
     function _r(uint256 seed, uint256 i) internal pure returns (uint256) {
@@ -307,7 +307,7 @@ contract RateFuzzTest is Fixture {
                 assertTrue(fits, "passed above the cap in force");
                 spent += price;
             } catch (bytes memory why) {
-                assertEq(bytes4(why), Core.HourlyCap.selector);
+                assertEq(bytes4(why), ICore.HourlyCap.selector);
                 assertFalse(fits, "blocked below the cap in force");
                 break;
             }

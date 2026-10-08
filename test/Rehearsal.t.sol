@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {ProdDeployer} from "./utils/ProdDeployer.sol";
 import {Test, console} from "forge-std/Test.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IV4Router} from "v4-periphery/src/interfaces/IV4Router.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, Mainnet} from "../src/interfaces/Interfaces.sol";
 import {IArtCoinsFactory, IArtCoinsToken} from "../src/interfaces/ArtCoins.sol";
-import {SystemDeployer, Deployed} from "../script/Deploy.s.sol";
+import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
 import {LaunchConfig} from "../script/LaunchConfig.sol";
 
 interface IUniversalRouterR {
@@ -27,7 +28,7 @@ interface IPermit2R {
 /// env var REHEARSAL is set, so the default suite stays pinned and fast. it reads the config file named by
 /// LAUNCH_CONFIG, like the scripts do, so the operator rehearses the exact file they will launch with.
 /// `set -a; . ./.env; set +a; REHEARSAL=1 LAUNCH_CONFIG=script/config/local.json forge test --match-path test/Rehearsal.t.sol -vv`
-contract RehearsalTest is Test, SystemDeployer {
+contract RehearsalTest is Test, ProdDeployer {
     LaunchConfig internal c;
     Deployed internal d;
     address internal deployer;
@@ -101,8 +102,8 @@ contract RehearsalTest is Test, SystemDeployer {
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
         uint256[6] memory txGas = [
             libGas + 21_000 + _calldataGas(libCode) + 512,
-            stepGas[0] + 21_000 + _calldataGas(type(ControllerV1).creationCode) + 512,
-            stepGas[1] + 21_000 + _calldataGas(type(Core).creationCode) + 16_384,
+            stepGas[0] + 21_000 + _calldataGas(vm.getCode("ControllerV1.sol:ControllerV1")) + 512,
+            stepGas[1] + 21_000 + _calldataGas(vm.getCode("Core.sol:Core")) + 16_384,
             stepGas[2] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
@@ -178,7 +179,7 @@ contract RehearsalTest is Test, SystemDeployer {
     }
 
     function _smoke() internal {
-        Core core = Core(payable(d.core));
+        ICore core = ICore(payable(d.core));
         IArtCoinsToken coin = IArtCoinsToken(d.coin);
         IUniversalRouterR ur = IUniversalRouterR(Mainnet.UNIVERSAL_ROUTER);
         // past the anti sniper window, so the skim is the 10 point baseline
@@ -210,7 +211,7 @@ contract RehearsalTest is Test, SystemDeployer {
     }
 
     /// finds a real credit held by an account without code and sells it into the bid
-    function _sellRealCredit(Core core) internal {
+    function _sellRealCredit(ICore core) internal {
         assertTrue(core.funded(), "funded after the fees");
         assertEq(core.ethRate(), c.rateStart, "no climb yet");
         ICredits credits = ICredits(Mainnet.CREDITS);

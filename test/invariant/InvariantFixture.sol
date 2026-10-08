@@ -5,7 +5,6 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {Core} from "../../src/Core.sol";
 import {Lane, ICreditScore, ICreditStrategy, Mainnet} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {Fixture} from "../utils/Fixture.sol";

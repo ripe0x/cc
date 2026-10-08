@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {ReviewHarness, IFactoryAdmin} from "./utils/ReviewHarness.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
-import {Core} from "../src/Core.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";

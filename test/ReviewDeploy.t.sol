@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {console} from "forge-std/Test.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {ReviewHarness, IFactoryAdmin} from "./utils/ReviewHarness.sol";
 import {TestSwapRouter} from "./utils/TestSwapRouter.sol";
@@ -12,7 +13,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Mainnet, Stack, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionFactory, IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook, IArtCoinsMevSkim} from "../src/interfaces/ArtCoins.sol";
-import {SystemDeployer, Deployed} from "../script/Deploy.s.sol";
+import {SystemDeployer, Deployed} from "../script/SystemDeployer.sol";
 import {LaunchConfig, ConfigReader} from "../script/LaunchConfig.sol";
 import {Report} from "../script/Report.sol";
 
@@ -125,8 +126,8 @@ contract ReviewDeployTest is ReviewHarness {
     }
 
     /// @dev a frame of its own for the constructor call: the 28 field settings struct leaves no room for more locals
-    function _make(LaunchConfig memory c, address coinAt, address controller) private returns (Core) {
-        return new Core(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings);
+    function _make(LaunchConfig memory c, address coinAt, address controller) private returns (ICore) {
+        return Prod.newCore(c.owner, coinAt, controller, c.stack, c.rateStart, c.settings);
     }
 
     function _launchTx(LaunchConfig memory c, address coreAt) private returns (address) {
@@ -142,7 +143,7 @@ contract ReviewDeployTest is ReviewHarness {
         address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coinAt = predictCoin(c, deployer, coreAt);
         vm.startPrank(deployer);
-        st.controller = address(new ControllerV1(coreAt, c.sale));
+        st.controller = address(Prod.newController(coreAt, c.sale));
         if (n >= 2) st.core = _newCore(c, coinAt, st.controller);
         if (n >= 3) {
             st.coin = _launchTx(c, coreAt);
@@ -162,7 +163,7 @@ contract ReviewDeployTest is ReviewHarness {
         Steps memory st = _steps(base, 2);
         IArtCoinsFactory f = IArtCoinsFactory(base.stack.factory);
         uint256 fee = f.deployFee();
-        assertEq(Core(payable(st.core)).COIN().code.length, 0, "no coin yet");
+        assertEq(ICore(payable(st.core)).COIN().code.length, 0, "no coin yet");
         assertEq(st.core.balance, 0, "the core holds nothing");
         vm.prank(watcher);
         vm.expectRevert();
@@ -314,7 +315,7 @@ contract ReviewDeployTest is ReviewHarness {
         vm.deal(buyer, 1 ether);
         vm.prank(buyer);
         r.swap{value: 1 ether}(d.launchKey, true, -1 ether, buyer);
-        assertEq(Core(payable(d.core)).ethPot(), 0.895 ether);
+        assertEq(ICore(payable(d.core)).ethPot(), 0.895 ether);
     }
 
     function _hookView(address hook, string memory sig) internal view returns (address a) {
@@ -360,20 +361,20 @@ contract ReviewDeployTest is ReviewHarness {
         Settings memory s = Mainnet.defaultSettings();
         Stack memory st = base.stack;
         st.hook = makeAddr("hook");
-        vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, st.hook));
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.hook));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
         st = base.stack;
         st.escrow = makeAddr("escrow");
-        vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, st.escrow));
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.escrow));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
         st = base.stack;
         st.auctionFactory = makeAddr("auction factory");
-        vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, st.auctionFactory));
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, st.auctionFactory));
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
         st.auctionFactory = Mainnet.PERMIT2;
         vm.expectRevert();
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
-        new Core(owner, makeAddr("coin"), makeAddr("ctl"), base.stack, 4e12, s);
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), st, 4e12, s);
+        Prod.newCore(owner, makeAddr("coin"), makeAddr("ctl"), base.stack, 4e12, s);
     }
 
     function parse(string memory j) external view returns (LaunchConfig memory) {
@@ -534,9 +535,9 @@ contract ReviewFundedTest is Fixture {
     uint256 internal constant AVG = 4_330_000;
     uint256 internal cursor;
 
-    function _newCore(uint256 rate) internal returns (Core c) {
+    function _newCore(uint256 rate) internal returns (ICore c) {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        ControllerV1 ctl2 = new ControllerV1(predicted, Mainnet.defaultSale());
+        IControllerV1 ctl2 = Prod.newController(predicted, Mainnet.defaultSale());
         Settings memory s = Mainnet.defaultSettings();
         // any opening rate in the bounds needs a rate cap at or above it
         s.rateCap = uint64(1e15);
@@ -544,18 +545,18 @@ contract ReviewFundedTest is Fixture {
         assertEq(address(c), predicted);
     }
 
-    function _fees(Core c, uint256 amt) internal {
+    function _fees(ICore c, uint256 amt) internal {
         vm.deal(Mainnet.SKIM_HOOK, amt);
         vm.prank(Mainnet.SKIM_HOOK);
         (bool ok,) = address(c).call{value: amt}("");
         assertTrue(ok);
     }
 
-    function _make(uint256 rate, address controller, Settings memory s) internal returns (Core) {
-        return new Core(owner, address(coin), controller, Mainnet.defaultStack(), rate, s);
+    function _make(uint256 rate, address controller, Settings memory s) internal returns (ICore) {
+        return Prod.newCore(owner, address(coin), controller, Mainnet.defaultStack(), rate, s);
     }
 
-    function _check(Core c) internal view {
+    function _check(ICore c) internal view {
         uint256 pot = c.ethPot();
         uint256 stored = c.rateAtCheckpoint();
         // the flag is exactly the definition: the hourly cap affords one average credit at the stored rate
@@ -571,7 +572,7 @@ contract ReviewFundedTest is Fixture {
     /// forge-config: default.fuzz.runs = 400
     function testFuzz_fundedRuleAndClamp(uint256 rateSeed, uint256[10] memory ops) public {
         uint256 rate = bound(rateSeed, 1e11, 1e15);
-        Core c = _newCore(rate);
+        ICore c = _newCore(rate);
         address who = makeAddr("fuzz.seller");
         for (uint256 i; i < ops.length; ++i) {
             uint256 op = ops[i] % 4;
@@ -599,7 +600,7 @@ contract ReviewFundedTest is Fixture {
                 try c.sellForEth(ids) {}
                 catch (bytes memory why) {
                     bytes4 sel = bytes4(why);
-                    assertTrue(sel == Core.HourlyCap.selector || sel == Core.PotTooSmall.selector, "unexpected revert");
+                    assertTrue(sel == ICore.HourlyCap.selector || sel == ICore.PotTooSmall.selector, "unexpected revert");
                 }
                 vm.stopPrank();
             } else {
@@ -613,17 +614,17 @@ contract ReviewFundedTest is Fixture {
     function test_rateStartBounds() public {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         Stack memory st = Mainnet.defaultStack();
-        vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), predicted, st, 1e11 - 1, Mainnet.defaultSettings());
-        vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), predicted, st, 1e15 + 1, Mainnet.defaultSettings());
+        vm.expectRevert(ICore.BadRate.selector);
+        Prod.newCore(owner, address(coin), predicted, st, 1e11 - 1, Mainnet.defaultSettings());
+        vm.expectRevert(ICore.BadRate.selector);
+        Prod.newCore(owner, address(coin), predicted, st, 1e15 + 1, Mainnet.defaultSettings());
         // the opening rate may not sit above the rate cap (1.232e14 at the launch values)
-        vm.expectRevert(Core.BadRate.selector);
-        new Core(owner, address(coin), predicted, st, 1.233e14, Mainnet.defaultSettings());
+        vm.expectRevert(ICore.BadRate.selector);
+        Prod.newCore(owner, address(coin), predicted, st, 1.233e14, Mainnet.defaultSettings());
         Settings memory top = Mainnet.defaultSettings();
         top.rateCap = uint64(1e15);
-        Core lo = new Core(owner, address(coin), predicted, st, 1e11, top);
-        Core hi = new Core(owner, address(coin), address(1), st, 1e15, top);
+        ICore lo = Prod.newCore(owner, address(coin), predicted, st, 1e11, top);
+        ICore hi = Prod.newCore(owner, address(coin), address(1), st, 1e15, top);
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.ethRate(), 1e15);
         // funded thresholds: five average credits at the rate

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {ProdDeployer} from "./utils/ProdDeployer.sol";
+import {Prod} from "./utils/Prod.sol";
 import {Test} from "forge-std/Test.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
-import {Deployed} from "../script/Deploy.s.sol";
-import {SystemResumer, Stage} from "../script/Resume.s.sol";
+import {Deployed} from "../script/SystemDeployer.sol";
+import {SystemResumer, Stage} from "../script/SystemResumer.sol";
 import {LaunchConfig} from "../script/LaunchConfig.sol";
 import {Report} from "../script/Report.sol";
 
@@ -15,12 +17,12 @@ interface IHouseFactoryR {
     function houseOf(address owner) external view returns (address);
 }
 
-/// @notice `script/Resume.s.sol` on the pinned fork: a deploy stopped after each of the transactions (the library, the
+/// @notice `script/SystemResumer.sol` on the pinned fork: a deploy stopped after each of the transactions (the library, the
 /// controller, the core with its house, the launch, the lock, the handover) is finished by sending only the missing
 /// steps, as the original deployer. the library goes through the deterministic deployer in a broadcast and takes one
 /// deployer nonce, so the tests send it through that deployer too and bump the nonce by hand (a test prank sends no
 /// transaction)
-contract ResumeTest is Test, SystemResumer {
+contract ResumeTest is Test, SystemResumer, ProdDeployer {
     bool internal scriptMode;
     /// @dev SETTINGS_CHANGED of the operator, a flag here so parallel tests never share an environment variable
     bool internal changedFlag;
@@ -70,9 +72,9 @@ contract ResumeTest is Test, SystemResumer {
         core = vm.computeCreateAddress(deployer, nonce + 1);
         address coinAt = predictCoin(base, deployer, core);
         vm.startPrank(deployer);
-        if (n >= 2) address(new ControllerV1(core, base.sale));
+        if (n >= 2) address(Prod.newController(core, base.sale));
         if (n >= 3) {
-            new Core(owner, coinAt, vm.computeCreateAddress(deployer, nonce), base.stack, base.rateStart, base.settings);
+            Prod.newCore(owner, coinAt, vm.computeCreateAddress(deployer, nonce), base.stack, base.rateStart, base.settings);
         }
         if (n >= 4) coin = _launch(base, deployer, coinAt, core);
         if (n >= 5) _lock(base, poolKeyOf(coin, base.stack));
@@ -105,7 +107,7 @@ contract ResumeTest is Test, SystemResumer {
         Stage from = this.resume(deployer, base, core);
         assertEq(uint256(from), uint256(expectFrom), "stage found");
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done));
-        address coin = Core(payable(core)).COIN();
+        address coin = ICore(payable(core)).COIN();
         assertEq(IArtCoinsToken(coin).admin(), owner, "the owner is the token admin");
         postflight(base, core);
         (string memory list,) = _failed();
@@ -133,7 +135,7 @@ contract ResumeTest is Test, SystemResumer {
     /// a finished deploy: nothing is sent, the nonce does not move
     function test_resumeWhenDoneSendsNothing() public {
         (address core,) = _steps(5);
-        address coin = Core(payable(core)).COIN();
+        address coin = ICore(payable(core)).COIN();
         vm.prank(deployer);
         IArtCoinsToken(coin).updateAdmin(owner);
         uint64 nonce = vm.getNonce(deployer);
@@ -193,13 +195,13 @@ contract ResumeTest is Test, SystemResumer {
         (address core,) = _steps(5);
         _assertDone(core, Stage.Locked);
         address next = makeAddr("resume.next");
-        address coin = Core(payable(core)).COIN();
+        address coin = ICore(payable(core)).COIN();
         vm.startPrank(owner);
-        Core(payable(core)).transferOwnership(next);
+        ICore(payable(core)).transferOwnership(next);
         IArtCoinsToken(coin).updateAdmin(next);
         vm.stopPrank();
         vm.prank(next);
-        Core(payable(core)).acceptOwnership();
+        ICore(payable(core)).acceptOwnership();
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Locked), "no flag, the admin looks unfinished");
         ownerFlag = true;
         assertEq(uint256(detectStage(base, core)), uint256(Stage.Done), "flag set, the handover is done");
@@ -216,7 +218,7 @@ contract ResumeTest is Test, SystemResumer {
         IArtCoinsFactory(Mainnet.ARTCOINS_FACTORY).setAdmin(deployer, false);
         _assertDone(core, Stage.Locked);
         // the hook slot stays locked and empty
-        bytes32 id = keccak256(abi.encode(poolKeyOf(Core(payable(core)).COIN(), base.stack)));
+        bytes32 id = keccak256(abi.encode(poolKeyOf(ICore(payable(core)).COIN(), base.stack)));
         assertTrue(IArtCoinsSkimHook(base.stack.hook).poolExtensionLocked(id));
     }
 
@@ -229,7 +231,7 @@ contract ResumeTest is Test, SystemResumer {
         (address core,) = _steps(3);
         address house = IHouseFactoryR(base.stack.auctionFactory).houseOf(core);
         assertTrue(house != address(0) && house.code.length != 0, "no house");
-        assertEq(address(Core(payable(core)).HOUSE()), house);
+        assertEq(address(ICore(payable(core)).HOUSE()), house);
         _assertDone(core, Stage.CoreOnly);
     }
 
@@ -258,7 +260,7 @@ contract ResumeTest is Test, SystemResumer {
         (address core,) = _steps(2);
         assertEq(core.code.length, 0, "no core");
         address controller = vm.computeCreateAddress(deployer, vm.getNonce(deployer) - 1);
-        assertEq(address(ControllerV1(controller).CORE()), core, "it points at the core that never came");
+        assertEq(address(IControllerV1(controller).CORE()), core, "it points at the core that never came");
         assertEq(controller.balance, 0);
         vm.expectRevert(
             abi.encodeWithSelector(CoreMismatch.selector, "no code at the core address, run Deploy instead")
@@ -267,7 +269,7 @@ contract ResumeTest is Test, SystemResumer {
         // sending the saved core creation at the next nonce gives the predicted core, and Resume goes on from there
         address coinAt = predictCoin(base, deployer, core);
         vm.startPrank(deployer);
-        address c2 = address(new Core(owner, coinAt, controller, base.stack, base.rateStart, base.settings));
+        address c2 = address(Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings));
         vm.stopPrank();
         assertEq(c2, core, "the saved creation lands on the predicted core");
         _assertDone(core, Stage.CoreOnly);
@@ -277,10 +279,10 @@ contract ResumeTest is Test, SystemResumer {
     /// the signed ones unless the operator says so
     function test_resumeRefusesChangedSettings() public {
         (address core,) = _steps(4);
-        Settings memory s = Core(payable(core)).settings();
+        Settings memory s = ICore(payable(core)).settings();
         s.saleFloorBps = 8_000;
         vm.prank(owner);
-        Core(payable(core)).setSettings(s);
+        ICore(payable(core)).setSettings(s);
         vm.expectRevert(
             abi.encodeWithSelector(CoreMismatch.selector, "settings (SETTINGS_CHANGED=1 if the owner changed them)")
         );

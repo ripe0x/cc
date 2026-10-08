@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Core} from "../../src/Core.sol";
-import {ControllerV1} from "../../src/ControllerV1.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
+import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {IExitModule, IStatements, Mainnet} from "../../src/interfaces/Interfaces.sol";
 import {ScriptedController} from "./ScriptedController.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
@@ -10,11 +10,11 @@ import {MockExitToken} from "../standins/MockExitToken.sol";
 /// a scripted controller that can also sell: it is the one address `sellTo` accepts once the owner installs it. it
 /// forwards a sale as it is told and can try the sale twice or from inside a reentry
 contract SellingController is ScriptedController {
-    Core public immutable CORE;
+    ICore public immutable CORE;
     bool public lastOk;
     bytes public lastWhy;
 
-    constructor(Core core_) {
+    constructor(ICore core_) {
         CORE = core_;
     }
 
@@ -47,8 +47,8 @@ contract SellingController is ScriptedController {
 
 /// a buyer of a statement through the controller that tries to re enter on the refund of its excess
 contract ReentrantBuyer {
-    ControllerV1 public immutable CTL;
-    Core public immutable CORE;
+    IControllerV1 public immutable CTL;
+    ICore public immutable CORE;
     /// the statement the reentry tries to buy, and the one it tries to reprice
     uint256 public other;
     /// a statement the buy just sold, so its record is gone
@@ -63,7 +63,7 @@ contract ReentrantBuyer {
     bytes4 public buySel;
     bytes4 public repriceSel;
 
-    constructor(ControllerV1 ctl_, Core core_) {
+    constructor(IControllerV1 ctl_, ICore core_) {
         CTL = ctl_;
         CORE = core_;
     }
@@ -112,9 +112,9 @@ contract ReentrantBuyer {
 
 /// a buyer that cannot take an eth refund
 contract RefundRefuser {
-    ControllerV1 public immutable CTL;
+    IControllerV1 public immutable CTL;
 
-    constructor(ControllerV1 ctl_) {
+    constructor(IControllerV1 ctl_) {
         CTL = ctl_;
     }
 
@@ -181,14 +181,14 @@ contract HostileModule is IExitModule {
 
 /// the caller of `exitStatement` that is repaid in eth and tries every door of the core from its `receive`
 contract RepaidCaller {
-    Core public immutable CORE;
+    ICore public immutable CORE;
     uint256 public other;
     uint256 public hits;
     uint256 public blocked;
     uint256 public ok;
     uint256 public repaid;
 
-    constructor(Core core_) {
+    constructor(ICore core_) {
         CORE = core_;
     }
 
@@ -209,14 +209,14 @@ contract RepaidCaller {
     receive() external payable {
         repaid += msg.value;
         if (hits++ != 0) return;
-        _try(abi.encodeCall(Core.exitStatement, (other)));
-        _try(abi.encodeCall(Core.compose, ()));
-        _try(abi.encodeCall(Core.composeExit, ()));
-        _try(abi.encodeCall(Core.skim, ()));
-        _try(abi.encodeCall(Core.collectSales, ()));
-        _try(abi.encodeCall(Core.buyback, ()));
-        _try(abi.encodeCall(Core.overprint, ()));
-        _try(abi.encodeCall(Core.repriceStatement, (other)));
-        _try(abi.encodeCall(Core.syncStatement, (other)));
+        _try(abi.encodeCall(ICore.exitStatement, (other)));
+        _try(abi.encodeCall(ICore.compose, ()));
+        _try(abi.encodeCall(ICore.composeExit, ()));
+        _try(abi.encodeCall(ICore.skim, ()));
+        _try(abi.encodeCall(ICore.collectSales, ()));
+        _try(abi.encodeCall(ICore.buyback, ()));
+        _try(abi.encodeCall(ICore.overprint, ()));
+        _try(abi.encodeCall(ICore.repriceStatement, (other)));
+        _try(abi.encodeCall(ICore.syncStatement, (other)));
     }
 }

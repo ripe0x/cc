@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "../utils/Fixture.sol";
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {SetSettings, ICoreOwner} from "../../script/SetSettings.s.sol";
@@ -72,7 +72,7 @@ contract FloorRaiseRaceTest is Fixture {
         assertEq(_live(sid).reserve, old, "the raise did not move the open reserve");
 
         _bid(bidder, sid, old);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
 
         _endAuction(sid);

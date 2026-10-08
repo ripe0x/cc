@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {InvariantsHostileController} from "./InvariantsPhase2.t.sol";
 
 /// regression for a deep run failure of invariant 11 ("unexpected revert in compose, selector NotReady") in the
@@ -32,7 +32,7 @@ contract ComposeHostileNotReadyTest is InvariantsHostileController {
         assertLt(used, 500_000, "pre check read used the whole cap");
 
         // from the core: the same read runs out of gas at the cap, so the core answers NotReady
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
 
         vm.prank(0x64c47B8c7F8a9C08964bA4927A7fc74cd741B7F7);

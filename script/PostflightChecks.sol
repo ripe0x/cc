@@ -4,13 +4,14 @@ pragma solidity ^0.8.28;
 import {console} from "forge-std/console.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Mainnet, Stack, Settings, IStatements} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
-import {CoreLib} from "../src/lib/CoreLib.sol";
+import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 import {
     IArtCoinsFactory,
@@ -43,7 +44,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         _reset();
         _code("code: core", core_);
         if (core_.code.length == 0) return;
-        Core core = Core(payable(core_));
+        ICore core = ICore(payable(core_));
         _postCore(c, core);
         address coin = core.COIN();
         _code("code: coin", coin);
@@ -90,7 +91,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     /// config and the first controller: the original owner `c.owner`, `c.stack`, `c.rateStart` and `c.settings`. the coin
     /// is the Core immutable `COIN`, which cannot change. nothing here reads the live `owner`, `controller` or `settings`,
     /// all of which the owner can change after launch (audit finding A02)
-    function coreConstructorArgs(Core core, LaunchConfig memory c, address firstController_)
+    function coreConstructorArgs(ICore core, LaunchConfig memory c, address firstController_)
         internal
         view
         returns (bytes memory)
@@ -102,7 +103,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     /// constructor arguments of the Core (from the config, see `coreConstructorArgs`) and of the controller, then the
     /// live controller and settings on separate lines labelled as live. docs/DEPLOY.md section 3. `deployer` is the
     /// address that sent the deploy, it finds the first controller
-    function printVerifyInputs(Core core, LaunchConfig memory c, address deployer) internal view {
+    function printVerifyInputs(ICore core, LaunchConfig memory c, address deployer) internal view {
         address lib = findLibrary(address(core).code);
         console.log("verify: library CoreLib at", lib);
         console.log(string.concat("verify: flag  --libraries src/lib/CoreLib.sol:CoreLib:", vm.toString(lib)));
@@ -126,7 +127,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         if (found && core.controller() != first) console.log("verify: note the live controller is not the first one");
     }
 
-    function _postCore(LaunchConfig memory c, Core core) private {
+    function _postCore(LaunchConfig memory c, ICore core) private {
         // after a handover the live owner is the new one: OWNER_CHANGED=1 turns the row into a warning
         if (_ownerChanged()) {
             _warn("warn: owner equals the config", core.owner() == c.owner, "OWNER_CHANGED=1, a handover ran");
@@ -155,7 +156,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         );
         address ctl = core.controller();
         _code("code: controller", ctl);
-        if (ctl.code.length != 0) _eq("controller: core", address(ControllerV1(ctl).CORE()), address(core));
+        if (ctl.code.length != 0) _eq("controller: core", address(IControllerV1(ctl).CORE()), address(core));
         _check(
             "core: allowed targets",
             core.allowedTarget(Mainnet.SEAPORT) && core.allowedTarget(Mainnet.CREDIT_STRATEGY)
@@ -204,7 +205,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     /// the row into a warning once the owner changed them)
     function _postSale(LaunchConfig memory c, address ctl) private {
         if (ctl.code.length == 0) return;
-        ControllerV1 k = ControllerV1(ctl);
+        IControllerV1 k = IControllerV1(ctl);
         bool same = k.buyOnly() == c.sale.buyOnly && k.startBps() == c.sale.startBps && k.stepBps() == c.sale.stepBps
             && k.stepEvery() == c.sale.stepEvery && k.floorBps() == c.sale.floorBps;
         if (_settingsChanged()) {
@@ -238,7 +239,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
     /// @dev the settings are owner adjustable after launch. right after the deploy they must equal the config field by
     /// field, so a Core built with other values fails. once the owner has called `setSettings` the live values differ
     /// on purpose: run with SETTINGS_CHANGED=1 and the row turns into a warning that prints the difference
-    function _postSettings(LaunchConfig memory c, Core core) private {
+    function _postSettings(LaunchConfig memory c, ICore core) private {
         Settings memory live = core.settings();
         bytes32 bad = SettingsBounds.firstViolation(live);
         _check("core: settings inside the bounds", bad == 0, bad == 0 ? "all fields" : string(abi.encodePacked(bad)));
@@ -290,7 +291,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
 
     /// @dev the auction house the core created in its constructor: the factory knows it, the core owns it, its fee is
     /// zero and it may take statements
-    function _postHouse(LaunchConfig memory c, Core core) private {
+    function _postHouse(LaunchConfig memory c, ICore core) private {
         address house = address(core.HOUSE());
         _code("code: house", house);
         if (house.code.length == 0) return;
@@ -313,7 +314,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
 
     /// @dev the Core is linked against `CoreLib`. its address sits in the Core runtime code as a push20. the row finds
     /// a push20 operand whose code is the compiled library (its own address masked out)
-    function _postLibrary(Core core) private {
+    function _postLibrary(ICore core) private {
         address found = findLibrary(address(core).code);
         _check(
             "core: linked library is the compiled CoreLib",
@@ -352,7 +353,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         }
     }
 
-    function _postCoin(LaunchConfig memory c, Core core, IArtCoinsToken coin, bytes32 id) private {
+    function _postCoin(LaunchConfig memory c, ICore core, IArtCoinsToken coin, bytes32 id) private {
         _eq("coin: name", coin.name(), c.name);
         _eq("coin: symbol", coin.symbol(), c.symbol);
         _eq("coin: supply", coin.totalSupply(), c.supply);
@@ -369,7 +370,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         }
         uint256 pm = coin.balanceOf(c.stack.poolManager);
         uint256 dust = coin.balanceOf(c.stack.locker);
-        (, int24 tick,,) = StateLibrary.getSlot0(core.MANAGER(), PoolId.wrap(id));
+        (, int24 tick,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
         bool untraded = tick == -c.startTick;
         bool inPool = dust < LOCKER_DUST_MAX && (untraded ? pm + dust == c.supply : pm + dust <= c.supply && pm != 0);
         _check(
@@ -381,9 +382,9 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         );
     }
 
-    function _postPool(LaunchConfig memory c, Core core, PoolKey memory key, bytes32 id) private {
+    function _postPool(LaunchConfig memory c, ICore core, PoolKey memory key, bytes32 id) private {
         _eq("pool: key hook", address(key.hooks), c.stack.hook);
-        (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(core.MANAGER(), PoolId.wrap(id));
+        (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
         // the launch position is single sided at the pool edge, so the active liquidity can be zero at the start
         _check("pool: initialized", sqrtPrice != 0, vm.toString(id));
     }
@@ -498,7 +499,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
 
     /// @dev the launch position as the position manager stores it. the pool is eth against the coin, so the pool ticks
     /// are the negated config ticks. the start tick is read from the pool while untraded
-    function _postPosition(LaunchConfig memory c, Core core, address coin, bytes32 id) private {
+    function _postPosition(LaunchConfig memory c, ICore core, address coin, bytes32 id) private {
         IArtCoinsLocker.TokenRewardInfo memory info = IArtCoinsLocker(c.stack.locker).tokenRewards(coin);
         (bool ok, uint256 w) =
             _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("positionInfo(uint256)", info.positionId));
@@ -520,7 +521,7 @@ abstract contract PostflightChecks is SystemBuilder, Report {
         (bool ok2, uint256 holder) =
             _word(Mainnet.POSITION_MANAGER, abi.encodeWithSignature("ownerOf(uint256)", info.positionId));
         _check("position: held by the locker", ok2 && address(uint160(holder)) == c.stack.locker, "ownerOf");
-        (, int24 tick,,) = StateLibrary.getSlot0(core.MANAGER(), PoolId.wrap(id));
+        (, int24 tick,,) = StateLibrary.getSlot0(IPoolManager(core.MANAGER()), PoolId.wrap(id));
         bool inRange = tick >= pi.tickLower() && tick <= pi.tickUpper();
         _check(
             "pool: start tick",

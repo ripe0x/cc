@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 
 /// a bidder that cannot receive statements and cannot receive eth, so an outbid refund to it is credited on the house.
@@ -18,9 +18,9 @@ contract DeafBidder {
 
 /// bids on a statement auction and tries to re enter the core when it receives a statement or eth
 contract ReentrantBidder {
-    Core internal core;
+    ICore internal core;
 
-    constructor(Core c) {
+    constructor(ICore c) {
         core = c;
     }
 

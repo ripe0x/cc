@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {CoreLib} from "../src/lib/CoreLib.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {SettingsStore} from "../src/lib/SettingsStore.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 import {Lane, Settings, Mainnet, IExitModule, IStatements} from "../src/interfaces/Interfaces.sol";
@@ -318,12 +318,12 @@ contract ReviewPhase2FlexTest is Fixture {
         assertFalse(core.allowedTarget(address(b)), "cleared by the set");
         uint256 id = _credits(seller, 1)[0];
         bytes memory data = abi.encodeCall(MockExitModule.setUnitPerPoint, (7));
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
         _replace(address(_mod(UNIT)));
         // no longer the module, and the stale approval is gone: it needs a new `addTarget`
         assertFalse(core.allowedTarget(address(b)));
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(0, data, id, address(b));
         assertEq(b.currentUnit(), UNIT, "reverted, so nothing changed");
     }
@@ -337,15 +337,15 @@ contract ReviewPhase2FlexTest is Fixture {
         _allow(address(a));
         assertTrue(core.allowedTarget(address(a)));
         vm.startPrank(owner);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(b));
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(xt));
         vm.stopPrank();
         // a as target pulls nothing: exit on it mints to the core in the stand in, then the credit check unwinds it
         uint256 id = _credits(seller, 1)[0];
         uint256 bal = xt.balanceOf(address(core));
-        vm.expectRevert(Core.NoCredit.selector);
+        vm.expectRevert(ICore.NoCredit.selector);
         core.buyListing(0, abi.encodeCall(MockExitModule.exit, (1)), id, address(a));
         assertEq(xt.balanceOf(address(core)), bal, "nothing kept");
         // the exit token and the new module are blocked at call time even when flagged before
@@ -361,7 +361,7 @@ contract ReviewPhase2FlexTest is Fixture {
         _runSet(d);
         (d, eta) = _setCall(address(0xdead));
         vm.warp(eta);
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         _runSet(d);
     }
 
@@ -377,7 +377,7 @@ contract ReviewPhase2FlexTest is Fixture {
         emit log_named_uint("highest unit the floor allows", ceiling);
         (bytes memory d, uint256 eta) = _setCall(address(_mod(ceiling + 1)));
         vm.warp(eta);
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         _runSet(d);
         // the same unit is fine as long as the floor holds
         _replace(address(_mod(ceiling)));
@@ -416,11 +416,11 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(core.exitToken(), address(xt), "the core kept its own copy");
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(sid);
         (bytes memory d, uint256 eta) = _setCall(address(fm));
         vm.warp(eta);
-        vm.expectRevert(Core.ExitTokenChanged.selector);
+        vm.expectRevert(ICore.ExitTokenChanged.selector);
         _runSet(d);
         // a unit change reported later is ignored until a set reads it
         fm.setToken(address(xt));
@@ -449,7 +449,7 @@ contract ReviewPhase2FlexTest is Fixture {
         _runSet(d);
         assertEq(core.xRate(), rate, "same rate right after the set");
         vm.prank(seller);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.sellForExitToken(_one(ids[0]), quoteOld);
         // without a floor the seller takes what the new unit pays
         uint256 b = xt.balanceOf(seller);
@@ -579,7 +579,7 @@ contract ReviewPhase2FlexTest is Fixture {
         uint256[] memory last = _credits(seller, 1);
         vm.prank(seller);
         try core.sellForExitToken(last) {} catch (bytes memory err) {
-            assertEq(bytes4(err), Core.PotTooSmall.selector);
+            assertEq(bytes4(err), ICore.PotTooSmall.selector);
         }
         _solvent();
     }
@@ -691,7 +691,8 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(a, 0);
         assertEq(b, 0);
         assertEq(c, uint256(type(uint16).max) << 176, "the share alone");
-        Settings memory u = CoreLib.unpack(a, b, c);
+        ICoreLib clib = ICoreLib(findLibrary(address(core).code));
+        Settings memory u = clib.unpack(a, b, c);
         assertEq(u.exitLaneToBuybackBps, type(uint16).max);
         assertEq(u.rateCap, 0);
         assertEq(u.exitSliceCredits, 0);
@@ -701,7 +702,7 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(a, 0);
         assertEq(b, 0);
         assertEq(c, uint256(type(uint16).max) << 192, "the fee share alone");
-        u = CoreLib.unpack(a, b, c);
+        u = clib.unpack(a, b, c);
         assertEq(u.feeToBuybackBps, type(uint16).max);
         assertEq(u.exitLaneToBuybackBps, 0);
     }
@@ -710,7 +711,7 @@ contract ReviewPhase2FlexTest is Fixture {
         Settings memory s = core.settings();
         s.exitLaneToBuybackBps = 10_001;
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(CoreLib.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
+        vm.expectRevert(abi.encodeWithSelector(ICoreLib.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
         core.setSettings(s);
         s.exitLaneToBuybackBps = 10_000;
         _setSettings(s);
@@ -741,7 +742,7 @@ contract ReviewPhase2FlexTest is Fixture {
         assertEq(core.xRate(), rate, "and flat, it does not recover by itself");
         uint256[] memory ids = _credits(seller, 1);
         vm.prank(seller);
-        vm.expectRevert(Core.PotTooSmall.selector);
+        vm.expectRevert(ICore.PotTooSmall.selector);
         core.sellForExitToken(ids);
         // the owner lowers it at once
         uint256 floor = core.settings().xRateFloor;

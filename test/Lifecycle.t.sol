@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, ICreditStrategy, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {Fixture} from "./utils/Fixture.sol";
@@ -63,16 +63,16 @@ contract LifecycleSwapsTest is Fixture {
 
     /// phase 2 doors are shut while the exit module slot is empty
     function test_phase1_exitDoorsAreClosed() public {
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.exitStatement(1);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.buybackExit(type(uint256).max);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.sellForExitToken(_one(1));
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.composeExit();
         // the statement door of phase 1 is the house, and it needs no module
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(1);
         core.collectSales();
         assertEq(core.exitToken(), address(0));
@@ -158,7 +158,7 @@ contract LifecycleDoorsTest is Fixture {
         uint256 first = core.ceilingOf(ids[0]);
         uint256 sum = first + AVG * _dropped(core.ethRate(), first, core.ethPot()) / 1e4;
         vm.prank(seller);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.sellForEth(ids, sum + 1);
         vm.prank(seller);
         core.sellForEth(ids, sum);
@@ -238,7 +238,7 @@ contract LifecycleDoorsTest is Fixture {
         assertEq(price, 0.036 ether);
         assertGt(price, core.ceilingOf(LISTED_A), "the start rate is far below the listing");
         vm.prank(keeper);
-        vm.expectRevert(Core.AboveCeiling.selector);
+        vm.expectRevert(ICore.AboveCeiling.selector);
         core.buyListing(price, _buyData(LISTED_A), LISTED_A, STRATEGY);
 
         _warpUntilCeiling(LISTED_A, price);
@@ -263,26 +263,26 @@ contract LifecycleDoorsTest is Fixture {
 
         // wrong value, the strategy refuses
         vm.prank(keeper);
-        vm.expectRevert(Core.CallFailed.selector);
+        vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(priceA - 1, _buyData(LISTED_A), LISTED_A, STRATEGY);
         _assertUnchanged(s0);
 
         // wrong calldata for the value
         vm.prank(keeper);
-        vm.expectRevert(Core.CallFailed.selector);
+        vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(priceA, _buyData(LISTED_B), LISTED_A, STRATEGY);
         _assertUnchanged(s0);
 
         // the call works but delivers another credit than the one asked for
         vm.prank(keeper);
-        vm.expectRevert(Core.NoCredit.selector);
+        vm.expectRevert(ICore.NoCredit.selector);
         core.buyListing(priceB, _buyData(LISTED_B), LISTED_A, STRATEGY);
         _assertUnchanged(s0);
 
         // a credit the strategy holds but does not list
         uint256 unlisted = CreditIds.at(5);
         vm.prank(keeper);
-        vm.expectRevert(Core.CallFailed.selector);
+        vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(1, _buyData(unlisted), unlisted, STRATEGY);
         _assertUnchanged(s0);
 
@@ -295,7 +295,7 @@ contract LifecycleDoorsTest is Fixture {
 
         // the core never buys a credit it already owns
         vm.prank(keeper);
-        vm.expectRevert(Core.AlreadyOwned.selector);
+        vm.expectRevert(ICore.AlreadyOwned.selector);
         core.buyListing(priceB, _buyData(LISTED_B), LISTED_B, STRATEGY);
         _solvent();
     }
@@ -306,7 +306,7 @@ contract LifecycleDoorsTest is Fixture {
         uint256 hostile0 = address(hostile).balance;
 
         vm.prank(keeper);
-        vm.expectRevert(Core.NoCredit.selector);
+        vm.expectRevert(ICore.NoCredit.selector);
         core.buyListing(1 gwei, "", LISTED_A, address(hostile));
         _assertUnchanged(s0);
         assertEq(address(hostile).balance, hostile0, "the eth came back with the revert");
@@ -314,14 +314,14 @@ contract LifecycleDoorsTest is Fixture {
         // not on the list at all
         address stranger = address(new HostileTarget());
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(1 gwei, "", LISTED_A, stranger);
 
         // removal is immediate
         vm.prank(owner);
         core.removeTarget(address(hostile));
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(1 gwei, "", LISTED_A, address(hostile));
         _assertUnchanged(s0);
     }
@@ -343,12 +343,12 @@ contract LifecycleDoorsTest is Fixture {
         ];
         for (uint256 i; i < forbidden.length; ++i) {
             vm.prank(owner);
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(forbidden[i]);
             assertFalse(core.allowedTarget(forbidden[i]));
         }
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(1, "", LISTED_A, Mainnet.SKIM_HOOK);
     }
 }
@@ -406,7 +406,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(basis, c.cost + c.reimb);
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
-        assertEq(uint8(l.status), uint8(Core.StatementStatus.Listed));
+        assertEq(uint8(l.status), uint8(ICore.StatementStatus.Listed));
         assertEq(l.reserve, basis * 11_000 / 10_000, "110 percent of cost");
         assertEq(_auctionOf(c.sid).duration, 24 hours);
         uint256[] memory heldIds = core.heldStatements();
@@ -445,7 +445,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(_live(capped.sid).reserve, basis2 * 11_000 / 10_000, "the reserve follows the basis");
 
         // the controller cannot be asked again, there is no full page left
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
     }
 
@@ -457,7 +457,7 @@ contract LifecycleComposeTest is Fixture {
         uint256 pot = core.ethPot();
         _warp(60 days);
         Live memory l = _live(c.sid);
-        assertEq(uint8(l.status), uint8(Core.StatementStatus.Listed));
+        assertEq(uint8(l.status), uint8(ICore.StatementStatus.Listed));
         assertEq(l.auctionId, l0.auctionId);
         assertEq(l.reserve, l0.reserve);
         assertEq(STATEMENTS.ownerOf(c.sid), address(house));
@@ -465,7 +465,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(core.ethPot(), pot, "an unsold statement costs nothing and books nothing");
         // two months later a first bid at the reserve still starts the clock
         _bid(alice, c.sid, l.reserve);
-        assertEq(uint8(_live(c.sid).status), uint8(Core.StatementStatus.Bid));
+        assertEq(uint8(_live(c.sid).status), uint8(ICore.StatementStatus.Bid));
         assertEq(_live(c.sid).endTime, block.timestamp + 24 hours);
         _solvent();
     }
@@ -541,9 +541,9 @@ contract LifecycleComposeTest is Fixture {
         assertEq(STATEMENTS.ownerOf(c.sid), bob, "the winner holds the statement");
         assertEq(_owedByHouse(), step, "the proceeds are the core's, on the house");
         assertEq(core.ethPot(), pot0, "not booked until collected");
-        assertEq(uint8(_live(c.sid).status), uint8(Core.StatementStatus.Sold));
+        assertEq(uint8(_live(c.sid).status), uint8(ICore.StatementStatus.Sold));
         vm.expectEmit(address(core));
-        emit Core.StatementSold(c.sid, _live(c.sid).auctionId, bob);
+        emit ICore.StatementSold(c.sid, _live(c.sid).auctionId, bob);
         core.syncStatement(c.sid);
         assertEq(core.heldStatements().length, 0);
 
@@ -560,17 +560,17 @@ contract LifecycleComposeTest is Fixture {
         vm.roll(block.number + 1);
         assertEq(_buybackAndCheck(buybacker), 1 ether);
         vm.prank(buybacker);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 24);
         vm.prank(buybacker);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         assertEq(_buybackAndCheck(buybacker), step / 2 - 1 ether, "the last slice is what is left");
         assertEq(core.ethToBuyback(), 0);
         vm.roll(block.number + 25);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();
     }
 
@@ -588,11 +588,11 @@ contract LifecycleComposeTest is Fixture {
         assertEq(_buybackAndCheck(buybacker), 0.2 ether);
 
         vm.prank(buybacker);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 2);
         vm.prank(buybacker);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         _buybackAndCheck(buybacker);
@@ -608,7 +608,7 @@ contract LifecycleComposeTest is Fixture {
         assertEq(core.ethToBuyback(), 0);
         assertLt(last, 0.2 ether, "the last slice was partial");
         vm.roll(block.number + 3);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();
     }
 }
@@ -645,10 +645,10 @@ contract LifecyclePhase2Test is Fixture {
         assertEq(core.exitModule(), address(mod));
         c = _composeOnce();
         uint256 aid = _live(c.sid).auctionId;
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         vm.warp(c.at + 105 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         vm.warp(c.at + 105 hours);
 
@@ -708,7 +708,7 @@ contract LifecyclePhase2Test is Fixture {
         assertGt(again, coin.balanceOf(taker));
         uint256 held = coin.balanceOf(taker);
         vm.prank(taker);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.buybackExit(held);
         _solvent();
     }
@@ -719,12 +719,12 @@ contract LifecyclePhase2Test is Fixture {
         Composed memory c = _composeOnce();
         vm.warp(c.at + 105 hours);
         _bid(alice, c.sid, _live(c.sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), address(house), "nothing moved");
         _endAuction(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), alice);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.exitStatement(c.sid);
         assertEq(core.xPot() + core.xToBuyback(), 0, "no exit token came in");
         _collectSales();
@@ -780,29 +780,31 @@ contract LifecyclePhase2Test is Fixture {
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.composeExit();
-        uint256 reimb = keeper.balance - keeper0;
         uint256 sid = supply0 + 1;
-        assertEq(STATEMENTS.supply(), sid);
-        assertEq(STATEMENTS.ownerOf(sid), address(core), "held by the core, never listed");
-        assertEq(core.pileSize(Lane.Exit), 0);
-        (bool held, Lane lane, uint256 basis,) = core.statementInfo(sid);
-        assertTrue(held);
-        assertEq(uint8(lane), uint8(Lane.Exit));
-        assertEq(basis, total, "the basis is the exit token paid, no refund in it");
-        assertGt(reimb, 0);
-        assertLe(reimb, cap * 500 / 10_000);
-        assertEq(core.ethPot(), ethPot0 - reimb);
+        {
+            uint256 reimb = keeper.balance - keeper0;
+            assertEq(STATEMENTS.supply(), sid);
+            assertEq(STATEMENTS.ownerOf(sid), address(core), "held by the core, never listed");
+            assertEq(core.pileSize(Lane.Exit), 0);
+            (bool held, Lane lane, uint256 basis,) = core.statementInfo(sid);
+            assertTrue(held);
+            assertEq(uint8(lane), uint8(Lane.Exit));
+            assertEq(basis, total, "the basis is the exit token paid, no refund in it");
+            assertGt(reimb, 0);
+            assertLe(reimb, cap * 500 / 10_000);
+            assertEq(core.ethPot(), ethPot0 - reimb);
 
-        // no auction in the exit lane
-        Live memory l = _live(sid);
-        assertEq(uint8(l.status), uint8(Core.StatementStatus.Held));
-        assertEq(l.auctionId, 0);
-        (bool listed,) = house.getAuctionFor(address(STATEMENTS), sid);
-        assertFalse(listed);
-        vm.expectRevert(Core.NotListed.selector);
-        core.repriceStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
-        core.syncStatement(sid);
+            // no auction in the exit lane
+            Live memory l = _live(sid);
+            assertEq(uint8(l.status), uint8(ICore.StatementStatus.Held));
+            assertEq(l.auctionId, 0);
+            (bool listed,) = house.getAuctionFor(address(STATEMENTS), sid);
+            assertFalse(listed);
+            vm.expectRevert(ICore.NotListed.selector);
+            core.repriceStatement(sid);
+            vm.expectRevert(ICore.NotListed.selector);
+            core.syncStatement(sid);
+        }
 
         // immediate exit, everything to xPot, nothing to the buyback
         uint256 required = STATEMENTS.creditScoreOf(sid) * UNIT;
@@ -830,27 +832,27 @@ contract LifecyclePhase2Test is Fixture {
 
         // one basis point short
         mod.setShortfallBps(1);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the statement never left the house");
         (bool held,,,) = core.statementInfo(c.sid);
         assertTrue(held);
-        assertEq(uint8(_live(c.sid).status), uint8(Core.StatementStatus.Listed), "still listed");
+        assertEq(uint8(_live(c.sid).status), uint8(ICore.StatementStatus.Listed), "still listed");
         assertEq(_live(c.sid).auctionId, aid);
 
         // all of it withheld
         mod.setShortfallBps(10_000);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
 
         // a module that lowers the unit it pays by after it was set. the core holds the unit from set time
         mod.setShortfallBps(0);
         mod.setUnitPerPoint(1);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
 
         assertEq(keccak256(abi.encode(core.xPot(), core.xToBuyback(), xt.balanceOf(address(core)))), before);
-        assertEq(uint8(_live(c.sid).status), uint8(Core.StatementStatus.Listed));
+        assertEq(uint8(_live(c.sid).status), uint8(ICore.StatementStatus.Listed));
         // the listing is still good: a bidder could win it right now
         uint256 snap = vm.snapshotState();
         _bid(alice, c.sid, _live(c.sid).reserve);
@@ -973,7 +975,7 @@ contract LifecycleNarrativeTest is Fixture {
 
     /// the statement nobody bid on: still listed after the sale of the other, redeemed after `exitAfter`
     function _exit(uint256 sid, uint64 at) internal {
-        assertEq(uint8(_live(sid).status), uint8(Core.StatementStatus.Listed), "no bid, so still listed");
+        assertEq(uint8(_live(sid).status), uint8(ICore.StatementStatus.Listed), "no bid, so still listed");
         vm.warp(at + core.settings().exitAfter);
         uint256 required = STATEMENTS.creditScoreOf(sid) * UNIT;
         uint256 back0 = core.xToBuyback();
@@ -1041,7 +1043,7 @@ contract LifecycleNarrativeTest is Fixture {
             (uint256 aged, uint64 agedAt) = _composeNow();
             assertEq(core.heldStatements().length, 2);
             _sale(sold);
-            assertEq(uint8(_live(aged).status), uint8(Core.StatementStatus.Listed));
+            assertEq(uint8(_live(aged).status), uint8(ICore.StatementStatus.Listed));
             _buybacks();
             _exit(aged, agedAt);
             _bidForCredits();
@@ -1115,7 +1117,7 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         s.saleFloorBps = 12_000;
         s.saleToBuybackBps = 8_000;
         vm.expectEmit(address(core));
-        emit Core.SettingsSet(s);
+        emit ICore.SettingsSet(s);
         _setSettings(s);
         _solvent();
 
@@ -1124,16 +1126,18 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         for (uint256 i; i < 2; ++i) {
             assertEq(core.ceilingOf(fresh[i]), _blend(fresh[i], 5_000), "half flat, half score");
         }
-        uint256 quote = core.ceilingOf(fresh[0]);
-        uint256 before = seller.balance;
-        vm.prank(seller);
-        core.sellForEth(_one(fresh[0]));
-        assertEq(seller.balance - before, quote, "paid by the new numbers");
+        {
+            uint256 quote = core.ceilingOf(fresh[0]);
+            uint256 before = seller.balance;
+            vm.prank(seller);
+            core.sellForEth(_one(fresh[0]));
+            assertEq(seller.balance - before, quote, "paid by the new numbers");
+        }
 
         // the old listings are untouched until someone reprices them. a listing with a bid cannot be repriced at all
         assertEq(_live(s1).reserve, oldReserve1);
         assertEq(_live(s2).reserve, cost2 * 11_000 / 10_000);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(s1);
         vm.prank(carol);
         core.repriceStatement(s2);
@@ -1146,26 +1150,28 @@ contract LifecycleOwnerAdaptsTest is Fixture {
         assertEq(core.heldStatements().length, 3);
 
         // sales: s1 clears at its old reserve, s2 at the new one, which a bid under the old reserve could not meet
-        uint256 pot0 = core.ethPot();
-        uint256 back0 = core.ethToBuyback();
-        _endAuction(s1);
-        assertEq(STATEMENTS.ownerOf(s1), alice);
-        uint256 price2 = _live(s2).reserve;
-        assertGt(price2, cost2 * 11_000 / 10_000);
-        _bid(bob, s2, price2);
-        _endAuction(s2);
-        uint256 price3 = _live(s3).reserve;
-        _bid(carol, s3, price3);
-        _endAuction(s3);
-        assertEq(STATEMENTS.ownerOf(s2), bob);
-        assertEq(STATEMENTS.ownerOf(s3), carol);
-        assertEq(_owedByHouse(), oldReserve1 + price2 + price3);
+        {
+            uint256 pot0 = core.ethPot();
+            uint256 back0 = core.ethToBuyback();
+            _endAuction(s1);
+            assertEq(STATEMENTS.ownerOf(s1), alice);
+            uint256 price2 = _live(s2).reserve;
+            assertGt(price2, cost2 * 11_000 / 10_000);
+            _bid(bob, s2, price2);
+            _endAuction(s2);
+            uint256 price3 = _live(s3).reserve;
+            _bid(carol, s3, price3);
+            _endAuction(s3);
+            assertEq(STATEMENTS.ownerOf(s2), bob);
+            assertEq(STATEMENTS.ownerOf(s3), carol);
+            assertEq(_owedByHouse(), oldReserve1 + price2 + price3);
 
-        // one collection under the new split: 80 percent of every sale, old statements included
-        assertEq(_collectSales(), oldReserve1 + price2 + price3);
-        uint256 total = oldReserve1 + price2 + price3;
-        assertEq(core.ethToBuyback() - back0, total * 8_000 / 10_000, "80 percent to the buyback");
-        assertEq(core.ethPot() - pot0, total - total * 8_000 / 10_000, "the rest to the pot");
+            // one collection under the new split: 80 percent of every sale, old statements included
+            assertEq(_collectSales(), oldReserve1 + price2 + price3);
+            uint256 total = oldReserve1 + price2 + price3;
+            assertEq(core.ethToBuyback() - back0, total * 8_000 / 10_000, "80 percent to the buyback");
+            assertEq(core.ethPot() - pot0, total - total * 8_000 / 10_000, "the rest to the pot");
+        }
         for (uint256 i; i < 3; ++i) {
             core.syncStatement(i == 0 ? s1 : i == 1 ? s2 : s3);
         }

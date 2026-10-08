@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {LaunchChecks} from "./Checks.sol";
@@ -29,7 +29,7 @@ contract Postflight is Script, LaunchChecks {
             _check("deployer still factory admin", !admin || !gate, admin ? "yes, revoke it (step 10)" : "no");
         }
         _print("postflight");
-        if (core.code.length != 0) printVerifyInputs(Core(payable(core)), c, deployer);
+        if (core.code.length != 0) printVerifyInputs(ICore(payable(core)), c, deployer);
         _require();
     }
 }

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, Sale, Settings, IStatements} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
@@ -134,7 +135,7 @@ contract SaleCurveTest is SaleBase {
         for (uint256 i; i < t.length; ++i) {
             _age(sid, t[i]);
             vm.expectEmit(address(core));
-            emit Core.StatementRepriced(sid, cost * bps[i] / 10_000);
+            emit ICore.StatementRepriced(sid, cost * bps[i] / 10_000);
             core.repriceStatement(sid);
             assertEq(_live(sid).reserve, cost * bps[i] / 10_000, "reserve");
             assertEq(house.getAuction(_live(sid).auctionId).reservePrice, cost * bps[i] / 10_000, "house reserve");
@@ -209,17 +210,17 @@ contract SaleCurveTest is SaleBase {
 
     function test_curve_startBelowFloorAndFloorAboveStartRevert() public {
         vm.startPrank(owner);
-        vm.expectRevert(abi.encodeWithSelector(ControllerV1.BadSetting.selector, bytes32("startBps")));
+        vm.expectRevert(abi.encodeWithSelector(IControllerV1.BadSetting.selector, bytes32("startBps")));
         ctl.setStartBps(7_499);
-        vm.expectRevert(abi.encodeWithSelector(ControllerV1.BadSetting.selector, bytes32("floorBps")));
+        vm.expectRevert(abi.encodeWithSelector(IControllerV1.BadSetting.selector, bytes32("floorBps")));
         ctl.setFloorBps(11_001);
         ctl.setStartBps(7_500);
-        vm.expectRevert(abi.encodeWithSelector(ControllerV1.BadSetting.selector, bytes32("floorBps")));
+        vm.expectRevert(abi.encodeWithSelector(IControllerV1.BadSetting.selector, bytes32("floorBps")));
         ctl.setFloorBps(7_501);
         vm.stopPrank();
         // a controller built with a start below its floor is refused
-        vm.expectRevert(abi.encodeWithSelector(ControllerV1.BadSetting.selector, bytes32("floorBps")));
-        new ControllerV1(address(core), Sale({buyOnly: false, startBps: 5_000, stepBps: 100, stepEvery: 3 hours, floorBps: 7_500}));
+        vm.expectRevert(abi.encodeWithSelector(IControllerV1.BadSetting.selector, bytes32("floorBps")));
+        Prod.newController(address(core), Sale({buyOnly: false, startBps: 5_000, stepBps: 100, stepEvery: 3 hours, floorBps: 7_500}));
     }
 
     /// the whole table again with the mode flipped: buy only keeps the house reserve at the start price while the
@@ -238,7 +239,7 @@ contract SaleCurveTest is SaleBase {
     function test_curve_priceOfRefusesWhatIsNotForSale() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.priceOf(sid + 100);
         // an exit lane statement is never for sale
         uint256[] memory ids = _credits(seller, 80);
@@ -249,7 +250,7 @@ contract SaleCurveTest is SaleBase {
         vm.fee(composeBasefee);
         core.composeExit();
         uint256 xs = STATEMENTS.supply();
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.priceOf(xs);
     }
 }
@@ -335,7 +336,7 @@ contract SaleFloorTest is SaleBase {
             uint256 supply = STATEMENTS.supply();
             uint256 pot = core.ethPot();
             vm.prank(keeper);
-            vm.expectRevert(Core.BadPrice.selector);
+            vm.expectRevert(ICore.BadPrice.selector);
             core.compose();
             assertEq(STATEMENTS.supply(), supply, "nothing minted");
             assertEq(core.pileSize(Lane.Eth), 80, "the pile is whole");
@@ -360,7 +361,7 @@ contract SaleFloorTest is SaleBase {
             sc = _scripted(9_000, false);
             _brokenModes(m, sc);
             _age(sid, 30 * H);
-            vm.expectRevert(Core.BadPrice.selector);
+            vm.expectRevert(ICore.BadPrice.selector);
             core.repriceStatement(sid);
             assertEq(_live(sid).reserve, reserve, "the stored reserve stays");
             assertEq(house.getAuction(_live(sid).auctionId).reservePrice, reserve);
@@ -377,7 +378,7 @@ contract SaleFloorTest is SaleBase {
         uint256 sid = _composeOnce().sid;
         uint256 reserve = _live(sid).reserve;
         _setController(address(0xBEEF));
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, reserve);
     }
@@ -402,26 +403,26 @@ contract SaleFloorTest is SaleBase {
         uint256 reserve = _live(sid).reserve;
         _bid(address(0xB1D1), sid, reserve);
         _age(sid, 6 * H);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, reserve);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
         // also when the controller is broken: the bid is checked first
         sc = _scripted(9_000, false);
         sc.setRevertPrice(true);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
         // and after the auction ended and before it is settled
         _bid(address(0xB1D2), sid, reserve * 106 / 100);
         Live memory l = _live(sid);
         vm.warp(l.endTime);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
-        vm.expectRevert(Core.HasBid.selector);
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
         // after the sale: the record is stale, not listed
         vm.prank(address(0xE4D));
         house.endAuction{gas: END_GAS}(l.auctionId);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sid);
     }
 
@@ -432,7 +433,7 @@ contract SaleFloorTest is SaleBase {
         vm.prank(address(0x5757));
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, _cost(sid) * 10_800 / 10_000);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sid + 77);
         uint256[] memory ids = _credits(seller, 80);
         xt.mint(address(core), 5e19);
@@ -442,7 +443,7 @@ contract SaleFloorTest is SaleBase {
         vm.fee(composeBasefee);
         core.composeExit();
         uint256 xs = STATEMENTS.supply();
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(xs);
     }
 }
@@ -467,7 +468,7 @@ contract SaleAuctionTest is SaleBase {
         vm.expectRevert(IAuctionHouse.BidBelowReserve.selector);
         house.createBid{value: reserve - 1}(aid);
         _bid(b1, sid, reserve);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
         uint256 min2 = reserve + reserve * 500 / 10_000;
         vm.deal(b2, min2);
         vm.prank(b2);
@@ -486,10 +487,10 @@ contract SaleAuctionTest is SaleBase {
         assertEq(core.ethPot(), pot0, "owed eth is not in the pot until collected");
         assertEq(address(core).balance, bal0);
         assertTrue(_held(sid), "the record is stale until synced");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold));
 
         vm.expectEmit(address(core));
-        emit Core.SalesCollected(min2, min2 * bps / 10_000);
+        emit ICore.SalesCollected(min2, min2 * bps / 10_000);
         _collectSales();
         assertEq(address(core).balance - bal0, min2, "the balance rose by the winning bid");
         assertEq(core.ethToBuyback() - bb0, min2 * bps / 10_000, "buyback share");
@@ -499,7 +500,7 @@ contract SaleAuctionTest is SaleBase {
 
         core.syncStatement(sid);
         assertFalse(_held(sid));
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None));
         // a second collect books nothing more
         (pot0, bb0, bal0) = _recordedBook();
         core.collectSales();
@@ -539,7 +540,7 @@ contract SaleAuctionTest is SaleBase {
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost * 9_000 / 10_000);
         _bid(b, sid, cost * 9_000 / 10_000);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
     }
 
     /// the reserve of an auction that already has a bid stays: later decay does not touch it
@@ -550,7 +551,7 @@ contract SaleAuctionTest is SaleBase {
         _age(sid, 12 * H);
         assertEq(ctl.priceOf(sid), cost * 10_600 / 10_000);
         assertEq(_live(sid).reserve, cost * 11_000 / 10_000);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
     }
 
@@ -565,7 +566,7 @@ contract SaleAuctionTest is SaleBase {
         assertEq(bb1, bb0);
         assertEq(bal1, bal0);
         assertEq(STATEMENTS.ownerOf(sid), address(house));
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
     }
 }
 
@@ -590,9 +591,9 @@ contract SaleBuyOnlyTest is SaleBase {
             uint256 n = core.heldStatements().length;
             uint256 aid = _live(sid).auctionId;
             vm.expectEmit(address(core));
-            emit Core.StatementSoldTo(sid, buyer, price);
+            emit ICore.StatementSoldTo(sid, buyer, price);
             vm.expectEmit(address(ctl));
-            emit ControllerV1.Bought(sid, buyer, price);
+            emit IControllerV1.Bought(sid, buyer, price);
             _pay(buyer, sid, price);
             assertEq(buyer.balance, 0, "exact payment, nothing back");
             assertEq(STATEMENTS.ownerOf(sid), buyer);
@@ -607,7 +608,7 @@ contract SaleBuyOnlyTest is SaleBase {
             assertFalse(held, "the core record is cleared");
             assertEq(core.heldStatements().length, n - 1);
             assertFalse(_held(sid));
-            assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None));
+            assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None));
             assertEq(_owedByHouse(), 0, "the house owes nothing");
             _solvent();
             vm.revertToState(snap);
@@ -626,10 +627,10 @@ contract SaleBuyOnlyTest is SaleBase {
         (uint256 pot0, uint256 bb0, uint256 bal0) = _recordedBook();
         vm.deal(buyer, price);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.Underpaid.selector);
+        vm.expectRevert(IControllerV1.Underpaid.selector);
         ctl.buy{value: price - 1}(sid);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.Underpaid.selector);
+        vm.expectRevert(IControllerV1.Underpaid.selector);
         ctl.buy(sid);
         (uint256 pot1, uint256 bb1, uint256 bal1) = _recordedBook();
         assertEq(pot1, pot0);
@@ -648,7 +649,7 @@ contract SaleBuyOnlyTest is SaleBase {
         assertEq(now_, _cost(sid) * 11_700 / 10_000, "a raised start lifts the ask at once");
         vm.deal(buyer, price);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.Underpaid.selector);
+        vm.expectRevert(IControllerV1.Underpaid.selector);
         ctl.buy{value: price}(sid);
         _pay(buyer, sid, now_);
         assertEq(STATEMENTS.ownerOf(sid), buyer);
@@ -672,12 +673,12 @@ contract SaleBuyOnlyTest is SaleBase {
         uint256 sid = _composeOnce().sid;
         vm.deal(buyer, 100 ether);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.NotBuyOnly.selector);
+        vm.expectRevert(IControllerV1.NotBuyOnly.selector);
         ctl.buy{value: 100 ether}(sid);
         _buyOnly(true);
         _buyOnly(false);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.NotBuyOnly.selector);
+        vm.expectRevert(IControllerV1.NotBuyOnly.selector);
         ctl.buy{value: 100 ether}(sid);
     }
 
@@ -688,16 +689,16 @@ contract SaleBuyOnlyTest is SaleBase {
         _bid(bidder, sid, reserve);
         vm.deal(buyer, 100 ether);
         vm.prank(buyer);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         ctl.buy{value: 100 ether}(sid);
         assertEq(buyer.balance, 100 ether);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
         assertEq(_live(sid).bid, reserve);
         assertEq(house.getAuction(_live(sid).auctionId).bidder, bidder);
         // even a price far above the reserve does not buy it out of the auction
         _age(sid, 1 * H);
         vm.prank(buyer);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         ctl.buy{value: 100 ether}(sid);
         _endAuction(sid);
         assertEq(STATEMENTS.ownerOf(sid), bidder, "the bidder wins the statement");
@@ -711,10 +712,10 @@ contract SaleBuyOnlyTest is SaleBase {
         _pay(buyer, sid, price);
         vm.deal(buyer, 100 ether);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.buy{value: 100 ether}(sid);
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.buy{value: 100 ether}(sid + 500);
         uint256[] memory ids = _credits(seller, 80);
         xt.mint(address(core), 5e19);
@@ -725,7 +726,7 @@ contract SaleBuyOnlyTest is SaleBase {
         core.composeExit();
         uint256 xs = STATEMENTS.supply();
         vm.prank(buyer);
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.buy{value: 100 ether}(xs);
     }
 
@@ -766,7 +767,7 @@ contract SaleModeFlipTest is SaleBase {
         _buyOnly(true);
         vm.deal(address(0xB0B), 100 ether);
         vm.prank(address(0xB0B));
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         ctl.buy{value: 100 ether}(a);
         _endAuction(a);
         assertEq(STATEMENTS.ownerOf(a), bidder, "the auction ran on after the flip");
@@ -805,12 +806,12 @@ contract SaleModeFlipTest is SaleBase {
         assertEq(_live(sid).reserve, cost * 11_000 / 10_000);
         vm.deal(address(0xB0B), 100 ether);
         vm.prank(address(0xB0B));
-        vm.expectRevert(ControllerV1.NotBuyOnly.selector);
+        vm.expectRevert(IControllerV1.NotBuyOnly.selector);
         ctl.buy{value: 100 ether}(sid);
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost * 9_000 / 10_000);
         _bid(address(0xB1D1), sid, cost * 9_000 / 10_000);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
     }
 
     /// a listing repriced down in auction mode, then the flip: its reserve walks back UP to the start price at the
@@ -831,11 +832,11 @@ contract SaleModeFlipTest is SaleBase {
 
     function test_flip_onlyTheOwnerFlips() public {
         vm.prank(address(0x5757));
-        vm.expectRevert(ControllerV1.OnlyOwner.selector);
+        vm.expectRevert(IControllerV1.OnlyOwner.selector);
         ctl.setBuyOnly(true);
         vm.prank(owner);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.BuyOnlySet(true);
+        emit IControllerV1.BuyOnlySet(true);
         ctl.setBuyOnly(true);
         assertTrue(ctl.buyOnly());
     }
@@ -857,18 +858,18 @@ contract SaleSellToTest is SaleBase {
     function test_sellTo_onlyTheCurrentController() public {
         uint256 sid = _composeOnce().sid;
         vm.deal(address(this), 100 ether);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: 10 ether}(sid, buyer);
         vm.prank(owner);
         vm.deal(owner, 100 ether);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: 10 ether}(sid, buyer);
         // the first controller has no way to call it except `buy`, and after it is replaced `buy` fails too
         _buyOnly(true);
         _install();
         vm.deal(buyer, 100 ether);
         vm.prank(buyer);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         ctl.buy{value: 100 ether}(sid);
         vm.deal(address(sc), 100 ether);
         sc.sell{value: _floorOf(sid)}(sid, buyer);
@@ -879,15 +880,15 @@ contract SaleSellToTest is SaleBase {
         uint256 sid = _composeOnce().sid;
         _install();
         uint256 floor = _floorOf(sid);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         sc.sell{value: floor - 1}(sid, buyer);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         sc.sell{value: 0}(sid, buyer);
         assertEq(STATEMENTS.ownerOf(sid), address(house));
         (uint256 pot0, uint256 bb0, uint256 bal0) = _recordedBook();
         uint256 scBal = address(sc).balance;
         vm.expectEmit(address(core));
-        emit Core.StatementSoldTo(sid, buyer, floor);
+        emit ICore.StatementSoldTo(sid, buyer, floor);
         sc.sell{value: floor}(sid, buyer);
         assertEq(STATEMENTS.ownerOf(sid), buyer);
         assertEq(address(core).balance - bal0, floor);
@@ -903,9 +904,9 @@ contract SaleSellToTest is SaleBase {
         _install();
         uint256 cost = _cost(sid);
         _floorBps(30_000);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         sc.sell{value: cost * 29_999 / 10_000}(sid, buyer);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         sc.sell{value: cost * 3 - 1}(sid, buyer);
         _floorBps(1_000);
         sc.sell{value: cost / 10}(sid, buyer);
@@ -936,15 +937,15 @@ contract SaleSellToTest is SaleBase {
         core.composeExit();
         uint256 xs = STATEMENTS.supply();
         _install();
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         sc.sell{value: 100 ether}(xs, buyer);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         sc.sell{value: 100 ether}(sid + 1000, buyer);
         assertEq(STATEMENTS.ownerOf(xs), address(core), "the exit lane statement stays");
         // a statement that was sold and not synced: the record is stale and the house has no auction
         _bid(address(0xB1D1), sid, _live(sid).reserve);
         _endAuction(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         sc.sell{value: 100 ether}(sid, buyer);
     }
 
@@ -953,13 +954,13 @@ contract SaleSellToTest is SaleBase {
         _install();
         address bidder = address(0xB1D1);
         _bid(bidder, sid, _live(sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         sc.sell{value: 1000 ether}(sid, buyer);
         _bid(address(0xB1D2), sid, _live(sid).bid * 106 / 100);
         Live memory l = _live(sid);
         vm.warp(l.endTime);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
-        vm.expectRevert(Core.HasBid.selector);
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
+        vm.expectRevert(ICore.HasBid.selector);
         sc.sell{value: 1000 ether}(sid, buyer);
         vm.prank(address(0xE4D));
         house.endAuction{gas: END_GAS}(l.auctionId);
@@ -972,7 +973,7 @@ contract SaleSellToTest is SaleBase {
         uint256 floor = _floorOf(sid);
         sc.sellTwice{value: floor * 2}(sid, buyer, floor, floor);
         assertFalse(sc.lastOk());
-        assertEq(bytes4(sc.lastWhy()), Core.NotListed.selector);
+        assertEq(bytes4(sc.lastWhy()), ICore.NotListed.selector);
         assertEq(STATEMENTS.ownerOf(sid), buyer);
     }
 
@@ -983,7 +984,7 @@ contract SaleSellToTest is SaleBase {
         vm.expectRevert();
         sc.sell{value: floor}(sid, address(0));
         assertEq(STATEMENTS.ownerOf(sid), address(house));
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
         // a buyer without a receiver hook still gets it: the core uses a plain transfer
         sc.sell{value: floor}(sid, address(ctl));
         assertEq(STATEMENTS.ownerOf(sid), address(ctl));
@@ -1024,10 +1025,10 @@ contract SaleSellToTest is SaleBase {
         assertEq(address(rb).balance - pre, 2 ether, "and the refund landed");
         assertEq(rb.reentries(), 1);
         assertTrue(rb.buyBlocked(), "a second buy from the refund is refused");
-        assertEq(rb.buySel(), ControllerV1.Reentrant.selector);
+        assertEq(rb.buySel(), IControllerV1.Reentrant.selector);
         assertTrue(rb.sellBlocked(), "sellTo is the controller's alone");
         assertTrue(rb.repriceBlocked(), "the sold statement is not listed any more");
-        assertEq(rb.repriceSel(), Core.NotListed.selector);
+        assertEq(rb.repriceSel(), ICore.NotListed.selector);
         assertTrue(rb.exitBlocked());
         assertEq(STATEMENTS.ownerOf(b), address(house), "the other statement is untouched");
         assertEq(core.ethPot() - pot0 + core.ethToBuyback() - bb0, price, "booked exactly once");
@@ -1091,7 +1092,7 @@ contract SaleRelistTest is SaleBase {
         assertEq(_live(sid).auctionId, aid + 1);
         // the exit wait counts from the relist
         _warp(105 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         _warp(1);
         core.exitStatement(sid);
@@ -1108,12 +1109,12 @@ contract SaleRelistTest is SaleBase {
         ScriptedController sc = new ScriptedController();
         sc.setRevertPrice(true);
         _setController(address(sc));
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Returned));
         assertEq(STATEMENTS.ownerOf(sid), address(core));
         core.syncStatement(sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
         assertEq(_live(sid).reserve, _cost(sid) * core.settings().saleFloorBps / 10_000, "listed at the hard floor");
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         sc.setRevertPrice(false);
         sc.setPriceBps(20_000);
@@ -1142,7 +1143,7 @@ contract SaleRelistTest is SaleBase {
         assertFalse(held, "the top is gone");
         // the base was listed 100 hours ago but may not exit for 105 hours from the relist
         _warp(104 hours);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(a);
         _warp(1 hours);
         core.exitStatement(a);
@@ -1162,7 +1163,7 @@ contract SaleSettingsTest is SaleBase {
     }
 
     function _bad(bytes32 field) internal pure returns (bytes memory) {
-        return abi.encodeWithSelector(ControllerV1.BadSetting.selector, field);
+        return abi.encodeWithSelector(IControllerV1.BadSetting.selector, field);
     }
 
     function test_settings_boundsOfEverySetter() public {
@@ -1206,19 +1207,19 @@ contract SaleSettingsTest is SaleBase {
     function test_settings_eventsAndValues() public {
         vm.startPrank(owner);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.StartBpsSet(12_000);
+        emit IControllerV1.StartBpsSet(12_000);
         ctl.setStartBps(12_000);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.StepBpsSet(150);
+        emit IControllerV1.StepBpsSet(150);
         ctl.setStepBps(150);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.StepEverySet(2 hours);
+        emit IControllerV1.StepEverySet(2 hours);
         ctl.setStepEvery(2 hours);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.FloorBpsSet(8_000);
+        emit IControllerV1.FloorBpsSet(8_000);
         ctl.setFloorBps(8_000);
         vm.expectEmit(address(ctl));
-        emit ControllerV1.BuyOnlySet(true);
+        emit IControllerV1.BuyOnlySet(true);
         ctl.setBuyOnly(true);
         vm.stopPrank();
         assertEq(ctl.startBps(), 12_000);
@@ -1233,15 +1234,15 @@ contract SaleSettingsTest is SaleBase {
         address[4] memory who = [deployer, keeper, address(ctl), address(0x5757)];
         for (uint256 i; i < who.length; ++i) {
             vm.startPrank(who[i]);
-            vm.expectRevert(ControllerV1.OnlyOwner.selector);
+            vm.expectRevert(IControllerV1.OnlyOwner.selector);
             ctl.setBuyOnly(true);
-            vm.expectRevert(ControllerV1.OnlyOwner.selector);
+            vm.expectRevert(IControllerV1.OnlyOwner.selector);
             ctl.setStartBps(12_000);
-            vm.expectRevert(ControllerV1.OnlyOwner.selector);
+            vm.expectRevert(IControllerV1.OnlyOwner.selector);
             ctl.setStepBps(150);
-            vm.expectRevert(ControllerV1.OnlyOwner.selector);
+            vm.expectRevert(IControllerV1.OnlyOwner.selector);
             ctl.setStepEvery(2 hours);
-            vm.expectRevert(ControllerV1.OnlyOwner.selector);
+            vm.expectRevert(IControllerV1.OnlyOwner.selector);
             ctl.setFloorBps(8_000);
             vm.stopPrank();
         }
@@ -1253,46 +1254,46 @@ contract SaleSettingsTest is SaleBase {
         Sale memory s = _fresh();
         s.startBps = 999;
         vm.expectRevert(_bad("startBps"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.startBps = 40_001;
         vm.expectRevert(_bad("startBps"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.stepBps = 5_001;
         vm.expectRevert(_bad("stepBps"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.stepEvery = 59;
         vm.expectRevert(_bad("stepEvery"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.stepEvery = 30 days + 1;
         vm.expectRevert(_bad("stepEvery"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.floorBps = 999;
         vm.expectRevert(_bad("floorBps"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.floorBps = s.startBps + 1;
         vm.expectRevert(_bad("floorBps"));
-        new ControllerV1(address(core), s);
+        Prod.newController(address(core), s);
         s = _fresh();
         s.buyOnly = true;
-        ControllerV1 c = new ControllerV1(address(core), s);
+        IControllerV1 c = Prod.newController(address(core), s);
         assertTrue(c.buyOnly());
     }
 
     /// a controller the owner installs later is governed by the same live owner
     function test_settings_aNewControllerFollowsTheSameOwner() public {
-        ControllerV1 c2 = new ControllerV1(address(core), lc.sale);
+        IControllerV1 c2 = Prod.newController(address(core), lc.sale);
         _setController(address(c2));
         vm.prank(owner);
         c2.setBuyOnly(true);
         assertTrue(c2.buyOnly());
         vm.prank(address(0x5757));
-        vm.expectRevert(ControllerV1.OnlyOwner.selector);
+        vm.expectRevert(IControllerV1.OnlyOwner.selector);
         c2.setStepBps(1);
     }
 }

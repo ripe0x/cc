@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {console} from "forge-std/Test.sol";
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsMevSkim} from "../../src/interfaces/ArtCoins.sol";
@@ -121,16 +121,16 @@ abstract contract InvariantsBase is InvariantFixture {
                 assertEq(o, address(core), "an exit lane statement is not held by the core");
                 assertTrue(held, "an exit lane statement is not recorded as held");
                 assertEq(cost, s.cost, "exit lane cost basis differs");
-                (Core.StatementStatus st,,,,) = core.statementStatus(sid);
-                assertEq(uint256(st), uint256(Core.StatementStatus.Held), "held statement has another status");
+                (ICore.StatementStatus st,,,,) = core.statementStatus(sid);
+                assertEq(uint256(st), uint256(ICore.StatementStatus.Held), "held statement has another status");
             } else if (s.status == handler.S_SOLD()) {
                 assertEq(o, s.winner, "a sold statement is not with its winner");
                 assertGe(s.price, s.reserve, "sold below the reserve");
                 if (!s.synced) {
                     inRecord++;
                     assertTrue(held, "a sold, unsynced statement lost its record");
-                    (Core.StatementStatus st,,,,) = core.statementStatus(sid);
-                    assertEq(uint256(st), uint256(Core.StatementStatus.Sold), "the live status of a sale is Sold");
+                    (ICore.StatementStatus st,,,,) = core.statementStatus(sid);
+                    assertEq(uint256(st), uint256(ICore.StatementStatus.Sold), "the live status of a sale is Sold");
                 } else {
                     assertTrue(!held, "a synced sale is still recorded as held");
                 }
@@ -165,12 +165,12 @@ abstract contract InvariantsBase is InvariantFixture {
         assertTrue(held, "a listed statement is not recorded as held");
         assertEq(cost, s.cost, "listed cost basis differs");
         assertEq(clock, s.listedAt, "listing time differs");
-        (Core.StatementStatus st, uint256 aid, uint256 reserve, uint256 bid,) = core.statementStatus(sid);
+        (ICore.StatementStatus st, uint256 aid, uint256 reserve, uint256 bid,) = core.statementStatus(sid);
         assertEq(aid, s.auctionId, "auction id differs");
         assertEq(reserve, s.reserve, "the reserve on the house is not the one the core set");
         assertEq(bid, s.bid, "the top bid differs");
         assertTrue(
-            st == Core.StatementStatus.Listed || st == Core.StatementStatus.Bid || st == Core.StatementStatus.Ended,
+            st == ICore.StatementStatus.Listed || st == ICore.StatementStatus.Bid || st == ICore.StatementStatus.Ended,
             "a listed statement has another live status"
         );
         IAuctionHouse.Auction memory au = house.getAuction(s.auctionId);
@@ -197,7 +197,7 @@ abstract contract InvariantsBase is InvariantFixture {
                 try core.syncStatement(sid) {
                     revert("syncStatement settled a statement that is still listed");
                 } catch (bytes memory why) {
-                    assertEq(bytes4(why), Core.AuctionLive.selector, "a listed statement refused for another reason");
+                    assertEq(bytes4(why), ICore.AuctionLive.selector, "a listed statement refused for another reason");
                 }
             }
         }

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Vm} from "forge-std/Vm.sol";
 import {FeeBase} from "./Fees.t.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 
@@ -172,14 +172,14 @@ contract FeeShareTest is FeeBase {
         Settings memory s = core.settings();
         s.feeToBuybackBps = 10_001;
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, bytes32("feeToBuybackBps")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, bytes32("feeToBuybackBps")));
         core.setSettings(s);
         s.feeToBuybackBps = 10_000;
         vm.prank(owner);
         core.setSettings(s);
         assertEq(core.settings().feeToBuybackBps, 10_000);
         vm.prank(address(0x5757));
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.setSettings(s);
     }
 
@@ -208,7 +208,7 @@ contract FeeShareBuybackTest is FeeBase {
 
     function _event(Vm.Log[] memory logs) internal pure returns (uint256 spent, uint256 tip) {
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].topics[0] == Core.Buyback.selector) (spent, tip) = abi.decode(logs[i].data, (uint256, uint256));
+            if (logs[i].topics[0] == ICore.Buyback.selector) (spent, tip) = abi.decode(logs[i].data, (uint256, uint256));
         }
     }
 

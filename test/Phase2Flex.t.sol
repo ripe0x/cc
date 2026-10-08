@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings, Mainnet} from "../src/interfaces/Interfaces.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
@@ -80,7 +80,7 @@ contract Phase2FlexTest is Fixture {
         uint256 sid = _composeOnce().sid;
         address fresh = address(_mod(2e10));
         vm.expectEmit(address(core));
-        emit Core.ExitModuleSet(fresh, address(xt), 2e10);
+        emit ICore.ExitModuleSet(fresh, address(xt), 2e10);
         _replace(fresh);
         assertEq(core.exitModule(), fresh);
         assertEq(core.exitToken(), address(xt));
@@ -128,7 +128,7 @@ contract Phase2FlexTest is Fixture {
         // the module changed its answer, the core keeps the unit it read until the set runs
         assertEq(core.unitPerPoint(), UNIT);
         vm.expectEmit(address(core));
-        emit Core.ExitModuleSet(address(mod), address(xt), 3e10);
+        emit ICore.ExitModuleSet(address(mod), address(xt), 3e10);
         _replace(address(mod));
         assertEq(core.exitModule(), address(mod));
         assertEq(core.unitPerPoint(), 3e10, "a unit change takes effect at once");
@@ -142,7 +142,7 @@ contract Phase2FlexTest is Fixture {
         _enterPhase2();
         MockExitModule alien = new MockExitModule(address(new MockExitToken("Other", "OTH")), UNIT);
         vm.prank(owner);
-        vm.expectRevert(Core.ExitTokenChanged.selector);
+        vm.expectRevert(ICore.ExitTokenChanged.selector);
         core.setExitModule(address(alien));
         assertEq(core.exitModule(), address(mod));
         assertEq(core.exitToken(), address(xt));
@@ -152,7 +152,7 @@ contract Phase2FlexTest is Fixture {
         // before any module the token is free: the first set behaves as it always did
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), 7e9);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.exitStatement(1);
         _replace(address(mod));
         assertEq(core.exitToken(), address(xt));
@@ -169,7 +169,7 @@ contract Phase2FlexTest is Fixture {
         _replace(address(m3));
         assertEq(core.exitModule(), address(m3));
         assertEq(core.unitPerPoint(), 5e9);
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.setExitModule(address(mod));
     }
 
@@ -198,10 +198,10 @@ contract Phase2FlexTest is Fixture {
         gone.setRevertUnit(true); // the unit read fails
         vm.startPrank(owner);
         for (uint256 i; i < 4; ++i) {
-            vm.expectRevert(Core.BadModule.selector);
+            vm.expectRevert(ICore.BadModule.selector);
             core.setExitModule(bad[i]);
         }
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         core.setExitModule(address(gone));
         vm.stopPrank();
         assertEq(core.exitModule(), address(mod), "every refusal left the state alone");
@@ -212,7 +212,7 @@ contract Phase2FlexTest is Fixture {
         _enterPhase2();
         // while it is the module it cannot be a target
         vm.prank(owner);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(mod));
         MockExitModule m2 = _mod(2e10);
         _replace(address(m2));
@@ -220,11 +220,11 @@ contract Phase2FlexTest is Fixture {
         _allow(address(mod));
         assertTrue(core.allowedTarget(address(mod)));
         vm.prank(owner);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(m2));
         // the exit token stays forbidden
         vm.prank(owner);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(xt));
     }
 
@@ -239,7 +239,7 @@ contract Phase2FlexTest is Fixture {
         _replace(address(m2));
         m2.setShortfallBps(2_500);
         _warp(105 hours);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(sid);
         // paying the new unit in full passes
         m2.setShortfallBps(0);
@@ -453,7 +453,7 @@ contract Phase2FlexTest is Fixture {
         uint256 xb = core.xToBuyback();
         uint256 bal = xt.balanceOf(address(core));
         vm.expectEmit(address(core));
-        emit Core.StatementExited(sid, Lane.Exit, got);
+        emit ICore.StatementExited(sid, Lane.Exit, got);
         core.exitStatement(sid);
         uint256 toBuyback = got * bps / 10_000;
         assertEq(xt.balanceOf(address(core)) - bal, got, "paid rating times the unit");
@@ -554,17 +554,17 @@ contract Phase2FlexTest is Fixture {
         Settings memory s = core.settings();
         s.exitLaneToBuybackBps = 10_001;
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
         core.setSettings(s);
         s.exitLaneToBuybackBps = type(uint16).max;
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, bytes32("exitLaneToBuybackBps")));
         core.setSettings(s);
         uint16[3] memory ok = [uint16(0), 10_000, 4_321];
         for (uint256 i; i < 3; ++i) {
             s.exitLaneToBuybackBps = ok[i];
             vm.expectEmit(address(core));
-            emit Core.SettingsSet(s);
+            emit ICore.SettingsSet(s);
             _owner(s);
             assertEq(core.settings().exitLaneToBuybackBps, ok[i]);
             assertEq(keccak256(abi.encode(core.settings())), keccak256(abi.encode(s)), "the other fields are intact");

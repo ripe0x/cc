@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, ICreditScore, ICreditStrategy, Stack, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {HostileTarget} from "./attackers/HostileTarget.sol";
@@ -88,9 +89,9 @@ abstract contract CoreBase is Fixture {
     /// @dev builds a core with other constructor arguments. external, so a revert of the constructor can be expected
     function mk(address owner_, address coin_, address ctl_, Stack memory st, uint256 r, Settings memory s)
         external
-        returns (Core)
+        returns (ICore)
     {
-        return new Core(owner_, coin_, ctl_, st, r, s);
+        return Prod.newCore(owner_, coin_, ctl_, st, r, s);
     }
 }
 
@@ -150,23 +151,23 @@ contract CoreUnitTest is CoreBase {
         Stack memory st = lc.stack;
         uint256 r = lc.rateStart;
         Settings memory s = lc.settings;
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         this.mk(address(0), address(coin), address(ctl), st, r, s);
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         this.mk(owner, address(0), address(ctl), st, r, s);
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         this.mk(owner, address(coin), address(0), st, r, s);
         // every address of the stack is required, the auction factory included
         for (uint256 i; i < 6; ++i) {
-            vm.expectRevert(Core.ZeroAddress.selector);
+            vm.expectRevert(ICore.ZeroAddress.selector);
             this.mk(owner, address(coin), address(ctl), _stack8(st, i, address(0)), r, s);
         }
         Stack memory flat = _stack8(st, 99, address(0));
         flat.tickSpacing = 0;
-        vm.expectRevert(Core.BadStack.selector);
+        vm.expectRevert(ICore.BadStack.selector);
         this.mk(owner, address(coin), address(ctl), flat, r, s);
         flat.tickSpacing = 32_768;
-        vm.expectRevert(Core.BadStack.selector);
+        vm.expectRevert(ICore.BadStack.selector);
         this.mk(owner, address(coin), address(ctl), flat, r, s);
         flat.tickSpacing = 32_767;
         this.mk(owner, address(coin), address(ctl), flat, r, s);
@@ -179,7 +180,7 @@ contract CoreUnitTest is CoreBase {
         Settings memory s = lc.settings;
         address nobody = makeAddr("no code");
         for (uint256 i; i < 6; ++i) {
-            vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, nobody));
+            vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, nobody));
             this.mk(owner, address(coin), address(ctl), _stack8(st, i, nobody), r, s);
         }
         // the coin has no code at construction time and that is fine
@@ -189,13 +190,13 @@ contract CoreUnitTest is CoreBase {
     /// the opening bid is a deploy input bounded to [1e11, 1e15] wei per whole point
     function test_rateStartBounds() public {
         Settings memory s = lc.settings;
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         this.mk(owner, address(coin), address(ctl), lc.stack, 1e11 - 1, s);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         this.mk(owner, address(coin), address(ctl), lc.stack, 1e15 + 1, s);
-        Core lo = this.mk(owner, address(coin), address(ctl), lc.stack, 1e11, s);
+        ICore lo = this.mk(owner, address(coin), address(ctl), lc.stack, 1e11, s);
         s.rateCap = 1e15;
-        Core hi = this.mk(owner, address(coin), address(ctl), lc.stack, 1e15, s);
+        ICore hi = this.mk(owner, address(coin), address(ctl), lc.stack, 1e15, s);
         assertEq(lo.RATE_START(), 1e11);
         assertEq(lo.ethRate(), 1e11);
         assertEq(hi.RATE_START(), 1e15);
@@ -218,7 +219,7 @@ contract CoreUnitTest is CoreBase {
         for (uint160 a = 0x1111; a <= 0x5555; a += 0x1111) {
             vm.etch(address(a), hex"00");
         }
-        Core c2 = this.mk(owner, address(coin), address(ctl), other, lc.rateStart, lc.settings);
+        ICore c2 = this.mk(owner, address(coin), address(ctl), other, lc.rateStart, lc.settings);
         assertEq(address(c2.MANAGER()), address(0x1111));
         assertEq(c2.HOOK(), address(0x2222));
         assertEq(c2.TICK_SPACING(), 60);
@@ -447,7 +448,7 @@ contract CoreUnitTest is CoreBase {
             assertEq(alice.balance - before, price);
             assertLt(core.rateAtCheckpoint(), rate, "the fill dropped the rate");
             vm.prank(alice);
-            vm.expectRevert(Core.HourlyCap.selector);
+            vm.expectRevert(ICore.HourlyCap.selector);
             core.sellForEth(_one(ids[1]));
             return;
         }
@@ -465,7 +466,7 @@ contract CoreUnitTest is CoreBase {
                 assertLt(core.rateAtCheckpoint(), rate, "the fill dropped the rate");
                 ++sold;
             } else if (price > hourlyCap) {
-                vm.expectRevert(Core.HourlyCap.selector);
+                vm.expectRevert(ICore.HourlyCap.selector);
                 core.sellForEth(_one(ids[i]));
                 ++refused;
             }
@@ -601,13 +602,13 @@ contract CoreUnitTest is CoreBase {
         assertLe(spent, cap);
 
         vm.prank(alice);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.sellForEth(_one(ids[i]));
 
         // the window reopens exactly one hour after it opened.
         _warp(1 hours - 1);
         vm.prank(alice);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.sellForEth(_one(ids[i]));
         _warp(1);
         vm.prank(alice);
@@ -657,7 +658,7 @@ contract CoreUnitTest is CoreBase {
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         vm.prank(alice);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.sellForEth(ids);
     }
 
@@ -672,7 +673,7 @@ contract CoreUnitTest is CoreBase {
         uint256 price = core.ceilingOf(id);
 
         vm.prank(alice);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.sellForEth(_one(id), price + 1);
 
         uint256 before = alice.balance;
@@ -695,7 +696,7 @@ contract CoreUnitTest is CoreBase {
         uint256[] memory ids = _credits(alice, 3);
         uint256 first = core.ceilingOf(ids[0]);
         vm.prank(alice);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.sellForEth(ids, first * 3);
         uint256 before = alice.balance;
         vm.prank(alice);
@@ -708,20 +709,20 @@ contract CoreUnitTest is CoreBase {
         uint256[] memory none = new uint256[](0);
 
         vm.prank(alice);
-        vm.expectRevert(Core.Empty.selector);
+        vm.expectRevert(ICore.Empty.selector);
         core.sellForEth(none);
 
         vm.prank(alice);
-        vm.expectRevert(Core.ZeroId.selector);
+        vm.expectRevert(ICore.ZeroId.selector);
         core.sellForEth(_one(0));
 
         vm.prank(alice);
-        vm.expectRevert(Core.PotTooSmall.selector);
+        vm.expectRevert(ICore.PotTooSmall.selector);
         core.sellForEth(ids);
 
         _fund(10 ether);
         vm.prank(keeper);
-        vm.expectRevert(Core.NotOwner.selector);
+        vm.expectRevert(ICore.NotOwner.selector);
         core.sellForEth(ids);
 
         // not approved
@@ -740,7 +741,7 @@ contract CoreUnitTest is CoreBase {
         vm.prank(alice);
         core.sellForEth(_one(id));
         vm.prank(alice);
-        vm.expectRevert(Core.NotOwner.selector);
+        vm.expectRevert(ICore.NotOwner.selector);
         core.sellForEth(_one(id));
     }
 
@@ -811,7 +812,7 @@ contract CoreUnitTest is CoreBase {
         // an empty controller address answers nothing and counts as zero too.
         _setController(address(0xBEEF));
         assertEq(core.ceilingOf(ids[1]), _ref(ids[1], core.ethRate(), 0));
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
     }
 
@@ -838,7 +839,7 @@ contract CoreUnitTest is CoreBase {
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         assertGt(price, core.ceilingOf(LISTED_A), "start rate is far below the listing");
         vm.prank(keeper);
-        vm.expectRevert(Core.AboveCeiling.selector);
+        vm.expectRevert(ICore.AboveCeiling.selector);
         core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
     }
 
@@ -936,17 +937,17 @@ contract CoreUnitTest is CoreBase {
 
         // wrong value, the strategy reverts.
         vm.prank(keeper);
-        vm.expectRevert(Core.CallFailed.selector);
+        vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(priceA - 1, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // wrong calldata, the strategy reverts.
         vm.prank(keeper);
-        vm.expectRevert(Core.CallFailed.selector);
+        vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(priceA, _listing(LISTED_B), LISTED_A, STRATEGY);
 
         // asked for one id but the call delivers another.
         vm.prank(keeper);
-        vm.expectRevert(Core.NoCredit.selector);
+        vm.expectRevert(ICore.NoCredit.selector);
         core.buyListing(priceB, _listing(LISTED_B), LISTED_A, STRATEGY);
 
         assertEq(core.ethPot(), pot);
@@ -961,7 +962,7 @@ contract CoreUnitTest is CoreBase {
 
         // the core never buys a credit it already owns.
         vm.prank(keeper);
-        vm.expectRevert(Core.AlreadyOwned.selector);
+        vm.expectRevert(ICore.AlreadyOwned.selector);
         core.buyListing(priceB, _listing(LISTED_B), LISTED_B, STRATEGY);
         _solvent();
     }
@@ -995,10 +996,10 @@ contract CoreUnitTest is CoreBase {
         ];
         vm.startPrank(keeper);
         for (uint256 i; i < refused.length; ++i) {
-            vm.expectRevert(Core.TargetNotAllowed.selector);
+            vm.expectRevert(ICore.TargetNotAllowed.selector);
             core.buyListing(1, "", LISTED_A, refused[i]);
         }
-        vm.expectRevert(Core.ZeroId.selector);
+        vm.expectRevert(ICore.ZeroId.selector);
         core.buyListing(1, "", 0, STRATEGY);
         vm.stopPrank();
     }
@@ -1013,13 +1014,13 @@ contract CoreUnitTest is CoreBase {
         _warpUntilCeiling(LISTED_A, price);
         assertGt(price, core.ethPot() * 2000 / 10_000);
         vm.prank(keeper);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // a pot of one wei less than the price: the pot check comes before the ceiling and cap checks
         vm.warp(block.timestamp + 1 hours);
         vm.prank(keeper);
-        vm.expectRevert(Core.PotTooSmall.selector);
+        vm.expectRevert(ICore.PotTooSmall.selector);
         core.buyListing(price * 4 + 1, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // with a pot of ten times the price the cap no longer binds, tip included
@@ -1042,13 +1043,13 @@ contract CoreUnitTest is CoreBase {
         assertGt(price, core.ethPot() * 2000 / 10_000, "the listing is above the hourly cap");
         assertGe(core.ceilingOf(LISTED_A), price, "and below the ceiling with the bonus");
         vm.prank(keeper);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.buyListing(price, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // a value above the pot fails first, before the ceiling and the cap
         vm.warp(block.timestamp + 1 hours);
         vm.prank(keeper);
-        vm.expectRevert(Core.PotTooSmall.selector);
+        vm.expectRevert(ICore.PotTooSmall.selector);
         core.buyListing(price * 44 / 10 + 1, _listing(LISTED_A), LISTED_A, STRATEGY);
 
         // with a pot of ten times the price the cap no longer binds, tip included
@@ -1070,7 +1071,7 @@ contract CoreUnitTest is CoreBase {
         uint256 before = address(core).balance;
         uint256 hostileBefore = address(hostile).balance;
         vm.prank(keeper);
-        vm.expectRevert(Core.NoCredit.selector);
+        vm.expectRevert(ICore.NoCredit.selector);
         core.buyListing(1 gwei, "", LISTED_A, address(hostile));
         assertEq(address(core).balance, before, "core balance");
         assertEq(address(hostile).balance, hostileBefore, "the eth went nowhere");
@@ -1122,7 +1123,7 @@ contract CoreUnitTest is CoreBase {
         _fund(10 ether);
         uint256 value = core.ceilingOf(id) / 2;
         vm.prank(keeper);
-        vm.expectRevert(Core.BadCost.selector);
+        vm.expectRevert(ICore.BadCost.selector);
         core.buyListing(value, abi.encodeCall(ProbeTarget.fill, (id, 0)), id, address(p));
     }
 
@@ -1152,21 +1153,21 @@ contract CoreUnitTest is CoreBase {
 
     function test_owner_onlyOwner() public {
         vm.startPrank(alice);
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.setController(address(ctl));
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.setExitModule(address(mod));
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.addTarget(address(0x1234));
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.removeTarget(STRATEGY);
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.lockController();
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.lockExitModule();
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.lockTargets();
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.transferOwnership(alice);
         vm.stopPrank();
     }
@@ -1176,10 +1177,10 @@ contract CoreUnitTest is CoreBase {
         address newCtl = address(new ScriptedController());
         vm.startPrank(owner);
         vm.expectEmit(false, false, false, true);
-        emit Core.ControllerSet(newCtl);
+        emit ICore.ControllerSet(newCtl);
         core.setController(newCtl);
         assertEq(core.controller(), newCtl);
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         core.setController(address(0));
         vm.stopPrank();
     }
@@ -1187,13 +1188,13 @@ contract CoreUnitTest is CoreBase {
     function test_owner_lockControllerIsForever() public {
         _setController(address(new ScriptedController()));
         vm.expectEmit(false, false, false, false);
-        emit Core.ControllerLocked();
+        emit ICore.ControllerLocked();
         vm.prank(owner);
         core.lockController();
         assertTrue(core.controllerLocked());
 
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("controller")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("controller")));
         core.setController(address(ctl));
 
         // the other powers survive the lock
@@ -1210,24 +1211,24 @@ contract CoreUnitTest is CoreBase {
     function test_owner_lockExitModule() public {
         // no module yet: phase 2 cannot be locked out by accident
         vm.prank(owner);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.lockExitModule();
         assertFalse(core.exitModuleLocked());
 
         _enterPhase2();
         vm.expectEmit(false, false, false, false);
-        emit Core.ExitModuleLocked();
+        emit ICore.ExitModuleLocked();
         vm.prank(owner);
         core.lockExitModule();
         assertTrue(core.exitModuleLocked());
 
         MockExitModule other = new MockExitModule(address(xt), 1e10);
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("exitModule")));
         core.setExitModule(address(other));
         // naming the same module again to refresh the unit is blocked too
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("exitModule")));
         core.setExitModule(address(mod));
         assertEq(core.exitModule(), address(mod));
     }
@@ -1236,14 +1237,14 @@ contract CoreUnitTest is CoreBase {
         address t = address(new HostileTarget());
         _allow(t);
         vm.expectEmit(false, false, false, false);
-        emit Core.TargetsLocked();
+        emit ICore.TargetsLocked();
         vm.prank(owner);
         core.lockTargets();
         assertTrue(core.targetsLocked());
 
         address t2 = address(new HostileTarget());
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("targets")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("targets")));
         core.addTarget(t2);
         // removing still works
         vm.prank(owner);
@@ -1255,35 +1256,35 @@ contract CoreUnitTest is CoreBase {
         address bob = _user("bob");
         vm.prank(owner);
         vm.expectEmit(true, true, false, false);
-        emit Core.OwnershipTransferStarted(owner, alice);
+        emit ICore.OwnershipTransferStarted(owner, alice);
         core.transferOwnership(alice);
         assertEq(core.pendingOwner(), alice);
         assertEq(core.owner(), owner, "nothing changes until the accept");
 
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
 
         vm.prank(alice);
         vm.expectEmit(true, true, false, false);
-        emit Core.OwnershipTransferred(owner, alice);
+        emit ICore.OwnershipTransferred(owner, alice);
         core.acceptOwnership();
         assertEq(core.owner(), alice);
         assertEq(core.pendingOwner(), address(0));
 
         // the old owner lost every power, the new one has them
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.removeTarget(STRATEGY);
         vm.prank(alice);
         core.removeTarget(STRATEGY);
         assertFalse(core.allowedTarget(STRATEGY));
         // the accept cannot be replayed
         vm.prank(alice);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
     }
 
@@ -1297,11 +1298,11 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.pendingOwner(), address(0));
         vm.stopPrank();
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         // with nothing pending nobody can accept (the zero address cannot send a transaction)
         vm.prank(alice);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
     }
 
@@ -1324,7 +1325,7 @@ contract CoreUnitTest is CoreBase {
         // a module with another exit token reverts, and the state stays
         MockExitModule alien = new MockExitModule(address(new MockExitToken("x", "x")), 1e10);
         vm.prank(owner);
-        vm.expectRevert(Core.ExitTokenChanged.selector);
+        vm.expectRevert(ICore.ExitTokenChanged.selector);
         core.setExitModule(address(alien));
         assertEq(core.exitModule(), address(other));
     }
@@ -1350,7 +1351,7 @@ contract CoreUnitTest is CoreBase {
         }
         vm.startPrank(owner);
         for (uint256 i; i < bad.length; ++i) {
-            vm.expectRevert(Core.BadModule.selector);
+            vm.expectRevert(ICore.BadModule.selector);
             core.setExitModule(bad[i]);
         }
         vm.stopPrank();
@@ -1364,7 +1365,7 @@ contract CoreUnitTest is CoreBase {
             MockExitModule m = new MockExitModule(address(new MockExitToken("X", "X")), units[i]);
             if (i == 3) m.setRevertUnit(true);
             vm.prank(owner);
-            vm.expectRevert(Core.BadModule.selector);
+            vm.expectRevert(ICore.BadModule.selector);
             core.setExitModule(address(m));
             assertEq(core.exitModule(), address(0));
         }
@@ -1389,7 +1390,7 @@ contract CoreUnitTest is CoreBase {
         ];
         vm.startPrank(owner);
         for (uint256 i; i < forbidden.length; ++i) {
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(forbidden[i]);
         }
         vm.stopPrank();
@@ -1397,9 +1398,9 @@ contract CoreUnitTest is CoreBase {
         // the exit module and the exit token are forbidden once they exist.
         _enterPhase2();
         vm.startPrank(owner);
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(mod));
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(xt));
         vm.stopPrank();
     }
@@ -1411,7 +1412,7 @@ contract CoreUnitTest is CoreBase {
         assertFalse(core.allowedTarget(STRATEGY));
         _fund(10 ether);
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(1, "", LISTED_A, STRATEGY);
 
         // a target that later becomes the exit module can no longer be called.
@@ -1421,7 +1422,7 @@ contract CoreUnitTest is CoreBase {
         assertTrue(core.allowedTarget(address(mod)));
         _setExitModule(address(mod));
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(1, "", LISTED_A, address(mod));
     }
 
@@ -1498,14 +1499,14 @@ contract CoreUnitTest is CoreBase {
     //////////////////////////////////////////////////////////////*/
 
     function test_compose_notReady() public {
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.composeExit();
 
         uint256[] memory ids = _sellN(alice, 79);
         assertEq(ids.length, 79);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
     }
 
@@ -1516,35 +1517,35 @@ contract CoreUnitTest is CoreBase {
 
         // an id that is in no pile
         scripted.setPage(Lane.Eth, true, _page(ids[0], 777_777), 0);
-        vm.expectRevert(abi.encodeWithSelector(Core.NotInPile.selector, 777_777));
+        vm.expectRevert(abi.encodeWithSelector(ICore.NotInPile.selector, 777_777));
         core.compose();
 
         // a duplicate: the second occurrence is no longer in the pile
         scripted.setPage(Lane.Eth, true, _page(ids[0], ids[0]), 0);
-        vm.expectRevert(abi.encodeWithSelector(Core.NotInPile.selector, ids[0]));
+        vm.expectRevert(abi.encodeWithSelector(ICore.NotInPile.selector, ids[0]));
         core.compose();
 
         // a credit of the other lane
         scripted.setPage(Lane.Exit, true, _page(ids[0], ids[1]), 0);
-        vm.expectRevert(abi.encodeWithSelector(Core.NotInPile.selector, ids[0]));
+        vm.expectRevert(abi.encodeWithSelector(ICore.NotInPile.selector, ids[0]));
         core.composeExit();
 
         // id zero is the null sentinel and is never in a pile
         scripted.setPage(Lane.Eth, true, _page(0, 0), 0);
-        vm.expectRevert(abi.encodeWithSelector(Core.NotInPile.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICore.NotInPile.selector, 0));
         core.compose();
 
         // bad format
         scripted.setPage(Lane.Eth, true, _page(ids[0], ids[1]), 8);
-        vm.expectRevert(Core.BadFormat.selector);
+        vm.expectRevert(ICore.BadFormat.selector);
         core.compose();
 
         // not ready and a reverting controller
         scripted.setPage(Lane.Eth, false, _page(ids[0], ids[1]), 0);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
         scripted.setRevertPage(true);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.compose();
 
         // a reverting controller blocks nothing else
@@ -1606,14 +1607,14 @@ contract CoreUnitTest is CoreBase {
 
     /// the sale doors are on the house, the core only settles records: with no statement they all say so
     function test_statementDoorsRefuseAnUnknownStatement() public {
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(1);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(1);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.exitStatement(1);
-        (Core.StatementStatus status,,,,) = core.statementStatus(1);
-        assertEq(uint256(status), uint256(Core.StatementStatus.None));
+        (ICore.StatementStatus status,,,,) = core.statementStatus(1);
+        assertEq(uint256(status), uint256(ICore.StatementStatus.None));
         // nothing is owed by the house to a core that sold nothing
         core.collectSales();
         assertEq(core.ethPot(), 0);
@@ -1622,40 +1623,40 @@ contract CoreUnitTest is CoreBase {
 
     function test_exitDoorsClosedWithoutModule() public {
         vm.prank(alice);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.sellForExitToken(_one(1));
         vm.prank(alice);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.sellForExitToken(_one(1), 0);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.buybackExit(type(uint256).max);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.composeExit();
         core.skim();
         assertEq(core.exitAuctionPrice(), 0);
     }
 
     function test_overprint_notReadyWithV1() public {
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.overprint();
     }
 
     function test_buyback_guards() public {
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();
         // eth held without being booked into the buyback pot is not for sale to the buyback
         vm.deal(address(core), 1 ether);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();
     }
 
     function test_unlockCallback_onlyPoolManager() public {
-        vm.expectRevert(Core.OnlyPoolManager.selector);
+        vm.expectRevert(ICore.OnlyPoolManager.selector);
         core.unlockCallback("");
     }
 
     function test_onERC721Received_senders() public {
-        vm.expectRevert(Core.BadSender.selector);
+        vm.expectRevert(ICore.BadSender.selector);
         core.onERC721Received(address(0), address(0), 1, "");
         vm.prank(address(STATEMENTS));
         assertEq(core.onERC721Received(address(0), address(0), 1, ""), core.onERC721Received.selector);
@@ -1750,7 +1751,7 @@ contract CoreComposedTest is CoreBase {
         assertEq(uint8(lane), uint8(Lane.Eth));
         assertEq(cost, c.cost + c.reimb, "cost basis is the credits plus the gas refund");
         assertEq(clockStart, c.at);
-        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(c.sid).status), uint256(ICore.StatementStatus.Listed));
 
         assertEq(core.pileSize(Lane.Eth), 0);
         assertEq(core.pileHead(Lane.Eth), 0);
@@ -1868,16 +1869,16 @@ contract CoreComposedTest is CoreBase {
 
     function test_exit_guards() public {
         Composed memory c = _composeOnce();
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(c.sid + 100);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(105 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(1);
         core.exitStatement(c.sid);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(c.sid);
     }
 
@@ -1903,13 +1904,13 @@ contract CoreComposedTest is CoreBase {
         Composed memory c = _composeOnce();
         _warp(105 hours);
         mod.setShortfallBps(1);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
         mod.setShortfallBps(5000);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the statement never left, its listing is intact");
-        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(c.sid).status), uint256(ICore.StatementStatus.Listed));
         assertEq(_held().length, 1);
 
         mod.setShortfallBps(0);
@@ -1924,7 +1925,7 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.unitPerPoint(), UNIT);
         _warp(105 hours);
         mod.setUnitPerPoint(0);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
 
         mod.setUnitPerPoint(3e10);
@@ -1984,7 +1985,7 @@ contract CoreComposedTest is CoreBase {
             r -= 20;
         }
         vm.prank(alice);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.sellForExitToken(ids, total + 1);
 
         vm.prank(alice);
@@ -2101,18 +2102,18 @@ contract CoreComposedTest is CoreBase {
         uint256[] memory ids = _credits(alice, 1);
         uint256[] memory none = new uint256[](0);
         vm.prank(alice);
-        vm.expectRevert(Core.Empty.selector);
+        vm.expectRevert(ICore.Empty.selector);
         core.sellForExitToken(none);
         vm.prank(alice);
-        vm.expectRevert(Core.ZeroId.selector);
+        vm.expectRevert(ICore.ZeroId.selector);
         core.sellForExitToken(_one(0));
         vm.prank(keeper);
-        vm.expectRevert(Core.NotOwner.selector);
+        vm.expectRevert(ICore.NotOwner.selector);
         core.sellForExitToken(ids);
 
         stdstore.target(address(core)).sig("xPot()").checked_write(uint256(1));
         vm.prank(alice);
-        vm.expectRevert(Core.PotTooSmall.selector);
+        vm.expectRevert(ICore.PotTooSmall.selector);
         core.sellForExitToken(ids);
     }
 
@@ -2166,10 +2167,10 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.ethPot(), potBefore - paid);
         assertLe(paid, 80 * 4_330_000 * core.ethRate() / 1e4 * 500 / 10_000, "notional cap");
         assertGt(paid, 0);
-        assertEq(uint256(_live(sidX).status), uint256(Core.StatementStatus.Held));
-        vm.expectRevert(Core.NotListed.selector);
+        assertEq(uint256(_live(sidX).status), uint256(ICore.StatementStatus.Held));
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sidX);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(sidX);
 
         // no auction in the exit lane, so it exits at once and everything returns to the bid pot, none of it to the
@@ -2226,35 +2227,36 @@ contract CoreComposedTest is CoreBase {
         _setController(address(scripted));
         _warp(10 hours);
         scripted.setOverprint(true, c.sid, sid2);
+        {
+            (,, uint256 c1,) = core.statementInfo(c.sid);
+            (,, uint256 c2,) = core.statementInfo(sid2);
+            uint256 r1 = STATEMENTS.creditScoreOf(c.sid);
+            uint256 r2 = STATEMENTS.creditScoreOf(sid2);
 
-        (,, uint256 c1,) = core.statementInfo(c.sid);
-        (,, uint256 c2,) = core.statementInfo(sid2);
-        uint256 r1 = STATEMENTS.creditScoreOf(c.sid);
-        uint256 r2 = STATEMENTS.creditScoreOf(sid2);
+            core.overprint();
 
-        core.overprint();
-
-        (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(c.sid);
-        assertTrue(held);
-        assertEq(uint8(lane), uint8(Lane.Eth));
-        assertEq(cost, c1 + c2, "cost bases are summed");
-        assertEq(clockStart, block.timestamp, "the listing clock restarts");
-        assertEq(STATEMENTS.creditScoreOf(c.sid), r1 + r2);
-        assertEq(STATEMENTS.overprintsOf(c.sid), 1);
-        (bool held2,,,) = core.statementInfo(sid2);
-        assertFalse(held2);
-        uint256[] memory h = _held();
-        assertEq(h.length, 2);
-        assertEq(_live(c.sid).reserve, _reserveFor(c1 + c2), "listed again at the reserve of the summed cost");
-        assertEq(core.overprintCount(), 1);
+            (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(c.sid);
+            assertTrue(held);
+            assertEq(uint8(lane), uint8(Lane.Eth));
+            assertEq(cost, c1 + c2, "cost bases are summed");
+            assertEq(clockStart, block.timestamp, "the listing clock restarts");
+            assertEq(STATEMENTS.creditScoreOf(c.sid), r1 + r2);
+            assertEq(STATEMENTS.overprintsOf(c.sid), 1);
+            (bool held2,,,) = core.statementInfo(sid2);
+            assertFalse(held2);
+            uint256[] memory h = _held();
+            assertEq(h.length, 2);
+            assertEq(_live(c.sid).reserve, _reserveFor(c1 + c2), "listed again at the reserve of the summed cost");
+            assertEq(core.overprintCount(), 1);
+        }
 
         // the top is gone from circulation.
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
 
         stdstore.target(address(core)).sig("overprintCount()").checked_write(uint256(8));
         scripted.setOverprint(true, c.sid, sid3);
-        vm.expectRevert(Core.DailyCap.selector);
+        vm.expectRevert(ICore.DailyCap.selector);
         core.overprint();
 
         // the budget resets with the next utc day.
@@ -2271,19 +2273,19 @@ contract CoreComposedTest is CoreBase {
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
 
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.overprint();
 
         scripted.setOverprint(true, c.sid, c.sid);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
 
         scripted.setOverprint(true, c.sid, c.sid + 50);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
 
         scripted.setOverprint(true, c.sid + 50, c.sid);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
 
         // a statement of the exit lane cannot be merged into an eth lane one.
@@ -2295,10 +2297,10 @@ contract CoreComposedTest is CoreBase {
         vm.prank(keeper);
         core.composeExit();
         scripted.setOverprint(true, c.sid, sidX);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
         scripted.setOverprint(true, sidX, c.sid);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
 
         // two exit lane statements merge with no house in the way: nothing is cancelled or listed
@@ -2317,12 +2319,12 @@ contract CoreComposedTest is CoreBase {
         assertEq(cost, cx + cy);
         assertEq(STATEMENTS.creditScoreOf(sidX), rating);
         assertEq(STATEMENTS.ownerOf(sidX), address(core), "held, never listed");
-        assertEq(uint256(_live(sidX).status), uint256(Core.StatementStatus.Held));
+        assertEq(uint256(_live(sidX).status), uint256(ICore.StatementStatus.Held));
         assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the eth lane listing was not touched");
 
         scripted.setRevertPage(true);
         scripted.setOverprint(false, c.sid, sidX);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.overprint();
     }
 

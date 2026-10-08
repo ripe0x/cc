@@ -13,7 +13,7 @@ import {IV4Router} from "v4-periphery/src/interfaces/IV4Router.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {TestLiquidityHelper} from "./utils/TestLiquidityHelper.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IArtCoinsSkimHook, IPreSwapStream, IArtCoinsMevSkim} from "../src/interfaces/ArtCoins.sol";
 import {SwapMidListing, SwapMidExit, SwapAroundCollect} from "./attackers/SwapMidCall.sol";
@@ -621,30 +621,36 @@ contract ReceiveSettingsTest is FeeBase {
         uint256[3] memory tipCap = [uint256(200), 500, 100];
         for (uint256 i; i < 3; ++i) {
             vm.revertToState(snap);
+            _midListingCase(t, flat[i], tipSav[i], tipCap[i]);
+        }
+    }
+
+    /// @dev one setting row of `test_receiveMidBuyListingAcrossSettings` (a helper so the locals fit the stack)
+    function _midListingCase(SwapMidListing t, uint256 flat, uint256 tipSav, uint256 tipCap) internal {
+        {
             Settings memory s = core.settings();
             // forge-lint: disable-start(unsafe-typecast)
-            s.flatBps = uint16(flat[i]);
-            s.tipSavingsBps = uint16(tipSav[i]);
-            s.tipCapBps = uint16(tipCap[i]);
+            s.flatBps = uint16(flat);
+            s.tipSavingsBps = uint16(tipSav);
+            s.tipCapBps = uint16(tipCap);
             // forge-lint: disable-end(unsafe-typecast)
             _setSettings(s);
-            uint256 id = _credits(address(t), 1)[0];
-            uint256 ceiling = core.ceilingOf(id);
-            uint256 swapEth = ceiling * 5;
-            vm.deal(address(t), swapEth);
-            t.arm(id, swapEth);
-            uint256 pot = core.ethPot();
-            uint256 bounty = swapEth * 10_000 / 100_000 * 9500 / 10_000;
-            uint256 cost = ceiling - bounty;
-            uint256 tip = (tipSav[i] * (ceiling - cost) / 10_000).min(tipCap[i] * cost / 10_000);
-            uint256 keeper0 = keeper.balance;
-            vm.prank(keeper);
-            core.buyListing(ceiling, hex"deadbeef", id, address(t));
-            assertEq(CREDITS.ownerOf(id), address(core));
-            assertEq(keeper.balance - keeper0, tip, "tip by the settings");
-            assertEq(core.ethPot(), pot - cost - tip, "the push was not booked mid measurement");
-            assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "consistent");
         }
+        uint256 id = _credits(address(t), 1)[0];
+        uint256 ceiling = core.ceilingOf(id);
+        uint256 swapEth = ceiling * 5;
+        vm.deal(address(t), swapEth);
+        t.arm(id, swapEth);
+        uint256 pot = core.ethPot();
+        uint256 cost = ceiling - swapEth * 10_000 / 100_000 * 9500 / 10_000;
+        uint256 tip = (tipSav * (ceiling - cost) / 10_000).min(tipCap * cost / 10_000);
+        uint256 keeper0 = keeper.balance;
+        vm.prank(keeper);
+        core.buyListing(ceiling, hex"deadbeef", id, address(t));
+        assertEq(CREDITS.ownerOf(id), address(core));
+        assertEq(keeper.balance - keeper0, tip, "tip by the settings");
+        assertEq(core.ethPot(), pot - cost - tip, "the push was not booked mid measurement");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "consistent");
     }
 
     /// the push inside `exitStatement`'s measurement, with the exit split and the wait taken from the settings
@@ -660,7 +666,7 @@ contract ReceiveSettingsTest is FeeBase {
         _setSettings(s);
         Composed memory c = _composeOnce();
         vm.warp(c.at + 1 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         vm.warp(c.at + 1 hours);
         uint256 pot = core.ethPot();
@@ -842,18 +848,18 @@ contract BuybackTest is FeeBase {
         _anotherSale();
         assertGt(core.ethToBuyback(), 0);
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + core.settings().buybackDelay - 1);
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         vm.prank(keeper);
         core.buyback();
         assertEq(core.ethToBuyback(), 0);
         vm.roll(block.number + core.settings().buybackDelay);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback());
     }
@@ -926,11 +932,11 @@ contract BuybackSettingsTest is FeeBase {
         assertEq(_buyback(), 0.02 ether);
 
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 2);
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         assertEq(_buyback(), 0.02 ether);
@@ -938,7 +944,7 @@ contract BuybackSettingsTest is FeeBase {
         // a shorter delay, effective at once: one block is enough now
         _configure(0.02 ether, 1, 200);
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         assertEq(_buyback(), 0.02 ether);
@@ -965,7 +971,7 @@ contract BuybackSettingsTest is FeeBase {
         _anotherSale();
         vm.roll(block.number + 7_199);
         vm.prank(keeper);
-        vm.expectRevert(Core.TooSoon.selector);
+        vm.expectRevert(ICore.TooSoon.selector);
         core.buyback();
         vm.roll(block.number + 1);
         _buyback();
@@ -1085,7 +1091,7 @@ contract AuctionTest is FeeBase {
         _equipTaker(40 ether);
         (, uint256 coinIn) = _waitUntilAffordable();
         vm.prank(taker);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.buybackExit(coinIn - 1);
         // the quote only falls with time, so a stale cap stays safe, and it fills at exactly the quote
         _fill(coinIn);
@@ -1094,7 +1100,7 @@ contract AuctionTest is FeeBase {
         (, uint256 next) = core.exitAuctionQuote();
         assertGt(next, coinIn, "restart is above the last price");
         vm.prank(taker);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.buybackExit(coinIn);
     }
 
@@ -1136,7 +1142,7 @@ contract AuctionTest is FeeBase {
         assertEq(sliced, pool);
         assertEq(xt.balanceOf(taker), pool);
         vm.prank(taker);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buybackExit(type(uint256).max);
     }
 
@@ -1157,10 +1163,10 @@ contract AuctionTest is FeeBase {
     }
 
     function test_noExitModuleOrNothingToSell() public {
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.buybackExit(type(uint256).max);
         _enterPhase2();
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buybackExit(type(uint256).max);
         (uint256 slice, uint256 coinIn) = core.exitAuctionQuote();
         assertEq(slice, 0);

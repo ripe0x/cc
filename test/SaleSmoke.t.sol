@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 
 /// the sale controller and the fee share on the live fork: the asking price and its decay, repricing, buy only mode
@@ -45,14 +45,14 @@ contract SaleSmokeTest is Fixture {
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost, "reserve follows the ask, ten steps down to 100 percent");
         _bid(address(0xB1D), sid, cost);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
     }
 
     function test_buy_reverts_in_auction_mode() public {
         uint256 sid = _composeOnce().sid;
         vm.deal(address(0xB0B), 10 ether);
         vm.prank(address(0xB0B));
-        vm.expectRevert(ControllerV1.NotBuyOnly.selector);
+        vm.expectRevert(IControllerV1.NotBuyOnly.selector);
         ctl.buy{value: 10 ether}(sid);
     }
 
@@ -72,7 +72,7 @@ contract SaleSmokeTest is Fixture {
         uint256 toBuyback = price * core.settings().saleToBuybackBps / 10_000;
         assertEq(core.ethToBuyback() - bbBefore, toBuyback, "buyback share booked");
         assertEq(core.ethPot() - potBefore, price - toBuyback, "rest to the pot");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None), "record cleared");
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None), "record cleared");
         _solvent();
     }
 
@@ -83,7 +83,7 @@ contract SaleSmokeTest is Fixture {
         address buyer = address(0xB0B);
         vm.deal(buyer, 10 ether);
         vm.prank(buyer);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         ctl.buy{value: 10 ether}(sid);
     }
 
@@ -93,7 +93,7 @@ contract SaleSmokeTest is Fixture {
         uint256 price = ctl.priceOf(sid);
         vm.deal(address(0xB0B), price);
         vm.prank(address(0xB0B));
-        vm.expectRevert(ControllerV1.Underpaid.selector);
+        vm.expectRevert(IControllerV1.Underpaid.selector);
         ctl.buy{value: price - 1}(sid);
     }
 
@@ -101,11 +101,11 @@ contract SaleSmokeTest is Fixture {
         uint256 sid = _composeOnce().sid;
         vm.deal(address(0xB0B), 10 ether);
         vm.prank(address(0xB0B));
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: 10 ether}(sid, address(0xB0B));
         vm.deal(owner, 10 ether);
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: 10 ether}(sid, owner);
     }
 

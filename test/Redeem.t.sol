@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {SellingController, HostileModule, RepaidCaller} from "./attackers/SaleAttackers.sol";
@@ -97,10 +97,10 @@ contract RedeemTimingTest is RedeemBase {
         uint256 wait = core.settings().exitAfter;
         assertEq(wait, 105 hours);
         vm.warp(uint256(at));
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         vm.warp(uint256(at) + wait - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(house), "still listed after the refused tries");
         vm.warp(uint256(at) + wait);
@@ -120,12 +120,12 @@ contract RedeemTimingTest is RedeemBase {
         s.exitAfter = 365 days;
         _setSettings(s);
         vm.warp(uint256(at) + 200 days);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         s.exitAfter = 1 hours;
         _setSettings(s);
         vm.warp(uint256(at) + 1 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         vm.warp(uint256(at) + 1 hours);
         core.exitStatement(sid);
@@ -142,12 +142,12 @@ contract RedeemTimingTest is RedeemBase {
     function test_timing_noModuleNotHeldAndUnknown() public {
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.exitStatement(sid);
         _enterPhase2();
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid + 99);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(0);
     }
 
@@ -164,21 +164,21 @@ contract RedeemTimingTest is RedeemBase {
         uint256 bal = keeper.balance;
         vm.fee(composeBasefee);
         vm.prank(keeper);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(sid);
         assertEq(core.ethPot(), pot, "nothing repaid");
         assertEq(keeper.balance, bal);
         // the auction has run its 24 hours: ended, not settled
         vm.warp(uint256(at) + 125 hours);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
-        vm.expectRevert(Core.HasBid.selector);
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(sid);
         // settled: the record is stale, then gone
         _endAuction(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.exitStatement(sid);
         core.syncStatement(sid);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), bidder);
     }
@@ -188,9 +188,9 @@ contract RedeemTimingTest is RedeemBase {
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
         _bid(address(0xB1D1), sid, _live(sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid));
     }
 
     function test_timing_aBuyOnlySaleFirstMakesTheExitRevert() public {
@@ -203,7 +203,7 @@ contract RedeemTimingTest is RedeemBase {
         vm.deal(address(0xB0B), price);
         vm.prank(address(0xB0B));
         ctl.buy{value: price}(sid);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(0xB0B));
     }
@@ -216,7 +216,7 @@ contract RedeemTimingTest is RedeemBase {
         uint256 floor = _cost(sid) * 7_500 / 10_000;
         sc.sell{value: floor}(sid, address(0xB0B));
         _warp(105 hours);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
     }
 
@@ -246,13 +246,13 @@ contract RedeemTimingTest is RedeemBase {
         uint256 xpot = core.xPot();
         uint256 bal = keeper.balance;
         vm.prank(keeper);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(sid);
         assertEq(core.ethPot(), pot);
         assertEq(core.xPot(), xpot);
         assertEq(keeper.balance, bal);
         assertEq(STATEMENTS.ownerOf(sid), address(house), "the listing is whole");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
         hm.setPayBps(10_000);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(hm));
@@ -492,13 +492,13 @@ contract RedeemRepayTest is RedeemBase {
             _setController(address(sc));
             bytes memory data;
             address target = address(core);
-            if (k == 0) data = abi.encodeCall(Core.compose, ());
-            else if (k == 1) data = abi.encodeCall(Core.skim, ());
-            else if (k == 2) data = abi.encodeCall(Core.collectSales, ());
-            else if (k == 3) data = abi.encodeCall(Core.exitStatement, (b));
-            else if (k == 4) data = abi.encodeCall(Core.repriceStatement, (b));
-            else if (k == 5) data = abi.encodeCall(Core.syncStatement, (b));
-            else if (k == 6) data = abi.encodeCall(Core.buyback, ());
+            if (k == 0) data = abi.encodeCall(ICore.compose, ());
+            else if (k == 1) data = abi.encodeCall(ICore.skim, ());
+            else if (k == 2) data = abi.encodeCall(ICore.collectSales, ());
+            else if (k == 3) data = abi.encodeCall(ICore.exitStatement, (b));
+            else if (k == 4) data = abi.encodeCall(ICore.repriceStatement, (b));
+            else if (k == 5) data = abi.encodeCall(ICore.syncStatement, (b));
+            else if (k == 6) data = abi.encodeCall(ICore.buyback, ());
             else {
                 target = address(sc);
                 data = abi.encodeCall(SellingController.sell, (b, address(hm)));

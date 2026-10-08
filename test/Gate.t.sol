@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 
 /// @notice the inventory gate is gone (docs/FLOW.md decision 2): the engine never stops buying because statements are
@@ -38,8 +38,8 @@ contract GateTest is Fixture {
         uint256 s1 = _composeNext();
         uint256 s2 = _composeNext();
         assertEq(core.heldStatements().length, 2);
-        assertEq(uint256(_live(s1).status), uint256(Core.StatementStatus.Listed));
-        assertEq(uint256(_live(s2).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(s1).status), uint256(ICore.StatementStatus.Listed));
+        assertEq(uint256(_live(s2).status), uint256(ICore.StatementStatus.Listed));
         // the bid is open at two held statements, however long they sit
         _warp(30 days);
         _sellOne();
@@ -60,7 +60,7 @@ contract GateTest is Fixture {
         _collectSales();
         assertEq(core.ethRate(), rateBefore, "booking the proceeds does not touch the rate");
         _sellOne();
-        assertEq(uint256(_live(s2).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(s2).status), uint256(ICore.StatementStatus.Listed));
         _solvent();
     }
 }
@@ -95,7 +95,7 @@ contract GateFuzzTest is Fixture {
         uint256[] memory h = core.heldStatements();
         if (h.length == 0) return;
         uint256 sid = h[(seed >> 8) % h.length];
-        if (_live(sid).status != Core.StatementStatus.Listed) return;
+        if (_live(sid).status != ICore.StatementStatus.Listed) return;
         _bid(funder, sid, _live(sid).reserve);
         _endAuction(sid);
         try core.collectSales() {} catch {}

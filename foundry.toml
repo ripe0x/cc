@@ -3,8 +3,21 @@ solc_version = "0.8.30"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
-via_ir = true
 bytecode_hash = "none"
+# per path compiler profiles. the default profile (tests, scripts, test libraries) compiles without via_ir. the production
+# contracts are forced onto the second profile, which is the shipped build: via_ir, optimizer 200 runs, cancun, no
+# metadata hash. foundry also moves every file that imports a restricted file onto that profile, so tests and scripts
+# reach the production contracts only through src/interfaces/ICore.sol, IControllerV1.sol and ICoreLib.sol (generated
+# by script/tools/gen-interfaces.sh) and their artifacts. src/lib/SettingsBounds.sol and SettingsStore.sol are internal
+# only libraries that the scripts and tests use directly: they stay unrestricted (their shipped copy is inside Core,
+# built by the restricted profile). script/NewProd.sol (`new Core`) pulls the deploy scripts onto the profile.
+additional_compiler_profiles = [
+    { name = "viair", via_ir = true, optimizer = true, optimizer_runs = 200, evm_version = "cancun", bytecode_hash = "None" },
+]
+compilation_restrictions = [
+    { paths = "src/[A-Z]*.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
+    { paths = "src/lib/CoreLib.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
+]
 fs_permissions = [{ access = "read", path = "./" }]
 ffi = false
 

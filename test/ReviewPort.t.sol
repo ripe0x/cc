@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {StdStorage, stdStorage} from "forge-std/Test.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {IArtCoinsFactory} from "../src/interfaces/ArtCoins.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
@@ -47,15 +48,15 @@ contract SwapOnReceive {
         fired = false;
     }
 
-    function sell(Core c, uint256[] calldata ids) external {
+    function sell(ICore c, uint256[] calldata ids) external {
         c.sellForEth(ids);
     }
 
-    function compose(Core c) external {
+    function compose(ICore c) external {
         c.compose();
     }
 
-    function buyback(Core c) external {
+    function buyback(ICore c) external {
         c.buyback();
     }
 
@@ -287,7 +288,7 @@ contract ReviewPort is Fixture {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), unit);
         vm.prank(owner);
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         core.setExitModule(address(mod));
     }
 
@@ -328,7 +329,7 @@ contract ReviewPort is Fixture {
         address[3] memory banned = [Mainnet.PERMIT2, Mainnet.POSITION_MANAGER, Mainnet.UNIVERSAL_ROUTER];
         for (uint256 i; i < banned.length; ++i) {
             vm.prank(owner);
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(banned[i]);
             assertFalse(core.allowedTarget(banned[i]));
         }
@@ -344,12 +345,12 @@ contract ReviewPort is Fixture {
         (bool ok,) = Mainnet.ARTCOINS_FACTORY.call(abi.encodeWithSignature("setDeprecated(bool)", false));
         assertTrue(ok);
         bytes32 salt = keccak256("hijack victim");
-        uint64 nonce = vm.getNonce(deployer);
-        address coreAt = vm.computeCreateAddress(deployer, nonce + 1);
+        address coreAt = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
         address coinAt = predictCoin(deployer, coreAt, "Victim", "VIC", salt);
         vm.startPrank(deployer);
-        ControllerV1 c2 = new ControllerV1(coreAt, lc.sale);
-        Core core2 = new Core(owner, coinAt, address(c2), lc.stack, lc.rateStart, lc.settings);
+        ICore core2 = Prod.newCore(
+            owner, coinAt, address(Prod.newController(coreAt, lc.sale)), lc.stack, lc.rateStart, lc.settings
+        );
         vm.stopPrank();
         assertEq(address(core2), coreAt);
 
@@ -357,10 +358,13 @@ contract ReviewPort is Fixture {
         vm.deal(attacker, 1 ether);
         address sink = address(new Sink());
         vm.prank(attacker);
-        address got = FACTORY.deployTokenWithProtocolBpsAndTax{value: FACTORY.deployFee()}(
-            buildConfig(deployer, sink, attacker, "Victim", "VIC", salt), 0, buildTaxConfig(coreAt)
+        assertEq(
+            FACTORY.deployTokenWithProtocolBpsAndTax{value: FACTORY.deployFee()}(
+                buildConfig(deployer, sink, attacker, "Victim", "VIC", salt), 0, buildTaxConfig(coreAt)
+            ),
+            coinAt,
+            "the attacker got the predicted coin address"
         );
-        assertEq(got, coinAt, "the attacker got the predicted coin address");
 
         // the real launch now reverts on the CREATE2 collision
         vm.deal(deployer, 1 ether);

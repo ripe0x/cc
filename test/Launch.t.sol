@@ -264,7 +264,7 @@ interface IArtCoinsExtensionSetter {
 contract LaunchWiringTest is Fixture {
     /// the core created its own pnd auction house in its constructor, through the live factory
     function test_coreOwnsItsHouse() public view {
-        IAuctionHouse h = core.HOUSE();
+        IAuctionHouse h = IAuctionHouse(core.HOUSE());
         assertEq(IAuctionFactory(Mainnet.AUCTION_FACTORY).houseOf(address(core)), address(h), "the factory knows it");
         assertEq(h.owner(), address(core), "the core owns it for good");
         assertEq(h.protocolFeeBps(), 0, "no fee at the pin");

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {ProdDeployer} from "./ProdDeployer.sol";
 import {Test, console} from "forge-std/Test.sol";
-import {Core} from "../../src/Core.sol";
-import {ControllerV1} from "../../src/ControllerV1.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
+import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {SettingsFields} from "../../script/SettingsFields.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Mainnet, Stack, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionFactory, IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook, IArtCoinsMevSkim} from "../../src/interfaces/ArtCoins.sol";
-import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
+import {SystemDeployer, Deployed} from "../../script/SystemDeployer.sol";
 import {LaunchConfig, ConfigReader} from "../../script/LaunchConfig.sol";
 import {Report} from "../../script/Report.sol";
 
@@ -20,7 +21,7 @@ interface IFactoryAdmin {
 /// @notice independent review of the deploy package (docs/REVIEW-deploy.md), rebuilt for the flow rework: the config
 /// mutation matrix, the state mutations (factory, house, library, deployer), proofs of the readbacks and a fuzz of the
 /// funded rule. forks mainnet at FORK_BLOCK
-abstract contract ReviewHarness is Test, SystemDeployer {
+abstract contract ReviewHarness is Test, ProdDeployer {
     string internal constant MUT_TOKEN = "test/data/ReviewMutatedToken.creation.hex";
     string internal constant EMPTY_TOKEN = "test/data/ReviewEmptyToken.creation.hex";
     string internal constant GARBAGE_TOKEN = "test/data/ReviewGarbageToken.creation.hex";
@@ -165,7 +166,7 @@ abstract contract ReviewHarness is Test, SystemDeployer {
 
     /// @dev the library address the test build links the Core against
     function _linked() internal view returns (address lib) {
-        lib = findLibrary(type(Core).creationCode);
+        lib = findLibrary(vm.getCode("Core.sol:Core"));
         assertTrue(lib != address(0), "no linked library found in the Core creation code");
     }
 

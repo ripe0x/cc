@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {console} from "forge-std/console.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, ICreditStrategy, IStatements, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsSkimHook} from "../src/interfaces/ArtCoins.sol";
@@ -113,7 +113,7 @@ contract GasCapTest is SeaportBase {
         if (target.code.length == 0) revert("target has no code");
     }
 
-    // ------------------------------------------------------------------ the deploy transactions of script/Deploy.s.sol
+    // ------------------------------------------------------------------ the deploy transactions of script/SystemDeployer.sol
 
     /// @dev tx 1, the linked library through the create2 deployer: 32 byte salt plus the creation code, plus the proxy
     function test_gas_deploy_1_library() public {
@@ -142,7 +142,7 @@ contract GasCapTest is SeaportBase {
         uint256 g = gasleft();
         address c2 = deployCode("Core.sol:Core", args);
         g -= gasleft();
-        assertTrue(address(Core(payable(c2)).HOUSE()) != address(house), "a new house");
+        assertTrue(address(ICore(payable(c2)).HOUSE()) != address(house), "a new house");
         console.log("core initcode bytes", code.length, "runtime bytes", c2.code.length);
         _row("deploy 3 core (house creation inside)", g, code);
     }
@@ -510,7 +510,7 @@ contract GasCapTest is SeaportBase {
 
     function test_gas_syncStatement_soldPath() public {
         (uint256 sid,) = _sellStatement(bidder);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold));
         _cool(address(core));
         vm.prank(stranger);
         uint256 g = gasleft();
@@ -534,13 +534,13 @@ contract GasCapTest is SeaportBase {
         _warp(30 days + 1);
         house.unwindStuckLot{gas: END_GAS}(l.auctionId);
         vm.clearMockedCalls();
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Returned));
         _cool(address(core));
         vm.prank(stranger);
         uint256 g = gasleft();
         core.syncStatement(sid);
         g -= gasleft();
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
         _row("syncStatement, relist after an unwound sale, cold", g, abi.encodeCall(core.syncStatement, (sid)));
     }
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings, Mainnet, IStatements, Stack} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
@@ -114,7 +115,7 @@ contract FlowTest is Fixture {
     function testFuzz_settings_roundTrip(uint256 seed) public {
         Settings memory s = _valid(seed);
         vm.expectEmit(address(core));
-        emit Core.SettingsSet(s);
+        emit ICore.SettingsSet(s);
         _owner(s);
         assertEq(_hash(core.settings()), _hash(s), "round trip");
     }
@@ -148,7 +149,7 @@ contract FlowTest is Fixture {
             _set(s, i, hi[i] + 1);
             // an xRateFloor above the cap names the floor
             vm.prank(owner);
-            vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, names[i]));
+            vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, names[i]));
             core.setSettings(s);
             // below the bottom (fields whose bottom is zero have none)
             if (lo[i] == 0 && i != 4 && i != 21) continue;
@@ -163,7 +164,7 @@ contract FlowTest is Fixture {
                 _set(s, i, lo[i] - 1);
             }
             vm.prank(owner);
-            vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, names[i]));
+            vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, names[i]));
             core.setSettings(s);
         }
     }
@@ -183,11 +184,11 @@ contract FlowTest is Fixture {
         Settings memory s = Mainnet.defaultSettings();
         for (uint256 i; i < nobody.length; ++i) {
             vm.startPrank(nobody[i]);
-            vm.expectRevert(Core.OnlyOwner.selector);
+            vm.expectRevert(ICore.OnlyOwner.selector);
             core.setSettings(s);
-            vm.expectRevert(Core.OnlyOwner.selector);
+            vm.expectRevert(ICore.OnlyOwner.selector);
             core.setRate(5e12);
-            vm.expectRevert(Core.OnlyOwner.selector);
+            vm.expectRevert(ICore.OnlyOwner.selector);
             core.setXRate(5_000);
             vm.stopPrank();
         }
@@ -196,12 +197,12 @@ contract FlowTest is Fixture {
     function test_setRate_boundsEventAndReset() public {
         uint256 cap = core.settings().rateCap;
         vm.startPrank(owner);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setRate(1e11 - 1);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setRate(cap + 1);
         vm.expectEmit(address(core));
-        emit Core.RateSet(2e13);
+        emit ICore.RateSet(2e13);
         core.setRate(2e13);
         assertEq(core.ethRate(), 2e13);
         assertEq(core.rateAtCheckpoint(), 2e13);
@@ -214,7 +215,7 @@ contract FlowTest is Fixture {
         s.rateCap = 1e15;
         _owner(s);
         vm.startPrank(owner);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setRate(1e15 + 1);
         core.setRate(1e15);
         vm.stopPrank();
@@ -236,12 +237,12 @@ contract FlowTest is Fixture {
 
     function test_setXRate_boundsAndEvent() public {
         vm.startPrank(owner);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setXRate(2_999);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setXRate(9_701);
         vm.expectEmit(address(core));
-        emit Core.XRateSet(8_000);
+        emit ICore.XRateSet(8_000);
         core.setXRate(8_000);
         assertEq(core.xRate(), 8_000);
         core.setXRate(3_000);
@@ -255,7 +256,7 @@ contract FlowTest is Fixture {
         s.xRateCap = 4_000;
         _owner(s);
         vm.startPrank(owner);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setXRate(4_001);
         core.setXRate(1_000);
         vm.stopPrank();
@@ -490,7 +491,7 @@ contract FlowTest is Fixture {
         assertEq(cost, c.cost + c.reimb, "cost basis is the credits plus the reimbursement");
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Listed));
         assertEq(l.reserve, cost * 11_000 / 10_000, "110 percent of cost");
         IAuctionHouse.Auction memory a = _auctionOf(c.sid);
         assertEq(a.tokenId, c.sid);
@@ -531,7 +532,7 @@ contract FlowTest is Fixture {
         uint256 sid = STATEMENTS.supply();
         bool listed;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.StatementListed.selector) {
+            if (logs[i].emitter == address(core) && logs[i].topics[0] == ICore.StatementListed.selector) {
                 listed = true;
                 assertEq(uint256(logs[i].topics[1]), sid);
                 assertEq(uint256(logs[i].topics[2]), _live(sid).auctionId);
@@ -552,7 +553,7 @@ contract FlowTest is Fixture {
         core.composeExit();
         uint256 sid = STATEMENTS.supply();
         Live memory l = _live(sid);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Held));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Held));
         assertEq(l.auctionId, 0);
         assertEq(STATEMENTS.ownerOf(sid), address(core), "held by the core, not on the house");
     }
@@ -573,7 +574,7 @@ contract FlowTest is Fixture {
         vm.expectRevert(IAuctionHouse.BidMustBePositive.selector);
         house.createBid(id);
         vm.stopPrank();
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed), "still no bid");
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed), "still no bid");
     }
 
     function test_bid_reserveStartsTheTimer() public {
@@ -586,7 +587,7 @@ contract FlowTest is Fixture {
         assertEq(a.amount, reserve);
         assertEq(a.bidder, alice);
         Live memory l = _live(sid);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Bid));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Bid));
         assertEq(l.bid, reserve);
         assertEq(l.endTime, block.timestamp + 24 hours);
     }
@@ -656,7 +657,7 @@ contract FlowTest is Fixture {
         assertEq(address(core).balance, balance, "nothing arrived at the core yet");
         assertEq(core.ethPot(), pot, "pot unchanged until collected");
         assertEq(core.ethToBuyback(), buyback);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold), "the record is stale");
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold), "the record is stale");
         assertEq(core.heldStatements().length, 1, "still listed as held until synced");
         assertEq(_auctionOf(sid).tokenOwner, address(0), "the house forgot the auction");
     }
@@ -674,7 +675,7 @@ contract FlowTest is Fixture {
         uint256 buyback = core.ethToBuyback();
         uint256 toBuyback = price * bps / 10_000;
         vm.expectEmit(address(core));
-        emit Core.SalesCollected(price, toBuyback);
+        emit ICore.SalesCollected(price, toBuyback);
         assertEq(_collectSales(), price);
         assertEq(address(core).balance, balance + price, "the eth moved from the house to the core");
         assertEq(core.ethToBuyback(), buyback + toBuyback, "buyback share");
@@ -743,7 +744,7 @@ contract FlowTest is Fixture {
         uint256 supply = coin.totalSupply();
         _warp(1);
         vm.expectEmit(address(core));
-        emit Core.SalesCollected(owed, owed / 2);
+        emit ICore.SalesCollected(owed, owed / 2);
         vm.prank(keeper);
         core.buyback();
         assertEq(_owedByHouse(), 0, "collected by the buyback");
@@ -771,13 +772,13 @@ contract FlowTest is Fixture {
         (, uint256 price) = _sellStatement(alice);
         uint256 booked = _booked();
         vm.expectEmit(address(core));
-        emit Core.Skimmed(0, 0);
+        emit ICore.Skimmed(0, 0);
         core.skim();
         assertEq(_booked(), booked, "the house balance is not the core balance");
         _collectSales();
         assertEq(_booked(), booked + price, "booked once by collectSales");
         vm.expectEmit(address(core));
-        emit Core.Skimmed(0, 0);
+        emit ICore.Skimmed(0, 0);
         core.skim();
         assertEq(_booked(), booked + price, "and not again by skim");
         _solvent();
@@ -794,7 +795,7 @@ contract FlowTest is Fixture {
         assertEq(_booked(), booked + price, "collection books the proceeds only, not the donation");
         assertEq(address(core).balance - _booked(), 1 ether, "the donation is still unbooked");
         vm.expectEmit(address(core));
-        emit Core.Skimmed(1 ether, 0);
+        emit ICore.Skimmed(1 ether, 0);
         core.skim();
         assertEq(_booked(), booked + price + 1 ether);
         core.skim();
@@ -825,36 +826,36 @@ contract FlowTest is Fixture {
         (uint256 sid,) = _sellStatement(alice);
         uint256 aid = _live(sid).auctionId;
         vm.expectEmit(address(core));
-        emit Core.StatementSold(sid, aid, alice);
+        emit ICore.StatementSold(sid, aid, alice);
         vm.prank(bob);
         core.syncStatement(sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None));
         (bool held,,,) = core.statementInfo(sid);
         assertFalse(held);
         assertEq(core.heldStatements().length, 0);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(sid);
     }
 
     function test_sync_refusesWhileTheAuctionExists() public {
         uint256 sid = _composeOnce().sid;
-        vm.expectRevert(Core.AuctionLive.selector);
+        vm.expectRevert(ICore.AuctionLive.selector);
         core.syncStatement(sid);
         _bid(alice, sid, _live(sid).reserve);
-        vm.expectRevert(Core.AuctionLive.selector);
+        vm.expectRevert(ICore.AuctionLive.selector);
         core.syncStatement(sid);
         vm.warp(_live(sid).endTime);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
-        vm.expectRevert(Core.AuctionLive.selector);
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
+        vm.expectRevert(ICore.AuctionLive.selector);
         core.syncStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(999_999);
     }
 
     function test_sync_aWinnerThatBurnedTheStatementStillSettles() public {
         (uint256 sid,) = _sellStatement(alice);
         vm.mockCallRevert(address(STATEMENTS), abi.encodeWithSelector(IStatements.ownerOf.selector, sid), "burned");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold));
         core.syncStatement(sid);
         assertEq(core.heldStatements().length, 0);
     }
@@ -878,11 +879,11 @@ contract FlowTest is Fixture {
 
     function test_sync_unwoundSaleRelistsAtTheCurrentReserve() public {
         (uint256 sid, uint256 aid, uint256 price) = _failedDelivery();
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
         assertEq(_owedByHouse(), 0, "a deferred sale pays nobody");
         vm.expectRevert(IAuctionHouse.AuctionAlreadySettled.selector);
         house.endAuction{gas: END_GAS}(aid);
-        vm.expectRevert(Core.AuctionLive.selector);
+        vm.expectRevert(ICore.AuctionLive.selector);
         core.syncStatement(sid);
         vm.expectRevert(IAuctionHouse.UnwindTooEarly.selector);
         house.unwindStuckLot{gas: END_GAS}(aid);
@@ -892,18 +893,18 @@ contract FlowTest is Fixture {
         assertEq(STATEMENTS.ownerOf(sid), address(core), "returned to the core by the unwind");
         assertEq(house.pendingRefunds(alice), price, "the winner is refunded");
         assertEq(_owedByHouse(), 0, "no proceeds for the core");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Returned));
 
         Settings memory s = core.settings();
         s.saleFloorBps = 12_000;
         _owner(s);
         (,, uint256 cost,) = core.statementInfo(sid);
         vm.expectEmit(address(core));
-        emit Core.StatementListed(sid, aid + 1, cost * 12_000 / 10_000);
+        emit ICore.StatementListed(sid, aid + 1, cost * 12_000 / 10_000);
         vm.prank(bob);
         core.syncStatement(sid);
         Live memory l = _live(sid);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Listed));
         assertEq(l.auctionId, aid + 1, "a new auction");
         assertEq(l.reserve, cost * 12_000 / 10_000, "at the current reserve");
         (,,, uint64 listedAt) = core.statementInfo(sid);
@@ -926,7 +927,7 @@ contract FlowTest is Fixture {
         house.claimLot(aid, address(0));
         assertEq(STATEMENTS.ownerOf(sid), alice);
         assertEq(_owedByHouse(), price);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold));
         core.syncStatement(sid);
         _collectSales();
         _solvent();
@@ -943,7 +944,7 @@ contract FlowTest is Fixture {
         _owner(s);
         assertEq(_live(sid).reserve, old, "a settings change does not touch the listing by itself");
         vm.expectEmit(address(core));
-        emit Core.StatementRepriced(sid, cost * 12_000 / 10_000);
+        emit ICore.StatementRepriced(sid, cost * 12_000 / 10_000);
         vm.prank(bob);
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, cost * 12_000 / 10_000);
@@ -963,12 +964,12 @@ contract FlowTest is Fixture {
     function test_reprice_refusedWithABidOrWithoutAListing() public {
         uint256 sid = _composeOnce().sid;
         _bid(alice, sid, _live(sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(424_242);
         _endAuction(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sid);
     }
 
@@ -983,14 +984,14 @@ contract FlowTest is Fixture {
         (,,, uint64 listedAt) = core.statementInfo(c.sid);
         uint256 aid = _live(c.sid).auctionId;
         vm.warp(listedAt + 105 hours - 1);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         vm.warp(listedAt + 105 hours);
         uint256 rating = STATEMENTS.creditScoreOf(c.sid);
         uint256 before = xt.balanceOf(address(core));
         uint256 pot = core.xPot();
         vm.expectEmit(address(core));
-        emit Core.StatementExited(c.sid, Lane.Eth, rating * UNIT);
+        emit ICore.StatementExited(c.sid, Lane.Eth, rating * UNIT);
         vm.prank(bob);
         core.exitStatement(c.sid);
         uint256 got = xt.balanceOf(address(core)) - before;
@@ -1024,14 +1025,14 @@ contract FlowTest is Fixture {
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
         _bid(alice, sid, _live(sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(sid);
         vm.warp(_live(sid).endTime + 1 days);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), address(house), "nothing moved");
         _endAuction(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.exitStatement(sid);
         assertEq(STATEMENTS.ownerOf(sid), alice, "a sold statement cannot be exited");
     }
@@ -1043,7 +1044,7 @@ contract FlowTest is Fixture {
         s.exitAfter = 365 days;
         _owner(s);
         vm.warp(block.timestamp + 100 days);
-        vm.expectRevert(Core.TooEarly.selector);
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(sid);
         s.exitAfter = 1 hours;
         _owner(s);
@@ -1054,7 +1055,7 @@ contract FlowTest is Fixture {
     function test_exit_needsTheModule() public {
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.exitStatement(sid);
     }
 
@@ -1062,7 +1063,7 @@ contract FlowTest is Fixture {
         _enterPhase2();
         (uint256 sid,) = _sellStatement(alice);
         _warp(105 hours);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.exitStatement(sid);
     }
 
@@ -1071,7 +1072,7 @@ contract FlowTest is Fixture {
         (uint256 sid, uint256 aid,) = _failedDelivery();
         _warp(30 days + 1);
         house.unwindStuckLot{gas: END_GAS}(aid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.exitStatement(sid);
         core.syncStatement(sid);
         (,,, uint64 listedAt) = core.statementInfo(sid);
@@ -1136,7 +1137,7 @@ contract FlowTest is Fixture {
         uint256 aidB = _live(b).auctionId;
         uint256 sum = STATEMENTS.creditScoreOf(a) + STATEMENTS.creditScoreOf(b);
         vm.expectEmit(address(core));
-        emit Core.Overprinted(a, b, costA + costB);
+        emit ICore.Overprinted(a, b, costA + costB);
         core.overprint();
         assertEq(house.getAuction(aidA).tokenOwner, address(0), "the base listing was cancelled");
         assertEq(house.getAuction(aidB).tokenOwner, address(0), "the top listing was cancelled");
@@ -1148,7 +1149,7 @@ contract FlowTest is Fixture {
         assertEq(cost, costA + costB, "costs add");
         assertEq(listedAt, block.timestamp);
         Live memory l = _live(a);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Listed));
         assertTrue(l.auctionId != aidA && l.auctionId != aidB, "a new auction");
         assertEq(l.reserve, (costA + costB) * 11_000 / 10_000, "reserve on the summed cost");
         assertEq(_auctionOf(a).duration, 24 hours);
@@ -1162,11 +1163,11 @@ contract FlowTest is Fixture {
         (uint256 a, uint256 b) = _twoStatements();
         uint256 snap = vm.snapshotState();
         _bid(alice, b, _live(b).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.overprint();
         vm.revertToState(snap);
         _bid(alice, a, _live(a).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.overprint();
         assertEq(STATEMENTS.ownerOf(b), address(house), "atomic: the other listing is untouched");
     }
@@ -1175,7 +1176,7 @@ contract FlowTest is Fixture {
         (uint256 a, uint256 b) = _twoStatements();
         _bid(alice, b, _live(b).reserve);
         _endAuction(b);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.overprint();
         assertEq(STATEMENTS.ownerOf(a), address(house));
     }
@@ -1186,16 +1187,16 @@ contract FlowTest is Fixture {
         address[2] memory t = [address(house), Mainnet.AUCTION_FACTORY];
         for (uint256 i; i < 2; ++i) {
             vm.prank(owner);
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(t[i]);
-            vm.expectRevert(Core.TargetNotAllowed.selector);
+            vm.expectRevert(ICore.TargetNotAllowed.selector);
             core.buyListing(0, "", 1, t[i]);
             assertFalse(core.allowedTarget(t[i]));
         }
     }
 
-    function _newCore(Settings memory s, address factory) internal returns (Core) {
-        return new Core(owner, address(coin), address(ctl), _stack(factory), 4e12, s);
+    function _newCore(Settings memory s, address factory) internal returns (ICore) {
+        return Prod.newCore(owner, address(coin), address(ctl), _stack(factory), 4e12, s);
     }
 
     function _stack(address factory) internal view returns (Stack memory st) {
@@ -1204,7 +1205,7 @@ contract FlowTest is Fixture {
     }
 
     function test_constructor_createsItsOwnHouse() public {
-        Core c2 = _newCore(Mainnet.defaultSettings(), Mainnet.AUCTION_FACTORY);
+        ICore c2 = _newCore(Mainnet.defaultSettings(), Mainnet.AUCTION_FACTORY);
         address h2 = IAuctionFactory(Mainnet.AUCTION_FACTORY).houseOf(address(c2));
         assertTrue(h2 != address(0) && h2 != address(house));
         assertEq(address(c2.HOUSE()), h2);
@@ -1216,20 +1217,20 @@ contract FlowTest is Fixture {
     function test_constructor_refusesBadInputs() public {
         Settings memory s = Mainnet.defaultSettings();
         s.avgScore = 799_999;
-        vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, bytes32("avgScore")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, bytes32("avgScore")));
         this.newCoreExternal(s, Mainnet.AUCTION_FACTORY);
         // the opening rate (4e12) may not sit above the rate cap
         Settings memory capped = Mainnet.defaultSettings();
         capped.rateCap = 3.9e12;
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         this.newCoreExternal(capped, Mainnet.AUCTION_FACTORY);
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         this.newCoreExternal(Mainnet.defaultSettings(), address(0));
-        vm.expectRevert(abi.encodeWithSelector(Core.NoCode.selector, address(0xBEEF)));
+        vm.expectRevert(abi.encodeWithSelector(ICore.NoCode.selector, address(0xBEEF)));
         this.newCoreExternal(Mainnet.defaultSettings(), address(0xBEEF));
     }
 
-    function newCoreExternal(Settings memory s, address factory) external returns (Core) {
+    function newCoreExternal(Settings memory s, address factory) external returns (ICore) {
         return _newCore(s, factory);
     }
 
@@ -1319,12 +1320,12 @@ contract FlowTest is Fixture {
                 next = _publicDoor(sid, r, next);
             } else if (kind == 6) {
                 Live memory l = _live(sid);
-                if (l.status == Core.StatementStatus.Listed) _bid(alice, sid, l.reserve);
-                else if (l.status == Core.StatementStatus.Bid) _bid(bob, sid, l.bid * 105 / 100);
+                if (l.status == ICore.StatementStatus.Listed) _bid(alice, sid, l.reserve);
+                else if (l.status == ICore.StatementStatus.Bid) _bid(bob, sid, l.bid * 105 / 100);
             } else if (kind == 7) {
                 _warp(1 hours + (r >> 8) % 3 days);
             } else if (kind == 8) {
-                if (_live(sid).status == Core.StatementStatus.Ended) _endAuction(sid);
+                if (_live(sid).status == ICore.StatementStatus.Ended) _endAuction(sid);
             } else if (kind == 9) {
                 _sellMaybe(ids[(r >> 8) % 6]);
             } else {

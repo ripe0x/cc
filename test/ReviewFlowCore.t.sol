@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Prod} from "./utils/Prod.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {CoreLib} from "../src/lib/CoreLib.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {
     Lane,
     Settings,
@@ -127,7 +128,7 @@ contract ReviewFlowCoreTest is Fixture {
 
     function _expectBad(Settings memory s, bytes32 field) internal {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Core.BadSetting.selector, field));
+        vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, field));
         core.setSettings(s);
     }
 
@@ -175,8 +176,8 @@ contract ReviewFlowCoreTest is Fixture {
         s.exitAfter = 1 hours;
         _setSettings(s);
         Composed memory c = _composeOnce();
-        assertEq(uint8(_live(c.sid).status), uint8(Core.StatementStatus.Listed));
-        vm.expectRevert(Core.TooEarly.selector);
+        assertEq(uint8(_live(c.sid).status), uint8(ICore.StatementStatus.Listed));
+        vm.expectRevert(ICore.TooEarly.selector);
         core.exitStatement(c.sid);
         _warp(1 hours);
         core.exitStatement(c.sid);
@@ -188,11 +189,11 @@ contract ReviewFlowCoreTest is Fixture {
         address lib = findLibrary(address(core).code);
         assertTrue(lib != address(0), "library found");
         // control: the same construction works while the library has code
-        Core ok = new Core(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings);
+        ICore ok = Prod.newCore(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings);
         assertEq(ok.settings().avgScore, lc.settings.avgScore, "control builds");
         vm.etch(lib, "");
         bool built;
-        try new Core(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings) returns (Core c2) {
+        try this.buildCore() returns (ICore c2) {
             built = true;
             emit log("constructed against an empty library");
             emit log_named_uint("avgScore stored", c2.settings().avgScore);
@@ -200,6 +201,11 @@ contract ReviewFlowCoreTest is Fixture {
             emit log("constructor reverted");
         }
         assertFalse(built, "an empty library address must stop the constructor");
+    }
+
+    /// @dev an external wrapper so `try` can catch a constructor revert of the artifact deploy
+    function buildCore() external returns (ICore) {
+        return Prod.newCore(owner, address(coin), address(ctl), lc.stack, lc.rateStart, lc.settings);
     }
 
     function _allMin() internal pure returns (Settings memory m) {
@@ -254,11 +260,11 @@ contract ReviewFlowCoreTest is Fixture {
     /// the library is never usable directly, and the packed words round trip at both ends of every bound
     function test_libraryDirectCallsRevertAndPackingRoundTrips() public {
         address lib = findLibrary(address(core).code);
-        (bool ok,) = lib.call(abi.encodeWithSelector(CoreLib.setSettings.selector, _allMax()));
+        (bool ok,) = lib.call(abi.encodeWithSelector(ICoreLib.setSettings.selector, _allMax()));
         assertFalse(ok, "setSettings direct");
         (ok,) = lib.call(
             abi.encodeWithSelector(
-                CoreLib.swapIn.selector, Mainnet.POOL_MANAGER, address(coin), uint24(0), int24(200), address(0), 1
+                ICoreLib.swapIn.selector, Mainnet.POOL_MANAGER, address(coin), uint24(0), int24(200), address(0), 1
             )
         );
         assertFalse(ok, "swapIn direct");
@@ -372,7 +378,7 @@ contract ReviewFlowCoreTest is Fixture {
         Settings memory s = core.settings();
         assertEq(s.rateCap, 123_200_000_000_000, "launch value");
         vm.prank(owner);
-        vm.expectRevert(Core.BadRate.selector);
+        vm.expectRevert(ICore.BadRate.selector);
         core.setRate(uint256(s.rateCap) + 1);
         vm.prank(owner);
         core.setRate(s.rateCap);
@@ -442,7 +448,7 @@ contract ReviewFlowCoreTest is Fixture {
     /// a word with bits above the field width is refused by the library, never truncated into bounds
     function test_dirtyCalldataWordsAreRefused() public {
         Settings memory base = core.settings();
-        bytes memory good = abi.encodeCall(Core.setSettings, (base));
+        bytes memory good = abi.encodeCall(ICore.setSettings, (base));
         assertEq(good.length, 4 + 29 * 32);
         for (uint256 i; i < 29; ++i) {
             bytes memory bad = bytes.concat(good);
@@ -565,7 +571,7 @@ contract ReviewFlowCoreTest is Fixture {
         _setController(address(bc));
         vm.fee(20 gwei);
         vm.prank(keeper);
-        vm.expectRevert(Core.NotReady.selector);
+        vm.expectRevert(ICore.NotReady.selector);
         core.composeExit{gas: 30_000_000}();
 
         // burning 300,000 (under the cap with the page read) is answered, and the refund is held at the notional cap of the launch rate
@@ -605,7 +611,7 @@ contract ReviewFlowCoreTest is Fixture {
         assertApproxEqRel(flat, core.ethPot() * 2_000 / 10_000, 1e9, "at the clamp the flat ceiling is the hourly cap");
         assertApproxEqRel(core.ceilingOf(ids[0]), flat * 12_500 / 10_000, 1e9, "bonus on top");
         vm.prank(seller);
-        vm.expectRevert(Core.HourlyCap.selector);
+        vm.expectRevert(ICore.HourlyCap.selector);
         core.sellForEth(_one(ids[0]));
         vm.prank(seller);
         core.sellForEth(_one(ids[1]));
@@ -645,11 +651,11 @@ contract ReviewFlowCoreTest is Fixture {
 
 /// a controller that answers like ControllerV1 but burns gas first (a staticcall can do that and nothing else)
 contract BurnController {
-    Core internal immutable CORE;
+    ICore internal immutable CORE;
     uint256 internal immutable BURN;
 
     constructor(address core_, uint256 burn_) {
-        CORE = Core(payable(core_));
+        CORE = ICore(payable(core_));
         BURN = burn_;
     }
 

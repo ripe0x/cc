@@ -4,12 +4,13 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {Core} from "../../src/Core.sol";
-import {ControllerV1} from "../../src/ControllerV1.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
+import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, IStatements, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse, IAuctionFactory} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsFactory, IArtCoinsToken, IArtCoinsFeeEscrow} from "../../src/interfaces/ArtCoins.sol";
-import {SystemDeployer, Deployed} from "../../script/Deploy.s.sol";
+import {Deployed} from "../../script/SystemDeployer.sol";
+import {ProdDeployer} from "./ProdDeployer.sol";
 import {LaunchConfig} from "../../script/LaunchConfig.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
@@ -23,7 +24,7 @@ import {TestSwapRouter} from "./TestSwapRouter.sol";
 /// the only stand ins are the exit module and exit token, which appear only after `_enterPhase2`.
 /// the sniper window is OPEN after setUp (the pool was just born). call `_skipSniperWindow` for steady state fees.
 /// @dev every address is namespaced because common labels are delegated accounts on mainnet that sweep eth
-abstract contract Fixture is Test, SystemDeployer {
+abstract contract Fixture is Test, ProdDeployer {
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
     IPoolManager internal constant PM = IPoolManager(Mainnet.POOL_MANAGER);
@@ -68,9 +69,9 @@ abstract contract Fixture is Test, SystemDeployer {
 
     /// @dev the launch config of the fixture: the default (live artcoins stack) with the placeholders filled
     LaunchConfig internal lc;
-    Core internal core;
+    ICore internal core;
     IArtCoinsToken internal coin;
-    ControllerV1 internal ctl;
+    IControllerV1 internal ctl;
     /// @dev the pnd auction house the core created in its constructor, through the real live factory
     IAuctionHouse internal house;
     PoolKey internal launchKey;
@@ -154,26 +155,13 @@ abstract contract Fixture is Test, SystemDeployer {
         Deployed memory d = deploySystem(deployer, lc);
         vm.stopPrank();
 
-        core = Core(payable(d.core));
+        core = ICore(payable(d.core));
         coin = IArtCoinsToken(d.coin);
-        ctl = ControllerV1(d.controller);
-        house = core.HOUSE();
+        ctl = IControllerV1(d.controller);
+        house = IAuctionHouse(core.HOUSE());
         launchKey = d.launchKey;
         poolId = d.poolId;
         launchTime = block.timestamp;
-    }
-
-    /// @dev the system is created from its artifacts, so no test contract embeds the creation code of the Core
-    function _newController(address core_, LaunchConfig memory c) internal override returns (address) {
-        return deployCode("ControllerV1.sol:ControllerV1", abi.encode(core_, c.sale));
-    }
-
-    function _newCore(address owner_, address coin_, address controller_, LaunchConfig memory c)
-        internal
-        override
-        returns (address)
-    {
-        return deployCode("Core.sol:Core", abi.encode(owner_, coin_, controller_, c.stack, c.rateStart, c.settings));
     }
 
     // ------------------------------------------------------------------ builders on the fixture config
@@ -349,7 +337,7 @@ abstract contract Fixture is Test, SystemDeployer {
 
     /// @notice the live status of a statement as the core reads it from the house
     struct Live {
-        Core.StatementStatus status;
+        ICore.StatementStatus status;
         uint256 auctionId;
         uint256 reserve;
         uint256 bid;

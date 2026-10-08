@@ -248,13 +248,15 @@ abstract contract LaunchChecks is PostflightChecks {
 
     function _preFactory(LaunchConfig memory c, address deployer) private {
         address f = c.stack.factory;
-        (bool ok1, uint256 hookOn) = _word(f, abi.encodeCall(IArtCoinsFactory.enabledHooks, (c.stack.hook)));
-        _check("factory: hook enabled", ok1 && hookOn == 1, "enabledHooks(hook)");
-        (bool ok2, uint256 lockOn) =
-            _word(f, abi.encodeCall(IArtCoinsFactory.enabledLockers, (c.stack.locker, c.stack.hook)));
-        _check("factory: locker enabled for hook", ok2 && lockOn == 1, "enabledLockers(locker, hook)");
-        (bool ok3, uint256 mevOn) = _word(f, abi.encodeCall(IArtCoinsFactory.enabledMevModules, (c.mevModule)));
-        _check("factory: mev module enabled", ok3 && mevOn == 1, "enabledMevModules(module)");
+        {
+(bool ok1, uint256 hookOn) = _word(f, abi.encodeCall(IArtCoinsFactory.enabledHooks, (c.stack.hook)));
+            _check("factory: hook enabled", ok1 && hookOn == 1, "enabledHooks(hook)");
+            (bool ok2, uint256 lockOn) =
+                _word(f, abi.encodeCall(IArtCoinsFactory.enabledLockers, (c.stack.locker, c.stack.hook)));
+            _check("factory: locker enabled for hook", ok2 && lockOn == 1, "enabledLockers(locker, hook)");
+            (bool ok3, uint256 mevOn) = _word(f, abi.encodeCall(IArtCoinsFactory.enabledMevModules, (c.mevModule)));
+            _check("factory: mev module enabled", ok3 && mevOn == 1, "enabledMevModules(module)");
+        }
         (bool ok4, uint256 dep) = _word(f, abi.encodeCall(IArtCoinsFactory.deprecated, ()));
         _check("factory: deprecated readable", ok4, dep == 1 ? "deprecated true" : "deprecated false");
         _check(
@@ -271,14 +273,16 @@ abstract contract LaunchChecks is PostflightChecks {
         (bool ok6, uint256 adm) = _word(f, abi.encodeCall(IArtCoinsFactory.admins, (deployer)));
         bool may = ok4 && ok5 && (dep == 0 || address(uint160(own)) == deployer || (ok6 && adm == 1));
         _check("factory: deployer may launch", may, string.concat("deployer ", vm.toString(deployer)));
+        _preFee(f, deployer);
+    }
+
+    function _preFee(address f, address deployer) private {
         (bool ok7, uint256 fee) = _word(f, abi.encodeCall(IArtCoinsFactory.deployFee, ()));
         uint256 need = fee + DEPLOY_GAS_ESTIMATE * block.basefee * 2;
         _check(
             "deployer balance covers fee and gas",
             ok7 && deployer.balance >= need,
-            string.concat(
-                "fee ", vm.toString(fee), " need ", vm.toString(need), " have ", vm.toString(deployer.balance)
-            )
+            string.concat("fee ", vm.toString(fee), " need ", vm.toString(need), " have ", vm.toString(deployer.balance))
         );
     }
 

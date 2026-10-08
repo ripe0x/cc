@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 
@@ -35,10 +35,10 @@ contract ReviewCoreTest is Fixture {
         vm.warp(c.at + 105 hours);
 
         mod.setUnitPerPoint(1);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), address(house), "the statement never left: its listing is intact");
-        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(c.sid).status), uint256(ICore.StatementStatus.Listed));
         assertEq(core.unitPerPoint(), UNIT, "the stored unit did not move");
         _solvent();
     }
@@ -122,7 +122,7 @@ contract ReviewCoreTest is Fixture {
 
         // a cap one wei short of the quote, a missing approval and a stranger without coin all fail
         vm.prank(attacker);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.buybackExit(coinIn - 1);
         address stranger = _user("stranger");
         vm.prank(stranger);
@@ -241,7 +241,7 @@ contract ReviewCoreTest is Fixture {
 
         vm.warp(block.timestamp + 1000 hours);
         vm.prank(attacker);
-        vm.expectRevert(Core.NothingToBuy.selector);
+        vm.expectRevert(ICore.NothingToBuy.selector);
         core.buybackExit(type(uint256).max);
         (uint256 s, uint256 c) = core.exitAuctionQuote();
         assertEq(s, 0);
@@ -318,7 +318,7 @@ contract ReviewCoreTest is Fixture {
         assertEq(coinIn, slice.mulDivUp(start / 4, 1e18));
         assertGt(coinIn, 1e26, "a quarter of the whole supply for a full slice, not dust");
         vm.prank(attacker);
-        vm.expectRevert(Core.Slippage.selector);
+        vm.expectRevert(ICore.Slippage.selector);
         core.buybackExit(coinIn - 1);
         // the whole queue cannot be taken for dust: every further slice needs its own decay, see
         // test_drainingSlicesAtDustNeedsSeparateDecays in Fees.t.sol

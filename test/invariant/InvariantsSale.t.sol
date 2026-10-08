@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {ControllerV1} from "../../src/ControllerV1.sol";
+import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {Lane} from "../../src/interfaces/Interfaces.sol";
 import {InvariantsBase} from "./Invariants.t.sol";
 
@@ -48,7 +48,7 @@ abstract contract SaleSuite is InvariantsBase {
 
     function _buyOnly(bool on) internal {
         vm.prank(_owner());
-        ControllerV1(address(ctl)).setBuyOnly(on);
+        IControllerV1(address(ctl)).setBuyOnly(on);
     }
 
     /// the fresh state has two listed statements without a bid (and none sold in the window variant). the sale actions

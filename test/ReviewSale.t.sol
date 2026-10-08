@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
-import {ControllerV1} from "../src/ControllerV1.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
+import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
 import {Lane, Settings, Sale, Mainnet, IExitModule, IStatements} from "../src/interfaces/Interfaces.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
@@ -15,9 +15,9 @@ import {MockExitModule} from "./standins/MockExitModule.sol";
 
 /// a controller that can call sellTo with any statement, buyer and payment
 contract SellProbe is ScriptedController {
-    Core internal immutable CORE;
+    ICore internal immutable CORE;
 
-    constructor(Core c) {
+    constructor(ICore c) {
         CORE = c;
     }
 
@@ -28,15 +28,15 @@ contract SellProbe is ScriptedController {
 
 /// a buyer that records every callback and tries to re enter on the refund
 contract EvilBuyer {
-    ControllerV1 public ctl;
-    Core public core;
+    IControllerV1 public ctl;
+    ICore public core;
     uint256 public hooks;
     uint256 public refunds;
     uint256 public sid;
     bool public failRefund;
     bytes4 public lastWhy;
 
-    constructor(ControllerV1 c, Core k) {
+    constructor(IControllerV1 c, ICore k) {
         ctl = c;
         core = k;
     }
@@ -155,17 +155,17 @@ contract ReviewSaleTest is Fixture {
         uint256 floor = _floorOf(sid);
         vm.deal(bob, 100 ether);
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: floor}(sid, bob);
         vm.deal(owner, 100 ether);
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         core.sellTo{value: floor}(sid, owner);
         // after a controller change the old controller is dead for sales
         _buyOnly();
         SellProbe p = _probe();
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyController.selector);
+        vm.expectRevert(ICore.OnlyController.selector);
         ctl.buy{value: 100 ether}(sid);
         p.sell{value: floor}(sid, bob);
         assertEq(STATEMENTS.ownerOf(sid), bob);
@@ -174,9 +174,9 @@ contract ReviewSaleTest is Fixture {
     function test_OK_sellTo_unknownRecordReverts() public {
         _composeOnce();
         SellProbe p = _probe();
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 0}(999_999, bob);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 0}(0, bob);
     }
 
@@ -188,7 +188,7 @@ contract ReviewSaleTest is Fixture {
         assertEq(uint256(lane), uint256(Lane.Exit));
         SellProbe p = _probe();
         vm.deal(address(this), 1000 ether);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 1000 ether}(sid, bob);
         assertEq(STATEMENTS.ownerOf(sid), address(core));
     }
@@ -198,19 +198,19 @@ contract ReviewSaleTest is Fixture {
         _bid(alice, sid, _live(sid).reserve);
         SellProbe p = _probe();
         vm.deal(address(this), 1000 ether);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         p.sell{value: 1000 ether}(sid, bob);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Bid), "auction untouched");
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Bid), "auction untouched");
     }
 
     function test_OK_sellTo_endedButUnsettledAuctionReverts() public {
         uint256 sid = _composeOnce().sid;
         _bid(alice, sid, _live(sid).reserve);
         vm.warp(_live(sid).endTime + 1);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Ended));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Ended));
         SellProbe p = _probe();
         vm.deal(address(this), 1000 ether);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         p.sell{value: 1000 ether}(sid, bob);
     }
 
@@ -219,10 +219,10 @@ contract ReviewSaleTest is Fixture {
         SellProbe p = _probe();
         vm.deal(address(this), 1000 ether);
         // the record is stale (sold on the house) until syncStatement clears it
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 1000 ether}(sid, bob);
         core.syncStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 1000 ether}(sid, bob);
         assertEq(STATEMENTS.ownerOf(sid), alice);
     }
@@ -233,7 +233,7 @@ contract ReviewSaleTest is Fixture {
         SellProbe p = _probe();
         p.sell{value: floor}(sid, bob);
         vm.deal(address(this), 1000 ether);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         p.sell{value: 1000 ether}(sid, alice);
         assertEq(STATEMENTS.ownerOf(sid), bob);
         assertEq(core.heldStatements().length, 0);
@@ -245,9 +245,9 @@ contract ReviewSaleTest is Fixture {
         uint256 floor = _floorOf(sid);
         SellProbe p = _probe();
         vm.deal(address(this), 1000 ether);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         p.sell{value: floor - 1}(sid, bob);
-        vm.expectRevert(Core.BelowFloor.selector);
+        vm.expectRevert(ICore.BelowFloor.selector);
         p.sell{value: 0}(sid, bob);
         // the floor rounds down by less than one wei of the exact product
         assertLe(floor * 10_000, cost * core.settings().saleFloorBps);
@@ -265,7 +265,7 @@ contract ReviewSaleTest is Fixture {
         uint256 bb = core.ethToBuyback();
         uint256 bal = address(core).balance;
         vm.expectEmit(address(core));
-        emit Core.StatementSoldTo(sid, bob, pay);
+        emit ICore.StatementSoldTo(sid, bob, pay);
         p.sell{value: pay}(sid, bob);
         assertEq(address(core).balance - bal, pay, "balance rose by the payment");
         assertEq((core.ethPot() - pot) + (core.ethToBuyback() - bb), pay, "booked exactly once");
@@ -289,7 +289,7 @@ contract ReviewSaleTest is Fixture {
         assertEq(STATEMENTS.ownerOf(sid), address(b));
         assertEq(b.hooks(), 0, "transferFrom has no callback");
         assertEq(b.refunds(), 1, "the refund arrived once");
-        assertEq(b.lastWhy(), ControllerV1.Reentrant.selector, "buy is guarded against the refund");
+        assertEq(b.lastWhy(), IControllerV1.Reentrant.selector, "buy is guarded against the refund");
         assertEq(address(b).balance - dust, 1 ether);
         assertEq(address(ctl).balance, 0, "nothing stays in the controller");
         _solvent();
@@ -323,7 +323,7 @@ contract ReviewSaleTest is Fixture {
         uint256 sid = _composeOnce().sid;
         vm.deal(bob, 100 ether);
         vm.prank(bob);
-        vm.expectRevert(ControllerV1.NotBuyOnly.selector);
+        vm.expectRevert(IControllerV1.NotBuyOnly.selector);
         ctl.buy{value: 100 ether}(sid);
     }
 
@@ -335,7 +335,7 @@ contract ReviewSaleTest is Fixture {
         vm.prank(alice);
         core.acceptOwnership();
         vm.prank(owner);
-        vm.expectRevert(ControllerV1.OnlyOwner.selector);
+        vm.expectRevert(IControllerV1.OnlyOwner.selector);
         ctl.setBuyOnly(true);
         vm.prank(alice);
         ctl.setBuyOnly(true);
@@ -375,7 +375,7 @@ contract ReviewSaleTest is Fixture {
         _bid(alice, sid, _live(sid).reserve);
         vm.deal(bob, 100 ether);
         vm.prank(bob);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         ctl.buy{value: 100 ether}(sid);
     }
 
@@ -435,15 +435,15 @@ contract ReviewSaleTest is Fixture {
         ScriptedController sc = new ScriptedController();
         _setController(address(sc));
         sc.setRevertPrice(true);
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         sc.setRevertPrice(false);
         sc.setBurnPrice(true);
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         sc.setBurnPrice(false);
         sc.setShortPrice(true);
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         assertEq(_live(sid).reserve, stored, "the stored reserve stands");
     }
@@ -484,9 +484,9 @@ contract ReviewSaleTest is Fixture {
     function test_OK_reprice_withABidReverts() public {
         uint256 sid = _composeOnce().sid;
         _bid(alice, sid, _live(sid).reserve);
-        vm.expectRevert(Core.HasBid.selector);
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(424_242);
     }
 
@@ -552,23 +552,23 @@ contract ReviewSaleTest is Fixture {
 
     function test_OK_everyOwnerDoorIsOwnerOnly() public {
         bytes[11] memory calls = [
-            abi.encodeCall(Core.transferOwnership, (bob)),
-            abi.encodeCall(Core.setController, (bob)),
-            abi.encodeCall(Core.setExitModule, (bob)),
-            abi.encodeCall(Core.addTarget, (bob)),
-            abi.encodeCall(Core.removeTarget, (bob)),
-            abi.encodeCall(Core.lockController, ()),
-            abi.encodeCall(Core.lockExitModule, ()),
-            abi.encodeCall(Core.lockTargets, ()),
-            abi.encodeCall(Core.setSettings, (core.settings())),
-            abi.encodeCall(Core.setRate, (4e12)),
-            abi.encodeCall(Core.setXRate, (5_000))
+            abi.encodeCall(ICore.transferOwnership, (bob)),
+            abi.encodeCall(ICore.setController, (bob)),
+            abi.encodeCall(ICore.setExitModule, (bob)),
+            abi.encodeCall(ICore.addTarget, (bob)),
+            abi.encodeCall(ICore.removeTarget, (bob)),
+            abi.encodeCall(ICore.lockController, ()),
+            abi.encodeCall(ICore.lockExitModule, ()),
+            abi.encodeCall(ICore.lockTargets, ()),
+            abi.encodeCall(ICore.setSettings, (core.settings())),
+            abi.encodeCall(ICore.setRate, (4e12)),
+            abi.encodeCall(ICore.setXRate, (5_000))
         ];
         for (uint256 i; i < calls.length; ++i) {
             vm.prank(bob);
             (bool ok, bytes memory why) = address(core).call(calls[i]);
             assertFalse(ok);
-            assertEq(bytes4(why), Core.OnlyOwner.selector);
+            assertEq(bytes4(why), ICore.OnlyOwner.selector);
         }
         assertFalse(core.controllerLocked() || core.exitModuleLocked() || core.targetsLocked());
         assertEq(core.pendingOwner(), address(0));
@@ -576,25 +576,25 @@ contract ReviewSaleTest is Fixture {
 
     function test_OK_formerActionsKeepTheirValidityChecks() public {
         vm.startPrank(owner);
-        vm.expectRevert(Core.ZeroAddress.selector);
+        vm.expectRevert(ICore.ZeroAddress.selector);
         core.setController(address(0));
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         core.setExitModule(address(0xdead));
         address[4] memory bad = [lc.stack.hook, address(core), core.COIN(), address(house)];
         for (uint256 i; i < bad.length; ++i) {
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(bad[i]);
         }
         vm.stopPrank();
         _enterPhase2();
         vm.startPrank(owner);
         MockExitModule zero = new MockExitModule(address(xt), 0);
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         core.setExitModule(address(zero));
         MockExitModule other = new MockExitModule(address(new MockExitToken("O", "O")), 1e10);
-        vm.expectRevert(Core.ExitTokenChanged.selector);
+        vm.expectRevert(ICore.ExitTokenChanged.selector);
         core.setExitModule(address(other));
-        vm.expectRevert(Core.BadModule.selector);
+        vm.expectRevert(ICore.BadModule.selector);
         core.setExitModule(address(core));
         // a target flag set before a module is named is cleared when it becomes the module
         MockExitModule m2 = new MockExitModule(address(xt), 2e10);
@@ -602,7 +602,7 @@ contract ReviewSaleTest is Fixture {
         assertTrue(core.allowedTarget(address(m2)));
         core.setExitModule(address(m2));
         assertFalse(core.allowedTarget(address(m2)));
-        vm.expectRevert(Core.ForbiddenTarget.selector);
+        vm.expectRevert(ICore.ForbiddenTarget.selector);
         core.addTarget(address(m2));
         vm.stopPrank();
     }
@@ -613,7 +613,7 @@ contract ReviewSaleTest is Fixture {
         core.lockController();
         core.lockController();
         assertTrue(core.controllerLocked());
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("controller")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("controller")));
         core.setController(address(0xC0DE));
         // everything else stays open
         core.setExitModule(address(new MockExitModule(address(xt), 3e10)));
@@ -631,17 +631,17 @@ contract ReviewSaleTest is Fixture {
 
     function test_OK_lockExitModule_revertsWhileUnsetThenBlocksOnlyTheModuleDoor() public {
         vm.prank(owner);
-        vm.expectRevert(Core.NoExitModule.selector);
+        vm.expectRevert(ICore.NoExitModule.selector);
         core.lockExitModule();
         assertFalse(core.exitModuleLocked());
         uint256 sid = _composeOnce().sid;
         _enterPhase2();
         vm.startPrank(owner);
         core.lockExitModule();
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("exitModule")));
         core.setExitModule(address(mod));
         address fresh = address(new MockExitModule(address(xt), 3e10));
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("exitModule")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("exitModule")));
         core.setExitModule(fresh);
         core.setController(address(new SellProbe(core)));
         core.addTarget(address(0x7A9));
@@ -654,7 +654,7 @@ contract ReviewSaleTest is Fixture {
     function test_OK_lockTargets_blocksOnlyAddTarget() public {
         vm.startPrank(owner);
         core.lockTargets();
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("targets")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("targets")));
         core.addTarget(address(0x7A9));
         core.removeTarget(Mainnet.SEAPORT);
         assertFalse(core.allowedTarget(Mainnet.SEAPORT), "removal still works");
@@ -694,10 +694,10 @@ contract ReviewSaleTest is Fixture {
         vm.startPrank(owner);
         core.setController(address(sc));
         core.lockController();
-        vm.expectRevert(abi.encodeWithSelector(Core.Locked.selector, bytes32("controller")));
+        vm.expectRevert(abi.encodeWithSelector(ICore.Locked.selector, bytes32("controller")));
         core.setController(address(ctl));
         vm.stopPrank();
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         _warp(105 hours);
         core.exitStatement(sid);
@@ -709,31 +709,31 @@ contract ReviewSaleTest is Fixture {
     function test_OK_handover_twoStepAndTheOldOwnerLosesEveryDoor() public {
         vm.prank(owner);
         vm.expectEmit(address(core));
-        emit Core.OwnershipTransferStarted(owner, alice);
+        emit ICore.OwnershipTransferStarted(owner, alice);
         core.transferOwnership(alice);
         assertEq(core.owner(), owner, "still the old owner until accepted");
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         vm.prank(owner);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         vm.prank(alice);
         vm.expectEmit(address(core));
-        emit Core.OwnershipTransferred(owner, alice);
+        emit ICore.OwnershipTransferred(owner, alice);
         core.acceptOwnership();
         assertEq(core.owner(), alice);
         assertEq(core.pendingOwner(), address(0), "pending cleared");
         vm.startPrank(owner);
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.setController(address(ctl));
-        vm.expectRevert(Core.OnlyOwner.selector);
+        vm.expectRevert(ICore.OnlyOwner.selector);
         core.lockTargets();
-        vm.expectRevert(ControllerV1.OnlyOwner.selector);
+        vm.expectRevert(IControllerV1.OnlyOwner.selector);
         ctl.setStepBps(1);
         vm.stopPrank();
         vm.prank(alice);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
     }
 
@@ -743,13 +743,13 @@ contract ReviewSaleTest is Fixture {
         core.transferOwnership(bob);
         vm.stopPrank();
         vm.prank(alice);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         vm.prank(owner);
         core.transferOwnership(address(0));
         assertEq(core.pendingOwner(), address(0));
         vm.prank(bob);
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         assertEq(core.owner(), owner);
     }
@@ -910,7 +910,7 @@ contract ReviewSaleTest is Fixture {
         assertEq(got, drop, "paid from the pot, nowhere else");
         assertEq(got, cost * core.settings().reimburseCapBps / 10_000, "a high basefee binds the cap of the statement cost");
         vm.prank(keeper);
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
         _solvent();
     }
@@ -940,7 +940,7 @@ contract ReviewSaleTest is Fixture {
         uint256 pot = core.ethPot();
         uint256 bal = keeper.balance;
         vm.prank(keeper);
-        vm.expectRevert(Core.Underpaid.selector);
+        vm.expectRevert(ICore.Underpaid.selector);
         core.exitStatement(sid);
         assertEq(keeper.balance, bal);
         assertEq(core.ethPot(), pot);
@@ -1021,7 +1021,7 @@ contract ReviewSaleTest is Fixture {
         assertEq(abi.encode(core.settings()).length, SettingsFields.N * 32, "struct has as many words as the table");
         TupleProbe t = new TupleProbe();
         bytes4 fromScript = bytes4(keccak256(abi.encodePacked("setSettings(", t.tuple(), ")")));
-        assertEq(fromScript, Core.setSettings.selector, "SetSettings.s.sol tuple equals the Settings struct");
+        assertEq(fromScript, ICore.setSettings.selector, "SetSettings.s.sol tuple equals the Settings struct");
     }
 
     function _nm(bytes32 b) internal pure returns (string memory) {
@@ -1167,15 +1167,15 @@ contract ReviewSaleTest is Fixture {
     }
 
     function test_OK_priceOf_refusesWhatIsNotForSale() public {
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.priceOf(777_777);
         _enterPhase2();
         uint256 x = _exitLaneStatement();
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.priceOf(x);
         (uint256 sid,) = _sellStatement(alice);
         core.syncStatement(sid);
-        vm.expectRevert(ControllerV1.NotForSale.selector);
+        vm.expectRevert(IControllerV1.NotForSale.selector);
         ctl.priceOf(sid);
     }
 
@@ -1183,7 +1183,7 @@ contract ReviewSaleTest is Fixture {
     function test_FIXED_acceptOwnershipRejectsTheZeroCaller() public {
         assertEq(core.pendingOwner(), address(0));
         vm.prank(address(0));
-        vm.expectRevert(Core.OnlyPendingOwner.selector);
+        vm.expectRevert(ICore.OnlyPendingOwner.selector);
         core.acceptOwnership();
         assertEq(core.owner(), owner, "the owner is untouched");
     }
@@ -1211,7 +1211,7 @@ contract ReviewSaleTest is Fixture {
         core.setController(address(sc));
         core.syncStatement(sid);
         assertEq(_live(sid).reserve, _floorOf(sid), "listed at the hard floor");
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.repriceStatement(sid);
         _warp(105 hours);
         core.exitStatement(sid);
@@ -1231,7 +1231,7 @@ contract ReviewSaleTest is Fixture {
         vm.prank(owner);
         core.setController(address(sc));
         vm.fee(composeBasefee);
-        vm.expectRevert(Core.BadPrice.selector);
+        vm.expectRevert(ICore.BadPrice.selector);
         core.compose();
     }
 }

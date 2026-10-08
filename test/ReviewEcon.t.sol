@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 
@@ -184,21 +184,21 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         (bool held,,,) = core.statementInfo(sid);
         assertFalse(held);
         assertEq(core.heldStatements().length, 0, "not counted");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None));
-        vm.expectRevert(Core.NotListed.selector);
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None));
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sid);
         _enterPhase2();
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
         ScriptedController sc = new ScriptedController();
         _setController(address(sc));
         sc.setOverprint(true, sid + 1_000, sid);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
         sc.setOverprint(true, sid, sid + 1_000);
-        vm.expectRevert(Core.BadOverprint.selector);
+        vm.expectRevert(ICore.BadOverprint.selector);
         core.overprint();
         _solvent();
 
@@ -208,9 +208,9 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         _endAuction(sid);
         vm.prank(a);
         STATEMENTS.safeTransferFrom(a, address(core), sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Returned));
         core.syncStatement(sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Listed));
         assertEq(STATEMENTS.ownerOf(sid), address(house));
         assertEq(core.heldStatements().length, 1);
         assertEq(_live(sid).reserve, _reserveFor(_costOf(sid)), "back on the house at the current reserve");

@@ -9,7 +9,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {
     Lane,
     ICredits,
@@ -29,7 +29,7 @@ import {TestSwapRouter} from "../utils/TestSwapRouter.sol";
 
 /// everything the handler needs to know about the system under test.
 struct Wiring {
-    Core core;
+    ICore core;
     IAuctionHouse house;
     IArtCoinsToken coin;
     TestSwapRouter router;
@@ -159,7 +159,7 @@ abstract contract HandlerBase is Test {
                                   STATE
     //////////////////////////////////////////////////////////////*/
 
-    Core public core;
+    ICore public core;
     IAuctionHouse public house;
     IArtCoinsToken public coin;
     TestSwapRouter public router;
@@ -1040,6 +1040,25 @@ abstract contract HandlerBase is Test {
         uint256[] score;
     }
 
+    /// @dev the ids `sellForEth` offers: walks the actor inventory from a picked offset, within the budget unless overshoot
+    function _pickIds(address who, uint256 len, uint256 want, uint256 pick, bool overshoot)
+        internal
+        view
+        returns (uint256[] memory ids, uint256 n)
+    {
+        ids = new uint256[](want);
+        uint256 budget = _budget();
+        uint256 sum;
+        for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
+            uint256 id = inventory[who][(pick % len + k) % len];
+            uint256 c = core.ceilingOf(id);
+            if (sum + c <= budget || overshoot) {
+                ids[n++] = id;
+                sum += c;
+            }
+        }
+    }
+
     /// sells credits the actor holds into the eth bid. ids are picked to fit the budget, so most calls pass,
     /// and now and then the call is made oversized or with a duplicate id to prove the core refuses it.
     function sellForEth(uint256 aSeed, uint256 nSeed, uint256 pick, uint256 mode) external checked {
@@ -1049,20 +1068,7 @@ abstract contract HandlerBase is Test {
         if (len == 0) return _skip(a);
         uint256 want = bound(nSeed, 1, 10);
         bool overshoot = mode % 9 == 0;
-        uint256[] memory ids = new uint256[](want);
-        uint256 n;
-        {
-            uint256 budget = _budget();
-            uint256 sum;
-            for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
-                uint256 id = inventory[who][(pick % len + k) % len];
-                uint256 c = core.ceilingOf(id);
-                if (sum + c <= budget || overshoot) {
-                    ids[n++] = id;
-                    sum += c;
-                }
-            }
-        }
+        (uint256[] memory ids, uint256 n) = _pickIds(who, len, want, pick, overshoot);
         if (n == 0) return _skip(a);
         assembly {
             mstore(ids, n)
@@ -1103,7 +1109,7 @@ abstract contract HandlerBase is Test {
         uint256 count;
         uint256 ceilSum;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(core) || logs[i].topics[0] != Core.CreditBought.selector) continue;
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.CreditBought.selector) continue;
             uint256 id = uint256(logs[i].topics[1]);
             (uint256 lane, uint256 cost) = abi.decode(logs[i].data, (uint256, uint256));
             if (lane != 0) _flag(V_MODEL, "sellForEth bought into the wrong lane");
@@ -1410,20 +1416,16 @@ abstract contract HandlerBase is Test {
         // state changing attacks only inside the core's frame (each one halting a static frame burns the 300_000 gas
         // it was given), so the handler's own uncapped looking pre check cannot see that cost and the core answers
         // NotReady for a page the pre check saw as ready
-        bool hostileNotReady = bytes4(why) == Core.NotReady.selector && _mayNotPrice();
-        if (p.valid && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice()) && !hostileNotReady) {
+        bool hostileNotReady = bytes4(why) == ICore.NotReady.selector && _mayNotPrice();
+        if (p.valid && !(bytes4(why) == ICore.BadPrice.selector && _mayNotPrice()) && !hostileNotReady) {
             _unexpected(a, why);
         }
     }
 
-    function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        if (!p.valid) _flag(V_COMPOSE, "composed a page the ghost model considers invalid");
-        uint256 sid = STATEMENTS.supply();
-        if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != (lane == Lane.Eth ? address(house) : address(core))) {
-            _flag(V_COMPOSE, "new statement id is not supply + 1 or not held by the house (eth lane) or the core");
-        }
-        uint256 reimb = keeper.balance - p.callerBal;
+    /// @dev the reimbursement checks of a compose, returns what the caller was paid (a helper so the locals of
+    /// `_afterCompose` fit the stack)
+    function _composeReimbursement(Lane lane, CPre memory p) internal returns (uint256 reimb) {
+        reimb = keeper.balance - p.callerBal;
         // gas reimbursement: min(gas * basefee * reimburseBps, reimburseCapBps of the cost). the exit lane caps against
         // 80 average credits at the opening rate RATE_START. the gas used is what the handler saw, which is at least what the core
         // measured, plus its fixed overhead and, on the eth lane, the gas the core counts for the listing
@@ -1438,6 +1440,16 @@ abstract contract HandlerBase is Test {
         if (reimb > p.pot) _flag(V_COMPOSE, "gas reimbursement above the pot");
         _eth(p.bal, reimb, 0, "compose");
         if (core.ethPot() != p.pot - reimb) _flag(V_POT, "compose pot not reduced by the reimbursement");
+    }
+
+    function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        if (!p.valid) _flag(V_COMPOSE, "composed a page the ghost model considers invalid");
+        uint256 sid = STATEMENTS.supply();
+        if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != (lane == Lane.Eth ? address(house) : address(core))) {
+            _flag(V_COMPOSE, "new statement id is not supply + 1 or not held by the house (eth lane) or the core");
+        }
+        uint256 reimb = _composeReimbursement(lane, p);
         uint256 cost = lane == Lane.Eth ? p.sum + reimb : p.sum;
         (bool held, Lane l, uint256 coreCost,) = core.statementInfo(sid);
         if (!held || l != lane || coreCost != cost) _flag(V_MODEL, "statement cost basis differs from the ghost sum");
@@ -1489,7 +1501,7 @@ abstract contract HandlerBase is Test {
         uint256 reserve;
         uint256 seen;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(core) || logs[i].topics[0] != Core.StatementListed.selector) continue;
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.StatementListed.selector) continue;
             if (uint256(logs[i].topics[1]) != sid) continue;
             id = uint256(logs[i].topics[2]);
             reserve = abi.decode(logs[i].data, (uint256));
@@ -1521,18 +1533,50 @@ abstract contract HandlerBase is Test {
         return g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
     }
 
+    /// @dev the ghost bookkeeping and read back of a successful overprint (a helper so the locals fit the stack)
+    function _overprintGhost(uint256 base, uint256 top, uint256 day, uint256 rb, uint256 rt, uint256 saleFloorBps)
+        internal
+    {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        if (day != gOpDay) {
+            gOpDay = day;
+            gOpCount = 0;
+        }
+        gOpCount++;
+        _sg[base].cost += _sg[top].cost;
+        _sg[top].status = S_TOP;
+        _sg[top].base = base;
+        _sg[top].ratingSum = rb + rt;
+        // the eth lane base is listed again at the summed cost, its clock restarts. the exit lane is never listed
+        bool eth = _sg[base].lane == uint8(Lane.Eth);
+        if (eth) _ghostListed(base, _sg[base].cost, saleFloorBps, logs);
+        (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(base);
+        if (
+            !held || uint8(lane) != _sg[base].lane || cost != _sg[base].cost
+                || clockStart != (eth ? block.timestamp : 0)
+        ) {
+            _flag(V_MODEL, "overprint cost basis or clock differs from the ghost");
+        }
+        if (STATEMENTS.creditScoreOf(base) != rb + rt) _flag(V_OVERPRINT, "overprint rating is not the sum");
+        if (_ownerOf(top) != address(0)) _flag(V_OVERPRINT, "overprint top still exists");
+    }
+
     /// overprint as the controller asks. the cap, the pair rules and the rating sum are checked against ghosts.
     function overprint() external checked {
         uint8 a = A_OVERPRINT;
-        (bool ok, bytes memory out) = core.controller().staticcall(abi.encodeWithSignature("nextOverprint()"));
-        if (!ok || out.length < 96) return _skip(a);
-        (uint256 flag, uint256 base, uint256 top) = abi.decode(out, (uint256, uint256, uint256));
-        if (flag != 1 && block.number % 7 != 0) return _skip(a);
-        bool valid =
-            flag == 1 && base != top && _sg[base].lane == _sg[top].lane && _openOrHeld(base) && _openOrHeld(top);
+        uint256 base;
+        uint256 top;
+        bool valid;
+        {
+            (bool ok, bytes memory out) = core.controller().staticcall(abi.encodeWithSignature("nextOverprint()"));
+            if (!ok || out.length < 96) return _skip(a);
+            uint256 flag;
+            (flag, base, top) = abi.decode(out, (uint256, uint256, uint256));
+            if (flag != 1 && block.number % 7 != 0) return _skip(a);
+            valid = flag == 1 && base != top && _sg[base].lane == _sg[top].lane && _openOrHeld(base) && _openOrHeld(top);
+        }
         uint256 day = block.timestamp / 1 days;
-        uint256 countToday = day == gOpDay ? gOpCount : 0;
-        bool capped = countToday >= 8;
+        bool capped = (day == gOpDay ? gOpCount : 0) >= 8;
         uint256 rb = valid ? STATEMENTS.creditScoreOf(base) : 0;
         uint256 rt = valid ? STATEMENTS.creditScoreOf(top) : 0;
         uint256 pot0 = core.ethPot();
@@ -1544,34 +1588,13 @@ abstract contract HandlerBase is Test {
         vm.prank(keeper);
         try core.overprint() {
             _ok(a);
-            Vm.Log[] memory logs = vm.getRecordedLogs();
             if (!valid) _flag(V_OVERPRINT, "overprint of a pair the ghost model considers invalid");
             if (capped) _flag(V_OVERPRINT, "ninth overprint of the day succeeded");
-            if (day != gOpDay) {
-                gOpDay = day;
-                gOpCount = 0;
-            }
-            gOpCount++;
-            _sg[base].cost += _sg[top].cost;
-            _sg[top].status = S_TOP;
-            _sg[top].base = base;
-            _sg[top].ratingSum = rb + rt;
-            // the eth lane base is listed again at the summed cost, its clock restarts. the exit lane is never listed
-            bool eth = _sg[base].lane == uint8(Lane.Eth);
-            if (eth) _ghostListed(base, _sg[base].cost, rs.st.saleFloorBps, logs);
-            (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(base);
-            if (
-                !held || uint8(lane) != _sg[base].lane || cost != _sg[base].cost
-                    || clockStart != (eth ? block.timestamp : 0)
-            ) {
-                _flag(V_MODEL, "overprint cost basis or clock differs from the ghost");
-            }
-            if (STATEMENTS.creditScoreOf(base) != rb + rt) _flag(V_OVERPRINT, "overprint rating is not the sum");
-            if (_ownerOf(top) != address(0)) _flag(V_OVERPRINT, "overprint top still exists");
+            _overprintGhost(base, top, day, rb, rt, rs.st.saleFloorBps);
             _eth(b0, 0, 0, "overprint");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "overprint");
-            if (valid && !capped && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) _unexpected(a, why);
+            if (valid && !capped && !(bytes4(why) == ICore.BadPrice.selector && _mayNotPrice())) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
     }
@@ -1641,9 +1664,9 @@ abstract contract HandlerBase is Test {
         uint256 burned;
         uint256 collected;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.SalesCollected.selector) {
+            if (logs[i].emitter == address(core) && logs[i].topics[0] == ICore.SalesCollected.selector) {
                 (collected,) = abi.decode(logs[i].data, (uint256, uint256));
-            } else if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.Buyback.selector) {
+            } else if (logs[i].emitter == address(core) && logs[i].topics[0] == ICore.Buyback.selector) {
                 (spent, evTip) = abi.decode(logs[i].data, (uint256, uint256));
             } else if (logs[i].emitter == address(coin) && logs[i].topics[0] == TRANSFER) {
                 (uint256 amt) = abi.decode(logs[i].data, (uint256));
@@ -1674,6 +1697,18 @@ abstract contract HandlerBase is Test {
         if (core.ethPot() != p.pot + bounty - feeShare) _flag(V_POT, "buyback skim not booked to the pot");
         // a dust swap (the skim of it rounds to nothing) emits no skim event at all, and the fee share can now leave
         // one wei in the buyback pot, so a volume of zero is right when the whole skim rounds to zero
+        _buybackSkimChecks(p, volume, bounty, protocol, spent, bought);
+    }
+
+    /// @dev the skim and burn checks of a buyback (a helper so the locals of `_afterBuyback` fit the stack)
+    function _buybackSkimChecks(
+        BbPre memory p,
+        uint256 volume,
+        uint256 bounty,
+        uint256 protocol,
+        uint256 spent,
+        uint256 bought
+    ) internal {
         bool dust = volume == 0 && spent * p.bps / 100_000 == 0;
         if (volume != spent && !dust) _flag(V_BUYBACK, "buyback skim volume is not the eth spent");
         (uint256 eb, uint256 ep) = _expectSkim(volume, true, p.bps);
@@ -1777,7 +1812,7 @@ abstract contract HandlerBase is Test {
             if (core.controller() != target) _flag(V_MODEL, "controller not set at once");
             _ok(a);
         } catch (bytes memory why) {
-            if (!locked || bytes4(why) != Core.Locked.selector) _unexpected(a, why);
+            if (!locked || bytes4(why) != ICore.Locked.selector) _unexpected(a, why);
             else _ok(a);
         }
     }
@@ -1810,6 +1845,29 @@ abstract contract HandlerBase is Test {
         uint256[] score;
     }
 
+    /// @dev the ids `sellForExit` offers: walks the actor inventory from a picked offset while the exit prices fit the pot
+    function _pickExitIds(address who, uint256 len, uint256 want, uint256 pick, uint256 unit)
+        internal
+        view
+        returns (uint256[] memory ids, uint256 n)
+    {
+        ids = new uint256[](want);
+        uint256 pot = core.xPot();
+        uint256 r = core.xRate();
+        Settings memory st = core.settings();
+        for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
+            uint256 id = inventory[who][(pick % len + k) % len];
+            uint256 price = _score(id) * r * unit / 10_000;
+            // a credit the exit bid prices at zero (an exit rate of zero, which the owner may set) is refused
+            if (price != 0 && price <= pot) {
+                pot -= price;
+                r = r > st.xRateDropPerCredit ? r - st.xRateDropPerCredit : 0;
+                if (r < st.xRateFloor) r = st.xRateFloor;
+                ids[n++] = id;
+            }
+        }
+    }
+
     /// sells credits into the exit token bid. ids are picked so the prices fit the pot.
     function sellForExit(uint256 aSeed, uint256 nSeed, uint256 pick) external checked {
         uint8 a = A_SELL_FOR_EXIT;
@@ -1820,24 +1878,7 @@ abstract contract HandlerBase is Test {
         uint256 unit = _unitOf();
         if (unit == 0) return _skip(a);
         uint256 want = bound(nSeed, 1, 10);
-        uint256[] memory ids = new uint256[](want);
-        uint256 n;
-        {
-            uint256 pot = core.xPot();
-            uint256 r = core.xRate();
-            Settings memory st = core.settings();
-            for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
-                uint256 id = inventory[who][(pick % len + k) % len];
-                uint256 price = _score(id) * r * unit / 10_000;
-                // a credit the exit bid prices at zero (an exit rate of zero, which the owner may set) is refused
-                if (price != 0 && price <= pot) {
-                    pot -= price;
-                    r = r > st.xRateDropPerCredit ? r - st.xRateDropPerCredit : 0;
-                    if (r < st.xRateFloor) r = st.xRateFloor;
-                    ids[n++] = id;
-                }
-            }
-        }
+        (uint256[] memory ids, uint256 n) = _pickExitIds(who, len, want, pick, unit);
         if (n == 0) return _skip(a);
         assembly {
             mstore(ids, n)
@@ -1864,29 +1905,34 @@ abstract contract HandlerBase is Test {
         vm.prank(who);
         try core.sellForExitToken(ids) {
             _ok(a);
-            Vm.Log[] memory logs = vm.getRecordedLogs();
-            uint256 total;
-            for (uint256 i; i < logs.length; ++i) {
-                if (logs[i].emitter != address(core) || logs[i].topics[0] != Core.CreditBought.selector) continue;
-                (uint256 lane, uint256 cost) = abi.decode(logs[i].data, (uint256, uint256));
-                uint256 id = uint256(logs[i].topics[1]);
-                if (lane != 1) _flag(V_MODEL, "sellForExit bought into the wrong lane");
-                total += cost;
-                _addCredit(id, 1, cost);
-                _removeFrom(inventory[who], id);
-            }
-            uint256 paid = _xBal(who) - p.actorX;
-            if (paid != total) _flag(V_MODEL, "sellForExit paid differs from the sum of its events");
-            // no credit is bought above score * xRate * unit read before, the rate only falls within the call
-            if (paid > bound_) _flag(V_ABOVE_CAP, "sellForExit paid above score * xRate * unit read before");
-            _x(p.xbal, paid, 0, "sellForExit");
-            if (core.xPot() != p.xpot - paid) _flag(V_POT, "sellForExit exit pot not reduced by the price");
-            _eth(b0, 0, 0, "sellForExit");
+            _afterSellExit(who, p, bound_, b0);
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "sellForExit");
             _unexpected(a, why);
         }
         _rsCheck(rs, 0);
+    }
+
+    /// @dev the checks after a successful `sellForExit` (a helper so the locals fit the stack)
+    function _afterSellExit(address who, XPre memory p, uint256 bound_, uint256 b0) internal {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 total;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.CreditBought.selector) continue;
+            (uint256 lane, uint256 cost) = abi.decode(logs[i].data, (uint256, uint256));
+            uint256 id = uint256(logs[i].topics[1]);
+            if (lane != 1) _flag(V_MODEL, "sellForExit bought into the wrong lane");
+            total += cost;
+            _addCredit(id, 1, cost);
+            _removeFrom(inventory[who], id);
+        }
+        uint256 paid = _xBal(who) - p.actorX;
+        if (paid != total) _flag(V_MODEL, "sellForExit paid differs from the sum of its events");
+        // no credit is bought above score * xRate * unit read before, the rate only falls within the call
+        if (paid > bound_) _flag(V_ABOVE_CAP, "sellForExit paid above score * xRate * unit read before");
+        _x(p.xbal, paid, 0, "sellForExit");
+        if (core.xPot() != p.xpot - paid) _flag(V_POT, "sellForExit exit pot not reduced by the price");
+        _eth(b0, 0, 0, "sellForExit");
     }
 
     /// the unit the core stored when the module was last set. the module can change what it reports, the core reads
@@ -1937,9 +1983,9 @@ abstract contract HandlerBase is Test {
         // an eth lane statement exits when it was listed without a bid for exitAfter. a bid makes the cancel revert,
         // and a sold statement the core has not synced is no longer on the house
         p.open = g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
-        if (!p.ripe) p.refusal = Core.TooEarly.selector;
-        else if (g.status == S_SOLD) p.refusal = Core.NotListed.selector;
-        else if (g.status == S_LISTED && g.bid != 0) p.refusal = Core.HasBid.selector;
+        if (!p.ripe) p.refusal = ICore.TooEarly.selector;
+        else if (g.status == S_SOLD) p.refusal = ICore.NotListed.selector;
+        else if (g.status == S_LISTED && g.bid != 0) p.refusal = ICore.HasBid.selector;
         // an unripe or unopen eth lane statement is only tried now and then, to see the refusal
         if ((!p.ripe || !p.open) && aSeed % 6 != 0) return _skip(a);
         p.xbal = _xBal(address(core));
@@ -2138,7 +2184,7 @@ abstract contract HandlerBase is Test {
         uint256 slice;
         uint256 coinIn;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.ExitBuyback.selector) {
+            if (logs[i].emitter == address(core) && logs[i].topics[0] == ICore.ExitBuyback.selector) {
                 (slice, coinIn) = abi.decode(logs[i].data, (uint256, uint256));
             }
         }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings, Mainnet, IStatements} from "../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 
@@ -86,26 +86,26 @@ contract ReviewFlowHouseTest is Fixture {
     /// `heldStatements`). now the holder is not the core, so the statement clears as sold, like any other sale
     function test_FIXED_FH1_soldStatementParkedInTheHouseClearsAsSold() public {
         (uint256 sid,) = _sellStatement(alice);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Sold));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Sold));
         uint256 auctionId = _live(sid).auctionId;
         vm.prank(alice);
         STATEMENTS.transferFrom(alice, address(house), sid);
         assertEq(STATEMENTS.ownerOf(sid), address(house));
 
         vm.expectEmit(address(core));
-        emit Core.StatementSold(sid, auctionId, address(house));
+        emit ICore.StatementSold(sid, auctionId, address(house));
         core.syncStatement(sid);
         (bool held,,,) = core.statementInfo(sid);
         assertFalse(held, "the record is cleared");
         assertEq(core.heldStatements().length, 0, "no phantom entry");
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.None));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.None));
         // the record is gone, so an exit or a reprice say so, and a second sync has nothing to do
         _enterPhase2();
-        vm.expectRevert(Core.NotHeld.selector);
+        vm.expectRevert(ICore.NotHeld.selector);
         core.exitStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sid);
-        vm.expectRevert(Core.NotListed.selector);
+        vm.expectRevert(ICore.NotListed.selector);
         core.syncStatement(sid);
     }
 
@@ -124,8 +124,8 @@ contract ReviewFlowHouseTest is Fixture {
         assertEq(_live(c.sid).reserve, oldReserve, "the listing did not move");
 
         _bid(alice, c.sid, oldReserve);
-        assertEq(uint256(_live(c.sid).status), uint256(Core.StatementStatus.Bid));
-        vm.expectRevert(Core.HasBid.selector);
+        assertEq(uint256(_live(c.sid).status), uint256(ICore.StatementStatus.Bid));
+        vm.expectRevert(ICore.HasBid.selector);
         core.repriceStatement(c.sid);
         _endAuction(c.sid);
         assertEq(STATEMENTS.ownerOf(c.sid), alice);
@@ -141,11 +141,11 @@ contract ReviewFlowHouseTest is Fixture {
         (,, uint256 cost,) = core.statementInfo(sid);
         vm.prank(alice);
         STATEMENTS.transferFrom(alice, address(core), sid);
-        assertEq(uint256(_live(sid).status), uint256(Core.StatementStatus.Returned));
+        assertEq(uint256(_live(sid).status), uint256(ICore.StatementStatus.Returned));
         _warp(1 days);
         core.syncStatement(sid);
         Live memory l = _live(sid);
-        assertEq(uint256(l.status), uint256(Core.StatementStatus.Listed));
+        assertEq(uint256(l.status), uint256(ICore.StatementStatus.Listed));
         assertEq(l.reserve, _reserveFor(cost), "old cost, current reserve");
         uint256 potBefore = core.ethPot() + core.ethToBuyback();
         assertEq(_collectSales(), price);
@@ -179,10 +179,10 @@ contract ReviewFlowHouseTest is Fixture {
         address[2] memory t = [address(house), Mainnet.AUCTION_FACTORY];
         for (uint256 i; i < 2; ++i) {
             vm.prank(owner);
-            vm.expectRevert(Core.ForbiddenTarget.selector);
+            vm.expectRevert(ICore.ForbiddenTarget.selector);
             core.addTarget(t[i]);
         }
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(
             0, abi.encodeCall(IHouseExtra.recoverStuckERC721, (address(STATEMENTS), sid, bob)), 1, address(house)
         );
@@ -200,7 +200,7 @@ contract ReviewFlowHouseTest is Fixture {
         (,,, uint64 listedAt) = core.statementInfo(c.sid);
         assertEq(listedAt, c.at, "reprice does not move the clock");
         assertEq(_auctionOf(c.sid).duration, 24 hours, "the old duration stays");
-        vm.expectRevert(Core.AuctionLive.selector);
+        vm.expectRevert(ICore.AuctionLive.selector);
         core.syncStatement(c.sid);
     }
 

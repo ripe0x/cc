@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Vm} from "forge-std/Test.sol";
-import {Core} from "../../src/Core.sol";
+import {ICore} from "../../src/interfaces/ICore.sol";
 import {Lane, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {HandlerBase} from "./HandlerBase.sol";
@@ -241,7 +241,7 @@ abstract contract HandlerHouse is HandlerBase {
             Vm.Log[] memory logs = vm.getRecordedLogs();
             uint256 events;
             for (uint256 i; i < logs.length; ++i) {
-                if (logs[i].emitter == address(core) && logs[i].topics[0] == Core.SalesCollected.selector) {
+                if (logs[i].emitter == address(core) && logs[i].topics[0] == ICore.SalesCollected.selector) {
                     (uint256 amt, uint256 tbb) = abi.decode(logs[i].data, (uint256, uint256));
                     if (amt != owed || tbb != toBuyback) {
                         _flag(V_HOUSE, "SalesCollected differs from the owed and the split");
@@ -279,7 +279,7 @@ abstract contract HandlerHouse is HandlerBase {
         if (!found) return _skip(a);
         SG storage g = _sg[sid];
         bool should = g.status == S_SOLD && !g.synced;
-        bytes4 want = g.status == S_LISTED ? Core.AuctionLive.selector : Core.NotListed.selector;
+        bytes4 want = g.status == S_LISTED ? ICore.AuctionLive.selector : ICore.NotListed.selector;
         uint256 b0 = address(core).balance;
         uint256 pot0 = core.ethPot();
         uint256 rate0 = core.ethRate();
@@ -295,7 +295,7 @@ abstract contract HandlerHouse is HandlerBase {
             _eth(b0, 0, 0, "syncStatement");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "syncStatement");
-            if ((should || bytes4(why) != want) && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) {
+            if ((should || bytes4(why) != want) && !(bytes4(why) == ICore.BadPrice.selector && _mayNotPrice())) {
                 _unexpected(a, why);
             }
         }
@@ -306,7 +306,7 @@ abstract contract HandlerHouse is HandlerBase {
         SG storage g = _sg[sid];
         uint256 seen;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(core) || logs[i].topics[0] != Core.StatementSold.selector) continue;
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.StatementSold.selector) continue;
             seen++;
             if (uint256(logs[i].topics[1]) != sid || uint256(logs[i].topics[2]) != g.auctionId) {
                 _flag(V_MODEL, "StatementSold names another statement or auction");
@@ -331,7 +331,7 @@ abstract contract HandlerHouse is HandlerBase {
         SG storage g = _sg[sid];
         Settings memory st = core.settings();
         bool should = g.status == S_LISTED && g.bid == 0;
-        bytes4 want = g.status == S_LISTED ? Core.HasBid.selector : Core.NotListed.selector;
+        bytes4 want = g.status == S_LISTED ? ICore.HasBid.selector : ICore.NotListed.selector;
         uint256 b0 = address(core).balance;
         uint256 pot0 = core.ethPot();
         uint256 rate0 = core.ethRate();
@@ -352,7 +352,7 @@ abstract contract HandlerHouse is HandlerBase {
             _eth(b0, 0, 0, "repriceStatement");
         } catch (bytes memory why) {
             _failed(b0, pot0, rate0, "repriceStatement");
-            if ((should || bytes4(why) != want) && !(bytes4(why) == Core.BadPrice.selector && _mayNotPrice())) {
+            if ((should || bytes4(why) != want) && !(bytes4(why) == ICore.BadPrice.selector && _mayNotPrice())) {
                 _unexpected(a, why);
             }
         }

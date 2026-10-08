@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
@@ -442,8 +442,8 @@ contract SeaportTest is SeaportBase {
         uint256 price = core.ceilingOf(asked).min(core.ceilingOf(listed)) / 2;
         OrderComponents memory c = _open(listed, price, 0);
         // the call delivers a credit, just not the one the caller asked for.
-        _expectFail(asked, price, _basicData(c), Core.NoCredit.selector);
-        _expectFail(asked, price, _orderData(c), Core.NoCredit.selector);
+        _expectFail(asked, price, _basicData(c), ICore.NoCredit.selector);
+        _expectFail(asked, price, _orderData(c), ICore.NoCredit.selector);
         assertEq(CREDITS.ownerOf(listed), maker);
     }
 
@@ -452,7 +452,7 @@ contract SeaportTest is SeaportBase {
         uint256 price = core.ceilingOf(id) / 2;
         OrderComponents memory c = _open(id, price, 0);
         // the order fills, the credit goes to the keeper, the core gets nothing and the whole buy unwinds.
-        _expectFail(id, price, _advancedData(c, "", keeper), Core.NoCredit.selector);
+        _expectFail(id, price, _advancedData(c, "", keeper), ICore.NoCredit.selector);
     }
 
     function test_fail_cancelledOrder() public {
@@ -471,8 +471,8 @@ contract SeaportTest is SeaportBase {
         vm.prank(maker);
         assertTrue(SEAPORT.cancel(orders));
 
-        _expectFail(id, price, data, Core.CallFailed.selector);
-        _expectFail(id, price, _orderData(c), Core.CallFailed.selector);
+        _expectFail(id, price, data, ICore.CallFailed.selector);
+        _expectFail(id, price, _orderData(c), ICore.CallFailed.selector);
     }
 
     function test_fail_badSignature() public {
@@ -480,11 +480,11 @@ contract SeaportTest is SeaportBase {
         uint256 price = core.ceilingOf(id) / 2;
         OrderComponents memory c = _open(id, price, 0);
         (, uint256 otherKey) = makeAddrAndKey("creditsengine.seaport.impostor");
-        _expectFail(id, price, _basicData(c, _sign(c, otherKey)), Core.CallFailed.selector);
+        _expectFail(id, price, _basicData(c, _sign(c, otherKey)), ICore.CallFailed.selector);
 
         // a signature made over a different order does not carry over either.
         OrderComponents memory other = _open(id, price + 1, 0);
-        _expectFail(id, price, _basicData(c, _sign(other, makerKey)), Core.CallFailed.selector);
+        _expectFail(id, price, _basicData(c, _sign(other, makerKey)), ICore.CallFailed.selector);
 
         // and the genuine one still works afterwards.
         _buy(id, price, _basicData(c), price);
@@ -495,8 +495,8 @@ contract SeaportTest is SeaportBase {
         uint256 ceiling = core.ceilingOf(id);
         OrderComponents memory c = _open(id, ceiling, 0);
         // the order itself is fine at exactly the ceiling.
-        _expectFail(id, ceiling + 1, _basicData(c), Core.AboveCeiling.selector);
-        _expectFail(id, ceiling + 1, _orderData(c), Core.AboveCeiling.selector);
+        _expectFail(id, ceiling + 1, _basicData(c), ICore.AboveCeiling.selector);
+        _expectFail(id, ceiling + 1, _orderData(c), ICore.AboveCeiling.selector);
         uint256 tip = _buy(id, ceiling, _basicData(c), ceiling);
         assertEq(tip, 0, "no savings, no tip");
     }
@@ -507,10 +507,10 @@ contract SeaportTest is SeaportBase {
         uint256 fee = total / 100;
         OrderComponents memory c = _open(id, total - fee, fee);
         // seaport needs the full sum of every payout in msg.value. one wei short reverts the whole fill.
-        _expectFail(id, total - 1, _basicData(c), Core.CallFailed.selector);
-        _expectFail(id, total - 1, _orderData(c), Core.CallFailed.selector);
-        _expectFail(id, total - 1, _advancedData(c, "", address(core)), Core.CallFailed.selector);
-        _expectFail(id, 0, _basicData(c), Core.CallFailed.selector);
+        _expectFail(id, total - 1, _basicData(c), ICore.CallFailed.selector);
+        _expectFail(id, total - 1, _orderData(c), ICore.CallFailed.selector);
+        _expectFail(id, total - 1, _advancedData(c, "", address(core)), ICore.CallFailed.selector);
+        _expectFail(id, 0, _basicData(c), ICore.CallFailed.selector);
         // the full sum goes through.
         _buy(id, total, _basicData(c), total);
     }
@@ -525,8 +525,8 @@ contract SeaportTest is SeaportBase {
         uint256 snap = vm.snapshotState();
         _buy(id, value * 2, _basicData(c), value * 2);
         vm.revertToState(snap);
-        _expectFail(id, value, _basicData(c), Core.CallFailed.selector);
-        _expectFail(id, value, _orderData(c), Core.CallFailed.selector);
+        _expectFail(id, value, _basicData(c), ICore.CallFailed.selector);
+        _expectFail(id, value, _orderData(c), ICore.CallFailed.selector);
     }
 
     function test_fail_targetGuards() public {
@@ -534,10 +534,10 @@ contract SeaportTest is SeaportBase {
         uint256 price = core.ceilingOf(id) / 2;
         bytes memory data = _basicData(_open(id, price, 0));
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(price, data, id, makeAddr("creditsengine.seaport.notatarget"));
         vm.prank(keeper);
-        vm.expectRevert(Core.TargetNotAllowed.selector);
+        vm.expectRevert(ICore.TargetNotAllowed.selector);
         core.buyListing(price, data, id, address(CREDITS));
     }
 
@@ -554,9 +554,9 @@ contract SeaportTest is SeaportBase {
 
         // a restricted order needs its zone to approve the fill, and the core is not the zone. the door only
         // forwards what the caller supplies, it adds nothing, so the whole buy reverts.
-        _expectFail(id, price, _basicData(c), Core.CallFailed.selector);
-        _expectFail(id, price, _orderData(c), Core.CallFailed.selector);
-        _expectFail(id, price, _advancedData(c, hex"c0ffee", address(core)), Core.CallFailed.selector);
+        _expectFail(id, price, _basicData(c), ICore.CallFailed.selector);
+        _expectFail(id, price, _orderData(c), ICore.CallFailed.selector);
+        _expectFail(id, price, _advancedData(c, hex"c0ffee", address(core)), ICore.CallFailed.selector);
 
         // control: the order is otherwise genuine. when the zone is the caller itself seaport skips the zone
         // callbacks and the same fill goes through, so the revert above comes from the zone and nothing else.
@@ -571,9 +571,9 @@ contract SeaportTest is SeaportBase {
         OrderComponents memory c = _components(id, price, 0, address(zone), OrderType.FULL_RESTRICTED);
 
         // no extra data, and the basic path has no way to carry any: the zone says no.
-        _expectFail(id, price, _basicData(c), Core.CallFailed.selector);
-        _expectFail(id, price, _advancedData(c, "", address(core)), Core.CallFailed.selector);
-        _expectFail(id, price, _advancedData(c, hex"deadbeef", address(core)), Core.CallFailed.selector);
+        _expectFail(id, price, _basicData(c), ICore.CallFailed.selector);
+        _expectFail(id, price, _advancedData(c, "", address(core)), ICore.CallFailed.selector);
+        _expectFail(id, price, _advancedData(c, hex"deadbeef", address(core)), ICore.CallFailed.selector);
 
         // the door forwards whatever bytes the caller supplies, so the right extra data makes the same order fill.
         _buy(id, price, _advancedData(c, hex"c0ffee", address(core)), price);
@@ -697,7 +697,7 @@ contract SeaportTest is SeaportBase {
             ceilings[k] = core.ceilingOf(id);
             assertEq(ceilings[k], (bps[k] * 4_330_000 + (10_000 - bps[k]) * core.scoreOf(id)) * rate / 1e8);
             bytes memory data = _basicData(_open(id, ceilings[k], 0));
-            _expectFail(id, ceilings[k] + 1, data, Core.AboveCeiling.selector);
+            _expectFail(id, ceilings[k] + 1, data, ICore.AboveCeiling.selector);
         }
         // the middle setting prices between the two ends, and the door fills at exactly its ceiling
         assertGe(ceilings[1], ceilings[0].min(ceilings[2]));
@@ -741,7 +741,7 @@ contract SeaportColdTest is SeaportBase {
         uint256 price = core.ceilingOf(id) / 2;
         OrderComponents memory c = _open(id, price, 0);
         assertEq(core.ethPot(), 0);
-        _expectFail(id, price, _basicData(c), Core.PotTooSmall.selector);
+        _expectFail(id, price, _basicData(c), ICore.PotTooSmall.selector);
     }
 
     function test_fail_hourlyCap() public {
@@ -753,7 +753,7 @@ contract SeaportColdTest is SeaportBase {
         _buyCoin(funder, price * 3 * 10_000 / 950);
         assertGt(core.ethPot(), price * 5 / 2);
         assertLt(core.ethPot(), price * 7 / 2);
-        _expectFail(id, price, data, Core.HourlyCap.selector);
+        _expectFail(id, price, data, ICore.HourlyCap.selector);
     }
 }
 

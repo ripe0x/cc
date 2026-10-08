@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
-import {Core} from "../src/Core.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Settings} from "../src/interfaces/Interfaces.sol";
 
 /// @notice the economic dials of the eth bid that act on fills: the rate drop and the hourly spend cap. their bounds
@@ -108,7 +108,7 @@ contract EconDialsTest is Fixture {
                 ++sold;
             } catch (bytes memory why) {
                 bytes4 sel = bytes4(why);
-                assertTrue(sel == Core.HourlyCap.selector || sel == Core.PotTooSmall.selector, "only the caps refuse");
+                assertTrue(sel == ICore.HourlyCap.selector || sel == ICore.PotTooSmall.selector, "only the caps refuse");
                 break;
             }
         }
