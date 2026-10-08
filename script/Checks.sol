@@ -21,7 +21,10 @@ interface ISupply {
 /// @notice the read only checks run before a launch (`preflight`) and after it (`postflight`). they only read state,
 /// so they are safe to run against mainnet at any time
 abstract contract LaunchChecks is PostflightChecks {
-    /// @dev gas units of the six deploy transactions (the library, router, controller, core, launch, router setup) plus margin
+    /// @dev gas units of the deploy transactions (the library, controller, router, core, launch, router setup) plus margin
+    /// @dev the per transaction gas cap of the target chain (EIP 7825, 2^24). the launch is simulated with what is left of
+    /// it, so a launch that does not fit fails the simulation row, and a collision cannot burn more than that
+    uint256 internal constant TX_GAS_CAP = 16_777_216;
     uint256 internal constant DEPLOY_GAS_ESTIMATE = 13_500_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
     uint256 internal constant CORE_SUPPLY = 1_000_000_000e18;
@@ -33,6 +36,8 @@ abstract contract LaunchChecks is PostflightChecks {
     uint24 internal constant PIN_BASELINE_SKIM = 6_900;
     uint16 internal constant PIN_BOUNTY_BPS = 9000;
     uint16 internal constant PIN_PROTOCOL_BPS = 2000;
+    /// @dev the most the launch pays the factory. a fee above it is a factory state change the signed config never saw
+    uint256 internal constant PIN_DEPLOY_FEE_MAX = 0.1 ether;
     /// @dev the FeeRouter bounds (src/FeeRouter.sol), restated here so a bad config stops at preflight
     uint32 internal constant ROUTER_MAX_PAYEE_PPM = 200_000;
     uint32 internal constant ROUTER_MAX_TIP_PPM = 20_000;
@@ -371,6 +376,11 @@ abstract contract LaunchChecks is PostflightChecks {
             ok && deployer.balance >= need,
             string.concat("balance ", vm.toString(deployer.balance), " need ", vm.toString(need))
         );
+        _check(
+            "rule: the factory deploy fee is at most 0.1 ether",
+            ok && fee <= PIN_DEPLOY_FEE_MAX,
+            string.concat("fee ", vm.toString(fee), " (the v2 launch fee is 0.069 ether)")
+        );
         uint256 minLp;
         (ok, minLp) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.minLpFee, ()));
         _check(
@@ -461,7 +471,7 @@ abstract contract LaunchChecks is PostflightChecks {
     {
         bytes memory data = abi.encodeCall(IArtCoinsFactoryV2.deployTokenAsOwner, (cfg, c.protocolBps));
         uint256 g = gasleft();
-        (ok, out) = c.stack.factory.call{value: fee}(data);
+        (ok, out) = c.stack.factory.call{value: fee, gas: TX_GAS_CAP - 21_000}(data);
         gas = g - gasleft();
     }
 

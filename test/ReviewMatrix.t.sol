@@ -709,8 +709,8 @@ contract ReviewMatrixStateTest is ReviewHarness {
             (l, w) = ("factory referral payout is an EOA", Class.Pre);
             FACTORY.setReferralPayout(payable(creator));
         } else if (i == 23) {
-            (l, w) = ("hook fee escrow moved to another contract", Class.Pre);
-            IArtCoinsHookV2(v2.hook).setFeeEscrow(Mainnet.PERMIT2);
+            (l, w) = ("the fee escrow has no code", Class.Pre);
+            vm.etch(v2.escrow, "");
         } else if (i == 24) {
             (l, w) = ("hook launcher flag for the factory removed", Class.Pre);
             IArtCoinsHookV2(v2.hook).setLauncher(v2.factory, false);
@@ -733,7 +733,7 @@ contract ReviewMatrixStateTest is ReviewHarness {
             (l, w) = ("the Credits contract has no code", Class.Pre);
             vm.etch(Mainnet.CREDITS, "");
         } else {
-            (l, w) = ("deploy fee raised to 0.5 eth (a factory value, not config; the balance check covers it)", Class.Pre);
+            (l, w) = ("deploy fee raised to 0.5 eth (a factory value outside the signed config; the pinned fee rule)", Class.Pre);
             FACTORY.setDeployFee(0.5 ether);
         }
     }

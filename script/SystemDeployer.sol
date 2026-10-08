@@ -38,8 +38,6 @@ abstract contract SystemDeployer is LaunchChecks {
     /// @notice a transaction of the deploy would not fit under the per transaction gas cap
     error TxOverGasCap(uint256 step, uint256 gas);
 
-    /// @dev the per transaction gas cap of the target chain (EIP 7825, 2^24)
-    uint256 internal constant TX_GAS_CAP = 16_777_216;
     /// @dev what a transaction costs on top of the execution gas measured inside the call: the base 21_000 and the
     /// calldata of the largest creation (about 30 kb at 16 gas a byte, a bound)
     uint256 internal constant TX_OVERHEAD = 520_000;

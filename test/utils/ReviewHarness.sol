@@ -140,7 +140,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
     /// stops everything), then preflight, then the deploy. logs one matrix row. `signed` is the hash of the base config
     function _run(string memory label, LaunchConfig memory c, bytes32 signed, address who) internal returns (Class k) {
         uint256 snap = vm.snapshotState();
-        vm.stopPrank();
+        this.stopPrankExt();
         string memory detail;
         bool hashSame = configHash(c) == signed;
         detail = this.runPre(c, who);
@@ -155,7 +155,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
             }
         }
         console.log(string.concat("MUT ", label, " || ", _className(k), " || ", detail));
-        vm.stopPrank();
+        this.stopPrankExt();
         vm.revertToState(snap);
     }
 
@@ -231,6 +231,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         if (g == 4) {
             uint256 snap = vm.snapshotState();
             (label, want) = _state(i);
+            console.log(string.concat("STATE ", vm.toString(i), " ", label));
             k = _run(label, base, signed, deployer);
             vm.revertToState(snap);
             return (k, label, want);
