@@ -144,54 +144,16 @@ contract ConfigTest is Fixture {
         c.mevModule = lc.mevModule;
     }
 
-    function _enabledDeployer() internal returns (address d2) {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        d2 = _user("second deployer");
-        vm.prank(owner);
-        FACTORY.setAdmin(d2, true);
+    /// @dev the owner is the factory owner and the deployer. it holds the fee and the gas
+    function _funded() internal returns (address d2) {
+        d2 = owner;
         vm.deal(d2, 5 ether);
-    */
     }
 
     function _failedNames() internal view returns (string memory list) {
         (list,) = _failed();
-    }
-
-    function test_preflightPasses() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        address d2 = _enabledDeployer();
-        preflight(lc, d2);
-        assertEq(_failedNames(), "");
-        _print("preflight");
-    */
-    }
-
-    /// the owner is the factory owner here: owner or creator equal to the factory owner is a warning, never a failure
-    function test_warnOwnerOrCreatorIsTheFactoryOwner() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        address d2 = _enabledDeployer();
-        string memory w = "warn: owner or creator is the factory owner";
-        LaunchConfig memory c = lc;
-        preflight(c, d2);
-        assertTrue(_warnClean(w), "clean when neither is the factory owner");
-        c.owner = c.factoryOwner;
-        preflight(c, d2);
-        assertFalse(_warnClean(w), "the owner warning fires");
-        assertEq(_failedNames(), "", "owner = factory owner passes");
-        c = lc;
-        c.creator = c.factoryOwner;
-        preflight(c, d2);
-        assertFalse(_warnClean(w), "the creator warning fires");
-        assertEq(_failedNames(), "", "creator = factory owner passes");
-        c.owner = c.stack.hook;
-        preflight(c, d2);
-        assertEq(
-            _failedNames(), "rule: owner and creator are not dead or stack addresses", "a stack address still fails"
-        );
-    */
+        // a failure prints the whole table, so the detail of every row is in the log
+        if (bytes(list).length != 0) _print("rows");
     }
 
     function _warnClean(string memory name) internal view returns (bool) {
@@ -201,49 +163,174 @@ contract ConfigTest is Fixture {
         revert("row missing");
     }
 
+    function _rowDetail(string memory name) internal view returns (string memory) {
+        for (uint256 i; i < rows.length; ++i) {
+            if (keccak256(bytes(rows[i].name)) == keccak256(bytes(name))) return rows[i].detail;
+        }
+        revert("row missing");
+    }
+
+    function test_preflightPasses() public {
+        address d2 = _funded();
+        preflight(lc, d2);
+        assertEq(_failedNames(), "");
+        _print("preflight");
+        // every launch input has a row: the count is part of the report
+        assertGe(rows.length, 90, "preflight rows");
+    }
+
+    function test_preflightSimulatesTheLaunchAndLeavesNoTrace() public {
+        address d2 = _funded();
+        uint256 nonce = vm.getNonce(d2);
+        uint256 bal = d2.balance;
+        preflight(lc, d2);
+        assertEq(vm.getNonce(d2), nonce, "the simulation is reverted");
+        assertEq(d2.balance, bal);
+        assertTrue(bytes(_rowDetail("factory: deployTokenAsOwner accepts the config (simulated)")).length > 10);
+    }
+
+    /// owner and creator may be one address, a warning and never a failure. a stack address as owner or creator fails
+    function test_warnOwnerIsTheCreator() public {
+        address d2 = _funded();
+        string memory w = "warn: owner differs from creator";
+        preflight(lc, d2);
+        assertTrue(_warnClean(w), "clean when they differ");
+        LaunchConfig memory c = lc;
+        c.creator = c.owner;
+        preflight(c, d2);
+        assertFalse(_warnClean(w), "the warning fires");
+        assertEq(_failedNames(), "", "owner = creator passes");
+        c = lc;
+        c.creator = c.stack.hook;
+        preflight(c, d2);
+        assertEq(_failedNames(), "rule: owner, creator and payees are not dead or stack addresses, factory: deployTokenAsOwner accepts the config (simulated)");
+        c = lc;
+        c.creatorPayee = c.stack.escrow;
+        preflight(c, d2);
+        assertEq(_failedNames(), "rule: owner, creator and payees are not dead or stack addresses");
+    }
+
     function test_preflightFailures() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
+        // the default config: unset placeholders, a deployer that is not the factory owner
         address d2 = _user("second deployer");
         vm.deal(d2, 5 ether);
         LaunchConfig memory c = defaultConfig();
-        // a fresh deployer, the factory is deprecated and nobody enabled it, and the placeholders are unset
         preflight(c, d2);
-        assertEq(
-            _failedNames(),
-            "placeholders filled, factory: deployer may launch",
-            "unset placeholders and an unenabled deployer"
-        );
+        (string memory list, uint256 n) = _failed();
+        assertGe(n, 8, list);
         // a poor deployer, an out of bounds rate and a wrong hook
         c = lc;
         c.rateStart = 5;
         c.stack.hook = address(0xBEEF);
         preflight(c, _user("poor deployer"));
-        (string memory list, uint256 n) = _failed();
-        assertGe(n, 5, list);
-        // the predicted addresses are already taken: rewind the fixture deployer to the nonce it launched at. the core of
-        // the fixture owns a house, so the two house rows fail with the three address rows
-        vm.resetNonce(deployer);
-        preflight(lc, deployer);
+        (list, n) = _failed();
+        assertGe(n, 8, list);
+        // the predicted addresses are already taken: rewind the fixture owner to the nonce it deployed at. the core of the
+        // fixture owns a house, so the two house rows fail with the three address rows. the coin is taken by the same
+        // salt of the same config, and the launch cannot be simulated
+        (bool found, uint256 coreNonce) = _coreNonce(address(core), owner);
+        assertTrue(found);
+        vm.resetNonce(owner);
+        vm.setNonce(owner, uint64(coreNonce - 2));
+        vm.deal(owner, 5 ether);
+        preflight(lc, owner);
         assertEq(
             _failedNames(),
-            "predicted controller is empty, predicted core is empty, auction factory: no house yet for the predicted core, auction factory: the house address of the core is free, predicted coin is empty"
+            "factory: deployTokenAsOwner accepts the config (simulated), predicted router is empty, predicted controller is empty, predicted core is empty, predicted coin is empty, auction factory: no house yet for the predicted core, auction factory: the house address of the core is free"
         );
-    */
+    }
+
+    // ------------------------------------------------------------------ the owner commands the launch needs on v2
+
+    /// the factory floor of the lp fee: until the owner sets it to 0 the preflight fails, with the command named
+    function test_preflightNeedsMinLpFeeZero() public {
+        address d2 = _funded();
+        vm.prank(owner);
+        FACTORY.setMinLpFee(3_000);
+        preflight(lc, d2);
+        assertEq(
+            _failedNames(),
+            "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)"
+        );
+        assertTrue(bytes(_rowDetail("factory: min lp fee is at most the config lp fee")).length > 0);
+        vm.prank(owner);
+        FACTORY.setMinLpFee(0);
+        preflight(lc, d2);
+        assertEq(_failedNames(), "");
+    }
+
+    function test_preflightProtocolSkimFloorAgainstTheBounty() public {
+        address d2 = _funded();
+        vm.prank(owner);
+        FACTORY.setMinProtocolSkimShareBps(1_500);
+        preflight(lc, d2);
+        assertEq(
+            _failedNames(),
+            "factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)"
+        );
+        // a smaller floor is fine for a 9000 bounty
+        vm.prank(owner);
+        FACTORY.setMinProtocolSkimShareBps(500);
+        preflight(lc, d2);
+        assertEq(_failedNames(), "");
+    }
+
+    function test_preflightTheFactoryMustBeDeprecatedAndOwnedByTheDeployer() public {
+        address d2 = _funded();
+        vm.prank(owner);
+        FACTORY.setDeprecated(false);
+        preflight(lc, d2);
+        assertEq(_failedNames(), "factory: deprecated, only the owner can launch");
+        LaunchConfig memory c = lc;
+        c.allowOpenFactory = true;
+        preflight(c, d2);
+        assertEq(_failedNames(), "", "the override opens exactly that rule");
+        vm.prank(owner);
+        FACTORY.setDeprecated(true);
+        address other = _user("other signer");
+        vm.deal(other, 5 ether);
+        preflight(lc, other);
+        (string memory list,) = _failed();
+        assertEq(list, "factory: owner is the deployer, factory: deployTokenAsOwner accepts the config (simulated)");
+    }
+
+    function test_preflightEnabledStackAndEscrow() public {
+        address d2 = _funded();
+        vm.startPrank(owner);
+        FACTORY.setHook(lc.stack.hook, false);
+        vm.stopPrank();
+        preflight(lc, d2);
+        assertEq(_failedNames(), "factory: hook enabled, factory: deployTokenAsOwner accepts the config (simulated)");
+        vm.startPrank(owner);
+        FACTORY.setHook(lc.stack.hook, true);
+        FACTORY.setEscrow(lc.stack.escrow, false);
+        vm.stopPrank();
+        preflight(lc, d2);
+        assertEq(_failedNames(), "factory: escrow enabled");
+        vm.startPrank(owner);
+        FACTORY.setEscrow(lc.stack.escrow, true);
+        FACTORY.setLocker(lc.stack.locker, false);
+        vm.stopPrank();
+        preflight(lc, d2);
+        assertEq(_failedNames(), "factory: locker enabled, factory: deployTokenAsOwner accepts the config (simulated)");
+        vm.startPrank(owner);
+        FACTORY.setLocker(lc.stack.locker, true);
+        FACTORY.setMevModule(lc.mevModule, false);
+        vm.stopPrank();
+        preflight(lc, d2);
+        assertEq(_failedNames(), "factory: mev module enabled, factory: deployTokenAsOwner accepts the config (simulated)");
     }
 
     function test_postflightPassesOnTheFixture() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "");
         // the same after trading started: the exact supply and rate rows turn tolerant, nothing fails
         _skipSniperWindow();
         _buyCoin(funder, 1 ether);
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "");
         _print("postflight");
-    */
+        assertGe(rows.length, 85, "postflight rows");
     }
 
     function test_supplyConstantMatchesCore() public view {
@@ -263,38 +350,34 @@ contract ConfigTest is Fixture {
     }
 
     function test_postflightCatchesEveryMismatch() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         LaunchConfig memory c = lc;
         c.rateStart = lc.rateStart + 1;
-        postflight(c, address(core));
+        postflightAs(c, address(core), owner);
         assertEq(_failedNames(), "core: RATE_START");
 
         c = lc;
         c.owner = creator;
-        postflight(c, address(core));
-        assertEq(_failedNames(), "core: owner, coin: admin is owner");
+        postflightAs(c, address(core), owner);
+        assertEq(_failedNames(), "core: owner, coin: original admin is the config owner, coin: admin is the config owner, router: owner is the config owner");
 
         c = lc;
-        c.bountyBps = 9000;
-        c.taxBps = 1000;
-        postflight(c, address(core));
-        assertEq(_failedNames(), "coin: equals prediction, skim: bounty bps, tax: bps");
+        c.bountyBps = 8000;
+        postflightAs(c, address(core), owner);
+        assertEq(_failedNames(), "hook: skim config equals the config");
 
         c = lc;
         c.stack.escrow = address(0xE5C);
-        postflight(c, address(core));
-        assertEq(_failedNames(), "core: escrow, code: stack addresses");
+        postflightAs(c, address(core), owner);
+        assertEq(_failedNames(), "core: escrow, code: stack addresses, coin: allowlist holds the Core, the locker, the escrow and the config entries, coin: the locker and the escrow are pinned");
 
         // the auction factory of the config is not the one the core was built with
         c = lc;
         c.stack.auctionFactory = Mainnet.PERMIT2;
-        postflight(c, address(core));
+        postflightAs(c, address(core), owner);
         assertEq(_failedNames(), "core: auction factory, house: factory houseOf(core)");
 
-        postflight(lc, address(0xBEEF));
+        postflightAs(lc, address(0xBEEF), owner);
         assertEq(_failedNames(), "code: core");
-    */
     }
 
     /// the two json files collapsed into one: the settings block is inside the hash, and so is the auction factory
@@ -346,9 +429,7 @@ contract ConfigTest is Fixture {
 
     /// preflight names the failing settings row, the deploy guard refuses, postflight reads each field back
     function test_settingsRowsAndGuard() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        address d2 = _enabledDeployer();
+        address d2 = _funded();
         LaunchConfig memory c = lc;
         c.settings.saleFloorBps = 999;
         preflight(c, d2);
@@ -363,46 +444,44 @@ contract ConfigTest is Fixture {
         c.settings.climbMaxBps = c.settings.climbBaseBps - 1;
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "settings"));
         this.requireExt(c);
-    */
+        // the sale settings of the controller have their own row and guard
+        c = lc;
+        c.sale.floorBps = c.sale.startBps + 1;
+        preflight(c, d2);
+        assertEq(_failedNames(), "sale settings inside the bounds");
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "sale"));
+        this.requireExt(c);
     }
 
     function test_postflightReadsBackEverySetting() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         for (uint256 i; i < SettingsFields.N; ++i) {
             LaunchConfig memory c = lc;
             uint256 v = SettingsFields.get(c.settings, i);
             SettingsFields.set(c.settings, i, v == 0 ? 1 : v - 1);
-            postflight(c, address(core));
+            postflightAs(c, address(core), owner);
             assertEq(_failedNames(), "core: settings equal the config", "a settings field slipped the readback");
         }
-    */
     }
 
     /// after the owner changed the settings, postflight fails until the operator says so with SETTINGS_CHANGED=1
     function test_postflightAfterTheOwnerChangedTheSettings() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
         Settings memory s = core.settings();
         s.saleFloorBps = 8_000;
         _setSettings(s);
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "core: settings equal the config");
         changedFlag = true;
-        postflight(lc, address(core));
+        postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "", "SETTINGS_CHANGED turns the row into a warning");
-    */
     }
 
     /// the auction factory rows of the preflight: the live factory is clean, a house for the core fails it
     function test_preflightAuctionFactoryRows() public {
-        vm.skip(true); // TODO(v2 port stage 3)
-        /* TODO(v2 port stage 3), old body:
-        address d2 = _enabledDeployer();
+        address d2 = _funded();
         preflight(lc, d2);
         assertEq(_failedNames(), "");
         // a house already exists for the predicted core
-        address coreAt = vm.computeCreateAddress(d2, vm.getNonce(d2) + 1);
+        address coreAt = vm.computeCreateAddress(d2, vm.getNonce(d2) + 2);
         vm.prank(coreAt);
         IAuctionFactoryProbe(Mainnet.AUCTION_FACTORY).createAuctionHouse();
         preflight(lc, d2);
@@ -410,7 +489,6 @@ contract ConfigTest is Fixture {
             _failedNames(),
             "auction factory: no house yet for the predicted core, auction factory: the house address of the core is free"
         );
-    */
     }
 }
 

@@ -167,8 +167,8 @@ abstract contract PostflightPool is PostflightV2 {
         IPositionManager pm = IPositionManager(Mainnet.POSITION_MANAGER);
         (bool ok, PositionInfo info) = _positionInfo(pm, r.positionId);
         _check(
-            "position: ticks equal the config",
-            ok && info.tickLower() == c.positionLower && info.tickUpper() == c.positionUpper,
+            "position: ticks equal the config (mirrored, the coin is currency1)",
+            ok && info.tickLower() == -c.positionUpper && info.tickUpper() == -c.positionLower,
             string.concat("lower ", vm.toString(int256(info.tickLower())), " upper ", vm.toString(int256(info.tickUpper())))
         );
         (bool okl, uint256 liq) = _word(Mainnet.POSITION_MANAGER, abi.encodeCall(IPositionManager.getPositionLiquidity, (r.positionId)));
