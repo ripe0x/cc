@@ -596,7 +596,9 @@ abstract contract InvariantsBase is InvariantFixture {
             handler.warp(uint256(keccak256(abi.encode("w", i))) / 10 * 10 + 1);
         }
         assertTrue(handler.successes(3) > 0, "no real listing was bought");
-        assertTrue(_try(7, 80), "compose never succeeded");
+        // the hostile controller suite answers only a fraction of the composes (it burns the read gas on purpose), so the
+        // smoke gives it more tries; the fee flows of the v2 port moved the seeds off the lucky ones
+        assertTrue(_try(7, 300), "compose never succeeded");
         // listed eth statements are now at least three, so an overprint can pair two of them
         _overprintSmoke();
         // the statement sales on the house: bids around the reserve, a settlement, the collection, the lazy sync

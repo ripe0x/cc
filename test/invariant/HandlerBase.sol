@@ -850,8 +850,8 @@ abstract contract HandlerBase is Test {
         return skim + 2 >= gross && skim <= gross + 2;
     }
 
-    /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip comes off the top,
-    /// the payees' parts per million of the rest only once the split is on
+    /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip and the payees'
+    /// parts per million of the gross amount (once the split is on) both come out of it
     function _routerEngine(uint256 amount) internal view returns (uint256) {
         uint256 tip = amount * feeRouter.tipPpm() / 1_000_000;
         if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
@@ -859,7 +859,7 @@ abstract contract HandlerBase is Test {
         if (feeRouter.splitOn()) {
             (, uint32[] memory ppm) = feeRouter.payees();
             for (uint256 i; i < ppm.length; ++i) {
-                rest -= (amount - tip) * ppm[i] / 1_000_000;
+                rest -= amount * ppm[i] / 1_000_000;
             }
         }
         return rest;
