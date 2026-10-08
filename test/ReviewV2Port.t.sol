@@ -238,3 +238,106 @@ contract ReviewRouterGasTest is FeeBase {
         assertGt(passes, 0);
     }
 }
+
+/// calls a Core door and flushes the router once from its own `receive`, i.e. from inside the payout the door makes last
+contract FlushOnPayout {
+    IFeeRouter public immutable ROUTER;
+    bool public armed;
+
+    constructor(address router_) {
+        ROUTER = IFeeRouter(payable(router_));
+    }
+
+    function go(address target, bytes calldata data) external {
+        armed = true;
+        (bool ok, bytes memory why) = target.call(data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(why, 0x20), mload(why))
+            }
+        }
+    }
+
+    function approveAll(address nft, address op) external {
+        (bool ok,) = nft.call(abi.encodeWithSignature("setApprovalForAll(address,bool)", op, true));
+        require(ok);
+    }
+
+    receive() external payable {
+        if (armed) {
+            armed = false;
+            ROUTER.flush();
+        }
+    }
+}
+
+/// F4. a stranger flushes the router from inside the payout of every door that pays the caller. the doors pay last, so
+/// the booking lands on final state and the books stay exact
+contract ReviewFlushInPayoutTest is FeeBase {
+    FlushOnPayout internal atk;
+
+    function setUp() public override {
+        super.setUp();
+        atk = new FlushOnPayout(address(feeRouter));
+        _stock();
+        autoFlush = false;
+    }
+
+    function _queue() internal returns (uint256 held) {
+        _buyCoin(trader, 4 ether);
+        held = address(feeRouter).balance;
+        assertGt(held, 0.1 ether);
+    }
+
+    function _consistent() internal view {
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "every wei is booked");
+        assertEq(address(feeRouter).balance, 0, "the router was flushed");
+    }
+
+    function test_OK_flushInsideTheComposeReimbursement() public {
+        autoFlush = true;
+        _composeOnce(); // fills the pile and composes once; the state before is kept
+        vm.revertToState(preComposeSnap);
+        autoFlush = false;
+        vm.fee(composeBasefee);
+        _queue();
+        uint256 pot0 = core.ethPot();
+        (uint256 tip,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
+        uint256 a0 = address(atk).balance;
+        atk.go(address(core), abi.encodeCall(ICore.compose, ()));
+        uint256 r = address(atk).balance - a0 - tip; // the reimbursement; the rest of the balance is the flush tip
+        assertGt(r, 0);
+        assertEq(core.ethPot(), pot0 - r + toEngine, "pot = old - reimbursement + the booked fees");
+        _consistent();
+    }
+
+    function test_OK_flushInsideTheBuybackTip() public {
+        _fillEthBuyback();
+        vm.roll(block.number + 30);
+        _queue();
+        uint256 bb0 = core.ethToBuyback();
+        uint256 pot0 = core.ethPot();
+        atk.go(address(core), abi.encodeCall(ICore.buyback, ()));
+        assertLt(core.ethToBuyback(), bb0, "the slice left the buyback pot");
+        assertGt(core.ethPot(), pot0, "the flushed fees were booked on top");
+        _consistent();
+    }
+
+    function test_OK_flushInsideTheSellForEthPayout() public {
+        autoFlush = true;
+        _fundPot(3 ether);
+        autoFlush = false;
+        uint256[] memory ids = _credits(address(atk), 1);
+        atk.approveAll(address(CREDITS), address(core));
+        _queue();
+        uint256 pot0 = core.ethPot();
+        (uint256 tip,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
+        uint256 a0 = address(atk).balance;
+        atk.go(address(core), abi.encodeWithSignature("sellForEth(uint256[])", ids));
+        assertEq(CREDITS.ownerOf(ids[0]), address(core));
+        uint256 price = address(atk).balance - a0 - tip;
+        assertGt(price, 0);
+        assertEq(core.ethPot(), pot0 - price + toEngine, "pot = old - price + the booked fees");
+        _consistent();
+    }
+}
