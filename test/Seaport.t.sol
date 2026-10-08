@@ -6,6 +6,7 @@ import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
+import {BidModel} from "./utils/BidModel.sol";
 import {
     ISeaport,
     ItemType,
@@ -250,11 +251,7 @@ abstract contract SeaportBase is Fixture {
         assertEq(core.ethPot(), before.pot - cost - tip, "pot down by exactly cost and tip");
         assertEq(address(core).balance, before.balance - cost - tip, "balance down by exactly cost and tip");
         assertEq(core.ethToBuyback(), before.toBuyback);
-        assertEq(
-            core.rateAtCheckpoint(),
-            rate - rate * core.settings().dropBps * (cost + tip) / (10_000 * before.pot),
-            "rate drop"
-        );
+        assertEq(core.rateAtCheckpoint(), BidModel.dropOnce(core.settings(), rate, rate), "rate drop");
         assertEq(core.lastFillTime(), block.timestamp);
         assertLe(cost + tip, ceiling, "never above the ceiling");
         assertLe(tip, cost * 200 / 10_000, "tip within two percent of cost");
@@ -286,9 +283,13 @@ contract SeaportTest is SeaportBase {
 
     function setUp() public override {
         super.setUp();
-        // the launch rate cap (8 times the opening rate) is far below the rate the cases need: raise it to the bounds
+        // the launch rate cap (about 6 times the opening rate) is far below the rate the cases need: raise it to the bounds,
+        // with the clamp at one credit of hourly room and the ceiling at its loosest so the bid reaches it in days
         Settings memory cs = core.settings();
         cs.rateCap = uint64(TARGET_RATE);
+        cs.clampCredits = 1;
+        cs.ceilBps = 30_000;
+        cs.idleLoosenBps = 2_000;
         _setSettings(cs);
         _fundPot(POT);
         for (uint256 i; i < 900 && core.ethRate() < TARGET_RATE; ++i) {

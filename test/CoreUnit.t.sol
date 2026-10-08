@@ -14,6 +14,7 @@ import {ReentrantBidder} from "./attackers/StatementBuyers.sol";
 import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
+import {BidModel} from "./utils/BidModel.sol";
 
 /// shared helpers of the core unit suites. everything runs on the real stack of the Fixture: the live coin, hook,
 /// pool, Credits, Statements, CreditStrategy, Seaport and the pnd auction house. a test that needs an exact pot donates
@@ -40,9 +41,17 @@ abstract contract CoreBase is Fixture {
         core.skim();
     }
 
-    /// @dev the rate after a spend of `x` from a pot of `p`, at the drop of the settings now
-    function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
-        return r - r * core.settings().dropBps * x / (10_000 * p);
+    /// @dev the rate after one credit bought at `r`, the first fill of its minute, at the drop of the settings now
+    function _dropped(uint256 r) internal view returns (uint256) {
+        return BidModel.dropOnce(core.settings(), r, r);
+    }
+
+    /// @dev the owner sets the credits of hourly room the funded clamp holds. 1 makes the clamp the funded threshold
+    function _clampCredits(uint256 n) internal {
+        Settings memory s = core.settings();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        s.clampCredits = uint16(n);
+        _setSettings(s);
     }
 
     /// @dev the owner sets the flat share of the bid
@@ -311,9 +320,14 @@ contract CoreUnitTest is CoreBase {
         _fund(1.4e16);
         assertTrue(core.funded());
         assertEq(core.ethRate(), 4e12, "no retroactive climb");
-        // the wait since deploy is long, so the tier is the fastest one. the pot is large enough not to clamp
-        _warp(10 hours);
-        assertApproxEqRel(core.ethRate(), 8_635_699_989_091, 1e9);
+        // 20 credits of room at this pot is below the rate, so the funded rate holds
+        _warp(10 minutes);
+        assertEq(core.ethRate(), 4e12, "held by the clamp of 20 credits");
+        // the pot is large enough not to clamp
+        _fund(10 ether);
+        assertEq(core.rateAtCheckpoint(), 4e12);
+        _warp(10 minutes);
+        assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9, "10 minutes at 0.5 percent");
     }
 
     /// the same rule at another average score: funded needs `pot * spendCap >= avgScore * rate`, to the wei, and at
@@ -321,6 +335,7 @@ contract CoreUnitTest is CoreBase {
     function test_rate_fundedThresholdFollowsTheAverageScore() public {
         Settings memory s = core.settings();
         s.avgScore = 6_000_000;
+        s.clampCredits = 1;
         _setSettings(s);
         _fund(1.2e16 - 1);
         assertFalse(core.funded(), "one wei short of 6M * 4e12 / 20 percent");
@@ -333,7 +348,7 @@ contract CoreUnitTest is CoreBase {
         _fund(1e16);
         assertEq(core.ethRate(), 4e12);
         _warp(1 hours);
-        assertApproxEqRel(core.ethRate(), 4e12 * 108 / 100, 1e9, "room above the clamp, top tier");
+        assertApproxEqRel(core.ethRate(), 5_395_400_610_197, 1e9, "room above the clamp, 60 minutes at 0.5 percent");
         // a lower average score reopens the room at once
         s.avgScore = 800_000;
         _setSettings(s);
@@ -341,56 +356,57 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.ethRate(), core.ethPot() * 2000 / 800_000);
     }
 
-    function test_rate_climbTiers() public {
+    /// the climb is 0.5 percent a minute compounded from the checkpoint, and 1.005^n of the stored rate is exact
+    /// for whole minutes
+    function test_rate_climbsPerMinuteCompounded() public {
         _fund(10 ether);
         assertTrue(core.funded());
-        _warp(1 hours);
-        assertApproxEqRel(core.ethRate(), 4_040_000_000_000, 1e9);
-        _warp(9 hours);
-        assertApproxEqRel(core.ethRate(), 4_418_488_501_644, 1e9, "10h at 1 percent");
-        _warp(20 hours);
-        assertApproxEqRel(core.ethRate(), 5_719_709_774_456, 1e9, "24h at 1 percent then 6h at 2 percent");
-        _warp(52 hours);
-        assertApproxEqRel(core.ethRate(), 45_207_946_718_638, 1e9, "tiers 1, 2, 4 percent then 10h at 8 percent");
+        _warp(1 minutes);
+        assertApproxEqRel(core.ethRate(), 4_020_000_000_000, 1e9, "1 minute");
+        _warp(9 minutes);
+        assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9, "10 minutes");
+        _warp(10 minutes);
+        assertApproxEqRel(core.ethRate(), 4_419_582_308_747, 1e9, "20 minutes");
+        _warp(40 minutes);
+        assertApproxEqRel(core.ethRate(), 5_395_400_610_197, 1e9, "60 minutes");
     }
 
-    /// the tiers at other settings: 2 percent an hour, doubling every 12 hours, at most 10 percent. the numbers are
-    /// 4e12 * 1.02^12, then * 1.04^12, then * 1.08^12, then ten hours at 10 percent
-    function test_rate_climbTiersAtChangedSettings() public {
+    /// a fraction of a minute climbs as a fractional exponent
+    function test_rate_climbsInsideAMinute() public {
+        _fund(10 ether);
+        _warp(30);
+        assertApproxEqRel(core.ethRate(), 4_009_987_531_153, 1e9, "half a minute is 1.005^0.5");
+    }
+
+    /// the climb at other settings: 2 percent a minute
+    function test_rate_climbAtChangedSettings() public {
         Settings memory s = core.settings();
-        s.climbBaseBps = 200;
-        s.climbDoubleEvery = 12 hours;
-        s.climbMaxBps = 1000;
+        s.climbPerMinBps = 200;
         _setSettings(s);
         _fund(10 ether);
         assertTrue(core.funded());
-        _warp(12 hours);
-        assertApproxEqRel(core.ethRate(), 5_072_967_178_250, 1e9, "12h at 2 percent");
-        _warp(12 hours);
-        assertApproxEqRel(core.ethRate(), 8_121_983_896_114, 1e9, "12h at 4 percent");
-        _warp(12 hours);
-        assertApproxEqRel(core.ethRate(), 20_452_537_136_481, 1e9, "12h at 8 percent");
-        _warp(10 hours);
-        assertApproxEqRel(core.ethRate(), 53_048_613_987_664, 1e9, "10h at the 10 percent maximum");
+        _warp(10 minutes);
+        assertApproxEqRel(core.ethRate(), 4_875_977_679_978, 1e9, "10 minutes at 2 percent");
     }
 
-    function test_rate_checkpointKeepsTierClock() public {
+    function test_rate_checkpointKeepsTheCurve() public {
         _fund(10 ether);
-        _warp(30 hours);
+        _warp(30 minutes);
         uint256 r30 = core.ethRate();
         _fund(1);
         assertEq(core.rateAtCheckpoint(), r30);
         assertEq(core.checkpointTime(), block.timestamp);
         assertEq(core.lastFillTime(), launchTime);
-        _warp(52 hours);
-        assertApproxEqRel(core.ethRate(), 45_207_946_718_638, 1e9, "same curve as without the checkpoint");
+        _warp(30 minutes);
+        assertApproxEqRel(core.ethRate(), 5_395_400_610_197, 1e9, "same curve as without the checkpoint");
     }
 
     function test_rate_fundedClamp() public {
+        _clampCredits(1);
         _fund(0.02 ether);
         assertTrue(core.funded());
-        _warp(10 hours);
-        assertApproxEqRel(core.ethRate(), 4_418_488_501_644, 1e9);
+        _warp(10 minutes);
+        assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9);
         _warp(100 hours);
         uint256 cap = uint256(0.02 ether) * 2000 / 4_330_000;
         assertEq(cap, 9_237_875_288_683);
@@ -405,7 +421,7 @@ contract CoreUnitTest is CoreBase {
         _fund(0.02 ether);
         assertEq(core.rateAtCheckpoint(), cap);
         _warp(1 hours);
-        assertApproxEqRel(core.ethRate(), cap * 108 / 100, 1e9, "tier 8 percent after a long wait");
+        assertApproxEqRel(core.ethRate(), 12_460_509_492_371, 1e9, "60 minutes at 0.5 percent from the clamp");
     }
 
     /// the clamp at a smaller spend cap and a smaller average score, then at a larger cap and a larger score
@@ -413,6 +429,7 @@ contract CoreUnitTest is CoreBase {
         Settings memory s = core.settings();
         s.spendCapBps = 1000;
         s.avgScore = 2_000_000;
+        s.clampCredits = 1;
         _setSettings(s);
         _fund(0.02 ether);
         assertTrue(core.funded());
@@ -431,10 +448,14 @@ contract CoreUnitTest is CoreBase {
     /// the same clamp when the pot is filled by real swaps: it is measured, not assumed
     function test_rate_fundedClampWithRealFees() public {
         _skipSniperWindow();
-        _fundPot(0.01 ether);
+        _fundPot(1 ether);
         uint256 pot = core.ethPot();
         _warp(2000 hours);
-        assertEq(core.ethRate(), pot * 2000 / core.settings().avgScore, "clamp at what the hourly cap affords");
+        assertEq(
+            core.ethRate(),
+            pot * 2000 / (core.settings().avgScore * 20),
+            "clamp at what the hourly cap affords for 20 average credits"
+        );
     }
 
     /// at the clamp an average credit can actually be sold in the same block. 20 percent of the pot buys one average
@@ -443,6 +464,7 @@ contract CoreUnitTest is CoreBase {
     /// in a fresh window and a credit that would cost more than the cap is refused by it
     function _atTheClamp(bool flat) internal {
         _mode(flat);
+        _clampCredits(1);
         _fund(0.02 ether);
         _warp(3000 hours);
         uint256 avg = core.settings().avgScore;
@@ -504,6 +526,7 @@ contract CoreUnitTest is CoreBase {
     /// under the smaller pot and the rate never rises again. no real path shrinks the pot without also dropping the
     /// rate, so the pot slot is written directly and the balance is set to match
     function test_rate_goesUnfundedAfterPotDrops() public {
+        _clampCredits(1);
         _fund(0.02 ether);
         _warp(100 hours);
         uint256 cap = core.ethRate();
@@ -519,8 +542,8 @@ contract CoreUnitTest is CoreBase {
         _solvent();
     }
 
-    /// a fill drops the rate by `dropBps` of the share of the pot it spent and restarts the climb clock, flat and per
-    /// point. at the launch settings the flat price is 4.33e6 * rate / 1e4 to the wei
+    /// a fill drops the rate by `dropPerCreditBps`, makes the rate paid the ceiling anchor and restarts the climb clock,
+    /// flat and per point. at the launch settings the flat price is 4.33e6 * rate / 1e4 to the wei
     function _dropAndClockReset(bool flat) internal {
         _mode(flat);
         _fund(10 ether);
@@ -538,7 +561,10 @@ contract CoreUnitTest is CoreBase {
 
         assertEq(alice.balance - before, price);
         assertEq(core.ethPot(), 10 ether - price);
-        assertEq(core.rateAtCheckpoint(), _dropped(rate, price, 10 ether));
+        assertEq(core.rateAtCheckpoint(), rate * 9_950 / 10_000, "0.5 percent below the rate paid");
+        (uint256 anchor, uint256 minuteStart,) = _anchor();
+        assertEq(anchor, rate, "the rate paid is the ceiling anchor");
+        assertEq(minuteStart, rate, "and the start of the minute");
         assertEq(core.lastFillTime(), block.timestamp);
         assertEq(core.checkpointTime(), block.timestamp);
         assertEq(CREDITS.ownerOf(id), address(core));
@@ -549,10 +575,16 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.pileSize(Lane.Eth), 1);
         _solvent();
 
-        // the climb restarts at the base tier after a fill.
+        // the climb restarts from the dropped rate, and the ceiling is 125 percent of the rate paid
         uint256 after_ = core.rateAtCheckpoint();
-        _warp(1 hours);
-        assertApproxEqRel(core.ethRate(), after_ * 101 / 100, 1e9);
+        _warp(10 minutes);
+        assertApproxEqRel(core.ethRate(), after_ * 1_051_140_132_040_790_000 / 1e18, 1e9);
+        _warp(10 hours);
+        assertEq(
+            core.ethRate(),
+            rate * 12_500 * (10_000 + 200 * 61) / 1e8,
+            "ceiling 125 percent of the rate paid, loosened 2 percent per 10 idle minutes"
+        );
     }
 
     function test_rate_dropAndClockResetOnFill_flat() public {
@@ -572,7 +604,7 @@ contract CoreUnitTest is CoreBase {
         uint256 total;
         for (uint256 i; i < 3; ++i) {
             uint256 price = _ref(ids[i], r, 0);
-            r = _dropped(r, price, p);
+            r = BidModel.dropOnce(core.settings(), r, 4e12);
             p -= price;
             total += price;
         }
@@ -716,7 +748,8 @@ contract CoreUnitTest is CoreBase {
         core.sellForEth(ids, first * 3);
         uint256 before = alice.balance;
         vm.prank(alice);
-        core.sellForEth(ids, first * 3 - first / 1000);
+        // the second credit is paid 0.5 percent below the first, the third 0.5 percent below the second
+        core.sellForEth(ids, first * 2_985 / 1_000);
         assertLt(alice.balance - before, first * 3, "later credits were paid at the dropped rate");
     }
 
@@ -891,7 +924,7 @@ contract CoreUnitTest is CoreBase {
 
         assertEq(keeper.balance - keeperBefore, tip);
         assertEq(core.ethPot(), pot - price - tip);
-        assertEq(core.rateAtCheckpoint(), _dropped(rate, price + tip, pot));
+        assertEq(core.rateAtCheckpoint(), _dropped(rate));
         assertEq(core.lastFillTime(), block.timestamp);
         assertEq(CREDITS.ownerOf(LISTED_A), address(core));
         assertEq(ICreditStrategy(STRATEGY).nftForSale(LISTED_A), 0);
@@ -1024,6 +1057,7 @@ contract CoreUnitTest is CoreBase {
     /// clears its price at the clamp (ceiling 1.21 prices) while the hourly cap (0.8 prices) does not: a buy larger
     /// than a fifth of the pot hits the hourly cap, and one larger than the pot fails first with `PotTooSmall`
     function test_buyListing_hourlyCapAndPotChecks_perPoint() public {
+        _clampCredits(1);
         _flat(0);
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         _fund(price * 4);
@@ -1050,6 +1084,7 @@ contract CoreUnitTest is CoreBase {
     /// flat, the ceiling at the clamp is the hourly cap itself (an average credit), so the cap binds only through the
     /// controller bonus (a quarter above the cap) or through spend already in the window
     function test_buyListing_hourlyCapAndPotChecks_flat() public {
+        _clampCredits(1);
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
@@ -1709,7 +1744,7 @@ contract CoreUnitTest is CoreBase {
             uint256 r1 = core.ethRate();
             if (!f0) assertEq(r1, r0, "unfunded rate is frozen");
             else assertGe(r1, r0);
-            assertLe(r1, r0.max(core.ethPot() * st.spendCapBps / st.avgScore), "never above the funded threshold");
+            assertLe(r1, r0.max(BidModel.clamp(st, core.ethPot())), "never above the clamp of 20 credits");
 
             uint256 amount = bound(amounts[i], 0, 0.05 ether);
             if (amount != 0) _fund(amount);

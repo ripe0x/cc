@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
+import {BidModel} from "./utils/BidModel.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {ScriptedController} from "./attackers/ScriptedController.sol";
 import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
@@ -15,12 +16,6 @@ import {Lane, Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
 /// proofs and the recommended config file belong to things that no longer exist
 abstract contract ReviewEconBase is Fixture {
     using FixedPointMathLib for uint256;
-
-    /// @dev the eth rate after `secs` of climb at `bps` an hour from `r`, the closed form
-    function _climbed(uint256 r, uint256 bps, uint256 secs) internal pure returns (uint256) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return r.mulWad(uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(secs * 1e18 / 1 hours))));
-    }
 
     function _composeOne() internal returns (uint256 sid, uint256 cost) {
         _skipSniperWindow();
@@ -94,9 +89,9 @@ contract PilePageEquivalence is ReviewEconBase {
     }
 }
 
-/// @notice exact numbers at the launch settings (flat bid, 20 percent hourly cap, drop 20 percent, climb 1 percent an
-/// hour doubling every day up to 8 percent, average credit 4.33M). the pot is booked by donation so every number is a
-/// closed form. these replace the golden test of the defaults of the old Econ: the numbers are of the new rules
+/// @notice exact numbers at the launch settings (flat bid, 20 percent hourly cap, drop 0.5 percent per credit with an 80
+/// percent minute floor, climb 0.5 percent a minute, ceiling 125 percent of the rate paid plus 2 percent per 10 idle
+/// minutes, clamp over 20 credits, average credit 4.33M). the pot is booked by donation so every number is a closed form
 contract LaunchSettingsExactNumbers is ReviewEconBase {
     function test_scenarioAtTheLaunchSettings() public {
         vm.deal(address(core), 10 ether);
@@ -104,32 +99,38 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
         assertEq(core.ethPot(), 10 ether);
         assertEq(core.ethRate(), 4e12);
         assertTrue(core.funded());
-        // seven hours at 1 percent an hour from the opening rate, 4e12 * 1.01^7
-        _warp(7 hours);
-        assertEq(core.ethRate(), 4_288_541_408_428);
+        // ten minutes at 0.5 percent a minute from the opening rate, 4e12 * 1.005^10
+        _warp(10 minutes);
+        uint256 r1 = core.ethRate();
+        assertApproxEqAbs(r1, 4_204_560_528_163, 10);
         // three credits of three different scores sell in one call at the flat price: 4.33e6 * rate / 1e4, and the
-        // rate drops by 20 percent of the share of the pot spent after each
+        // rate drops by 0.5 percent after each
+        uint256 r2 = r1 * 9_950 / 10_000;
+        uint256 r3 = r2 * 9_950 / 10_000;
+        uint256[3] memory prices = [4_330_000 * r1 / 1e4, 4_330_000 * r2 / 1e4, 4_330_000 * r3 / 1e4];
         uint256[] memory ids = _credits(seller, 3);
         uint256 before = seller.balance;
         vm.prank(seller);
         core.sellForEth(ids);
-        assertEq(seller.balance - before, 5_570_608_388_644_001, "the three prices paid");
-        uint256[3] memory prices = [uint256(1_856_938_429_849_324), 1_856_869_465_443_106, 1_856_800_493_351_571];
+        assertEq(seller.balance - before, prices[0] + prices[1] + prices[2], "the three prices paid");
         for (uint256 i; i < 3; ++i) {
             (,, uint256 cost,) = core.creditInfo(ids[i]);
             assertEq(cost, prices[i], "cost basis is the flat price");
         }
-        assertEq(core.rateAtCheckpoint(), 4_288_063_541_738);
-        assertEq(core.ethPot(), 9_994_429_391_611_355_999);
+        assertEq(core.rateAtCheckpoint(), r3 * 9_950 / 10_000);
+        assertEq(core.ethPot(), 10 ether - prices[0] - prices[1] - prices[2]);
         assertEq(core.lastFillTime(), block.timestamp);
-        // forty hours later: 24 hours at 1 percent, then 16 hours at 2 percent
+        (uint256 anchor, uint256 minuteStart,) = _anchor();
+        assertEq(anchor, r3, "the rate of the last fill is the anchor");
+        assertEq(minuteStart, r1, "the minute started at the first rate paid");
+        // forty hours later the climb sits at the ceiling: 125 percent of the anchor loosened by 240 intervals of 2 percent
         _warp(40 hours);
-        assertEq(core.ethRate(), 7_474_410_246_507);
-        // the funded clamp of the hourly cap is 20 percent of the pot over 4.33M, 4.6e15, far above the rate cap of
-        // 8 * rateStart, so after a long climb the rate sits at the rate cap
+        assertEq(core.ethRate(), r3 * (10_000 + 200 * 240) * 12_500 / 1e8);
+        // the funded clamp of the hourly cap is 20 percent of the pot over 20 credits of 4.33M, 2.3e14, above the rate
+        // cap of about 6 * rateStart, so after a long climb the rate sits at the rate cap
         _warp(10_000 hours);
         assertEq(core.ethRate(), 123_200_000_000_000);
-        assertGt(core.ethPot() * 2000 / 4_330_000, core.ethRate());
+        assertGt(core.ethPot() * 2000 / (4_330_000 * 20), core.ethRate());
         _solvent();
     }
 }
@@ -222,14 +223,17 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
     }
 }
 
-/// @notice a model of the rate written independently of the Core loop: the climb is credited tier by tier from the
-/// fill clock for exactly the time the pot could afford an average credit, and never past the clamp, and a fill drops
-/// the rate by the spec formula. the fuzz drives warps, fees, donations, fills and changes of the settings and compares
-/// after every step
+/// @notice a model of the rate written independently of the Core: the climb compounds per minute from the checkpoint
+/// for exactly the time the pot could afford an average credit, stops at the clamp, the rate cap and the ceiling of the
+/// loosened anchor, and a fill drops the rate by the spec formula with the minute floor. the fuzz drives warps, fees,
+/// donations, fills and changes of the settings and compares after every step
 contract RateModelFuzz is ReviewEconBase {
     uint256 internal mRate;
     uint256 internal mTime;
     uint256 internal mLast;
+    uint256 internal mAnchor;
+    uint256 internal mMinuteStart;
+    uint256 internal mBucket;
     bool internal mFunded;
 
     function setUp() public override {
@@ -237,26 +241,13 @@ contract RateModelFuzz is ReviewEconBase {
         mRate = core.rateAtCheckpoint();
         mTime = core.checkpointTime();
         mLast = core.lastFillTime();
+        mAnchor = core.RATE_START();
     }
 
     /// the model rate at `to`, from its checkpoint, under the settings now
-    function _modelAt(uint256 to) internal view returns (uint256 r) {
-        r = mRate;
-        if (!mFunded) return r;
-        Settings memory s = core.settings();
-        uint256 cap = core.ethPot() * s.spendCapBps / s.avgScore;
-        if (cap > s.rateCap) cap = s.rateCap;
-        uint256 t = mTime;
-        while (t < to && r < cap) {
-            uint256 k = t > mLast ? (t - mLast) / s.climbDoubleEvery : 0;
-            uint256 bps = k >= 16 ? s.climbMaxBps : uint256(s.climbBaseBps) << k;
-            if (bps > s.climbMaxBps) bps = s.climbMaxBps;
-            uint256 end = mLast + (k + 1) * uint256(s.climbDoubleEvery);
-            if (end > to || k >= 11) end = to;
-            r = _climbed(r, bps, end - t);
-            t = end;
-        }
-        if (r > cap) r = cap;
+    function _modelAt(uint256 to) internal view returns (uint256) {
+        if (!mFunded) return mRate;
+        return BidModel.climb(core.settings(), mRate, core.ethPot(), mAnchor, to - mLast, to - mTime);
     }
 
     /// a checkpoint of the model at now, before an op that changes the pot, the settings or the fill clock
@@ -273,12 +264,15 @@ contract RateModelFuzz is ReviewEconBase {
     function _sell(uint256 seed) internal {
         uint256[] memory ids = _credits(seller, 1);
         _checkpoint();
-        uint256 pot = core.ethPot();
         uint256 before = seller.balance;
         vm.prank(seller);
         try core.sellForEth(ids) {
-            uint256 x = seller.balance - before;
-            mRate = mRate - mRate * core.settings().dropBps * x / (10_000 * pot);
+            if (block.timestamp / 60 != mBucket) {
+                mBucket = block.timestamp / 60;
+                mMinuteStart = mRate;
+            }
+            mAnchor = mRate;
+            mRate = BidModel.dropOnce(core.settings(), mRate, mMinuteStart);
             mLast = block.timestamp;
             _syncFunded();
         } catch {}
@@ -289,12 +283,14 @@ contract RateModelFuzz is ReviewEconBase {
         _checkpoint();
         Settings memory s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
-        s.climbBaseBps = uint16(seed % 1_001);
-        s.climbMaxBps = uint16(uint256(s.climbBaseBps) + (seed >> 12) % (2_001 - s.climbBaseBps));
-        s.climbDoubleEvery = uint32(1 hours + (seed >> 24) % 10 days);
+        s.climbPerMinBps = uint16(1 + seed % 1_000);
+        s.ceilBps = uint16(10_000 + (seed >> 10) % 20_001);
+        s.idleLoosenBps = uint16((seed >> 25) % 2_001);
+        s.clampCredits = uint16(1 + (seed >> 36) % 1_000);
         s.avgScore = uint32(800_000 + (seed >> 48) % 5_200_001);
         s.spendCapBps = uint16(100 + (seed >> 72) % 4_901);
-        s.dropBps = uint16(500 + (seed >> 96) % 4_501);
+        s.dropPerCreditBps = uint16(1 + (seed >> 96) % 1_000);
+        s.dropFloorBps = uint16(5_000 + (seed >> 108) % 5_001);
         s.rateCap = uint64(1e13 + (seed >> 120) % (1e15 - 1e13 + 1));
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);
@@ -340,8 +336,8 @@ contract RateModelFuzz is ReviewEconBase {
         }
     }
 
-    /// a fixed walk through the tiers, a fill and a change of the doubling, so the fuzz is known to reach them
-    function test_modelAcrossTheTiersAFillAndAChange() public {
+    /// a fixed walk through a climb, a fill and a change of the climb, so the fuzz is known to reach them
+    function test_modelAcrossAClimbAFillAndAChange() public {
         _skipSniperWindow();
         uint256[10] memory ops = [uint256(3), 0, 4, 0, 5, 0, 4, 1, 3, 0];
         for (uint256 i; i < ops.length; ++i) {

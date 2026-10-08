@@ -59,6 +59,9 @@ contract ReviewSeaportFlushTest is SeaportBase {
         super.setUp();
         Settings memory cs = core.settings();
         cs.rateCap = uint64(TARGET_RATE);
+        cs.clampCredits = 1;
+        cs.ceilBps = 30_000;
+        cs.idleLoosenBps = 2_000;
         _setSettings(cs);
         _fundPot(30 ether);
         for (uint256 i; i < 900 && core.ethRate() < TARGET_RATE; ++i) {

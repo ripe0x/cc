@@ -19,7 +19,7 @@ import {SettingsFields} from "../script/SettingsFields.sol";
 contract FlowTest is Fixture {
     using FixedPointMathLib for uint256;
 
-    uint256 internal constant N = 29;
+    uint256 internal constant N = 31;
 
     // ------------------------------------------------------------------ helpers
 
@@ -40,7 +40,7 @@ contract FlowTest is Fixture {
         return keccak256(abi.encode(s));
     }
 
-    /// @dev the field tables are the ones of the scripts (`SettingsFields`), 29 fields in declaration order
+    /// @dev the field tables are the ones of the scripts (`SettingsFields`), 31 fields in declaration order
     function _get(Settings memory s, uint256 i) internal pure returns (uint256) {
         return SettingsFields.get(s, i);
     }
@@ -49,28 +49,27 @@ contract FlowTest is Fixture {
         SettingsFields.set(s, i, v);
     }
 
-    function _lo() internal pure returns (uint256[29] memory) {
+    function _lo() internal pure returns (uint256[31] memory) {
         return SettingsFields.lo();
     }
 
-    function _hi() internal pure returns (uint256[29] memory) {
+    function _hi() internal pure returns (uint256[31] memory) {
         return SettingsFields.hi();
     }
 
-    function _names() internal pure returns (bytes32[29] memory) {
+    function _names() internal pure returns (bytes32[31] memory) {
         return SettingsFields.names();
     }
 
     /// @dev a valid settings struct derived from a seed, inside every bound and the two orderings
     function _valid(uint256 seed) internal pure returns (Settings memory s) {
-        uint256[29] memory lo = _lo();
-        uint256[29] memory hi = _hi();
+        uint256[31] memory lo = _lo();
+        uint256[31] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             uint256 x = uint256(keccak256(abi.encode(seed, i)));
             uint256 a = lo[i];
             uint256 b = hi[i];
-            if (i == 4) a = s.climbBaseBps;
-            if (i == 21) b = s.xRateCap;
+            if (i == 23) b = s.xRateCap;
             _set(s, i, a + (b > a ? x % (b - a + 1) : 0));
         }
     }
@@ -82,10 +81,12 @@ contract FlowTest is Fixture {
         Settings memory s = core.settings();
         assertEq(s.flatBps, 10_000);
         assertEq(s.avgScore, 4_330_000);
-        assertEq(s.climbBaseBps, 100);
-        assertEq(s.climbDoubleEvery, 24 hours);
-        assertEq(s.climbMaxBps, 800);
-        assertEq(s.dropBps, 2_000);
+        assertEq(s.dropPerCreditBps, 50);
+        assertEq(s.dropFloorBps, 8_000);
+        assertEq(s.climbPerMinBps, 50);
+        assertEq(s.ceilBps, 12_500);
+        assertEq(s.idleLoosenBps, 200);
+        assertEq(s.clampCredits, 20);
         assertEq(s.spendCapBps, 2_000);
         assertEq(s.bonusCapBps, 2_500);
         assertEq(s.tipSavingsBps, 1_000);
@@ -121,17 +122,15 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundEdgeIsAccepted() public {
-        uint256[29] memory lo = _lo();
-        uint256[29] memory hi = _hi();
+        uint256[31] memory lo = _lo();
+        uint256[31] memory hi = _hi();
         for (uint256 i; i < N; ++i) {
             for (uint256 k; k < 2; ++k) {
                 Settings memory s = Mainnet.defaultSettings();
                 uint256 v = k == 0 ? lo[i] : hi[i];
-                // the three fields bounded by another field
-                if (i == 4 && k == 0) v = s.climbBaseBps;
-                if (i == 2 && k == 1) s.climbMaxBps = 2_000;
-                if (i == 20 && k == 0) s.xRateFloor = 0;
-                if (i == 21 && k == 1) v = s.xRateCap;
+                // the two fields bounded by another field
+                if (i == 22 && k == 0) s.xRateFloor = 0;
+                if (i == 23 && k == 1) v = s.xRateCap;
                 _set(s, i, v);
                 _owner(s);
                 assertEq(_get(core.settings(), i), v, "edge stored");
@@ -140,9 +139,9 @@ contract FlowTest is Fixture {
     }
 
     function test_settings_everyBoundViolationReverts() public {
-        uint256[29] memory lo = _lo();
-        uint256[29] memory hi = _hi();
-        bytes32[29] memory names = _names();
+        uint256[31] memory lo = _lo();
+        uint256[31] memory hi = _hi();
+        bytes32[31] memory names = _names();
         for (uint256 i; i < N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top
@@ -152,13 +151,11 @@ contract FlowTest is Fixture {
             vm.expectRevert(abi.encodeWithSelector(ICore.BadSetting.selector, names[i]));
             core.setSettings(s);
             // below the bottom (fields whose bottom is zero have none)
-            if (lo[i] == 0 && i != 4 && i != 21) continue;
+            if (lo[i] == 0 && i != 23) continue;
             s = Mainnet.defaultSettings();
-            if (i == 4) {
-                _set(s, 4, s.climbBaseBps - 1);
-            } else if (i == 21) {
+            if (i == 23) {
                 // the floor is bounded by the cap, so a cap below the floor is the violation, and it names the floor
-                _set(s, 20, s.xRateFloor - 1);
+                _set(s, 22, s.xRateFloor - 1);
                 names[i] = "xRateFloor";
             } else {
                 _set(s, i, lo[i] - 1);
@@ -264,54 +261,55 @@ contract FlowTest is Fixture {
 
     // ------------------------------------------------------------------ a settings change checkpoints
 
-    /// @dev the eth rate after `hrs` whole hours of climb at `bps` per hour from `r`, the formula of the Core
-    function _climbed(uint256 r, uint256 bps, uint256 hrs) internal pure returns (uint256) {
-        return r.mulWad(uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(hrs * 1e18))));
+    /// @dev the eth rate after `mins` minutes of climb at `bps` per minute from `r`, the formula of the Core
+    function _climbed(uint256 r, uint256 bps, uint256 mins) internal pure returns (uint256) {
+        return r.mulWad(uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(mins * 1e18))));
     }
 
     function test_checkpoint_ethRateKeepsOldClimb() public {
-        _potTo(0.2 ether);
+        _potTo(20 ether);
         assertEq(core.ethRate(), 4e12);
-        _warp(10 hours);
-        uint256 old = _climbed(4e12, 100, 10);
-        assertEq(core.ethRate(), old, "10 hours at 100 bps");
+        _warp(10 minutes);
+        uint256 old = _climbed(4e12, 50, 10);
+        assertEq(core.ethRate(), old, "10 minutes at 50 bps");
         Settings memory s = core.settings();
-        s.climbBaseBps = 400;
+        s.climbPerMinBps = 200;
         _owner(s);
-        // nothing is credited at the new numbers for the 10 hours already gone
+        // nothing is credited at the new numbers for the 10 minutes already gone
         assertEq(core.rateAtCheckpoint(), old, "stored at the old climb");
         assertEq(core.checkpointTime(), block.timestamp);
         assertEq(core.ethRate(), old);
-        _warp(3 hours);
-        assertEq(core.ethRate(), _climbed(old, 400, 3), "3 hours at 400 bps");
-        // without the checkpoint the whole 13 hours would have been priced at the new climb
-        assertTrue(core.ethRate() != _climbed(4e12, 400, 13));
+        _warp(3 minutes);
+        assertEq(core.ethRate(), _climbed(old, 200, 3), "3 minutes at 200 bps");
+        // without the checkpoint the whole 13 minutes would have been priced at the new climb
+        assertTrue(core.ethRate() != _climbed(4e12, 200, 13));
     }
 
-    function test_checkpoint_climbOffFreezesTheRate() public {
-        _potTo(0.2 ether);
-        _warp(10 hours);
-        uint256 old = _climbed(4e12, 100, 10);
+    function test_checkpoint_slowestClimbCreditsOnlyAfterTheChange() public {
+        _potTo(20 ether);
+        _warp(10 minutes);
+        uint256 old = _climbed(4e12, 50, 10);
         Settings memory s = core.settings();
-        s.climbBaseBps = 0;
-        s.climbMaxBps = 0;
+        s.climbPerMinBps = 1;
         _owner(s);
-        _warp(500 hours);
-        assertEq(core.ethRate(), old, "no climb, and none credited later");
+        assertEq(core.rateAtCheckpoint(), old, "stored at the old climb");
+        _warp(60 minutes);
+        assertEq(core.ethRate(), _climbed(old, 1, 60), "an hour at 1 bps, the lowest climb");
     }
 
     function test_checkpoint_fundedFlagFollowsTheNewNumbers() public {
         _potTo(1e16);
         assertTrue(core.funded());
         _warp(5 hours);
-        uint256 old = _climbed(4e12, 100, 5);
+        // 20 credits of room at 1e16 is below the rate, so the funded rate does not climb
+        assertEq(core.ethRate(), 4e12, "held by the clamp");
         Settings memory s = core.settings();
         s.avgScore = 6_000_000;
         _owner(s);
         // the pot of 1e16 cannot afford one 6M credit at 4e12 under a 20 percent cap: 2e19 is below 2.4e19
         assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
-        assertEq(core.ethRate(), old, "unfunded, flat");
+        assertEq(core.ethRate(), 4e12, "unfunded, flat");
         s.avgScore = 4_330_000;
         _owner(s);
         assertTrue(core.funded());
@@ -1236,18 +1234,18 @@ contract FlowTest is Fixture {
 
     // ------------------------------------------------------------------ the rate never reverts, however long the gap
 
-    function _longGap(uint256 base, uint256 maxBps, uint256 dbl, uint256 gap) internal {
+    function _longGap(uint256 climbPerMin, uint256 ceilBps, uint256 loosen, uint256 gap) internal {
         Settings memory s = core.settings();
-        s.climbBaseBps = uint16(base);
-        s.climbMaxBps = uint16(maxBps);
-        s.climbDoubleEvery = uint32(dbl);
+        s.climbPerMinBps = uint16(climbPerMin);
+        s.ceilBps = uint16(ceilBps);
+        s.idleLoosenBps = uint16(loosen);
         _owner(s);
         _potTo(1 ether);
         _warp(gap);
         uint256 g = gasleft();
         uint256 r = core.ethRate();
         assertLt(g - gasleft(), 400_000, "bounded work");
-        assertLe(r, uint256(1 ether) * 2_000 / 4_330_000, "clamped at the hourly cap");
+        assertLe(r, uint256(1 ether) * 2_000 / (4_330_000 * 20), "clamped at the hourly room of 20 credits");
         vm.deal(core.FEE_SOURCE(), 1 ether);
         uint256 pot = core.ethPot();
         vm.prank(core.FEE_SOURCE());
@@ -1256,16 +1254,16 @@ contract FlowTest is Fixture {
         assertEq(core.ethPot(), pot + 1e15, "booked");
     }
 
-    function test_rate_hourlyDoublingOverTwentyYears() public {
-        _longGap(1, 2_000, 1 hours, 20 * 365 days);
+    function test_rate_fastestLoosenAndClimbOverTwentyYears() public {
+        _longGap(1_000, 30_000, 2_000, 20 * 365 days);
     }
 
     function test_rate_slowestClimbOverACentury() public {
-        _longGap(1, 1, 30 days, 100 * 365 days);
+        _longGap(1, 10_000, 0, 100 * 365 days);
     }
 
     function test_rate_fastestClimbOverACentury() public {
-        _longGap(1_000, 2_000, 1 hours, 100 * 365 days);
+        _longGap(1_000, 30_000, 2_000, 100 * 365 days);
     }
 
     // ------------------------------------------------------------------ hard rule 8

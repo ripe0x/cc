@@ -30,6 +30,7 @@ import {IAuctionHouse, IAuctionFactory} from "./interfaces/AuctionHouse.sol";
 import {CoreLib} from "./lib/CoreLib.sol";
 import {SettingsBounds} from "./lib/SettingsBounds.sol";
 import {SettingsStore} from "./lib/SettingsStore.sol";
+import {RateStore} from "./lib/RateStore.sol";
 
 /// custody and every rule of the credits engine. the owner sets the controller, the exit module and the target list at
 /// once, and can lock each of the three for good (docs/ARCHITECTURE.md).
@@ -349,6 +350,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         rateAtCheckpoint = rateStart_;
         checkpointTime = uint64(block.timestamp);
         lastFillTime = uint64(block.timestamp);
+        RateStore.load().lastFillRate = rateStart_;
         xRateAtCheckpoint = uint256(XRATE_START).min(settings_.xRateCap).max(settings_.xRateFloor);
         CREDITS.setApprovalForAll(address(STATEMENTS), true);
         emit OwnershipTransferred(address(0), owner_);
@@ -410,23 +412,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                ETH RATE
     //////////////////////////////////////////////////////////////*/
 
-    /// wei per whole point right now, climbed lazily from the checkpoint. it stops climbing where the hourly cap
-    /// (`spendCapBps` of the pot) no longer buys one average credit: `ethPot * spendCap = avgScore * rate`, and never
-    /// above `rateCap`.
+    /// wei per whole point right now, climbed lazily from the checkpoint. the climb, its clamp and its ceiling are in
+    /// `CoreLib.climb`
     function ethRate() public view returns (uint256 r) {
         r = rateAtCheckpoint;
         if (!funded) return r;
-        Settings storage s = _st();
-        return CoreLib.climb(
-            r,
-            (ethPot * s.spendCapBps / s.avgScore).min(s.rateCap),
-            lastFillTime,
-            checkpointTime,
-            block.timestamp,
-            s.climbBaseBps,
-            s.climbMaxBps,
-            s.climbDoubleEvery
-        );
+        return CoreLib.climb(r, ethPot, lastFillTime, checkpointTime, block.timestamp);
     }
 
     /// the most wei the core pays for credit id right now, bonus included.
@@ -463,8 +454,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (x > p) revert PotTooSmall();
         _requireRoom(x);
         windowSpent += x;
-        uint256 r = rateAtCheckpoint;
-        r -= r * _st().dropBps * x / (BPS * p);
+        uint256 r = CoreLib.drop(rateAtCheckpoint, block.timestamp);
         rateAtCheckpoint = r;
         lastFillTime = uint64(block.timestamp);
         ethPot = p - x;

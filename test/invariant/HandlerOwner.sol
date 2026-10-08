@@ -45,10 +45,12 @@ abstract contract HandlerOwner is HandlerHouse {
         // forge-lint: disable-start(unsafe-typecast)
         s.flatBps = uint16(_f(_r(seed, 0), 0, 10_000, c.flatBps));
         s.avgScore = uint32(_f(_r(seed, 1), 800_000, 6_000_000, c.avgScore));
-        s.climbBaseBps = uint16(_f(_r(seed, 2), 0, 1_000, c.climbBaseBps));
-        s.climbDoubleEvery = uint32(_f(_r(seed, 3), 1 hours, 30 days, c.climbDoubleEvery));
-        s.climbMaxBps = uint16(_f(_r(seed, 4), s.climbBaseBps, 2_000, c.climbMaxBps));
-        s.dropBps = uint16(_f(_r(seed, 5), 500, 5_000, c.dropBps));
+        s.dropPerCreditBps = uint16(_f(_r(seed, 2), 1, 1_000, c.dropPerCreditBps));
+        s.dropFloorBps = uint16(_f(_r(seed, 3), 5_000, 10_000, c.dropFloorBps));
+        s.climbPerMinBps = uint16(_f(_r(seed, 4), 1, 1_000, c.climbPerMinBps));
+        s.ceilBps = uint16(_f(_r(seed, 5), 10_000, 30_000, c.ceilBps));
+        s.idleLoosenBps = uint16(_f(_r(seed, 29), 0, 2_000, c.idleLoosenBps));
+        s.clampCredits = uint16(_f(_r(seed, 30), 1, 1_000, c.clampCredits));
         s.spendCapBps = uint16(_f(_r(seed, 6), 100, 5_000, c.spendCapBps));
         s.bonusCapBps = uint16(_f(_r(seed, 7), 0, 5_000, c.bonusCapBps));
         s.tipSavingsBps = uint16(_f(_r(seed, 8), 0, 2_500, c.tipSavingsBps));
@@ -95,9 +97,10 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 7) {
             s.saleToBuybackBps = 10_000;
         } else if (k == 8) {
-            s.climbBaseBps = 0;
+            s.idleLoosenBps = 0;
         } else if (k == 9) {
-            s.dropBps = 5_000;
+            s.dropPerCreditBps = 1_000;
+            s.dropFloorBps = 5_000;
         } else if (k == 10) {
             s.buybackSlice = 0.01 ether;
         } else if (k == 11) {
@@ -124,9 +127,10 @@ abstract contract HandlerOwner is HandlerHouse {
             s.bonusCapBps = 5_000;
         } else if (k == 16) {
             // the shortest clocks and the most aggressive climb
-            s.climbBaseBps = 1_000;
-            s.climbMaxBps = 2_000;
-            s.climbDoubleEvery = 1 hours;
+            s.climbPerMinBps = 1_000;
+            s.ceilBps = 30_000;
+            s.idleLoosenBps = 2_000;
+            s.clampCredits = 1;
             s.auctionDuration = 6 hours;
             s.xAuctionHalfLife = 10 minutes;
         } else if (k == 17) {
@@ -244,10 +248,12 @@ abstract contract HandlerOwner is HandlerHouse {
     function _firstViolation(Settings memory s) internal pure returns (bytes32) {
         if (s.flatBps > 10_000) return "flatBps";
         if (s.avgScore < 800_000 || s.avgScore > 6_000_000) return "avgScore";
-        if (s.climbBaseBps > 1_000) return "climbBaseBps";
-        if (s.climbDoubleEvery < 1 hours || s.climbDoubleEvery > 30 days) return "climbDoubleEvery";
-        if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2_000) return "climbMaxBps";
-        if (s.dropBps < 500 || s.dropBps > 5_000) return "dropBps";
+        if (s.dropPerCreditBps < 1 || s.dropPerCreditBps > 1_000) return "dropPerCreditBps";
+        if (s.dropFloorBps < 5_000 || s.dropFloorBps > 10_000) return "dropFloorBps";
+        if (s.climbPerMinBps < 1 || s.climbPerMinBps > 1_000) return "climbPerMinBps";
+        if (s.ceilBps < 10_000 || s.ceilBps > 30_000) return "ceilBps";
+        if (s.idleLoosenBps > 2_000) return "idleLoosenBps";
+        if (s.clampCredits < 1 || s.clampCredits > 1_000) return "clampCredits";
         if (s.spendCapBps < 100 || s.spendCapBps > 5_000) return "spendCapBps";
         if (s.bonusCapBps > 5_000) return "bonusCapBps";
         if (s.tipSavingsBps > 2_500) return "tipSavingsBps";
@@ -281,7 +287,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// breaks exactly one field of valid settings, `which` picks it. returns the name the library must report
     function _break(Settings memory s, uint256 which) internal pure returns (bytes32 name) {
         // forge-lint: disable-start(unsafe-typecast)
-        which = which % 42;
+        which = which % 46;
         if (which == 0) {
             (s.flatBps, name) = (10_001, "flatBps");
         } else if (which == 1) {
@@ -289,17 +295,17 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 2) {
             (s.avgScore, name) = (6_000_001, "avgScore");
         } else if (which == 3) {
-            (s.climbBaseBps, name) = (1_001, "climbBaseBps");
+            (s.dropPerCreditBps, name) = (1_001, "dropPerCreditBps");
         } else if (which == 4) {
-            (s.climbDoubleEvery, name) = (1 hours - 1, "climbDoubleEvery");
+            (s.dropPerCreditBps, name) = (0, "dropPerCreditBps");
         } else if (which == 5) {
-            (s.climbDoubleEvery, name) = (uint32(30 days) + 1, "climbDoubleEvery");
+            (s.dropFloorBps, name) = (4_999, "dropFloorBps");
         } else if (which == 6) {
-            (s.climbMaxBps, name) = (2_001, "climbMaxBps");
+            (s.dropFloorBps, name) = (10_001, "dropFloorBps");
         } else if (which == 7) {
-            (s.climbBaseBps, s.climbMaxBps, name) = (500, 499, "climbMaxBps");
+            (s.climbPerMinBps, name) = (0, "climbPerMinBps");
         } else if (which == 8) {
-            (s.dropBps, name) = (5_001, "dropBps");
+            (s.climbPerMinBps, name) = (1_001, "climbPerMinBps");
         } else if (which == 9) {
             (s.spendCapBps, name) = (99, "spendCapBps");
         } else if (which == 10) {
@@ -355,7 +361,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 35) {
             (s.exitSliceCredits, name) = (1_001, "exitSliceCredits");
         } else if (which == 36) {
-            (s.dropBps, name) = (499, "dropBps");
+            (s.ceilBps, name) = (9_999, "ceilBps");
         } else if (which == 37) {
             (s.exitAfter, name) = (1 hours - 1, "exitAfter");
         } else if (which == 38) {
@@ -364,8 +370,16 @@ abstract contract HandlerOwner is HandlerHouse {
             (s.rateCap, name) = (1e15 + 1, "rateCap");
         } else if (which == 40) {
             (s.exitLaneToBuybackBps, name) = (10_001, "exitLaneToBuybackBps");
-        } else {
+        } else if (which == 41) {
             (s.feeToBuybackBps, name) = (10_001, "feeToBuybackBps");
+        } else if (which == 42) {
+            (s.ceilBps, name) = (30_001, "ceilBps");
+        } else if (which == 43) {
+            (s.idleLoosenBps, name) = (2_001, "idleLoosenBps");
+        } else if (which == 44) {
+            (s.clampCredits, name) = (0, "clampCredits");
+        } else {
+            (s.clampCredits, name) = (1_001, "clampCredits");
         }
         // forge-lint: disable-end(unsafe-typecast)
     }

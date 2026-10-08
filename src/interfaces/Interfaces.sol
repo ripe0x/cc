@@ -103,13 +103,18 @@ struct Settings {
     uint16 flatBps;
     /// the score a flat credit is priced as and the "average credit" of the funded rule, 1e4 scale
     uint32 avgScore;
-    /// eth rate climb per hour at the start of a climb, bps
-    uint16 climbBaseBps;
-    /// the climb per hour doubles every this many seconds since the last fill
-    uint32 climbDoubleEvery;
-    uint16 climbMaxBps;
-    /// fall of the eth rate when the whole pot is spent, bps
-    uint16 dropBps;
+    /// fall of the eth rate per credit bought, bps of the rate before that credit
+    uint16 dropPerCreditBps;
+    /// within one minute the rate falls no lower than this share of the rate at the first fill of that minute, bps
+    uint16 dropFloorBps;
+    /// climb of the eth rate per minute, bps, compounded
+    uint16 climbPerMinBps;
+    /// the rate stays at or below this share of the ceiling anchor, bps. the anchor is the rate of the last fill
+    uint16 ceilBps;
+    /// growth of the ceiling anchor per full 10 minutes since the last fill, bps of the anchor
+    uint16 idleLoosenBps;
+    /// the climb stops where the hourly cap affords this many average credits
+    uint16 clampCredits;
     /// share of the pot that may be spent per hour window, bps
     uint16 spendCapBps;
     uint16 bonusCapBps;
@@ -214,10 +219,12 @@ library Mainnet {
         return Settings({
             flatBps: 10_000,
             avgScore: 4_330_000,
-            climbBaseBps: 100,
-            climbDoubleEvery: 24 hours,
-            climbMaxBps: 800,
-            dropBps: 2_000,
+            dropPerCreditBps: 50,
+            dropFloorBps: 8_000,
+            climbPerMinBps: 50,
+            ceilBps: 12_500,
+            idleLoosenBps: 200,
+            clampCredits: 20,
             spendCapBps: 2_000,
             bonusCapBps: 2_500,
             tipSavingsBps: 1_000,

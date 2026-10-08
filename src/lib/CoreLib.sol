@@ -13,6 +13,7 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Settings} from "../interfaces/Interfaces.sol";
 import {SettingsBounds} from "./SettingsBounds.sol";
 import {SettingsStore} from "./SettingsStore.sol";
+import {RateStore} from "./RateStore.sol";
 
 /// the one linked library of the Core: the settings write (validation, storage, event), the two pieces of
 /// transcendental math (the eth rate climb and the exit auction decay) and the pool manager swap of the coin buyback.
@@ -37,10 +38,12 @@ library CoreLib {
         Settings storage s = SettingsStore.load();
         s.flatBps = ns.flatBps;
         s.avgScore = ns.avgScore;
-        s.climbBaseBps = ns.climbBaseBps;
-        s.climbDoubleEvery = ns.climbDoubleEvery;
-        s.climbMaxBps = ns.climbMaxBps;
-        s.dropBps = ns.dropBps;
+        s.dropPerCreditBps = ns.dropPerCreditBps;
+        s.dropFloorBps = ns.dropFloorBps;
+        s.climbPerMinBps = ns.climbPerMinBps;
+        s.ceilBps = ns.ceilBps;
+        s.idleLoosenBps = ns.idleLoosenBps;
+        s.clampCredits = ns.clampCredits;
         s.spendCapBps = ns.spendCapBps;
         s.bonusCapBps = ns.bonusCapBps;
         s.tipSavingsBps = ns.tipSavingsBps;
@@ -74,17 +77,19 @@ library CoreLib {
         // forge-lint: disable-start(unsafe-typecast)
         s.flatBps = uint16(a);
         s.avgScore = uint32(a >> 16);
-        s.climbBaseBps = uint16(a >> 48);
-        s.climbDoubleEvery = uint32(a >> 64);
-        s.climbMaxBps = uint16(a >> 96);
-        s.dropBps = uint16(a >> 112);
-        s.spendCapBps = uint16(a >> 128);
-        s.bonusCapBps = uint16(a >> 144);
-        s.tipSavingsBps = uint16(a >> 160);
-        s.tipCapBps = uint16(a >> 176);
-        s.reimburseBps = uint16(a >> 192);
-        s.reimburseCapBps = uint16(a >> 208);
-        s.saleFloorBps = uint16(a >> 224);
+        s.dropPerCreditBps = uint16(a >> 48);
+        s.dropFloorBps = uint16(a >> 64);
+        s.climbPerMinBps = uint16(a >> 80);
+        s.ceilBps = uint16(a >> 96);
+        s.idleLoosenBps = uint16(a >> 112);
+        s.clampCredits = uint16(a >> 128);
+        s.spendCapBps = uint16(a >> 144);
+        s.bonusCapBps = uint16(a >> 160);
+        s.tipSavingsBps = uint16(a >> 176);
+        s.tipCapBps = uint16(a >> 192);
+        s.reimburseBps = uint16(a >> 208);
+        s.reimburseCapBps = uint16(a >> 224);
+        s.saleFloorBps = uint16(a >> 240);
         s.auctionDuration = uint32(b);
         s.exitAfter = uint32(b >> 32);
         s.saleToBuybackBps = uint16(b >> 64);
@@ -104,37 +109,47 @@ library CoreLib {
         // forge-lint: disable-end(unsafe-typecast)
     }
 
-    /// @notice the eth rate after climbing from checkpoint time `t` to `nowTs`, clamped at `cap`. `last` is the time of
-    /// the last fill. the climb per hour starts at `base` bps and doubles every `dbl` seconds since the last fill, up to
-    /// `maxBps`. at most 12 steps whatever the gap, and it never reverts: the Core calls it from `receive()`
-    function climb(
-        uint256 r,
-        uint256 cap,
-        uint256 last,
-        uint256 t,
-        uint256 nowTs,
-        uint256 base,
-        uint256 maxBps,
-        uint256 dbl
-    ) external pure returns (uint256) {
-        if (base == 0 || r == 0 || cap <= r) return r;
-        while (t < nowTs && r < cap) {
-            uint256 k = t > last ? (t - last) / dbl : 0;
-            uint256 bps = (base << k.min(16)).min(maxBps);
-            // from step 11 on the climb is at its maximum for good, so one step covers the rest
-            uint256 end = k >= 11 ? nowTs : nowTs.min(last + (k + 1) * dbl);
-            if (bps != 0) {
-                // forge-lint: disable-start(unsafe-typecast)
-                int256 x =
-                    FixedPointMathLib.lnWad(int256(1e18 + bps * 1e14)) * int256((end - t) * 1e18 / 1 hours) / 1e18;
-                // growing past the cap: the clamp decides, and the exponential cannot overflow
-                if (x >= FixedPointMathLib.lnWad(int256(cap * 1e18 / r))) return cap;
-                r = r.mulWad(uint256(FixedPointMathLib.expWad(x)));
-                // forge-lint: disable-end(unsafe-typecast)
-            }
-            t = end;
+    /// @notice the eth rate (wei per whole point) at `nowTs`, climbed from the stored rate `r` of checkpoint time `t`.
+    /// The rate compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops at the
+    /// lowest of three limits: `rateCap`, the funded clamp `pot * spendCapBps / (avgScore * clampCredits)`, and the
+    /// ceiling `ceilBps` of the anchor. The anchor is the rate of the last fill, grown by `idleLoosenBps` per full 10
+    /// minutes since the last fill at `anchorTime`. A rate at or above the limit is returned as stored. Never reverts:
+    /// the Core calls it from `receive()`
+    function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
+        external
+        view
+        returns (uint256)
+    {
+        if (nowTs == t) return r;
+        Settings storage s = SettingsStore.load();
+        uint256 cap = (pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits)).min(s.rateCap);
+        uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * ((nowTs - anchorTime) / 10 minutes);
+        cap = cap.min(RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8);
+        if (r == 0 || cap <= r) return r;
+        // forge-lint: disable-start(unsafe-typecast)
+        int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
+            * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;
+        // growing past the limit: the limit decides, and the exponential cannot overflow
+        if (x >= FixedPointMathLib.lnWad(int256(cap * 1e18 / r))) return cap;
+        return r.mulWad(uint256(FixedPointMathLib.expWad(x))).min(cap);
+        // forge-lint: disable-end(unsafe-typecast)
+    }
+
+    /// @notice the rate after one credit is bought at `paid`, and the anchor update of that fill. The rate falls
+    /// `dropPerCreditBps` below `paid`, and stays at or above `dropFloorBps` of the rate paid at the first fill of the
+    /// current minute bucket (`nowTs / 60`). `paid` becomes the ceiling anchor
+    function drop(uint256 paid, uint256 nowTs) external returns (uint256) {
+        Settings storage s = SettingsStore.load();
+        RateStore.Anchor storage a = RateStore.load();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint64 bucket = uint64(nowTs / 1 minutes);
+        if (bucket != a.minuteBucket) {
+            a.minuteBucket = bucket;
+            a.minuteStartRate = paid;
         }
-        return r.min(cap);
+        a.lastFillRate = paid;
+        return
+            (paid * (10_000 - s.dropPerCreditBps) / 10_000).max((a.minuteStartRate * s.dropFloorBps / 10_000).min(paid));
     }
 
     /// @notice `start` halved `elapsed / halfLife` times, with the fraction of a half life by the exponential. zero

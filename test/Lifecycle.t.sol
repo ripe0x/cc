@@ -7,6 +7,7 @@ import {Lane, ICreditStrategy, Mainnet, Settings} from "../src/interfaces/Interf
 import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {CreditIds} from "./utils/CreditIds.sol";
+import {BidModel} from "./utils/BidModel.sol";
 import {HostileTarget} from "./attackers/HostileTarget.sol";
 
 /// the full system on a fork: the live artcoins stack, the live credits stack, the real core. fees come from real
@@ -54,12 +55,14 @@ contract LifecycleSwapsTest is Fixture {
         _buyCoin(trader, 0.2 ether);
         assertTrue(core.funded());
         assertEq(core.ethRate(), core.RATE_START(), "no retroactive climb");
+        // a pot with room for 20 average credits lets the climb start
+        _buyCoin(trader, 10 ether);
         _warp(10 hours);
         assertGt(core.ethRate(), core.RATE_START());
 
-        // the climb stops where the hourly cap (20 percent of the pot) no longer buys one average credit
+        // the climb stops where the hourly cap (20 percent of the pot) buys 20 average credits
         _warp(2000 hours);
-        assertEq(core.ethRate(), core.ethPot() * 2000 / core.settings().avgScore);
+        assertEq(core.ethRate(), core.ethPot() * 2000 / (core.settings().avgScore * 20));
     }
 
     /// phase 2 doors are shut while the exit module slot is empty
@@ -98,8 +101,9 @@ contract LifecycleDoorsTest is Fixture {
     /// the average credit of the flat bid, the score every credit is priced as at the launch settings
     uint256 internal constant AVG = 4_330_000;
 
-    function _dropped(uint256 r, uint256 x, uint256 p) internal view returns (uint256) {
-        return r - r * core.settings().dropBps * x / (10_000 * p);
+    /// @dev the rate after one credit bought at `r`, where `start` is the rate of the first fill of the same minute
+    function _dropped(uint256 r, uint256 start) internal view returns (uint256) {
+        return BidModel.dropOnce(core.settings(), r, start);
     }
 
     /// sellForEth pays the climbed ceiling out of a pot that real swaps filled, drops the rate per credit, and the
@@ -122,7 +126,7 @@ contract LifecycleDoorsTest is Fixture {
         for (uint256 i; i < 3; ++i) {
             prices[i] = AVG * r / 1e4;
             total += prices[i];
-            r = _dropped(r, prices[i], p);
+            r = _dropped(r, rate);
             p -= prices[i];
         }
 
@@ -157,7 +161,7 @@ contract LifecycleDoorsTest is Fixture {
         uint256[] memory ids = _credits(seller, 2);
         _warp(10 hours);
         uint256 first = core.ceilingOf(ids[0]);
-        uint256 sum = first + AVG * _dropped(core.ethRate(), first, core.ethPot()) / 1e4;
+        uint256 sum = first + AVG * _dropped(core.ethRate(), core.ethRate()) / 1e4;
         vm.prank(seller);
         vm.expectRevert(ICore.Slippage.selector);
         core.sellForEth(ids, sum + 1);
@@ -223,7 +227,7 @@ contract LifecycleDoorsTest is Fixture {
         assertEq(ICreditStrategy(STRATEGY).nftForSale(id), 0, "the strategy sold it");
         assertEq(core.ethPot(), pot - price - tip);
         assertEq(address(core).balance, balance - price - tip);
-        assertEq(core.rateAtCheckpoint(), _dropped(rate, price + tip, pot));
+        assertEq(core.rateAtCheckpoint(), _dropped(rate, rate));
         assertEq(core.lastFillTime(), block.timestamp);
         (bool inPile, Lane lane, uint256 cost,) = core.creditInfo(id);
         assertTrue(inPile);

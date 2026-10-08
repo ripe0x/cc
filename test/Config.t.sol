@@ -45,7 +45,7 @@ contract ConfigTest is Fixture {
         assertEq(f.name, "CC");
         assertEq(f.symbol, "CC");
         assertEq(f.salt, keccak256("CC"));
-        assertEq(f.rateStart, 1.54e13);
+        assertEq(f.rateStart, 2.0554e13);
         assertEq(f.supply, 1_000_000_000e18);
         assertEq(f.stack.auctionFactory, Mainnet.AUCTION_FACTORY);
         assertEq(abi.encode(f.settings), abi.encode(Mainnet.defaultSettings()), "settings block is the launch values");
@@ -448,32 +448,29 @@ contract ConfigTest is Fixture {
 
     /// the bounds of the preflight rows and of the deploy guard are the Core's: every field, both edges
     function test_settingsBoundsEveryFieldBothEdges() public view {
-        uint256[29] memory lo = SettingsFields.lo();
-        uint256[29] memory hi = SettingsFields.hi();
-        bytes32[29] memory names = SettingsFields.names();
+        uint256[31] memory lo = SettingsFields.lo();
+        uint256[31] memory hi = SettingsFields.hi();
+        bytes32[31] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
-            // above the top, and the top itself (the three bound by another field start from a free partner)
-            if (i == 2) s.climbMaxBps = 2_000;
-            if (i == 21) s.xRateCap = 10_000;
+            // above the top, and the top itself (the two bound by another field start from a free partner)
+            if (i == 23) s.xRateCap = 10_000;
             SettingsFields.set(s, i, hi[i]);
             assertEq(SettingsBounds.firstViolation(s), bytes32(0), "the top edge is inside");
             s = Mainnet.defaultSettings();
             SettingsFields.set(s, i, hi[i] + 1);
             assertEq(SettingsBounds.firstViolation(s), names[i], "above the top");
             // below the bottom, for the fields that have one
-            if (lo[i] == 0 && i != 4 && i != 21) continue;
+            if (lo[i] == 0 && i != 23) continue;
             s = Mainnet.defaultSettings();
-            if (i == 4) {
-                SettingsFields.set(s, 4, s.climbBaseBps - 1);
-            } else if (i == 21) {
-                SettingsFields.set(s, 20, s.xRateFloor - 1);
+            if (i == 23) {
+                SettingsFields.set(s, 22, s.xRateFloor - 1);
             } else {
                 SettingsFields.set(s, i, lo[i] - 1);
             }
             bytes32 got = SettingsBounds.firstViolation(s);
             // the cap below the floor names the floor, as the Core does
-            assertEq(got, i == 21 ? bytes32("xRateFloor") : names[i], "below the bottom");
+            assertEq(got, i == 23 ? bytes32("xRateFloor") : names[i], "below the bottom");
         }
     }
 
@@ -491,7 +488,7 @@ contract ConfigTest is Fixture {
         preflight(c, d2);
         assertEq(_failedNames(), "settings inside the bounds");
         c = lc;
-        c.settings.climbMaxBps = c.settings.climbBaseBps - 1;
+        c.settings.dropFloorBps = 4_999;
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "settings"));
         this.requireExt(c);
         // the sale settings of the controller have their own row and guard

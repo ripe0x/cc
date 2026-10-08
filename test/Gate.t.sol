@@ -30,8 +30,8 @@ contract GateTest is Fixture {
         core.sellForEth(ids);
     }
 
-    /// two statements sit unsold on the house and nothing closes: the bid is open, the climb restarts at the base tier
-    /// after a fill and runs on, a statement sale changes none of it, and the pot is never gated on inventory
+    /// two statements sit unsold on the house and nothing closes: the bid is open, the climb runs on from the dropped
+    /// rate after a fill, a statement sale changes none of it, and the pot is never gated on inventory
     function test_unsoldStatementsNeverStopTheBidOrTheClimb() public {
         _skipSniperWindow();
         _liftRateCap();
@@ -45,16 +45,16 @@ contract GateTest is Fixture {
         _sellOne();
         assertEq(core.heldStatements().length, 2, "still unsold");
         assertTrue(core.funded());
-        // the climb is clamped by the hourly cap the pot affords, so give the pot room for ten more hours of it. a v2 buy
+        // the climb is clamped by the hourly cap the pot affords, so give the pot room for ten more minutes of it. a v2 buy
         // lands about 5.2 points in the pot, not the 9.5 of v1, so the one sale above left less of it
         _fundPot(core.ethPot() + 5 ether);
         uint256 r0 = core.rateAtCheckpoint();
         uint256 t0 = core.checkpointTime();
-        _warp(10 hours);
+        _warp(10 minutes);
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 want =
-            r0.mulWad(uint256(FixedPointMathLib.powWad(1.01e18, int256((block.timestamp - t0) * 1e18 / 1 hours))));
-        assertApproxEqRel(core.ethRate(), want, 1e12, "base tier right after a fill, ten hours");
+            r0.mulWad(uint256(FixedPointMathLib.powWad(1.005e18, int256((block.timestamp - t0) * 1e18 / 1 minutes))));
+        assertApproxEqRel(core.ethRate(), want, 1e12, "0.5 percent a minute right after a fill, ten minutes");
         assertGt(core.ethRate(), r0);
         // one of them sells on the house: nothing about the bid changes, and the other keeps waiting
         _bid(funder, s1, _live(s1).reserve);
@@ -86,9 +86,9 @@ contract GateFuzzTest is Fixture {
         if (pick % 4 == 1) s.spendCapBps = uint16(100 + (seed >> 16) % 4_901);
         if (pick % 4 == 2) s.flatBps = uint16((seed >> 16) % 10_001);
         if (pick % 4 == 3) {
-            s.climbBaseBps = uint16((seed >> 16) % 1_001);
-            s.climbMaxBps = uint16(uint256(s.climbBaseBps) + (seed >> 32) % 1_000);
-            s.climbDoubleEvery = uint32(1 hours + (seed >> 48) % 10 days);
+            s.climbPerMinBps = uint16(1 + (seed >> 16) % 1_000);
+            s.ceilBps = uint16(10_000 + (seed >> 32) % 20_001);
+            s.idleLoosenBps = uint16((seed >> 48) % 2_001);
         }
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);

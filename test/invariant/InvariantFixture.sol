@@ -189,8 +189,16 @@ abstract contract InvariantFixture is Fixture {
         for (uint256 i; i < ethN; ++i) {
             ethIds[i] = ids[i];
         }
-        vm.prank(filler);
-        core.sellForEth(ethIds);
+        // in batches of 100: one call of all the credits would not fit the 60M gas of a call
+        for (uint256 from; from < ethN; from += 100) {
+            uint256 n = ethN - from < 100 ? ethN - from : 100;
+            uint256[] memory batch = new uint256[](n);
+            for (uint256 j; j < n; ++j) {
+                batch[j] = ethIds[from + j];
+            }
+            vm.prank(filler);
+            core.sellForEth(batch);
+        }
         uint256 firstStatement = STATEMENTS.supply() + 1;
         for (uint256 i; i < COMPOSES; ++i) {
             vm.prank(keeper);

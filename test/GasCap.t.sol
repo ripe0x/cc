@@ -701,8 +701,8 @@ contract GasCapTest is SeaportBase {
         Settings memory s = core.settings();
         s.flatBps = 9_000;
         s.avgScore = 4_000_000;
-        s.climbBaseBps = 90;
-        s.dropBps = 1_500;
+        s.climbPerMinBps = 90;
+        s.dropPerCreditBps = 150;
         s.saleFloorBps = 8_000;
         s.auctionDuration = 2 days;
         s.saleToBuybackBps = 4_000;

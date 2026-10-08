@@ -383,12 +383,12 @@ contract FeeFlowTest is FeeBase {
         uint256 old = core.ethRate();
         assertGt(old, core.RATE_START());
         Settings memory s = core.settings();
-        s.climbBaseBps = 0;
-        s.climbMaxBps = 0;
+        s.ceilBps = 10_000;
+        s.idleLoosenBps = 0;
         _setSettings(s);
         assertEq(core.rateAtCheckpoint(), old);
         vm.warp(block.timestamp + 50 hours);
-        assertEq(core.ethRate(), old, "no climb after the change");
+        assertEq(core.ethRate(), old, "no climb after the change: the new ceiling sits below the rate");
         _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(core.rateAtCheckpoint(), old, "the fee locked the unchanged rate");
         assertEq(core.checkpointTime(), block.timestamp);
@@ -613,10 +613,12 @@ contract ReceiveSettingsTest is FeeBase {
         // forge-lint: disable-start(unsafe-typecast)
         s.flatBps = uint16(_pick(seed, 0, 0, 10_000));
         s.avgScore = uint32(_pick(seed, 1, 800_000, 6_000_000));
-        s.climbBaseBps = uint16(_pick(seed, 2, 0, 1_000));
-        s.climbDoubleEvery = uint32(_pick(seed, 3, 1 hours, 30 days));
-        s.climbMaxBps = uint16(_pick(seed, 4, s.climbBaseBps, 2_000));
-        s.dropBps = uint16(_pick(seed, 5, 500, 5_000));
+        s.dropPerCreditBps = uint16(_pick(seed, 2, 1, 1_000));
+        s.dropFloorBps = uint16(_pick(seed, 3, 5_000, 10_000));
+        s.climbPerMinBps = uint16(_pick(seed, 4, 1, 1_000));
+        s.ceilBps = uint16(_pick(seed, 5, 10_000, 30_000));
+        s.idleLoosenBps = uint16(_pick(seed, 9, 0, 2_000));
+        s.clampCredits = uint16(_pick(seed, 10, 1, 1_000));
         s.spendCapBps = uint16(_pick(seed, 6, 100, 5_000));
         s.saleToBuybackBps = uint16(_pick(seed, 7, 0, 10_000));
         s.rateCap = uint64(_pick(seed, 8, 1e11, 1e15));
@@ -657,9 +659,10 @@ contract ReceiveSettingsTest is FeeBase {
         vm.prank(owner);
         core.setRate(1e11);
         Settings memory s = core.settings();
-        s.climbBaseBps = 1_000;
-        s.climbMaxBps = 2_000;
-        s.climbDoubleEvery = 1 hours;
+        s.climbPerMinBps = 1_000;
+        s.ceilBps = 30_000;
+        s.idleLoosenBps = 2_000;
+        s.clampCredits = 1;
         s.spendCapBps = 5_000;
         s.avgScore = 800_000;
         _setSettings(s);
@@ -679,7 +682,7 @@ contract ReceiveSettingsTest is FeeBase {
         for (uint256 i; i < 3; ++i) {
             Settings memory s = core.settings();
             s.flatBps = uint16(i * 5_000 > 10_000 ? 10_000 : i * 5_000);
-            s.dropBps = uint16(500 * (i + 1));
+            s.dropPerCreditBps = uint16(50 * (i + 1));
             s.saleToBuybackBps = 10_000;
             s.buybackDelay = 1;
             // forge-lint: disable-start(unsafe-typecast)

@@ -11,10 +11,12 @@ library SettingsBounds {
     function firstViolation(Settings memory s) internal pure returns (bytes32) {
         if (s.flatBps > 10_000) return "flatBps";
         if (s.avgScore < 800_000 || s.avgScore > 6_000_000) return "avgScore";
-        if (s.climbBaseBps > 1_000) return "climbBaseBps";
-        if (s.climbDoubleEvery < 1 hours || s.climbDoubleEvery > 30 days) return "climbDoubleEvery";
-        if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2_000) return "climbMaxBps";
-        if (s.dropBps < 500 || s.dropBps > 5_000) return "dropBps";
+        if (s.dropPerCreditBps < 1 || s.dropPerCreditBps > 1_000) return "dropPerCreditBps";
+        if (s.dropFloorBps < 5_000 || s.dropFloorBps > 10_000) return "dropFloorBps";
+        if (s.climbPerMinBps < 1 || s.climbPerMinBps > 1_000) return "climbPerMinBps";
+        if (s.ceilBps < 10_000 || s.ceilBps > 30_000) return "ceilBps";
+        if (s.idleLoosenBps > 2_000) return "idleLoosenBps";
+        if (s.clampCredits < 1 || s.clampCredits > 1_000) return "clampCredits";
         if (s.spendCapBps < 100 || s.spendCapBps > 5_000) return "spendCapBps";
         if (s.bonusCapBps > 5_000) return "bonusCapBps";
         if (s.tipSavingsBps > 2_500) return "tipSavingsBps";

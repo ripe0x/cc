@@ -414,7 +414,7 @@ contract ReviewDeployTest is ReviewHarness {
             '"poolFee": 8388608',
             '"flatBps": 10000',
             '"avgScore": 4330000',
-            '"climbDoubleEvery": 86400',
+            '"dropFloorBps": 8000',
             '"buybackSlice": 1000000000000000000'
         ];
         string[12] memory to = [
@@ -428,7 +428,7 @@ contract ReviewDeployTest is ReviewHarness {
             '"poolFee": 16777216',
             '"flatBps": 65536',
             '"avgScore": 4294967296',
-            '"climbDoubleEvery": 4294967296',
+            '"dropFloorBps": 65536',
             '"buybackSlice": 340282366920938463463374607431768211456'
         ];
         string[12] memory keys = [
@@ -442,7 +442,7 @@ contract ReviewDeployTest is ReviewHarness {
             ".stack.poolFee",
             ".settings.flatBps",
             ".settings.avgScore",
-            ".settings.climbDoubleEvery",
+            ".settings.dropFloorBps",
             ".settings.buybackSlice"
         ];
         for (uint256 i; i < from.length; ++i) {

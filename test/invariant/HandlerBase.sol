@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {BidModel} from "../utils/BidModel.sol";
+import {RateStore} from "../../src/lib/RateStore.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
@@ -678,6 +680,8 @@ abstract contract HandlerBase is Test {
         uint256 rate;
         uint256 pot;
         bool funded;
+        uint256 anchor;
+        uint256 lastFill;
     }
 
     function _rs() internal view returns (RS memory s) {
@@ -685,19 +689,38 @@ abstract contract HandlerBase is Test {
         s.rate = core.ethRate();
         s.pot = core.ethPot();
         s.funded = s.pot * s.st.spendCapBps >= uint256(s.st.avgScore) * s.rate;
+        (s.anchor,,) = _anchorState();
+        s.lastFill = core.lastFillTime();
     }
 
-    /// whole hours as a wad, for the growth factor of the rate
+    /// the bid anchor state of the core, read from its storage: the rate of the last fill, the rate of the first fill in
+    /// the current minute bucket, and that bucket
+    function _anchorState() internal view returns (uint256 lastFillRate, uint256 minuteStartRate, uint256 bucket) {
+        bytes32 slot = RateStore.SLOT;
+        lastFillRate = uint256(vm.load(address(core), slot));
+        minuteStartRate = uint256(vm.load(address(core), bytes32(uint256(slot) + 1)));
+        bucket = uint64(uint256(vm.load(address(core), bytes32(uint256(slot) + 2))));
+    }
+
+    /// the rate a fill in the next transaction starts its minute from: the stored start inside the current minute
+    /// bucket, `rate` (the rate it pays) when the bucket is new
+    function _minuteStartNow(uint256 rate) internal view returns (uint256) {
+        (, uint256 start, uint256 bucket) = _anchorState();
+        return bucket == block.timestamp / 60 ? start : rate;
+    }
+
+    /// minutes as a wad exponent, for the growth factor of the rate
     function _growth(uint256 bps, uint256 dt) internal pure returns (uint256) {
         // forge-lint: disable-next-line(unsafe-typecast)
-        return uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(dt * 1e18 / 3600)));
+        return uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(dt * 1e18 / 60)));
     }
 
     /// invariant 6 and its companions, against the settings in force over the interval (they cannot change inside
     /// one action or one warp, only the owner's calls change them and those are checked on their own). the rate does
-    /// not rise in an interval that began unfunded. across a warp it climbs at most `climbMaxBps` an hour and, while
-    /// funded and under the clamp, at least `climbBaseBps` an hour. with a zero base it does not move at all. the
-    /// stored funded flag must agree with the pot and the stored rate
+    /// not rise in an interval that began unfunded. across a warp of a funded rate it ends between the climb of
+    /// `climbPerMinBps` a minute from the rate it started at, stopped at the limit at the end of the interval, and the
+    /// larger of that climb and the limit: a rate held at the ceiling follows the ceiling as it loosens. the stored
+    /// funded flag must agree with the pot and the stored rate
     function _rsCheck(RS memory s, uint256 dt) internal {
         uint256 rate1 = core.ethRate();
         if (!s.funded && rate1 > s.rate) {
@@ -705,25 +728,18 @@ abstract contract HandlerBase is Test {
         }
         if (dt == 0) {
             if (rate1 > s.rate) _flag(V_RATE_BOUND, "rate rose with no time passing");
-        } else if (s.st.climbBaseBps == 0) {
-            if (rate1 != s.rate) _flag(V_RATE_BOUND, "rate moved with a zero climb");
-        } else {
-            uint256 maxR = s.rate * _growth(s.st.climbMaxBps, dt) / 1e18;
-            if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above climbMaxBps an hour");
-            if (s.funded) {
-                uint256 cap = s.pot * s.st.spendCapBps / s.st.avgScore;
-                if (cap > s.st.rateCap) cap = s.st.rateCap;
-                uint256 minR = s.rate;
-                if (s.rate < cap) {
-                    minR = s.rate * _growth(s.st.climbBaseBps, dt) / 1e18;
-                    if (minR > cap) minR = cap;
-                }
-                if (rate1 + rate1 / 1e9 + 4 < minR) {
-                    _flag(V_RATE_BOUND, "funded rate climbed below climbBaseBps an hour");
-                }
-            } else if (rate1 != s.rate) {
-                _flag(V_RATE_UNFUNDED, "unfunded rate moved");
+        } else if (s.funded) {
+            uint256 grown = s.rate * _growth(s.st.climbPerMinBps, dt) / 1e18;
+            uint256 limit = BidModel.clamp(s.st, s.pot).min(BidModel.ceiling(s.st, s.anchor, block.timestamp - s.lastFill));
+            uint256 maxR = grown.max(limit);
+            if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above the climb or the limit");
+            uint256 minR = s.rate;
+            if (s.rate < limit) minR = grown.min(limit);
+            if (rate1 + rate1 / 1e9 + 4 < minR) {
+                _flag(V_RATE_BOUND, "funded rate climbed below climbPerMinBps a minute");
             }
+        } else if (rate1 != s.rate) {
+            _flag(V_RATE_UNFUNDED, "unfunded rate moved");
         }
         _fundedCheck();
     }
@@ -796,8 +812,8 @@ abstract contract HandlerBase is Test {
     }
 
     /// what the rate becomes after a spend of x from pot p.
-    function _dropped(uint256 r, uint256 x, uint256 p, uint256 dropBps) internal pure returns (uint256) {
-        return r - r * dropBps * x / (10_000 * p);
+    function _dropped(Settings memory st, uint256 r, uint256 start) internal pure returns (uint256) {
+        return BidModel.dropOnce(st, r, start);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -1128,6 +1144,7 @@ abstract contract HandlerBase is Test {
         uint256 bal;
         uint256 pot;
         uint256 rate;
+        uint256 minuteStart;
         uint256 sellerBal;
         uint256[] ceil;
         uint256[] score;
@@ -1173,6 +1190,7 @@ abstract contract HandlerBase is Test {
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
+        p.minuteStart = _minuteStartNow(p.rate);
         p.sellerBal = who.balance;
         p.ceil = new uint256[](n);
         p.score = new uint256[](n);
@@ -1227,17 +1245,15 @@ abstract contract HandlerBase is Test {
         _eth(p.bal, paid, 0, "sellForEth");
         if (core.ethPot() != p.pot - total) _flag(V_POT, "sellForEth pot not reduced by the price");
 
-        // the drop on each fill, independently: r -= r * dropBps * x / pot, pot measured before each spend
+        // the drop on each fill, independently: dropPerCreditBps per credit, no lower than the minute floor
         uint256 r = p.rate;
-        uint256 pot = p.pot;
         for (uint256 i; i < ids.length; ++i) {
             _recordSpend(costs[i], p.pot);
-            r = _dropped(r, costs[i], pot, st.dropBps);
-            pot -= costs[i];
+            r = _dropped(st, r, p.minuteStart);
             _addCredit(ids[i], 0, costs[i]);
             _removeFrom(inventory[who], ids[i]);
         }
-        if (core.ethRate() != r) _flag(V_RATE_BOUND, "drop on fill is not proportional to the share spent");
+        if (core.ethRate() != r) _flag(V_RATE_BOUND, "drop on fill differs from dropPerCreditBps with the minute floor");
         if (core.lastFillTime() != block.timestamp) _flag(V_RATE_BOUND, "fill did not reset the fill clock");
     }
 
@@ -1306,6 +1322,7 @@ abstract contract HandlerBase is Test {
         uint256 bal;
         uint256 pot;
         uint256 rate;
+        uint256 minuteStart;
         uint256 keeperBal;
         uint256 ceiling;
         uint256 score;
@@ -1325,6 +1342,7 @@ abstract contract HandlerBase is Test {
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
+        p.minuteStart = _minuteStartNow(p.rate);
         p.keeperBal = keeper.balance;
         p.ceiling = core.ceilingOf(id);
         p.score = _score(id);
@@ -1366,8 +1384,8 @@ abstract contract HandlerBase is Test {
         _eth(p.bal, tip + expectCost, 0, "buyListing");
         if (core.ethPot() != p.pot - cost - tip) _flag(V_POT, "listing pot not reduced by cost and tip");
         _recordSpend(cost + tip, p.pot);
-        if (core.ethRate() != _dropped(p.rate, cost + tip, p.pot, st.dropBps)) {
-            _flag(V_RATE_BOUND, "drop on fill is not proportional to the share spent");
+        if (core.ethRate() != _dropped(st, p.rate, p.minuteStart)) {
+            _flag(V_RATE_BOUND, "drop on fill differs from dropPerCreditBps with the minute floor");
         }
         if (CREDITS.ownerOf(id) != address(core)) _flag(V_MODEL, "listing did not deliver the credit");
         gone[id] = true;

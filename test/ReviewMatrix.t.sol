@@ -508,17 +508,19 @@ contract ReviewMatrixConfigTest is ReviewHarness {
 /// @notice the config mutation matrix, part two: every field of the settings, above the top, below the bottom, a plausible
 /// wrong value and both edges
 contract ReviewMatrixSettingsTest is ReviewHarness {
-    uint256 internal constant N_SETTINGS = 145;
+    uint256 internal constant N_SETTINGS = 155;
 
     /// @dev a plausible value that is not the launch value, inside the bounds, for each field
-    function _wrong() internal pure returns (uint256[29] memory) {
+    function _wrong() internal pure returns (uint256[31] memory) {
         return [
             uint256(5000),
             3_000_000,
-            200,
-            12 hours,
-            1200,
-            1000,
+            100,
+            9000,
+            100,
+            15_000,
+            100,
+            10,
             3000,
             1000,
             500,
@@ -558,10 +560,10 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// @dev kinds: 0 above the top, 1 below the bottom, 2 a plausible wrong value, 3 the top edge, 4 the bottom edge.
     /// an empty label means the field has no such case
     function _mutSettings(uint256 k) internal view returns (Mut memory m) {
-        uint256 f = k % 29;
-        uint256 kind = k / 29;
-        uint256[29] memory lo = SettingsFields.lo();
-        uint256[29] memory hi = SettingsFields.hi();
+        uint256 f = k % 31;
+        uint256 kind = k / 31;
+        uint256[31] memory lo = SettingsFields.lo();
+        uint256[31] memory hi = SettingsFields.hi();
         string memory nm = _trim(SettingsFields.names()[f]);
         m = _m("", kind <= 1 ? Class.Pre : Class.Hash);
         Settings memory s = m.c.settings;
@@ -569,25 +571,22 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             SettingsFields.set(s, f, hi[f] + 1);
             m.label = string.concat("settings.", nm, " ", vm.toString(hi[f] + 1), " above the top");
         } else if (kind == 1) {
-            if (lo[f] == 0 && f != 4 && f != 21) return m;
-            if (f == 4) SettingsFields.set(s, 4, s.climbBaseBps - 1);
-            else if (f == 21) SettingsFields.set(s, 20, s.xRateFloor - 1);
+            if (lo[f] == 0 && f != 23) return m;
+            if (f == 23) SettingsFields.set(s, 22, s.xRateFloor - 1);
             else SettingsFields.set(s, f, lo[f] - 1);
             m.label = string.concat("settings.", nm, " one below the bottom");
         } else if (kind == 2) {
             SettingsFields.set(s, f, _wrong()[f]);
             m.label = string.concat("settings.", nm, " ", vm.toString(_wrong()[f]), " (valid, wrong)");
         } else if (kind == 3) {
-            if (f == 2) s.climbMaxBps = 2000;
-            if (f == 21) s.xRateFloor = s.xRateCap;
+            if (f == 23) s.xRateFloor = s.xRateCap;
             else SettingsFields.set(s, f, hi[f]);
             m.label = string.concat("settings.", nm, " ", vm.toString(hi[f]), " the top edge");
         } else {
-            if (lo[f] == 0 && f != 4 && f != 20) return m;
-            if (f == 4) s.climbMaxBps = s.climbBaseBps;
-            else if (f == 20) s.xRateCap = s.xRateFloor;
+            if (lo[f] == 0 && f != 22) return m;
+            if (f == 22) s.xRateCap = s.xRateFloor;
             // the lowest rate cap that still holds the launch rate
-            else if (f == 26) s.rateCap = uint64(base.rateStart);
+            else if (f == 28) s.rateCap = uint64(base.rateStart);
             else SettingsFields.set(s, f, lo[f]);
             m.label = string.concat("settings.", nm, " the bottom edge");
         }
@@ -602,19 +601,19 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// the settings group in parts: every field above the top and below the bottom, a plausible wrong value for every
     /// field, then the edges that must still be accepted
     function test_matrix_settingsViolations() public {
-        _matrix(2, 0, 58);
+        _matrix(2, 0, 62);
     }
 
     function test_matrix_settingsWrongValues() public {
-        _matrix(2, 58, 87);
+        _matrix(2, 62, 93);
     }
 
     function test_matrix_settingsTopEdges() public {
-        _matrix(2, 87, 116);
+        _matrix(2, 93, 124);
     }
 
     function test_matrix_settingsBottomEdges() public {
-        _matrix(2, 116, N_SETTINGS);
+        _matrix(2, 124, N_SETTINGS);
     }
 }
 

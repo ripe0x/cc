@@ -74,7 +74,7 @@ abstract contract ConfigReader is CommonBase {
     function defaultConfig() internal pure returns (LaunchConfig memory c) {
         c.stack = Mainnet.defaultStack();
         c.symbol = "CC";
-        c.rateStart = 15_400_000_000_000;
+        c.rateStart = 20_554_000_000_000;
         c.settings = Mainnet.defaultSettings();
         c.sale = Mainnet.defaultSale();
         c.supply = 1_000_000_000e18;
@@ -132,10 +132,12 @@ abstract contract ConfigReader is CommonBase {
         Settings memory s = c.settings;
         s.flatBps = _u16(j, ".settings.flatBps");
         s.avgScore = _u32(j, ".settings.avgScore");
-        s.climbBaseBps = _u16(j, ".settings.climbBaseBps");
-        s.climbDoubleEvery = _u32(j, ".settings.climbDoubleEvery");
-        s.climbMaxBps = _u16(j, ".settings.climbMaxBps");
-        s.dropBps = _u16(j, ".settings.dropBps");
+        s.dropPerCreditBps = _u16(j, ".settings.dropPerCreditBps");
+        s.dropFloorBps = _u16(j, ".settings.dropFloorBps");
+        s.climbPerMinBps = _u16(j, ".settings.climbPerMinBps");
+        s.ceilBps = _u16(j, ".settings.ceilBps");
+        s.idleLoosenBps = _u16(j, ".settings.idleLoosenBps");
+        s.clampCredits = _u16(j, ".settings.clampCredits");
         s.spendCapBps = _u16(j, ".settings.spendCapBps");
         s.bonusCapBps = _u16(j, ".settings.bonusCapBps");
         s.tipSavingsBps = _u16(j, ".settings.tipSavingsBps");

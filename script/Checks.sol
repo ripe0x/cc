@@ -543,7 +543,7 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.rateStart),
                 " wei per point, a flat credit opens at about ",
                 vm.toString(c.rateStart * c.settings.avgScore / 1e4),
-                " wei (launch day rule: 0.75 times the market price of a credit)"
+                " wei (launch day rule: the market price of a credit)"
             )
         );
         _info(
@@ -582,22 +582,26 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.settings.avgScore),
                 " spendCapBps ",
                 vm.toString(c.settings.spendCapBps),
-                " dropBps ",
-                vm.toString(c.settings.dropBps),
+                " clampCredits ",
+                vm.toString(c.settings.clampCredits),
                 " rateCap ",
                 vm.toString(c.settings.rateCap)
             )
         );
         _info(
-            "signoff: climb",
+            "signoff: drop and climb",
             string.concat(
-                "base ",
-                vm.toString(c.settings.climbBaseBps),
-                " max ",
-                vm.toString(c.settings.climbMaxBps),
-                " bps per hour, doubling every ",
-                vm.toString(c.settings.climbDoubleEvery),
-                "s"
+                "drop per credit ",
+                vm.toString(c.settings.dropPerCreditBps),
+                " floor ",
+                vm.toString(c.settings.dropFloorBps),
+                " climb per minute ",
+                vm.toString(c.settings.climbPerMinBps),
+                " ceiling ",
+                vm.toString(c.settings.ceilBps),
+                " loosen per 10 minutes ",
+                vm.toString(c.settings.idleLoosenBps),
+                " (bps)"
             )
         );
         _info(

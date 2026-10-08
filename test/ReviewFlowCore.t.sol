@@ -21,17 +21,18 @@ contract ReviewFlowCoreTest is Fixture {
     /// @dev what one credit costs on the open market at the pin, used only to price what an accomplice paid
     uint256 internal constant MARKET = 0.0089 ether;
 
-    function _hot(uint256 spendCap, uint256 drop, uint256 avg) internal view returns (Settings memory h) {
+    function _hot(uint256 spendCap, uint256 avg) internal view returns (Settings memory h) {
         h = core.settings();
         h.spendCapBps = uint16(spendCap);
-        h.dropBps = uint16(drop);
+        h.dropPerCreditBps = 1;
+        h.dropFloorBps = 10_000;
         h.avgScore = uint32(avg);
     }
 
-    /// the owner raises the rate cap and sets the hot (but in bounds) settings: spend cap, drop and score at their
-    /// loosest. the rate is then set to the top of the rate bounds
+    /// the owner raises the rate cap and sets the hot (but in bounds) settings: spend cap, score and the rate drop at
+    /// their loosest (a floor of 100 percent holds the rate through a batch). the rate is then set to the top of the rate bounds
     function _hotSettings() internal view returns (Settings memory h) {
-        h = _hot(5_000, 500, 6_000_000);
+        h = _hot(5_000, 6_000_000);
         h.rateCap = uint64(RATE_START_MAX_WEI);
     }
 
@@ -210,8 +211,11 @@ contract ReviewFlowCoreTest is Fixture {
 
     function _allMin() internal pure returns (Settings memory m) {
         m.avgScore = 800_000;
-        m.climbDoubleEvery = 1 hours;
-        m.dropBps = 500;
+        m.dropPerCreditBps = 1;
+        m.dropFloorBps = 5_000;
+        m.climbPerMinBps = 1;
+        m.ceilBps = 10_000;
+        m.clampCredits = 1;
         m.spendCapBps = 100;
         m.saleFloorBps = 1_000;
         m.auctionDuration = 6 hours;
@@ -228,9 +232,11 @@ contract ReviewFlowCoreTest is Fixture {
             10_000,
             6_000_000,
             1_000,
-            30 days,
+            10_000,
+            1_000,
+            30_000,
             2_000,
-            5_000,
+            1_000,
             5_000,
             5_000,
             2_500,
@@ -276,7 +282,8 @@ contract ReviewFlowCoreTest is Fixture {
             // the three raw words hold exactly the values and nothing else
             bytes32 slot = 0xb5805f89ef62cd999f965a45fb6f4c11141caa04e5c4acba9c2552ef76902804;
             uint256 w0 = uint256(vm.load(address(core), slot));
-            assertEq(w0 >> 240, 0, "slot 0 top bits clear");
+            assertEq(uint16(w0 >> 240), two[i].saleFloorBps, "the sale floor sits at bits 240 to 255");
+            assertEq(uint16(w0 >> 128), two[i].clampCredits, "the clamp credits sit at bits 128 to 143");
             uint256 w2 = uint256(vm.load(address(core), bytes32(uint256(slot) + 2)));
             assertEq(w2 >> 208, 0, "slot 2 top bits clear");
             assertEq(uint16(w2 >> 192), two[i].feeToBuybackBps, "the fee share sits at bits 192 to 207");
@@ -288,7 +295,6 @@ contract ReviewFlowCoreTest is Fixture {
     function _hostileMix() internal pure returns (Settings memory m) {
         m = _allMax();
         m.avgScore = 800_000;
-        m.climbDoubleEvery = 1 hours;
         m.xAuctionHalfLife = 10 minutes;
         m.xRateFloor = 0;
         m.xRateCap = 0;
@@ -454,8 +460,8 @@ contract ReviewFlowCoreTest is Fixture {
     function test_dirtyCalldataWordsAreRefused() public {
         Settings memory base = core.settings();
         bytes memory good = abi.encodeCall(ICore.setSettings, (base));
-        assertEq(good.length, 4 + 29 * 32);
-        for (uint256 i; i < 29; ++i) {
+        assertEq(good.length, 4 + 31 * 32);
+        for (uint256 i; i < 31; ++i) {
             bytes memory bad = bytes.concat(good);
             uint256 off = 32 + 4 + i * 32;
             uint256 w;
@@ -480,7 +486,7 @@ contract ReviewFlowCoreTest is Fixture {
         assertFalse(ok3);
     }
 
-    /// gas of the hook's push into receive() after idle gaps, at launch settings and at the slowest doubling
+    /// gas of the hook's push into receive() after idle gaps, at launch settings and at the fastest climb and loosening
     function test_receiveGasByGap() public {
         _skipSniperWindow();
         _fundPot(5 ether);
@@ -489,9 +495,9 @@ contract ReviewFlowCoreTest is Fixture {
         for (uint256 j; j < 2; ++j) {
             if (j == 1) {
                 Settings memory s = core.settings();
-                s.climbDoubleEvery = 1 hours;
-                s.climbBaseBps = 1;
-                s.climbMaxBps = 2_000;
+                s.climbPerMinBps = 1_000;
+                s.idleLoosenBps = 2_000;
+                s.ceilBps = 30_000;
                 _setSettings(s);
             }
             for (uint256 i; i < 4; ++i) {
@@ -503,7 +509,7 @@ contract ReviewFlowCoreTest is Fixture {
                 (bool ok,) = address(core).call{value: 0.01 ether}("");
                 g -= gasleft();
                 assertTrue(ok);
-                emit log_named_uint(j == 0 ? "launch settings, gap" : "dbl 1h base 1, gap", gaps[i]);
+                emit log_named_uint(j == 0 ? "launch settings, gap" : "fastest climb and loosening, gap", gaps[i]);
                 emit log_named_uint("gas", g);
                 vm.revertToState(snap);
             }
@@ -601,9 +607,13 @@ contract ReviewFlowCoreTest is Fixture {
     /// (HourlyCap). the cap is never passed
     function test_bonusAtTheClampCannotPassTheHourlyCap() public {
         _skipSniperWindow();
-        // the launch rate cap (8 times the opening rate) sits below the funded clamp: raise it to the bounds
+        // the launch rate cap (about 6 times the opening rate) sits below the funded clamp: raise it to the bounds, with
+        // the clamp at one credit of hourly room and the ceiling at its loosest
         Settings memory cs = core.settings();
         cs.rateCap = uint64(RATE_START_MAX_WEI);
+        cs.clampCredits = 1;
+        cs.ceilBps = 30_000;
+        cs.idleLoosenBps = 2_000;
         _setSettings(cs);
         _fundPotNear(2 ether);
         ScriptedController sc = new ScriptedController();

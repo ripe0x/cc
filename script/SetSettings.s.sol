@@ -65,7 +65,7 @@ contract SetSettings is Script {
     error FloorNotRaised(uint256 count);
 
     string internal constant TUPLE =
-        "(uint16,uint32,uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64,uint16,uint16)";
+        "(uint16,uint32,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint32,uint16,uint16,uint128,uint16,uint16,uint16,uint16,uint16,uint16,uint32,uint16,uint64,uint16,uint16)";
 
     function run() external {
         ICoreOwner core = ICoreOwner(_core());
@@ -305,7 +305,7 @@ contract SetSettings is Script {
                 _set(s, keys[k], vm.parseJsonUint(json, string.concat(".", keys[k])));
             }
         }
-        bytes32[29] memory names = SettingsFields.names();
+        bytes32[31] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             string memory name = _name(names[i]);
             (bool has, uint256 v) = _single(name);
@@ -314,7 +314,7 @@ contract SetSettings is Script {
     }
 
     function _set(Settings memory s, string memory name, uint256 v) internal pure {
-        bytes32[29] memory names = SettingsFields.names();
+        bytes32[31] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             if (keccak256(bytes(_name(names[i]))) != keccak256(bytes(name))) continue;
             SettingsFields.set(s, i, v);
@@ -337,12 +337,10 @@ contract SetSettings is Script {
 
     /// @dev one line per field: name, live value, new value, a mark when it changes, the bounds
     function _table(Settings memory a, Settings memory b) internal pure {
-        console.log(
-            "settings: field | live | new | bounds (a * marks a change; climbMaxBps >= climbBaseBps, xRateFloor <= xRateCap)"
-        );
-        uint256[29] memory lo = SettingsFields.lo();
-        uint256[29] memory hi = SettingsFields.hi();
-        bytes32[29] memory names = SettingsFields.names();
+        console.log("settings: field | live | new | bounds (a * marks a change; xRateFloor <= xRateCap)");
+        uint256[31] memory lo = SettingsFields.lo();
+        uint256[31] memory hi = SettingsFields.hi();
+        bytes32[31] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             uint256 x = SettingsFields.get(a, i);
             uint256 y = SettingsFields.get(b, i);

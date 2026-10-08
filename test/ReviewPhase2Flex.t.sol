@@ -109,10 +109,12 @@ contract PackHarness {
         Settings storage s = SettingsStore.load();
         s.flatBps = type(uint16).max;
         s.avgScore = type(uint32).max;
-        s.climbBaseBps = type(uint16).max;
-        s.climbDoubleEvery = type(uint32).max;
-        s.climbMaxBps = type(uint16).max;
-        s.dropBps = type(uint16).max;
+        s.dropPerCreditBps = type(uint16).max;
+        s.dropFloorBps = type(uint16).max;
+        s.climbPerMinBps = type(uint16).max;
+        s.ceilBps = type(uint16).max;
+        s.idleLoosenBps = type(uint16).max;
+        s.clampCredits = type(uint16).max;
         s.spendCapBps = type(uint16).max;
         s.bonusCapBps = type(uint16).max;
         s.tipSavingsBps = type(uint16).max;
@@ -641,10 +643,12 @@ contract ReviewPhase2FlexTest is Fixture {
     function _maxStruct() internal pure returns (Settings memory m) {
         m.flatBps = type(uint16).max;
         m.avgScore = type(uint32).max;
-        m.climbBaseBps = type(uint16).max;
-        m.climbDoubleEvery = type(uint32).max;
-        m.climbMaxBps = type(uint16).max;
-        m.dropBps = type(uint16).max;
+        m.dropPerCreditBps = type(uint16).max;
+        m.dropFloorBps = type(uint16).max;
+        m.climbPerMinBps = type(uint16).max;
+        m.ceilBps = type(uint16).max;
+        m.idleLoosenBps = type(uint16).max;
+        m.clampCredits = type(uint16).max;
         m.spendCapBps = type(uint16).max;
         m.bonusCapBps = type(uint16).max;
         m.tipSavingsBps = type(uint16).max;
@@ -677,7 +681,7 @@ contract ReviewPhase2FlexTest is Fixture {
         PackHarness h = new PackHarness();
         h.maxAll();
         (uint256 a, uint256 b, uint256 c) = h.words();
-        assertEq(a, (1 << 240) - 1, "word 0");
+        assertEq(a, type(uint256).max, "word 0");
         assertEq(b, type(uint256).max, "word 1");
         assertEq(c, (1 << 208) - 1, "word 2: 176 bits of neighbors then the two 16 bit shares");
         bytes32 slot = SettingsStore.SLOT;

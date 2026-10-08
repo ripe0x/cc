@@ -23,6 +23,7 @@ import {MockExitToken} from "../standins/MockExitToken.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {CreditIds} from "./CreditIds.sol";
 import {TestSwapRouter} from "./TestSwapRouter.sol";
+import {RateStore} from "../../src/lib/RateStore.sol";
 
 /// @notice the full system on a mainnet fork, built only from real contracts. the artcoins v2 stack is deployed onto the
 /// fork from the vendored v2 artifacts (`V2Stack`, test/v2-artifacts), the factory owner (`owner`, who is also the engine
@@ -467,6 +468,15 @@ abstract contract Fixture is Test, ProdDeployer {
             s.rateCap = 1e15;
             _setSettings(s);
         }
+    }
+
+    /// @notice the bid anchor state of the Core, read from its storage: the rate of the last fill, the rate of the first fill
+    /// in the current minute bucket and that bucket
+    function _anchor() internal view returns (uint256 lastFillRate, uint256 minuteStartRate, uint256 minuteBucket) {
+        bytes32 slot = RateStore.SLOT;
+        lastFillRate = uint256(vm.load(address(core), slot));
+        minuteStartRate = uint256(vm.load(address(core), bytes32(uint256(slot) + 1)));
+        minuteBucket = uint64(uint256(vm.load(address(core), bytes32(uint256(slot) + 2))));
     }
 
     /// @notice the owner changes the settings
