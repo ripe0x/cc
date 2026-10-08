@@ -59,10 +59,13 @@ abstract contract PostflightChecks is PostflightPool {
         if (deployer == address(0)) return;
         (bool ok, uint256 n) = _coreNonce(core_, deployer);
         if (!ok) return;
-        address routerAt = vm.computeCreateAddress(deployer, n - 2);
+        address routerAt = vm.computeCreateAddress(deployer, n - 1);
         (bool okp, address want) = _predict(c, deployer, routerAt, core_);
         _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
     }
+
+    /// @dev the most the deploy may add to the launch time plus the window for the split start (a block time margin)
+    uint256 internal constant SPLIT_MARGIN_MAX = 1 hours;
 
     /// @dev nonces to scan down from the deployer nonce when looking for the creation of the Core
     uint256 internal constant NONCE_SCAN = 4096;
@@ -74,19 +77,19 @@ abstract contract PostflightChecks is PostflightPool {
     }
 
     /// @notice the controller the Core was created with, never read from the Core: the deploy creates the controller at
-    /// the deployer nonce n and the Core at n + 1 (`SystemDeployer.deploySystem`), so it is the create address one nonce
-    /// before the one that gives `core_`. scans down from the deployer nonce. `found` is false when the deployer is
+    /// the deployer nonce n, the router at n + 1 and the Core at n + 2 (`SystemDeployer.deploySystem`), so it is the create
+    /// address two nonces before the one that gives `core_`. scans down from the deployer nonce. `found` is false when the deployer is
     /// unknown and FIRST_CONTROLLER is not set, or the scan finds nothing
     function firstController(address core_, address deployer) internal view returns (address ctl, bool found) {
         address named = _firstControllerEnv();
         if (named != address(0)) return (named, true);
         (bool ok, uint256 n) = _coreNonce(core_, deployer);
         if (!ok) return (address(0), false);
-        return (vm.computeCreateAddress(deployer, n - 1), true);
+        return (vm.computeCreateAddress(deployer, n - 2), true);
     }
 
     /// @notice the deployer nonce the Core was created at, scanning down from the deployer nonce. the deploy creates the
-    /// router at n - 2, the controller at n - 1 and the Core at n (`SystemDeployer.deploySystem`)
+    /// controller at n - 2, the router at n - 1 and the Core at n (`SystemDeployer.deploySystem`)
     function _coreNonce(address core_, address deployer) internal view returns (bool, uint256) {
         if (deployer == address(0)) return (false, 0);
         uint256 top = vm.getNonce(deployer);
@@ -372,7 +375,7 @@ abstract contract PostflightChecks is PostflightPool {
         }
     }
 
-    /// @dev the router: the compiled code, created by the deployer right before the controller, the engine is the Core, the
+    /// @dev the router: the compiled code, created by the deployer right before the Core, the engine is the Core, the
     /// owner is the config owner, payees and tip as signed, the split start after the anti sniper window, not locked by the
     /// deploy. the owner can change every setting afterwards: ROUTER_CHANGED=1 turns those rows into warnings
     function _postRouter(LaunchConfig memory c, ICore core, address deployer, address coin_) private {
@@ -387,8 +390,8 @@ abstract contract PostflightChecks is PostflightPool {
         if (deployer != address(0)) {
             (bool ok, uint256 n) = _coreNonce(address(core), deployer);
             _check(
-                "router: created by the deployer two nonces before the Core",
-                ok && vm.computeCreateAddress(deployer, n - 2) == ra,
+                "router: created by the deployer one nonce before the Core",
+                ok && vm.computeCreateAddress(deployer, n - 1) == ra,
                 vm.toString(ra)
             );
         }
@@ -414,8 +417,9 @@ abstract contract PostflightChecks is PostflightPool {
         (, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(c.stack.factory, coin_);
         _soft(
             ch || r.splitOn(),
-            "router: split start is the launch time plus the anti sniper window",
-            info.launchedAt != 0 && r.splitStart() == uint256(info.launchedAt) + c.sniperSeconds,
+            "router: split start is after the anti sniper window, at most an hour after it",
+            info.launchedAt != 0 && r.splitStart() >= uint256(info.launchedAt) + c.sniperSeconds
+                && r.splitStart() <= uint256(info.launchedAt) + c.sniperSeconds + SPLIT_MARGIN_MAX,
             string.concat("splitStart ", vm.toString(r.splitStart())),
             "ROUTER_CHANGED=1 or the split is on"
         );

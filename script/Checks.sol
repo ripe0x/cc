@@ -286,10 +286,10 @@ abstract contract LaunchChecks is PostflightChecks {
     /// factory's own `predictToken` for the deployer and the full config, read through a call that cannot revert here
     function _prePredictions(LaunchConfig memory c, address deployer) private {
         uint64 nonce = _controllerNonce(deployer);
-        address routerAt = vm.computeCreateAddress(deployer, nonce);
+        address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
         _noCode("predicted router is empty", routerAt);
-        _noCode("predicted controller is empty", vm.computeCreateAddress(deployer, nonce + 1));
+        _noCode("predicted controller is empty", vm.computeCreateAddress(deployer, nonce));
         _noCode("predicted core is empty", coreAt);
         (bool ok, address coinAt) = _predict(c, deployer, routerAt, coreAt);
         _check(
@@ -423,7 +423,7 @@ abstract contract LaunchChecks is PostflightChecks {
     /// the Core need no code for it. the deployer gets the fee for the simulation only
     function _preSimulate(LaunchConfig memory c, address deployer) private {
         uint64 nonce = _controllerNonce(deployer);
-        address routerAt = vm.computeCreateAddress(deployer, nonce);
+        address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
         IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(c, c.owner, routerAt, coreAt);
         (bool ok, address coin, uint256 gas, bytes memory why) = _simulateLaunch(c, deployer, cfg);
@@ -508,7 +508,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _info("signoff: owner (core owner, token admin, router owner, factory owner)", vm.toString(c.owner));
         _info("signoff: creator (the one project locker reward slot, 80 percent of the lp rewards, none at lp fee 0)", vm.toString(c.creator));
         _info("signoff: deployer (sends the transactions, must be the factory owner)", vm.toString(deployer));
-        _info("signoff: router address (the bounty recipient of the pool)", vm.toString(vm.computeCreateAddress(deployer, nonce)));
+        _info("signoff: router address (the bounty recipient of the pool)", vm.toString(vm.computeCreateAddress(deployer, nonce + 1)));
         _info("signoff: core address (the router flushes to it)", vm.toString(vm.computeCreateAddress(deployer, nonce + 2)));
         _info(
             "signoff: router payee (one at launch, owner replaces it later with setPayees)",
