@@ -2275,6 +2275,30 @@ contract CoreComposedTest is CoreBase {
         );
     }
 
+    /// a pot whose clamp is a twentieth of the opening rate leaves the exit lane repay cap at the value of 80 notional
+    /// credits at `RATE_START`
+    function test_exitLane_composeReimbursementCapIgnoresTheClampOfASmallPot() public {
+        Settings memory s = core.settings();
+        s.reimburseCapBps = 100;
+        _setSettings(s);
+        _fillExitBuyback();
+        xt.mint(address(core), 100e18);
+        core.skim();
+        uint256[] memory ids = _credits(alice, 80);
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        // the cap is 1_385_600_000_000_000 wei, so a pot of 2e15 pays it in full
+        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(2e15));
+        assertLt(core.ethRate(), core.RATE_START() / 20, "the read is under a twentieth of the opening rate");
+        vm.fee(1000 gwei);
+        uint256 before = keeper.balance;
+        vm.prank(keeper);
+        core.composeExit();
+        assertEq(
+            keeper.balance - before, 80 * 4_330_000 * core.RATE_START() / 1e4 * 100 / 10_000, "the cap at RATE_START"
+        );
+    }
+
     /*//////////////////////////////////////////////////////////////
                                 overprint
     //////////////////////////////////////////////////////////////*/
