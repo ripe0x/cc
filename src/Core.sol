@@ -259,6 +259,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint64 public checkpointTime;
     uint64 public lastFillTime;
 
+    // hourly spend window: `windowPot` is the pot at the first spend of the hour plus every eth amount booked into the
+    // pot since (`_addToPot`, while the window is open), `windowSpent` the eth spent from the pot in the hour. an
+    // expired window is replaced at the next spend
     uint64 windowStart;
     uint256 windowPot;
     uint256 windowSpent;
@@ -367,7 +370,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         _checkpoint();
         uint256 toBuyback = msg.value * _st().feeToBuybackBps / BPS;
         if (toBuyback != 0) ethToBuyback += toBuyback;
-        ethPot += msg.value - toBuyback;
+        _addToPot(msg.value - toBuyback);
         emit FeesAdded(msg.value);
     }
 
@@ -386,7 +389,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 eth = address(this).balance.zeroFloorSub(ethPot + ethToBuyback);
         if (eth != 0) {
             _checkpoint();
-            ethPot += eth;
+            _addToPot(eth);
         }
         uint256 x;
         address token = exitToken;
@@ -408,7 +411,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// wei per whole point right now: the price state (`rateAtCheckpoint` climbed lazily, bounded by the ceiling and
     /// `rateCap`) lowered to the clamp `ethPot * spendCapBps / (avgScore * clampCredits)`. the clamp follows the current
     /// pot and is not stored. the hourly room, `windowPot * spendCapBps / BPS - windowSpent`, is a separate check in
-    /// `_requireRoom`, and a sell batch that crosses it reverts whole with `HourlyCap`. the math is in `CoreLib.climb`
+    /// `_requireRoom` (`windowPot` is the pot at the first spend of the hour plus the eth booked into the pot since),
+    /// and a sell batch that crosses it reverts whole with `HourlyCap`. the math is in `CoreLib.climb`
     function ethRate() public view returns (uint256 read) {
         (, read) = _climb();
     }
@@ -424,8 +428,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         (price,) = _climb();
     }
 
-    /// wei the hourly spend cap still allows in the current hour. a new hour opens at the next spend with the cap on the
-    /// pot of that moment, which this returns once the hour has passed
+    /// wei the hourly spend cap still allows in the current hour: `spendCapBps` of the pot at the first spend of the hour
+    /// plus the eth booked into the pot since, less the eth spent. a new hour opens at the next spend with the cap on
+    /// the pot of that moment, which this returns once the hour has passed
     function hourlyRoom() external view returns (uint256) {
         if (block.timestamp >= windowStart + SPEND_WINDOW) return ethPot * _st().spendCapBps / BPS;
         return (windowPot * _st().spendCapBps / BPS).zeroFloorSub(windowSpent);
@@ -464,6 +469,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         lastFillTime = uint64(block.timestamp);
         ethPot = p - x;
         emit EthRateFill(x, r, p - x);
+    }
+
+    /// books eth into the pot. while a window is open its pot grows by the same amount, so the room of the hour follows
+    /// inflows. an expired window is replaced on the pot at the next spend
+    function _addToPot(uint256 amount) private {
+        ethPot += amount;
+        if (block.timestamp < windowStart + SPEND_WINDOW) windowPot += amount;
     }
 
     function _requireRoom(uint256 x) private {
@@ -809,7 +821,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 toBuyback = amount * _st().saleToBuybackBps / BPS;
         ethToBuyback += toBuyback;
         _checkpoint();
-        ethPot += amount - toBuyback;
+        _addToPot(amount - toBuyback);
         emit SalesCollected(amount, toBuyback);
     }
 

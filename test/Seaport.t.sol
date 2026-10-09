@@ -747,14 +747,19 @@ contract SeaportColdTest is SeaportBase {
 
     function test_fail_hourlyCap() public {
         uint256 id = _list();
-        // a sale into a small pot opens the hourly window with a room of about 4e14. the pot then grows until the
-        // ceiling is the full price state, which is above the room left in the window
-        _fundPotNear(2e15);
-        uint256[] memory sold = _credits(seller, 1);
-        vm.prank(seller);
-        core.sellForEth(sold);
+        // the cap is lowered to 1 percent of a funded pot and single credits are sold in one hour until the room left
+        // is below the ceiling of the listed credit
         _fundPot(1 ether);
+        Settings memory st = core.settings();
+        st.spendCapBps = 100;
+        _setSettings(st);
+        for (uint256 i; i < 80 && core.hourlyRoom() >= core.ceilingOf(id); ++i) {
+            uint256[] memory sold = _credits(seller, 1);
+            vm.prank(seller);
+            core.sellForEth(sold);
+        }
         uint256 price = core.ceilingOf(id);
+        assertLt(core.hourlyRoom(), price, "the room is below the ceiling");
         OrderComponents memory c = _open(id, price, 0);
         bytes memory data = _basicData(c);
         _expectFail(id, price, data, ICore.HourlyCap.selector);

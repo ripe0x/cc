@@ -772,10 +772,16 @@ abstract contract HandlerBase is Test {
         if (stored != want) _flag(V_FUNDED_STALE, "exit funded flag disagrees with pot, stored rate and unit");
     }
 
+    /// eth booked into the pot adds to the window pot while the window is open
+    function _potIn(uint256 amount) internal {
+        if (block.timestamp < gWinStart + 1 hours) gWinPot += amount;
+    }
+
     /// independent hourly window ghost. a spend after the window expired opens a new window whose pot is the pot as
-    /// it stood before the action. every spend adds to the window. the core compares the window's spend with the
-    /// pot the window opened with times the cap in force at the spend, so that is what is checked. a spend that goes
-    /// past the cap the window opened under, because the owner raised the cap since, is counted and reported
+    /// it stood before the action. every spend adds to the window, and every eth booking into the pot adds to the
+    /// window pot (`_potIn`). the core compares the window's spend with the window pot times the cap in force at the
+    /// spend, so that is what is checked. a spend that goes past the cap the window opened under, because the owner
+    /// raised the cap since, is counted and reported
     function _recordSpend(uint256 x, uint256 potPre) internal {
         uint256 capNow = core.settings().spendCapBps;
         if (block.timestamp >= gWinStart + 1 hours) {
@@ -938,6 +944,7 @@ abstract contract HandlerBase is Test {
             if (address(feeRouter).balance != owed) _flag(V_ROUTER, "a flush left eth in the router");
             parked = 0;
             toCore = eng == address(core) ? want : 0;
+            _potIn(toCore - toCore * core.settings().feeToBuybackBps / 10_000);
         } catch {
             // only the core and the counting engine are known to take eth: `repoint` also sets an address built from the fuzz
             // seed, which can be any contract of the run
@@ -1876,6 +1883,7 @@ abstract contract HandlerBase is Test {
         // the sale proceeds the house owed were collected first, once, by the amount it owed
         if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
         gCollected += collected;
+        _potIn(collected - collected * p.st.saleToBuybackBps / 10_000);
         // the skim of the swap went to the router. the flush books its engine share, split by feeToBuybackBps
         (uint256 held, uint256 toCore) = _flushRouter();
         if (held != bounty) _flag(V_BUYBACK, "the router received other than the hook bounty leg");
@@ -1926,6 +1934,7 @@ abstract contract HandlerBase is Test {
             if (core.ethPot() != pot0 + booked || core.ethToBuyback() != tb0) {
                 _flag(V_POT, "skim booked the wrong eth");
             }
+            _potIn(booked);
             _eth(b0, 0, 0, "skim");
             if (core.exitToken() != address(0)) {
                 uint256 xbooked = xb0 > xp0 + xt0 ? xb0 - xp0 - xt0 : 0;
@@ -2216,6 +2225,7 @@ abstract contract HandlerBase is Test {
     /// after a door succeeded: the pull inside it did what the flush rule gives. the router holds what is owed to
     /// payees and nothing else after a flush that went through, the engine got its part, the caller got the tip
     function _pullChecks(Pull memory q, Vm.Log[] memory logs) internal {
+        _potIn(q.toCore - q.toCore * core.settings().feeToBuybackBps / 10_000);
         bool moved = q.ok && q.held > q.owed;
         uint256 flushes;
         uint256 tipSeen;

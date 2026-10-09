@@ -264,8 +264,8 @@ abstract contract InvariantsBase is InvariantFixture {
         _zero(g6);
     }
 
-    /// 7. hourly eth spend never exceeds the cap. the core applies the cap in force at each spend to the pot the window
-    /// opened with, so a change of spendCapBps inside a window takes effect on the next spend: raised, the window may
+    /// 7. hourly eth spend never exceeds the cap. the core applies the cap in force at each spend to the window pot (the
+    /// pot at open plus the eth booked since), so a change of spendCapBps inside a window takes effect on the next spend: raised, the window may
     /// spend past the cap it opened under (counted as `gOverOpenCap`), lowered, spending that already happened stays
     /// and nothing more passes (`gOverNowCap`). the model checks exactly that at every spend, and with no change of the
     /// cap in the window the original cap. the window is read from core storage and compared with the ghost.

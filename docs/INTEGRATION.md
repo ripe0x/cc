@@ -33,7 +33,7 @@ the record of a launch is the output of `script/Deploy.s.sol` (core, coin, contr
 | the bid per whole point, as the Core reads it | `core.ethRate()` |
 | the price state before the clamp of a thin pot | `core.ethPrice()` |
 | the payout for one credit of average score | `lens.snapshot().averageBid` |
-| the eth the hourly cap still allows | `core.hourlyRoom()` |
+| the eth the hourly cap still allows: `spendCapBps` of the pot at the first spend of the hour plus the eth booked into the pot since, less the eth spent | `core.hourlyRoom()` |
 
 a batch sold through `sellForEth` is paid credit by credit. after each credit the rate falls by `dropPerCreditBps` (50, which is 0.5 percent) and stays at or above `dropFloorBps` (8,000) of the price state at the first fill of the current minute, so the total of a batch of `n` credits is below `n * bidFor`. the quote of the first credit is exact for the state of the block the transaction runs in. the pull of fees (section 7) runs first and can raise the pot, which can only raise the read, so the first credit is paid `bidFor(id)` or more. `minOut` is the floor on the total.
 
@@ -172,7 +172,7 @@ what a successor has to implement: a `receive()` that accepts a plain eth call. 
 | `ethRate` | the bid per whole point as the Core reads it for a sale |
 | `ethPrice` | the price state before the clamp |
 | `averageBid` | the payout for one credit of average score, `avgScore * ethRate / 1e4` |
-| `hourlyRoom` | eth the hourly spend cap still allows |
+| `hourlyRoom` | eth the hourly spend cap still allows (the cap on the pot at the first spend of the hour plus the eth booked since, less the spend) |
 | `ethPileSize`, `ethPileHead`, `exitPileSize`, `exitPileHead` | size and oldest credit of each pile |
 | `ethPageReady`, `exitPageReady` | the controller answers `nextPage` for the lane with a ready flag and the full answer size (82 words) that `compose` requires |
 | `ethPot`, `ethToBuyback`, `xPot`, `xToBuyback` | the four pots |
@@ -296,7 +296,7 @@ the Core. an error named here is declared in `ICore`, and the ones raised inside
 | `ForbiddenTarget()` | `addTarget` | the target is a contract the Core refuses to call |
 | `HasBid()` | `repriceStatement`, `sellTo`, `exitStatement`, `overprint` | the auction has a bid, so it cannot be cancelled or repriced |
 | `Held()` | `rescueNft` | the statement is on the books of the Core |
-| `HourlyCap()` | `sellForEth`, `buyListing` | the spend would pass `spendCapBps` of the pot of the current hour |
+| `HourlyCap()` | `sellForEth`, `buyListing` | the spend would pass `spendCapBps` of the pot at the first spend of the current hour plus the eth booked since |
 | `InPile()` | `adopt`, `rescueNft` | the credit is in a pile |
 | `Locked(bytes32 what)` | owner setters | the door `what` (`controller`, `exitModule`, `targets`, `successor`) is locked |
 | `Measuring()` | `receive` | the fee router sent eth while a measured external call of the Core was running |

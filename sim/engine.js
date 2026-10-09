@@ -346,7 +346,7 @@ export class Core {
     this.syncFunded();
     if (this.moduleSet) this.syncXFunded();
   }
-  // fixed window cap. returns the window state it would use, without committing
+  // hourly window cap: the pot at open plus inflows since open (addFees, bookSale), minus spent. returns the window state it would use, without committing
   room(x, now) {
     let ws = this.windowStart, wp = this.windowPot, wsp = this.windowSpent;
     if (now >= ws + 3600) { ws = now; wp = this.ethPot; wsp = 0; }
@@ -382,6 +382,7 @@ export class Core {
     this.ethToBuyback += toBuyback;
     this.checkpoint(now);
     this.ethPot += amount - toBuyback;
+    this.windowPot += amount - toBuyback; // the hourly room follows inflows
     this.syncFunded();
     return { toBuyback, toPot: amount - toBuyback };
   }
@@ -457,6 +458,7 @@ export class Core {
     this.ethToBuyback += toBuyback;
     this.checkpoint(now);
     this.ethPot += amount - toBuyback;
+    this.windowPot += amount - toBuyback; // the hourly room follows inflows
     this.syncFunded();
     return { toBuyback, toPot: amount - toBuyback };
   }
