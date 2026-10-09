@@ -72,7 +72,7 @@ contract SwapOnReceive {
             fired = true;
             router.swap{value: swapEth}(key, true, -int256(swapEth), address(this));
             // the v2 hook pays the fee router, whose flush is what lands the eth in the core mid door
-            if (address(feeRouter) != address(0)) feeRouter.flush(address(this));
+            if (address(feeRouter) != address(0)) feeRouter.flush();
         }
     }
 }

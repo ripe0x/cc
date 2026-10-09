@@ -147,9 +147,8 @@ export const SIM_DEFAULTS = {
   sniperStartBps: 9000,
   sniperEndBps: 690, // falls to the baseline
   sniperSeconds: 1800,
-  // the fee router (docs/FLOW.md 10.6, 10.7): a flush pays the caller a tip off the top, then, once the split has started, the
-  // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
-  routerTipPpm: 5000, // 0.5 percent. the cap of 0.005 eth a flush is ignored, which makes the tip an upper bound
+  // the fee router (docs/FLOW.md 10.6, 10.7): once the split has started a flush pays the
+  // payee its parts per million of the gross inflow. everything before the split start goes to the engine. no lp fee, no lp income
   routerPayeePpm: 112778, // the one launch payee, 0.75 points of volume at the baseline (of the gross router inflow)
   routerSplitStartSec: 1800, // the mined launch time plus the 30 minute window, no margin
   startTick: -175000,
@@ -652,12 +651,12 @@ export function routerFeeFraction(p, f) {
   const base = p.baselineSkimBps / 1e4;
   return base * (p.bountyBps / BPS) + Math.max(0, f - base);
 }
-// share of a swap's notional that lands in the engine's pot at t seconds after launch: the router's inflow less the flush tip,
-// and after the split start less the payee's parts per million of the gross inflow (the tip comes out of the engine's part).
-// 5.18 points at the baseline once the split is on
+// share of a swap's notional that lands in the engine's pot at t seconds after launch: the router's inflow,
+// and after the split start less the payee's parts per million of the gross inflow.
+// 5.90 points at the baseline once the split is on
 export function engineFeeFraction(p, f, t) {
   const inflow = routerFeeFraction(p, f);
-  return inflow * (1 - p.routerTipPpm / 1e6 - (t >= p.routerSplitStartSec ? p.routerPayeePpm / 1e6 : 0));
+  return inflow * (1 - (t >= p.routerSplitStartSec ? p.routerPayeePpm / 1e6 : 0));
 }
 // volume in a step [t, t+dt). the first hour runs in 120 s sub steps, 15 of them inside the anti sniper window
 export function stepVolume(p, t, dt) {

@@ -8,7 +8,7 @@ import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {Lane, ICreditStrategy} from "../src/interfaces/Interfaces.sol";
 import {RefusingEngine, GasBurnerEngine} from "./attackers/FlushEngines.sol";
 import {RevertingRouter} from "./attackers/RevertingRouter.sol";
-import {GasBurningPayee, BurningTipCaller} from "./attackers/GasBurners.sol";
+import {GasBurningPayee, ContractSeller} from "./attackers/GasBurners.sol";
 
 /// the Core pulls the fee router's balance at the start of its eth pot entry points (`sellForEth`, `buyListing`,
 /// `compose`). real pool, real router, real credits. the router is loaded with `vm.deal`, which is the state a swap
@@ -28,21 +28,18 @@ contract PullFeesTest is CoreBase {
     }
 
     struct Parts {
-        uint256 tip;
         uint256 shared;
         uint256 toBuyback;
         uint256 toPot;
     }
 
-    /// what `flush` does with `amount` now: tip, payee shares, the engine part and its split into buyback and pot
+    /// what `flush` does with `amount` now: payee shares, the engine part and its split into buyback and pot
     function _parts(uint256 amount) internal view returns (Parts memory x) {
-        x.tip = amount * feeRouter.tipPpm() / 1_000_000;
-        if (x.tip > feeRouter.tipCap()) x.tip = feeRouter.tipCap();
         (, uint32[] memory ppm) = feeRouter.payees();
         for (uint256 i; i < ppm.length; ++i) {
             x.shared += amount * ppm[i] / 1_000_000;
         }
-        uint256 toEngine = amount - x.tip - x.shared;
+        uint256 toEngine = amount - x.shared;
         x.toBuyback = toEngine * core.settings().feeToBuybackBps / 10_000;
         x.toPot = toEngine - x.toBuyback;
     }
@@ -100,19 +97,18 @@ contract PullFeesTest is CoreBase {
         assertEq(address(feeRouter).balance, 0, "router emptied");
         assertEq(_payeeBalance() - payeeBefore, x.shared, "payee share");
         assertEq(pulled.buyback - buybackBefore, x.toBuyback, "buyback part booked");
-        assertEq(pulled.got - x.tip, keeperFlush.got, "the seller is paid what a keeper flush then a sale pays");
+        assertEq(pulled.got, keeperFlush.got, "the seller is paid what a keeper flush then a sale pays");
         assertEq(pulled.pot, keeperFlush.pot, "same pot");
         assertEq(pulled.buyback, keeperFlush.buyback, "same buyback pot");
-        assertGt(pulled.got - x.tip, empty.got, "the enlarged pot lifts the clamped price");
+        assertGt(pulled.got, empty.got, "the enlarged pot lifts the clamped price");
         assertEq(CREDITS.ownerOf(ids[0]), address(core));
     }
 
-    /// the flush tip goes to the caller of the Core and to nobody else
-    function test_sellTipGoesToTheCallerOfTheCore() public {
+    /// the caller of the Core receives the sale price only: the flush pays the caller nothing
+    function test_sellPaysTheCallerOnlyThePrice() public {
         uint256[] memory ids = _credits(alice, 1);
         _fund(1 ether);
         _load();
-        uint256 tip = _parts(LOAD).tip;
         uint256 flusherBefore = flusher.balance;
         uint256 keeperBefore = keeper.balance;
         uint256 before = alice.balance;
@@ -121,17 +117,12 @@ contract PullFeesTest is CoreBase {
         core.sellForEth(ids);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         uint256 sold;
-        uint256 tipped;
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].topics[0] == ICore.CreditBought.selector) {
                 (, sold) = abi.decode(logs[i].data, (uint8, uint256));
             }
-            if (logs[i].topics[0] == IFeeRouter.Flushed.selector) {
-                (, tipped,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
-            }
         }
-        assertEq(tipped, tip, "Flushed reports the tip");
-        assertEq(alice.balance - before, sold + tip, "the seller gets the price and the tip");
+        assertEq(alice.balance - before, sold, "the seller gets the price");
         assertEq(flusher.balance, flusherBefore);
         assertEq(keeper.balance, keeperBefore);
     }
@@ -172,9 +163,68 @@ contract PullFeesTest is CoreBase {
         emit log_named_uint("gas sellForEth 1 credit, router empty", empty);
         emit log_named_uint("gas sellForEth 1 credit, router 1 eth", loaded);
         // the figures of docs/FLOW.md 10.8
-        assertApproxEqAbs(empty, 394_433, 5_000, "gas, router empty");
-        assertApproxEqAbs(loaded - empty, 70_689, 5_000, "gas of the flush");
+        assertApproxEqAbs(empty, 394_372, 5_000, "gas, router empty");
+        assertApproxEqAbs(loaded - empty, 61_195, 5_000, "gas of the flush");
         assertEq(address(feeRouter).balance, 0);
+    }
+
+    /// gas of one call of a pulling door, from the same state with an empty router and with `LOAD` in it. printed
+    function _doorGas(string memory name, address who, bytes memory data) internal returns (uint256 empty, uint256 loaded) {
+        uint256 snap = vm.snapshotState();
+        vm.prank(who);
+        uint256 g = gasleft();
+        (bool ok,) = address(core).call(data);
+        empty = g - gasleft();
+        assertTrue(ok, "door, router empty");
+        vm.revertToState(snap);
+        _load();
+        vm.prank(who);
+        g = gasleft();
+        (ok,) = address(core).call(data);
+        loaded = g - gasleft();
+        assertTrue(ok, "door, router loaded");
+        assertEq(address(feeRouter).balance, 0, "the door pulled");
+        emit log_named_uint(string.concat("gas ", name, ", router empty"), empty);
+        emit log_named_uint(string.concat("gas ", name, ", router 1 eth"), loaded);
+    }
+
+    function test_gasOfThePullPerDoor_sellForEth() public {
+        uint256[] memory ids = _credits(alice, 1);
+        _fund(1 ether);
+        _doorGas("sellForEth", alice, abi.encodeWithSignature("sellForEth(uint256[])", ids));
+    }
+
+    function test_gasOfThePullPerDoor_buyListing() public {
+        uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
+        _fund(10 ether);
+        _warpUntilCeiling(LISTED_A, price);
+        _doorGas("buyListing", keeper, abi.encodeCall(core.buyListing, (price, _listing(LISTED_A), LISTED_A, STRATEGY)));
+    }
+
+    function test_gasOfThePullPerDoor_compose() public {
+        uint256 size = core.pileSize(Lane.Eth);
+        if (size < 80) _fillEthPile(80 - size);
+        vm.fee(composeBasefee);
+        _doorGas("compose", keeper, abi.encodeCall(core.compose, ()));
+    }
+
+    function test_gasOfThePullPerDoor_composeExit() public {
+        _enterPhase2();
+        _fillExitBuyback();
+        xt.mint(address(core), 100e18);
+        core.skim();
+        uint256[] memory ids = _credits(alice, 80);
+        vm.prank(alice);
+        core.sellForExitToken(ids);
+        vm.fee(composeBasefee);
+        _doorGas("composeExit", keeper, abi.encodeCall(core.composeExit, ()));
+    }
+
+    function test_gasOfThePullPerDoor_adopt() public {
+        uint256[] memory ids = _credits(alice, 1);
+        vm.prank(alice);
+        CREDITS.transferFrom(alice, address(core), ids[0]);
+        _doorGas("adopt", alice, abi.encodeCall(core.adopt, (ids)));
     }
 
     // ------------------------------------------------------------------ buyListing
@@ -189,7 +239,7 @@ contract PullFeesTest is CoreBase {
     }
 
     /// the pull comes before the measured window: the measured cost is the listing price and the cost basis is not
-    /// understated by the flushed amount. the tip of the flush goes to the buyer
+    /// understated by the flushed amount
     function test_buyListingPullsOutsideTheMeasuredWindow() public {
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         _fund(10 ether);
@@ -209,7 +259,7 @@ contract PullFeesTest is CoreBase {
         assertEq(cost, price, "the measured cost is the listing price");
         assertEq(address(feeRouter).balance, 0, "router emptied");
         assertEq(_payeeBalance() - payeeBefore, x.shared, "payee share");
-        assertEq(keeper.balance - keeperBefore, x.tip + buyTip, "flush tip and buy tip to the buyer");
+        assertEq(keeper.balance - keeperBefore, buyTip, "the buy tip to the buyer");
         assertEq(core.ethToBuyback() - buyback, x.toBuyback);
         assertEq(core.ethPot(), pot + x.toPot - price - buyTip, "the pot took the fees and paid the purchase");
         (,, uint256 basis,) = core.creditInfo(LISTED_A);
@@ -226,7 +276,7 @@ contract PullFeesTest is CoreBase {
         }
     }
 
-    function test_composePullsAndTheCallerGetsTheTip() public {
+    function test_composePullsAndRepaysTheCaller() public {
         uint256 size = core.pileSize(Lane.Eth);
         if (size < 80) _fillEthPile(80 - size);
         vm.fee(composeBasefee);
@@ -246,7 +296,7 @@ contract PullFeesTest is CoreBase {
         assertEq(address(feeRouter).balance, 0, "router emptied");
         assertEq(_payeeBalance() - payeeBefore, x.shared, "payee share");
         assertEq(core.ethToBuyback() - buyback, x.toBuyback);
-        assertEq(keeper.balance - keeperBefore, x.tip + reimbursement, "flush tip and gas repayment to the caller");
+        assertEq(keeper.balance - keeperBefore, reimbursement, "gas repayment to the caller");
         assertEq(core.ethPot(), pot + x.toPot - reimbursement, "the pot took the fees and repaid the caller");
     }
 
@@ -314,7 +364,7 @@ contract PullFeesTest is CoreBase {
     }
 
     /// the most expensive flush: the split just turned on, four payees that burn all the gas they are given (each is
-    /// credited as owed after 100,000 gas) and a tip recipient that burns the 50,000 gas of the tip send. printed and
+    /// credited as owed after 100,000 gas). printed and
     /// bounded, the door that pulls it still completes
     function test_worstCaseFlushGasAndTheDoorCompletes() public {
         address[] memory who = new address[](4);
@@ -325,14 +375,14 @@ contract PullFeesTest is CoreBase {
         }
         vm.prank(feeRouter.owner());
         feeRouter.setPayees(who, ppm);
-        BurningTipCaller caller = new BurningTipCaller(address(core));
+        ContractSeller caller = new ContractSeller(address(core));
         uint256[] memory ids = _credits(address(caller), 1);
         _fund(1 ether);
         _load();
         uint256 snap = vm.snapshotState();
 
         uint256 g = gasleft();
-        feeRouter.flush(address(caller));
+        feeRouter.flush();
         uint256 flushGas = g - gasleft();
         emit log_named_uint("worst case flush gas", flushGas);
         assertLe(flushGas, 800_000, "worst case flush gas");

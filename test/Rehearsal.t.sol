@@ -141,13 +141,13 @@ contract RehearsalTest is Test, ProdDeployer {
         );
         // each transaction costs its execution gas, 21000 intrinsic and its calldata (4 gas per zero byte, 16 per other byte)
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
-        uint256[10] memory txGas = [
+        uint256[9] memory txGas = [
             libGas + 21_000 + _calldataGas(libCode) + 512,
             stepGas[0] + _createGas("ControllerV1.sol:ControllerV1") + 512,
             stepGas[1] + _createGas("FeeRouter.sol:FeeRouter") + 512,
             stepGas[2] + _createGas("Core.sol:Core") + 16_384,
             // sent through the deterministic deployer: the measured call includes the create and the code deposit
-            stepGas[8] + 21_000 + _calldataGas(abi.encodePacked(LENS_SALT, vm.getCode("CoreLens.sol:CoreLens"), abi.encode(d.core))) + 512,
+            stepGas[7] + 21_000 + _calldataGas(abi.encodePacked(LENS_SALT, vm.getCode("CoreLens.sol:CoreLens"), abi.encode(d.core))) + 512,
             stepGas[3] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
@@ -156,10 +156,9 @@ contract RehearsalTest is Test, ProdDeployer {
                 ),
             stepGas[4] + 21_000 + 1_024,
             stepGas[5] + 21_000 + 2_048,
-            stepGas[6] + 21_000 + 1_024,
-            stepGas[7] + 21_000 + 1_024
+            stepGas[6] + 21_000 + 1_024
         ];
-        string[10] memory names = [
+        string[9] memory names = [
             "1 library CoreLib (create2 deployer)",
             "2 controller",
             "3 router",
@@ -168,11 +167,10 @@ contract RehearsalTest is Test, ProdDeployer {
             "6 launch through the factory (deployTokenAsOwner)",
             "7 router setEngine",
             "8 router setPayees",
-            "9 router setTip (skipped when the router already holds the config tip)",
-            "10 router setSplitStart (the Resume run, after the launch is mined)"
+            "9 router setSplitStart (the Resume run, after the launch is mined)"
         ];
         uint256 total;
-        for (uint256 i; i < 10; ++i) {
+        for (uint256 i; i < 9; ++i) {
             total += txGas[i];
             console.log(string.concat("deploy gas, tx ", names[i]), txGas[i]);
             assertLt(txGas[i], TX_GAS_CAP, string.concat("over the per transaction gas cap: ", names[i]));
@@ -182,7 +180,7 @@ contract RehearsalTest is Test, ProdDeployer {
         assertLe(total, DEPLOY_GAS_ESTIMATE, "the measured deploy gas is above DEPLOY_GAS_ESTIMATE");
         console.log("DEPLOY_GAS_ESTIMATE", DEPLOY_GAS_ESTIMATE);
         console.log("library at", lib);
-        console.log("total deploy gas, ten transactions", total);
+        console.log("total deploy gas, nine transactions", total);
         console.log("per transaction gas cap", TX_GAS_CAP);
         console.log("factory deploy fee (wei, sent as value of tx 6)", fee);
         uint256[3] memory gwei_ = [uint256(1), 5, 20];
@@ -260,11 +258,9 @@ contract RehearsalTest is Test, ProdDeployer {
         assertEq(core.ethPot(), pot, "nothing reaches the pot before the flush");
         address keeper = _user("keeper");
         vm.prank(keeper);
-        router.flush(keeper);
-        uint256 tip = want * c.tipPpm / 1e6;
-        if (tip > c.tipCap) tip = c.tipCap;
-        assertEq(keeper.balance, tip, "the flusher is paid the tip");
-        assertEq(core.ethPot() - pot, want - tip, "the rest reached the pot (no payee share in the flush that starts the split)");
+        router.flush();
+        assertEq(keeper.balance, 0, "the flusher is paid nothing");
+        assertEq(core.ethPot() - pot, want, "all of it reached the pot (no payee share in the flush that starts the split)");
         assertEq(address(core).balance, core.ethPot(), "pot equals balance");
         // the split start is the end of the window: this first flush after it turns the split on and shares nothing
         assertTrue(router.splitOn(), "the first flush after the window starts the split");
@@ -281,7 +277,7 @@ contract RehearsalTest is Test, ProdDeployer {
         vm.stopPrank();
         assertGt(trader.balance, ethBefore, "sold coin for eth");
         vm.prank(keeper);
-        router.flush(keeper);
+        router.flush();
         assertGt(core.ethPot(), pot, "the sell skim reached the pot too");
         assertEq(coin.balanceOf(Mainnet.DEAD), deadBefore, "no tax and no burn on canonical swaps");
 
@@ -292,7 +288,7 @@ contract RehearsalTest is Test, ProdDeployer {
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
         uint256 gross = address(router).balance;
         vm.prank(keeper);
-        router.flush(keeper);
+        router.flush();
         assertGt(c.creatorPayee.balance, payee0, "from now on the payee is paid its share");
         assertEq(c.creatorPayee.balance - payee0, gross * c.payeePpm / 1e6, "exactly its share of the inflow");
 

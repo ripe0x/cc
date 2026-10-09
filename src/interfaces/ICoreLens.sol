@@ -25,7 +25,6 @@ interface ICoreLens {
         uint256 routerBalance;
         uint256 routerOwed;
         uint256 flushToCore;
-        uint256 flushTip;
         uint256 flushToPayees;
         address controller;
         address successor;

@@ -47,11 +47,11 @@ contract FlushingPayee {
             require(sent, "top up");
         }
         if (swallow) {
-            try ROUTER.flush(address(this)) {
+            try ROUTER.flush() {
                 flushOk = true;
             } catch {}
         } else {
-            ROUTER.flush(address(this));
+            ROUTER.flush();
             flushOk = true;
         }
     }
@@ -140,9 +140,7 @@ contract ReviewSeaportFlushTest is SeaportBase {
         atk.arm(true, held);
         bytes memory data = _order(id, price, atk);
 
-        uint256 tip = held * feeRouter.tipPpm() / 1e6;
-        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
-        uint256 engine = held - tip - (feeRouter.splitOn() ? held * 112_778 / 1e6 : 0);
+        uint256 engine = held - (feeRouter.splitOn() ? held * 112_778 / 1e6 : 0);
         uint256 pot0 = core.ethPot();
         vm.recordLogs();
         vm.prank(maker);
@@ -203,11 +201,9 @@ contract ReviewSeaportFlushTest is SeaportBase {
 
         uint256 bb0 = core.ethToBuyback();
         uint256 pot0 = core.ethPot();
-        uint256 tip = held * feeRouter.tipPpm() / 1e6;
-        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
         uint256 shared = feeRouter.splitOn() ? held * 112_778 / 1e6 : 0;
         uint256 delivered = _flush();
-        assertEq(delivered, held - tip - shared, "the engine part of the held fees arrived, exactly");
+        assertEq(delivered, held - shared, "the engine part of the held fees arrived, exactly");
         uint256 toBuyback = delivered * 5_000 / 10_000;
         assertEq(core.ethToBuyback() - bb0, toBuyback, "half to the buyback pot");
         assertEq(core.ethPot() - pot0, delivered - toBuyback, "the rest to the pot");
@@ -360,7 +356,7 @@ contract ReviewRouterGasTest is FeeBase {
 
     function _tryFlush(uint256 g) internal returns (bool ok) {
         vm.prank(flusher);
-        (ok,) = address(feeRouter).call{gas: g}(abi.encodeCall(IFeeRouter.flush, (address(this))));
+        (ok,) = address(feeRouter).call{gas: g}(abi.encodeCall(IFeeRouter.flush, ()));
     }
 
     function test_OK_aNormalFlushPaysTheHeavyPayeeDirectly() public {
@@ -418,7 +414,7 @@ contract FlushOnPayout {
     receive() external payable {
         if (armed) {
             armed = false;
-            ROUTER.flush(address(this));
+            ROUTER.flush();
         }
     }
 }
@@ -454,10 +450,10 @@ contract ReviewFlushInPayoutTest is FeeBase {
         vm.fee(composeBasefee);
         _queue();
         uint256 pot0 = core.ethPot();
-        (uint256 tip,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
+        (, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         uint256 a0 = address(atk).balance;
         atk.go(address(core), abi.encodeCall(ICore.compose, ()));
-        uint256 r = address(atk).balance - a0 - tip; // the reimbursement; the rest of the balance is the flush tip
+        uint256 r = address(atk).balance - a0; // the reimbursement
         assertGt(r, 0);
         assertEq(core.ethPot(), pot0 - r + toEngine, "pot = old - reimbursement + the booked fees");
         _consistent();
@@ -483,11 +479,11 @@ contract ReviewFlushInPayoutTest is FeeBase {
         atk.approveAll(address(CREDITS), address(core));
         _queue();
         uint256 pot0 = core.ethPot();
-        (uint256 tip,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
+        (, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         uint256 a0 = address(atk).balance;
         atk.go(address(core), abi.encodeWithSignature("sellForEth(uint256[])", ids));
         assertEq(CREDITS.ownerOf(ids[0]), address(core));
-        uint256 price = address(atk).balance - a0 - tip;
+        uint256 price = address(atk).balance - a0;
         assertGt(price, 0);
         assertEq(core.ethPot(), pot0 - price + toEngine, "pot = old - price + the booked fees");
         _consistent();
@@ -639,15 +635,14 @@ contract ReviewFeePathTest is FeeBase {
         uint256 held = address(feeRouter).balance;
         assertGe(held, 2 ether);
         assertLe(held, 2 ether + 10, "2 eth plus launch dust");
-        (uint256 tip,, uint256 toEngine) = _routerSplit(held);
+        (, uint256 toEngine) = _routerSplit(held);
         _flush(); // the first flush at the split start: everything to the engine
-        assertEq(core.ethPot(), toEngine, "the forced router eth was booked as fees, after the tip");
+        assertEq(core.ethPot(), toEngine, "the forced router eth was booked as fees");
         assertEq(address(core).balance, toEngine + 1 ether, "the forced Core eth is not booked yet");
         core.skim();
         assertEq(core.ethPot(), toEngine + 1 ether);
         core.skim();
         assertEq(core.ethPot(), toEngine + 1 ether, "a second skim books nothing");
-        assertEq(flusher.balance, tip);
         _solvent();
     }
 

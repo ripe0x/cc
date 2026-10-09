@@ -348,20 +348,18 @@ contract AdoptTest is Fixture {
     }
 
     /// the fee router is pulled before the price is read, like at every door that spends from the pot: pending fee eth is
-    /// booked, and the flush tip goes to the caller
+    /// booked
     function test_OK_adoptPullsTheFeeRouterFirst() public {
         autoFlush = false;
         _buyCoin(funder, 3 ether);
         assertGt(address(feeRouter).balance, 0, "the router holds fees");
         uint256 pot = core.ethPot();
         uint256[] memory ids = _gift(1);
-        uint256 tipBefore = stranger.balance;
         vm.expectEmit(false, false, false, false, address(core));
         emit ICore.FeesAdded(0);
         _adopt(ids);
         assertEq(address(feeRouter).balance, 0, "the router was flushed");
         assertGt(core.ethPot(), pot, "the fees are in the pot");
-        assertGt(stranger.balance, tipBefore, "the flush tip went to the caller of adopt");
         (,, uint256 cost,) = core.creditInfo(ids[0]);
         assertEq(cost, core.ethPrice() * core.scoreOf(ids[0]) / 1e4, "the basis is read after the pull");
     }

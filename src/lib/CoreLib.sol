@@ -616,15 +616,15 @@ library CoreLib {
         SafeTransferLib.safeTransfer(c.exitToken, msg.sender, total);
     }
 
-    /// gas forwarded to the router flush of `pullFees`. the most expensive flush (four payees and a tip recipient that
-    /// burn all their gas, the split on) measures 706,000 gas in test/PullFees.t.sol
+    /// gas forwarded to the router flush of `pullFees`. the most expensive flush (four payees that burn all their
+    /// gas, the split on) measures 640,000 gas in test/PullFees.t.sol
     uint256 internal constant PULL_GAS = 1_000_000;
 
-    /// @notice calls `flush(tipTo)` on the fee router with at most `PULL_GAS` and ignores the outcome. the router sends
+    /// @notice calls `flush()` on the fee router with at most `PULL_GAS` and ignores the outcome. the router sends
     /// the fee eth to `Core.receive`, which books it. a router that reverts, burns its gas or has no code leaves the
     /// caller's entry point unaffected and the fees in the router
-    function pullFees(address router, address tipTo) external {
-        bytes memory data = abi.encodeCall(IRouterFlush.flush, (tipTo));
+    function pullFees(address router) external {
+        bytes memory data = abi.encodeCall(IRouterFlush.flush, ());
         assembly ("memory-safe") {
             pop(call(PULL_GAS, router, 0, add(data, 0x20), mload(data), 0, 0))
         }
@@ -632,7 +632,7 @@ library CoreLib {
 }
 
 interface IRouterFlush {
-    function flush(address tipTo) external;
+    function flush() external;
 }
 
 interface ICoinOf {

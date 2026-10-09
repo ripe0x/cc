@@ -164,7 +164,7 @@ contract GasCapTest is SeaportBase {
         g -= gasleft();
         _row("deploy 4 launch through the factory (deployTokenAsOwner)", g, data);
 
-        // the router set up: engine, payees, tip, split start (four owner transactions)
+        // the router set up: engine, payees, lock
         IFeeRouter r2 = IFeeRouter(payable(deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
         address[] memory who = new address[](1);
         who[0] = lc.creatorPayee;
@@ -211,13 +211,13 @@ contract GasCapTest is SeaportBase {
         ppm[1] = 80_515;
         vm.prank(owner);
         feeRouter.setPayees(who, ppm);
-        bytes memory data = abi.encodeCall(IFeeRouter.flush, (flusher));
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
         _cool(address(feeRouter));
         vm.prank(flusher);
         uint256 g = gasleft();
-        feeRouter.flush(flusher);
+        feeRouter.flush();
         g -= gasleft();
-        _row("flush with the split on (tip, two payees, the Core books the fees)", g, data);
+        _row("flush with the split on (two payees, the Core books the fees)", g, data);
     }
 
     /// @dev the first flush at or after the split start: sends everything to the engine and turns the split on
@@ -226,18 +226,18 @@ contract GasCapTest is SeaportBase {
         autoFlush = false;
         _buyCoin(funder, 5 ether);
         assertFalse(feeRouter.splitOn());
-        bytes memory data = abi.encodeCall(IFeeRouter.flush, (flusher));
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
         _cool(address(feeRouter));
         vm.prank(flusher);
         uint256 g = gasleft();
-        feeRouter.flush(flusher);
+        feeRouter.flush();
         g -= gasleft();
         assertTrue(feeRouter.splitOn());
-        _row("flush that turns the split on (tip, engine only)", g, data);
+        _row("flush that turns the split on (engine only)", g, data);
     }
 
     /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), `skim()` books it, a payee claim on the
-    /// router, `rescueCoin` and `setTip`
+    /// router and `rescueCoin`
     function test_gas_escrowClaim_skim_rescue_routerClaim() public {
         _skipToSplitStart();
         _buyCoin(funder, 5 ether);
@@ -270,14 +270,6 @@ contract GasCapTest is SeaportBase {
         core.rescueCoin(creator, 1_000e18);
         g -= gasleft();
         _row("rescueCoin", g, data);
-
-        data = abi.encodeCall(IFeeRouter.setTip, (4_000, 0.004 ether));
-        _cool(address(feeRouter));
-        vm.prank(owner);
-        g = gasleft();
-        feeRouter.setTip(4_000, 0.004 ether);
-        g -= gasleft();
-        _row("router setTip", g, data);
     }
 
     // ------------------------------------------------------------------ compose, exit, overprint

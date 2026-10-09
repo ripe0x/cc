@@ -57,8 +57,6 @@ contract LaunchV2Test is Fixture {
         assertFalse(feeRouter.locked(), "not locked by the deploy");
         assertFalse(feeRouter.splitOn(), "the split starts when the window ends");
         assertEq(feeRouter.splitStart(), launchTime + lc.sniperSeconds);
-        assertEq(feeRouter.tipPpm(), lc.tipPpm);
-        assertEq(feeRouter.tipCap(), lc.tipCap);
         (address[] memory who, uint32[] memory ppm) = feeRouter.payees();
         assertEq(who.length, 1);
         assertEq(who[0], lc.creatorPayee);

@@ -561,9 +561,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// the first action of the eth pot entry points (`sellForEth`, `buyListing`, `compose`, `composeExit`): the fee
     /// router flushes its balance into `receive`, which books it, before any rate read, checkpoint or measurement of the
-    /// entry point. the flush tip goes to the caller. a failing router does not fail the entry point (docs/FLOW.md 10.8)
+    /// entry point. a failing router does not fail the entry point (docs/FLOW.md 10.8)
     function _pullFees() private {
-        CoreLib.pullFees(FEE_SOURCE, msg.sender);
+        CoreLib.pullFees(FEE_SOURCE);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -680,10 +680,10 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// one body for both lanes, told apart by the selector of the call, so the code is not duplicated
     function _compose() private {
-        // the pull runs before `gasStart`, so the gas of the flush is covered by the flush tip only. the flush raises
-        // `ethPot`, which can lift the `ethPot` term of the `_repay` cap
-        _pullFees();
+        // `gasStart` is taken before the pull, so the repay covers the gas of the flush. the flush raises `ethPot`,
+        // which can lift the `ethPot` term of the `_repay` cap
         uint256 gasStart = gasleft();
+        _pullFees();
         Lane lane = msg.sig == this.composeExit.selector ? Lane.Exit : Lane.Eth;
         (bool ready, uint256[80] memory ids, uint256 format) = _nextPage(lane);
         if (!ready) revert NotReady();

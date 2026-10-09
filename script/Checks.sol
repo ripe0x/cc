@@ -42,8 +42,6 @@ abstract contract LaunchChecks is PostflightChecks {
     uint256 internal constant PIN_DEPLOY_FEE_MAX = 0.1 ether;
     /// @dev the FeeRouter bounds (src/FeeRouter.sol), restated here so a bad config stops at preflight
     uint32 internal constant ROUTER_MAX_PAYEE_PPM = 200_000;
-    uint32 internal constant ROUTER_MAX_TIP_PPM = 20_000;
-    uint96 internal constant ROUTER_MAX_TIP_CAP = 0.05 ether;
     uint24 internal constant SNIPER_START_MIN = 5_000;
     uint24 internal constant SNIPER_START_MAX = 9_000;
     uint32 internal constant SNIPER_SECONDS_MIN = 600;
@@ -165,19 +163,11 @@ abstract contract LaunchChecks is PostflightChecks {
             string.concat("restricted ", c.restricted ? "yes" : "no", " extra entries ", vm.toString(c.allowed.length))
         );
         _eq("rule: protocol bps is 2000", uint256(c.protocolBps), PIN_PROTOCOL_BPS);
-        bool routerOk = c.payeePpm != 0 && c.payeePpm <= ROUTER_MAX_PAYEE_PPM && c.tipPpm <= ROUTER_MAX_TIP_PPM
-            && c.tipCap <= ROUTER_MAX_TIP_CAP;
+        bool routerOk = c.payeePpm != 0 && c.payeePpm <= ROUTER_MAX_PAYEE_PPM;
         _check(
-            "rule: router payee share, tip and tip cap inside the router bounds",
+            "rule: router payee share inside the router bound",
             routerOk,
-            string.concat(
-                "payee ppm ",
-                vm.toString(c.payeePpm),
-                " tip ppm ",
-                vm.toString(c.tipPpm),
-                " tip cap ",
-                vm.toString(c.tipCap)
-            )
+            string.concat("payee ppm ", vm.toString(c.payeePpm))
         );
     }
 
@@ -529,17 +519,11 @@ abstract contract LaunchChecks is PostflightChecks {
         _info("signoff: core address (the router flushes to it)", vm.toString(vm.computeCreateAddress(deployer, nonce + 2)));
         _info(
             "signoff: router payee (one at launch, owner replaces it later with setPayees)",
-            string.concat(vm.toString(c.creatorPayee), " ppm ", vm.toString(c.payeePpm), " of a flush after the tip")
+            string.concat(vm.toString(c.creatorPayee), " ppm ", vm.toString(c.payeePpm), " of a flush")
         );
         _info(
-            "signoff: router tip and split",
-            string.concat(
-                "tip ppm ",
-                vm.toString(c.tipPpm),
-                " cap ",
-                vm.toString(c.tipCap),
-                " wei, the split starts at the first flush after the anti sniper window, router not locked by the deploy"
-            )
+            "signoff: router split",
+            "the split starts at the first flush after the anti sniper window, router not locked by the deploy"
         );
         _info(
             "signoff: opening bid",

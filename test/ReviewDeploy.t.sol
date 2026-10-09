@@ -184,7 +184,7 @@ contract ReviewDeployTest is ReviewHarness {
         vm.expectRevert(IFeeRouter.OnlyOwner.selector);
         r.lock();
         vm.expectRevert(IFeeRouter.NoEngine.selector);
-        r.flush(address(this));
+        r.flush();
         vm.stopPrank();
         vm.revertToState(snap);
     }
@@ -286,7 +286,7 @@ contract ReviewDeployTest is ReviewHarness {
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
         vm.stopPrank();
-        uint256 n = 17;
+        uint256 n = 15;
         for (uint256 i; i < n; ++i) {
             LaunchConfig memory c = base;
             string memory what;
@@ -304,8 +304,6 @@ contract ReviewDeployTest is ReviewHarness {
             else if (i == 11) (c.protocolBps, what) = (1000, "protocolBps");
             else if (i == 12) (c.creatorPayee, what) = (creator, "payee");
             else if (i == 13) (c.payeePpm, what) = (100_000, "payee ppm");
-            else if (i == 14) (c.tipPpm, what) = (1000, "tip ppm");
-            else if (i == 15) (c.tipCap, what) = (0.01 ether, "tip cap");
             else (c.supply, what) = (c.supply + 1e7, "supply");
             postflightAs(c, d.core, deployer);
             assertTrue(bytes(_failedNames()).length != 0, what);
@@ -313,7 +311,7 @@ contract ReviewDeployTest is ReviewHarness {
     }
 
     /// sign off row: at the launch block the whole skim of a buy reaches the engine through the router (no payee
-    /// share in the window), less the flush tip
+    /// share in the window)
     function test_signoffSniperExtraGoesToTheCore() public {
         vm.startPrank(deployer);
         Deployed memory d = deploySystem(deployer, base);
@@ -330,11 +328,9 @@ contract ReviewDeployTest is ReviewHarness {
         assertApproxEqRel(held, 0.8975022 ether, 0.001e18, "the router holds the bounty leg");
         address keeper2 = makeAddr("review.keeper");
         vm.prank(keeper2);
-        fr.flush(keeper2);
-        uint256 tip = held * base.tipPpm / 1e6;
-        if (tip > base.tipCap) tip = base.tipCap;
-        assertEq(keeper2.balance, tip);
-        assertEq(ICore(payable(d.core)).ethPot(), held - tip, "everything else reaches the pot");
+        fr.flush();
+        assertEq(keeper2.balance, 0);
+        assertEq(ICore(payable(d.core)).ethPot(), held, "everything else reaches the pot");
         assertFalse(fr.splitOn(), "the window never shares");
     }
 
@@ -406,10 +402,9 @@ contract ReviewDeployTest is ReviewHarness {
         this.load("test/data/ReviewTruncated.json");
         string memory j = vm.readFile(DEFAULT_CONFIG_FILE);
         assertEq(this.parse(j).bountyBps, 9638, "the untouched file parses");
-        string[12] memory from = [
+        string[11] memory from = [
             '"bountyBps": 9638',
             '"payeePpm": 112778',
-            '"tipPpm": 5000',
             '"baselineSkimBps": 690',
             '"sniperSeconds": 1800',
             '"startTick": -175000',
@@ -420,10 +415,9 @@ contract ReviewDeployTest is ReviewHarness {
             '"dropFloorBps": 8000',
             '"buybackSlice": 1000000000000000000'
         ];
-        string[12] memory to = [
+        string[11] memory to = [
             '"bountyBps": 65536',
             '"payeePpm": 4294967296',
-            '"tipPpm": 4294967296',
             '"baselineSkimBps": 16777216',
             '"sniperSeconds": 4294967296',
             '"startTick": -8388609',
@@ -434,10 +428,9 @@ contract ReviewDeployTest is ReviewHarness {
             '"dropFloorBps": 65536',
             '"buybackSlice": 340282366920938463463374607431768211456'
         ];
-        string[12] memory keys = [
+        string[11] memory keys = [
             ".launch.bountyBps",
             ".router.payeePpm",
-            ".router.tipPpm",
             ".launch.baselineSkimBps",
             ".launch.sniperSeconds",
             ".launch.startTick",
@@ -455,7 +448,7 @@ contract ReviewDeployTest is ReviewHarness {
         }
         // the largest value that fits is accepted
         assertEq(this.parse(vm.replace(j, from[0], '"bountyBps": 65535')).bountyBps, 65_535);
-        assertEq(this.parse(vm.replace(j, from[5], '"startTick": -8388608')).startTick, -8_388_608);
+        assertEq(this.parse(vm.replace(j, from[4], '"startTick": -8388608')).startTick, -8_388_608);
         // a key that is missing or misspelled is an error, not a zero
         vm.expectRevert();
         this.parse(vm.replace(j, '"exitSliceCredits"', '"exitSliceCreditz"'));

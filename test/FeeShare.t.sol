@@ -28,7 +28,7 @@ contract FeeShareTest is FeeBase {
     }
 
     /// one swap and a flush, and what they did to the core's books. the bounty is what the hook itself reports it pushed
-    /// to the router, the inflow is what the flush sent on to the core (less the tip and the payees' parts)
+    /// to the router, the inflow is what the flush sent on to the core (less the payees' parts)
     function _swap(Kind kind, uint256 amount) internal returns (Books memory b) {
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
@@ -36,7 +36,7 @@ contract FeeShareTest is FeeBase {
         Flow memory f = _flow(kind, amount, "");
         b.bounty = f.skimBounty;
         b.inflow = f.balanceRise;
-        assertEq(b.inflow, f.routerRise - f.tip - f.toPayees, "the core got the router inflow less tip and payees");
+        assertEq(b.inflow, f.routerRise - f.toPayees, "the core got the router inflow less the payees");
         b.dPot = core.ethPot() - pot;
         b.dBb = core.ethToBuyback() - bb;
         b.dBal = address(core).balance - bal;
@@ -59,7 +59,7 @@ contract FeeShareTest is FeeBase {
             uint256 want = b.inflow * bps[i] / BASIS;
             assertEq(b.dBb, want, "exact buyback share");
             assertEq(b.dPot, b.inflow - want, "exact pot share");
-            assertApproxEqAbs(b.inflow, 0.0586697 ether, 0.00001 ether, "5.86697 points of the buy reach the engine (router 6.65022 less the payee 0.74999851 and the tip 0.0332511)");
+            assertApproxEqAbs(b.inflow, 0.0590022 ether, 0.00001 ether, "5.9002215 points of the buy reach the engine (router 6.65022 less the payee 0.74999851)");
             _check(b, bps[i]);
             _solvent();
         }
@@ -81,7 +81,7 @@ contract FeeShareTest is FeeBase {
         _share(5_000);
         Books memory b = _swap(Kind.BuyExactIn, 1 ether);
         assertEq(b.bounty, 0.8975022 ether);
-        assertEq(b.inflow, 0.8975022 ether - 0.8975022 ether * 5_000 / 1_000_000);
+        assertEq(b.inflow, 0.8975022 ether);
         assertEq(b.dBb, b.inflow / 2);
         assertEq(b.dPot, b.inflow - b.inflow / 2);
         _check(b, 5_000);

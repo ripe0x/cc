@@ -38,8 +38,8 @@ contract CoreLens {
     /// clamp, the figure an adopted credit is priced with. `averageBid` is the payout for one credit of average
     /// score now. `hourlyRoom` is the eth the spend cap still allows in this hour. `unbookedEth` is the Core balance
     /// above the booked pots (`skim` books it). `salesOwed` is the sale proceeds waiting in the house
-    /// (`collectSales` books them). the flush fields are what `FeeRouter.flush(tipTo)` with a tip recipient would send
-    /// now: to the Core, to the tip recipient and to the payees
+    /// (`collectSales` books them). the flush fields are what `FeeRouter.flush()` would send
+    /// now: to the Core and to the payees
     struct Snapshot {
         uint256 ethRate;
         uint256 ethPrice;
@@ -60,7 +60,6 @@ contract CoreLens {
         uint256 routerBalance;
         uint256 routerOwed;
         uint256 flushToCore;
-        uint256 flushTip;
         uint256 flushToPayees;
         address controller;
         address successor;
@@ -131,7 +130,7 @@ contract CoreLens {
         s.salesOwed = HOUSE.pendingRefunds(address(core));
         s.routerBalance = address(ROUTER).balance;
         s.routerOwed = ROUTER.totalOwed();
-        (s.flushToCore, s.flushTip, s.flushToPayees) = _flush();
+        (s.flushToCore, s.flushToPayees) = _flush();
         s.successor = core.successor();
         s.controllerLocked = core.controllerLocked();
         s.exitModuleLocked = core.exitModuleLocked();
@@ -139,22 +138,21 @@ contract CoreLens {
         s.successorLocked = core.successorLocked();
     }
 
-    /// the split of `FeeRouter.flush` with a tip recipient, from the router balance, the debts to payees, the tip
-    /// settings and the split state now. zero while the router has no engine or nothing above its debts
-    function _flush() private view returns (uint256 toCore, uint256 tip, uint256 toPayees) {
+    /// the split of `FeeRouter.flush`, from the router balance, the debts to payees and the split state now. zero while
+    /// the router has no engine or nothing above its debts
+    function _flush() private view returns (uint256 toCore, uint256 toPayees) {
         IFeeRouter r = ROUTER;
         uint256 balance = address(r).balance;
         uint256 owed = r.totalOwed();
-        if (r.engine() == address(0) || balance <= owed) return (0, 0, 0);
+        if (r.engine() == address(0) || balance <= owed) return (0, 0);
         uint256 amount = balance - owed;
-        tip = (amount * r.tipPpm() / PPM).min(r.tipCap());
         if (r.splitOn()) {
             (, uint32[] memory ppm) = r.payees();
             for (uint256 i; i < ppm.length; ++i) {
                 toPayees += amount * ppm[i] / PPM;
             }
         }
-        toCore = amount - tip - toPayees;
+        toCore = amount - toPayees;
     }
 
     /// whether the controller answers `nextPage` for `lane` with ready set, read with the gas and the answer size the

@@ -86,8 +86,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     }
 
     /// @dev the first `n` of the transactions, by hand, as the deployer: 1 library, 2 controller, 3 router, 4 core,
-    /// 5 launch, 6 router engine, 7 router payees, 8 router split start from the mined launch time (the tip is the router
-    /// default, no transaction)
+    /// 5 launch, 6 router engine, 7 router payees, 8 router split start from the mined launch time
     /// @dev the lens is sent between the core and the launch, as `deploySystem` does. `skipLens` leaves it out of a
     /// deploy that went on to the launch, `lensEarly` sends it in a deploy that stopped right after it
     bool internal skipLens;
@@ -275,15 +274,6 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         _assertDone(core, Stage.Done);
         assertEq(vm.getNonce(deployer), nonce);
         assertEq(deployer.balance, bal);
-    }
-
-    /// the stage is read from the chain: a router tip that differs from the config is a missing step too
-    function test_aRouterTipThatDiffersIsASetupStep() public {
-        base.tipPpm = 7_000;
-        (address core,, address router) = _steps(8);
-        assertEq(uint256(this.stageOf(core)), uint256(Stage.Setup));
-        _assertDone(core, Stage.Setup);
-        assertEq(IFeeRouter(payable(router)).tipPpm(), 7_000);
     }
 
     function test_resumeRefusesWhatItCannotFinish() public {

@@ -208,7 +208,7 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 ### 10.2 FeeRouter (src/FeeRouter.sol)
 
 * `receive() external payable {}` and nothing else in it: no storage write, no cold read, no call. the hook pushes with the 2,300 gas stipend.
-* `flush(tipTo)`, permissionless, guarded against reentry (the tip goes to `tipTo`, section 10.8): sends the whole balance to `engine` with a plain call and all gas, reverts if the call fails or while `engine` is unset. eth waits safely in the router until then.
+* `flush()`, permissionless, guarded against reentry (section 10.8): sends the whole balance to `engine` with a plain call and all gas, reverts if the call fails or while `engine` is unset. eth waits safely in the router until then.
 * `engine`, set by the owner with `setEngine(address)` (must have code), any number of times until `lock()`, a one way lock with an event. events on every change.
 * its own two step owner (`transferOwnership`, `acceptOwnership`), first owner from the constructor. it does not read the Core's owner: a later engine must be able to take over.
 * no other function. it never holds coin on purpose and has no token path.
@@ -235,19 +235,18 @@ real contracts on the fork as before. the v2 stack is not on mainnet, so the fix
 |---|---|
 | 23 | a trader pays 6.9 percent in total. skim `baselineSkimBps` 690 (bps of volume, 6.9 points), `lpFeePips` 0. the factory accepts an lp fee of 0 while the baseline skim is above 0, and a preflight check confirms the factory accepts the config. decision 20 is revoked: with no lp fee there is no lp income and no fee swapper anywhere in the launch package |
 | 24 | `bountyBps` is 9_638 (decision 31). the protocol leg (362 of 10_000 of the skim, 0.24978 points of volume) belongs to the launcher protocol. it is a separate business from this engine and its owner's share: never describe it as the engine owner's income |
-| 25 | the router pays payees out of what it receives. the owner's intent is 0.5 points of volume to the creator and 0.5 points to the artist. at launch there is ONE payee: the creator address (the config owner address) with both shares, 0.75 points of volume at launch (decision 31). the router receives 6.65022 points (9_638 of 6_900), so that is 112_778 parts per million of the gross router inflow. the owner replaces it later through `setPayees` (with a splitter contract or two entries), so no artist address is needed for launch and nothing about it is a placeholder. the rest goes to the engine (5.86697 points, less the flush tip, which comes out of the engine's part) |
+| 25 | the router pays payees out of what it receives. the owner's intent is 0.5 points of volume to the creator and 0.5 points to the artist. at launch there is ONE payee: the creator address (the config owner address) with both shares, 0.75 points of volume at launch (decision 31). the router receives 6.65022 points (9_638 of 6_900), so that is 112_778 parts per million of the gross router inflow. the owner replaces it later through `setPayees` (with a splitter contract or two entries), so no artist address is needed for launch and nothing about it is a placeholder. the rest goes to the engine (5.9002215 points) |
 | 26 | everything the router receives during the anti sniper window goes to the engine, with no payee share. the anti sniper skim starts at 90 points (`sniperStartBps` 9_000) and falls to the baseline 6.9 over 30 minutes if the v2 module allows it (else nearest allowed, reported) |
-| 27 | `flush` pays its caller a small tip out of what it forwards |
+| 27 | `flush()` takes no argument and pays its caller nothing. the balance goes to the payees and the engine. the gas of a flush started by a door is covered by the door's gas repay (10.8) |
 | 28 | the Core gains `rescueCoin(address to, uint256 amount)`, owner only, guarded, with an event: it transfers coin the Core holds. the Core only holds coin in passing (the buyback burns what it buys in the same call), so this reaches only coin that arrived some other way. FLOW decision 8 is amended: this is an owner directed transfer of the coin only, never of eth, credits, statements or exitToken |
 | 29 | the Core is on the restricted coin's allowlist at launch (`restriction.allowed` holds the predicted Core). owner decision, it overrides decision 18 for the Core only (router: still not listed). accepted effects, to be written in ARCHITECTURE: anyone can send coin to the Core (it sits there until rescued), and after each buyback an allowance equal to the bought amount stays usable by anyone until the end of that transaction |
 
 FeeRouter, replacing 10.2 where they differ:
 * `receive() external payable {}` stays empty.
-* modes. until the split starts every flush sends everything (less the tip) to the engine. `splitStart` is a timestamp the owner sets (the Resume run after the launch is mined sets it to the launch time read from the factory record plus the anti sniper window, no margin). the first `flush` at or after `splitStart` still sends everything to the engine and then turns the split on, so eth that arrived during the window is never shared. from then on each flush pays the payees their parts per million of the gross amount flushed, the caller the tip, and the engine the rest (so the tip comes out of the engine's part and a payee gets exactly its share of the inflow).
-* tip: `min(amount * tipPpm / 1e6, tipCap)` to `tipTo`, taken off the top. no tip is paid when `tipTo` is the zero address. launch 5_000 ppm (0.5 percent) capped at 0.005 ether. a failed tip send is skipped, never a revert.
+* modes. until the split starts every flush sends everything to the engine. `splitStart` is a timestamp the owner sets (the Resume run after the launch is mined sets it to the launch time read from the factory record plus the anti sniper window, no margin). the first `flush` at or after `splitStart` still sends everything to the engine and then turns the split on, so eth that arrived during the window is never shared. from then on each flush pays the payees their parts per million of the gross amount flushed and the engine the rest, so a payee gets exactly its share of the inflow.
 * payees: up to 4 `(address, ppm)` entries, total at most 200_000 ppm (the engine always keeps at least 80 percent of a flush). a payee is paid by a plain call with a fixed gas cap; if that fails the amount is credited to `owed[payee]` and `claim()` lets the payee (or anyone, sending to the payee) pull it. a payee can never block a flush.
 * the engine gets the rest by a plain call with all gas. if that call fails the whole flush reverts and the eth waits.
-* owner setters, each with an event, all frozen by the one way `lock()`: `setEngine`, `setPayees`, `setTip` (ppm at most 20_000, cap at most 0.05 ether), `setSplitStart` (only while the split is not on).
+* owner setters, each with an event, all frozen by the one way `lock()`: `setEngine`, `setPayees`, `setSplitStart` (only while the split is not on).
 * flush is guarded against reentry and reverts while the engine is unset.
 
 ### 10.7 amendment to decision 25 (owner, 2026-10-08)
@@ -266,11 +265,10 @@ per 100 eth of volume at launch values (skim `baselineSkimBps` 690 is 6.9 points
 |---|---|---|
 | protocol recipient | 6.9 * 362 / 10_000 | 0.24978 |
 | router receives | 6.9 * 9_638 / 10_000 | 6.65022 |
-| flush tip | 5_000 ppm of the router inflow (0.0332511, cap 0.005 per flush) | 0.0332511 |
 | payee | 112_778 ppm of the router inflow: 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down | 0.7499985 |
-| engine | router inflow less tip less payee | 5.86697 |
+| engine | router inflow less payee | 5.9002215 |
 
-anti sniper window (skim above the baseline, up to 90 points at the start): the protocol keeps its 0.24978 points of the baseline, the whole router inflow (6.65022 points plus everything above the baseline) goes to the engine less the tip, and no payee is paid. on a 1 eth buy at the start of the window the router receives 0.8975022 eth.
+anti sniper window (skim above the baseline, up to 90 points at the start): the protocol keeps its 0.24978 points of the baseline, the whole router inflow (6.65022 points plus everything above the baseline) goes to the engine, and no payee is paid. on a 1 eth buy at the start of the window the router receives 0.8975022 eth.
 
 projection at comparable volume (1,961 eth in 90 days, the first 30 minutes of fees to the engine): the payee receives about 12 eth.
 
@@ -278,15 +276,15 @@ projection at comparable volume (1,961 eth in 90 days, the first 30 minutes of f
 
 | # | decision |
 |---|---|
-| 30 | the Core flushes the fee router at the start of `sellForEth` (both overloads), `buyListing`, `compose` and `composeExit`, so fees reach the pot without a keeper. `flush` takes the tip recipient as an argument, `flush(address tipTo)`, and the Core passes the caller of the entry point: the flush tip rewards whoever triggers the door. a keeper may still call `flush(tipTo)` directly |
+| 30 | the Core flushes the fee router at the start of `sellForEth` (both overloads), `buyListing`, `compose` and `composeExit`, so fees reach the pot without a keeper. `flush()` takes no argument and pays the caller of the entry point nothing. a keeper may call `flush()` directly |
 
 mechanism:
-* `CoreLib.pullFees(router, tipTo)` calls `flush(tipTo)` on `FEE_SOURCE` with at most 1,000,000 gas and ignores the outcome. a router that reverts, burns its gas or has no code leaves the entry point unaffected and the fees in the router.
+* `CoreLib.pullFees(router)` calls `flush()` on `FEE_SOURCE` with at most 1,000,000 gas and ignores the outcome. a router that reverts, burns its gas or has no code leaves the entry point unaffected and the fees in the router.
 * the pull is the first action of the entry point: before the checkpoint, before any pot or rate read and before the measuring flag is set. the flush sends eth into `Core.receive`, which checkpoints and books it, so the entry point prices against the enlarged pot at the rate checkpointed at that moment. fee eth arriving in a measured window is refused by `Core.receive`, and the pull has finished before a window starts (V2R-1).
 * an empty router returns early inside `flush` (after the engine check), which costs the entry point one library call and one router call.
 * `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` do not pull: the exit token entry points do not read the eth pot, and the others book or spend on their own schedule.
-* gas of one credit sale, measured by `test/PullFees.t.sol`: 394,433 with an empty router and 465,122 with 1 eth in the router (the flush adds about 70,700). the most expensive flush (four payees and a tip recipient that burn all their gas, the split on) costs 706,000 gas. `test/GasCap.t.sol` measures the largest sell batch with the 1 eth pull.
-* the pull sits before `gasStart` in `compose`, so the gas of the flush is covered by the flush tip only. a flush raises `ethPot`, which can lift the `ethPot` term of the `_repay` cap; the fees are booked fees and the lift is legitimate.
+* gas of one credit sale, measured by `test/PullFees.t.sol`: 394,372 with an empty router and 455,567 with 1 eth in the router (the flush adds about 61,200). the most expensive flush (four payees that burn all their gas, the split on) costs 640,000 gas. gas of one call of each pulling door with an empty router and with 1 eth in it, measured by `test_gasOfThePullPerDoor_*` in `test/PullFees.t.sol`: `sellForEth` 373,245 and 434,440, `buyListing` 465,004 and 526,104, `adopt` 239,312 and 303,308, `compose` 8,702,314 and 8,737,565, `composeExit` 8,464,924 and 8,496,054. `test/GasCap.t.sol` measures the largest sell batch with the 1 eth pull.
+* `gasStart` is taken before the pull in `compose` and `composeExit`, so the gas repay covers the flush. the repay cap (`reimburseCapBps` of the cost basis, or of the notional cap in the exit lane) and the `ethPot` bound apply to the gas of the flush as to the rest. a flush raises `ethPot`, which can lift the `ethPot` term of the `_repay` cap; the fees are booked fees and the lift is legitimate.
 * the router pointer is the immutable `FEE_SOURCE`, fixed at deploy and checked for code.
 
 
@@ -325,7 +323,7 @@ mechanism of 34:
 * pointers: the Core is the constructor argument. the router is `Core.FEE_SOURCE()` and the house is `Core.HOUSE()`, both read once in the constructor and held as immutables. Credits and Statements are the mainnet constants. the controller is read from `Core.controller()` on every call, so a controller replaced by the owner is followed.
 * the Core has two new views. `ethPrice()` returns the first value of `_climb`: the price state (`rateAtCheckpoint` climbed to now, bounded by the ceiling and `rateCap`). `ethRate()` returns the second value, the price state lowered to the clamp. the price state cannot be computed outside the Core, because the ceiling anchor `lastFillRate` sits in Core storage. `hourlyRoom()` is `windowPot * spendCapBps / 10_000 - windowSpent` (the window pot follows inflows, decision 36) while the window is open and `ethPot * spendCapBps / 10_000` once an hour has passed since `windowStart`, which is the cap the next spend opens a window with. the Core runtime goes from 23,837 to 24,043 bytes (`ethPrice` 47, `hourlyRoom` 159).
 * the average bid is `avgScore * ethRate / 1e4`, the payout for one credit of average score with no controller bonus. `bidFor(id)` is `ceilingOf(id)`.
-* the flush fields repeat the arithmetic of `FeeRouter.flush` with a tip recipient: `amount = balance - totalOwed`, `tip = min(amount * tipPpm / 1_000_000, tipCap)`, the payee shares `amount * ppm / 1_000_000` while `splitOn`, and the rest goes to the Core. all three are zero while the router has no engine or no balance above its debts. `test/Lens.t.sol` compares them with the balances after an actual flush.
+* the flush fields repeat the arithmetic of `FeeRouter.flush`: `amount = balance - totalOwed`, the payee shares `amount * ppm / 1_000_000` while `splitOn`, and the rest goes to the Core. both are zero while the router has no engine or no balance above its debts. `test/Lens.t.sol` compares them with the balances after an actual flush.
 * the reads of the controller (`nextPage` ready flag, `priceOf`) are bounded staticcalls. `nextPage` is read with the answer size `compose` requires (82 words), so the lens and `compose` agree on a short answer. a controller without code, a revert or a short answer reads as not ready.
 * `askingPrice` is the controller's `priceOf` while a buyer can buy at it: an eth lane statement with status Listed (live auction, no bid). it is 0 in every other status (Held, Bid, Ended, Sold, Returned), for an exit lane statement and for a controller that does not answer. `status`, `topBid` and `endTime` describe the other states.
 * a statement is `listed` while its auction is live on the house (status Listed, Bid or Ended). the status values are those of `Core.statementStatus`.

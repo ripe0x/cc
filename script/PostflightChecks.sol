@@ -461,13 +461,6 @@ abstract contract PostflightChecks is PostflightPool {
         (address[] memory who, uint32[] memory ppm) = r.payees();
         bool payees = who.length == 1 && who[0] == c.creatorPayee && ppm[0] == c.payeePpm;
         _soft(ch, "router: payee and share equal the config", payees, string.concat("payees ", vm.toString(who.length)), "ROUTER_CHANGED=1");
-        _soft(
-            ch,
-            "router: tip equals the config",
-            r.tipPpm() == c.tipPpm && r.tipCap() == c.tipCap,
-            string.concat("tip ppm ", vm.toString(r.tipPpm()), " cap ", vm.toString(r.tipCap())),
-            "ROUTER_CHANGED=1"
-        );
         _postSplitStart(c, r, ch, coin_);
         _info("router: split", r.splitOn() ? "on" : "not started, everything goes to the engine");
         _info("router: eth held", string.concat(vm.toString(address(r).balance), " wei, owed to payees ", vm.toString(r.totalOwed())));

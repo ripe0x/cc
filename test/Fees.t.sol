@@ -31,13 +31,12 @@ abstract contract FeeBase is Fixture {
     }
 
     /// @dev what one swap did, through the fee router into the core. `routerRise` is the bounty leg the hook pushed to the
-    /// router, `potRise` what the core booked after the flush (the router's tip and the payees' split taken off)
+    /// router, `potRise` what the core booked after the flush (the payees' split taken off)
     struct Flow {
         uint256 gross;
         uint256 potRise;
         uint256 balanceRise;
         uint256 routerRise;
-        uint256 tip;
         uint256 toPayees;
         uint256 skimVolume;
         uint256 skimBounty;
@@ -53,18 +52,16 @@ abstract contract FeeBase is Fixture {
         vm.deal(trader, 1000 ether);
     }
 
-    /// @dev what the router does with `amount` right now: the tip, the payees' split (only once the split is on) and
-    /// what is left for the engine. mirrors `FeeRouter.flush` from the router's own getters
-    function _routerSplit(uint256 amount) internal view returns (uint256 tip, uint256 toPayees, uint256 toEngine) {
-        tip = amount * feeRouter.tipPpm() / 1_000_000;
-        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
+    /// @dev what the router does with `amount` right now: the payees' split (only once the split is on) and what is
+    /// left for the engine. mirrors `FeeRouter.flush` from the router's own getters
+    function _routerSplit(uint256 amount) internal view returns (uint256 toPayees, uint256 toEngine) {
         if (feeRouter.splitOn()) {
             (, uint32[] memory ppm) = feeRouter.payees();
             for (uint256 i; i < ppm.length; ++i) {
                 toPayees += amount * ppm[i] / 1_000_000;
             }
         }
-        toEngine = amount - tip - toPayees;
+        toEngine = amount - toPayees;
     }
 
     /// @dev runs one swap of `kind`, then flushes the router. `amount` is eth in for BuyExactIn, coin out for
@@ -97,7 +94,7 @@ abstract contract FeeBase is Fixture {
         vm.stopPrank();
         _readSkim(f, vm.getRecordedLogs());
         f.routerRise = address(feeRouter).balance - rbal;
-        (f.tip, f.toPayees,) = _routerSplit(address(feeRouter).balance);
+        (f.toPayees,) = _routerSplit(address(feeRouter).balance);
         _flush();
         f.potRise = core.ethPot() - pot;
         f.balanceRise = address(core).balance - bal;
@@ -162,8 +159,8 @@ contract FeeFlowTest is FeeBase {
         assertApproxEqAbs(f.skimProtocol, toProtocol, 2, "protocol leg is 0.24978 points");
         // the hook's own books agree to the wei with the router, and the core booked what the router split left
         assertEq(f.routerRise, f.skimBounty, "router equals the hook bounty leg");
-        (,, uint256 toEngine) = _routerSplit(f.routerRise);
-        assertEq(f.potRise, toEngine, "the pot got the router inflow less the tip and the payees' parts");
+        (, uint256 toEngine) = _routerSplit(f.routerRise);
+        assertEq(f.potRise, toEngine, "the pot got the router inflow less the payees' parts");
         assertEq(f.balanceRise, f.potRise, "nothing unbooked");
         assertEq(address(feeRouter).balance, 0, "the flush emptied the router");
         assertEq(f.skimReferral, 0);
@@ -174,42 +171,39 @@ contract FeeFlowTest is FeeBase {
         _stock();
         _checkSteady(Kind.BuyExactIn, 3 ether);
         // an exact figure: 1 eth in is 0.0665022 to the router (6.65022 points) and 0.0024978 to the protocol (0.24978
-        // points). the split is on after the stock buy, the tip is 0.5 percent (out of the engine's part), the one payee
+        // points). the split is on after the stock buy, the one payee
         // takes 112_778 ppm of the gross, the pot gets the remainder
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(f.routerRise, 0.0665022 ether);
         assertEq(f.skimProtocol, 0.0024978 ether);
-        assertEq(f.potRise, 0.0665022 ether - 0.0665022 ether * 5_000 / 1_000_000 - 0.0665022 ether * 112_778 / 1_000_000);
-        // payee 66_502_200_000_000_000 * 112_778 / 1e6 = 7_499_985_111_600_000 (0.7499985 points), tip 332_511_000_000_000,
-        // pot is the router inflow less the tip less the payee = 58_669_703_888_400_000 (5.86697 points)
+        assertEq(f.potRise, 0.0665022 ether - 0.0665022 ether * 112_778 / 1_000_000);
+        // payee 66_502_200_000_000_000 * 112_778 / 1e6 = 7_499_985_111_600_000 (0.7499985 points),
+        // pot is the router inflow less the payee = 59_002_214_888_400_000 (5.9002215 points)
         assertEq(f.toPayees, 7_499_985_111_600_000, "the payee: 0.7499985 points of the buy, its share of the inflow");
-        assertEq(f.potRise, 58_669_703_888_400_000);
+        assertEq(f.potRise, 59_002_214_888_400_000);
         assertEq(feeRouter.splitOn(), true);
     }
 
     /// the full split at launch values, per 1 eth of volume (multiply by 100 for 100 eth), steady state and inside the anti
     /// sniper window. skim 6.9 points: protocol 0.24978 (bountyBps 9_638 leaves 362 of 10_000), router 6.65022.
-    /// steady state, out of the router's 66_502_200_000_000_000 wei: tip 5_000 ppm 0.0332511 points, payee 112_778 ppm
-    /// 0.74999851 points, engine 5.86697 points. window, skim 90 points (0.9 eth): the protocol keeps 0.24978 points, the
-    /// router gets 0.0665022 + 0.831 = 0.8975022 eth, the tip is 5_000 ppm of it, the payee gets nothing and the engine
-    /// the rest
+    /// steady state, out of the router's 66_502_200_000_000_000 wei: payee 112_778 ppm 0.74999851 points, engine
+    /// 5.9002215 points. window, skim 90 points (0.9 eth): the protocol keeps 0.24978 points, the router gets
+    /// 0.0665022 + 0.831 = 0.8975022 eth, the payee gets nothing and the engine the rest
     function test_launchSplitPerHundredEthOfVolume() public {
         Flow memory w = _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(w.skimProtocol * 100, 0.24978 ether, "window: protocol 0.24978 per 100 eth");
         assertEq(w.routerRise * 100, 89.75022 ether, "window: router 89.75022 per 100 eth");
-        assertEq(w.tip, 4_487_511_000_000_000, "window: tip 0.5 percent of the router");
         assertEq(w.toPayees, 0, "window: no payee share");
-        assertEq(w.balanceRise, 893_014_689_000_000_000, "window: engine is the router less the tip");
+        assertEq(w.balanceRise, w.routerRise, "window: the engine receives the whole router inflow");
 
         _stock();
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(f.skimProtocol * 100, 0.24978 ether, "protocol 0.24978 per 100 eth");
         assertEq(f.routerRise * 100, 6.65022 ether, "router 6.65022 per 100 eth");
-        assertEq(f.tip * 100, 0.0332511 ether, "tip 0.0332511 per 100 eth");
         assertEq(f.toPayees * 100, 0.74999851116 ether, "payee 0.74999851 per 100 eth");
-        assertEq(f.balanceRise * 100, 5.86697038884 ether, "engine 5.86697 per 100 eth");
+        assertEq(f.balanceRise * 100, 5.90022148884 ether, "engine 5.9002215 per 100 eth");
         assertEq(f.skimProtocol + f.routerRise, 0.069 ether, "protocol and router are the 6.9 point skim");
-        assertEq(f.routerRise, f.tip + f.toPayees + f.balanceRise, "the router pays out all it receives");
+        assertEq(f.routerRise, f.toPayees + f.balanceRise, "the router pays out all it receives");
     }
 
     function test_feesBuyExactOut() public {
@@ -228,8 +222,8 @@ contract FeeFlowTest is FeeBase {
     }
 
     /// the one launch payee is paid by the flush, 0.7499985 points of volume (112_778 ppm of the router inflow, 0.75 rounded down) (its share is of the gross
-    /// inflow, the tip comes out of the engine's part), and the tip goes to the flusher
-    function test_flushPaysThePayeeAndTheTip() public {
+    /// inflow)
+    function test_flushPaysThePayee() public {
         _stock();
         (address[] memory who, uint32[] memory ppm) = feeRouter.payees();
         assertEq(who.length, 1, "one payee at launch");
@@ -240,8 +234,7 @@ contract FeeFlowTest is FeeBase {
         uint256 f0 = flusher.balance;
         Flow memory f = _flow(Kind.BuyExactIn, 10 ether, "");
         assertEq(a.balance - a0, f.routerRise * 112_778 / 1_000_000);
-        assertEq(flusher.balance - f0, f.tip);
-        assertEq(f.tip, f.routerRise * 5_000 / 1_000_000);
+        assertEq(flusher.balance, f0, "the flusher receives nothing");
         assertApproxEqRel(a.balance - a0, 0.075 ether, 0.01e18);
         assertEq(f.toPayees, f.routerRise * 112_778 / 1_000_000);
     }
@@ -265,7 +258,7 @@ contract FeeFlowTest is FeeBase {
         assertEq(a.balance - a0, gross * 80_515 / 1_000_000);
         assertEq(b.balance, gross * 80_515 / 1_000_000);
         assertEq(f.toPayees, 2 * (gross * 80_515 / 1_000_000));
-        assertEq(f.potRise, gross - f.tip - f.toPayees);
+        assertEq(f.potRise, gross - f.toPayees);
     }
 
     /// the protocol leg of the skim (0.24978 points) is not the engine's: it goes to the v2 protocol controller, by push
@@ -293,7 +286,7 @@ contract FeeFlowTest is FeeBase {
         assertEq(f.routerRise, bountyShare + extra, "the whole extra goes to the bounty recipient");
         assertEq(f.skimProtocol, base - bountyShare, "the protocol leg does not grow in the window");
         assertEq(f.toPayees, 0);
-        assertEq(f.potRise, f.routerRise - f.tip, "the pot gets it all less the tip");
+        assertEq(f.potRise, f.routerRise, "the pot gets it all");
         assertApproxEqAbs(f.potRise, 0.8975022 ether, 0.005 ether);
         assertFalse(feeRouter.splitOn());
 
@@ -316,7 +309,7 @@ contract FeeFlowTest is FeeBase {
     }
 
     /// eth the router received during the window is never shared: it waits in the router, one flush after the window
-    /// sends all of it (less the tip) to the pot and only then starts the split
+    /// sends all of it to the pot and only then starts the split
     function test_eth_from_the_windowIsNeverShared() public {
         autoFlush = false;
         _buyCoin(trader, 20 ether);
@@ -325,10 +318,10 @@ contract FeeFlowTest is FeeBase {
         assertEq(core.ethPot(), 0, "nothing booked before a flush");
         _skipToSplitStart();
         uint256 a0 = lc.creatorPayee.balance;
-        (uint256 tip,, uint256 toEngine) = _routerSplit(held);
-        assertEq(toEngine, held - tip, "the split is off until the first flush after the window");
-        assertEq(_flush(), held - tip);
-        assertEq(core.ethPot(), held - tip, "all of it in the pot");
+        (, uint256 toEngine) = _routerSplit(held);
+        assertEq(toEngine, held, "the split is off until the first flush after the window");
+        assertEq(_flush(), held);
+        assertEq(core.ethPot(), held, "all of it in the pot");
         assertEq(lc.creatorPayee.balance, a0, "the payees got none of the window eth");
         assertTrue(feeRouter.splitOn(), "the split is on now");
         // the next buy is shared
@@ -377,7 +370,7 @@ contract FeeFlowTest is FeeBase {
         assertEq(f.potRise, plain.potRise);
         f = _flow(Kind.SellExactIn, coin.balanceOf(trader) / 4, _referralData(ref, 1000));
         assertEq(f.skimReferral, 0);
-        assertEq(f.potRise, f.routerRise - f.tip - f.toPayees);
+        assertEq(f.potRise, f.routerRise - f.toPayees);
     }
 
     /// the split of a swap fee is fixed inside the pool and the router. no setting moves it, and the core books the whole
@@ -395,7 +388,7 @@ contract FeeFlowTest is FeeBase {
             s.flatBps = 0;
             _setSettings(s);
             Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
-            (,, uint256 toEngine) = _routerSplit(f.routerRise);
+            (, uint256 toEngine) = _routerSplit(f.routerRise);
             assertEq(f.potRise, toEngine, "the flush to the pot");
             assertEq(core.ethToBuyback(), back, "nothing to the buyback share");
         }
@@ -552,7 +545,7 @@ contract ReceiveTest is FeeBase {
         for (uint256 i; i < held.length; ++i) {
             vm.deal(address(core), held[i]);
             Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
-            (,, uint256 toEngine) = _routerSplit(0.0665022 ether);
+            (, uint256 toEngine) = _routerSplit(0.0665022 ether);
             assertEq(f.potRise, toEngine);
             uint256 coinBal = coin.balanceOf(trader);
             f = _flow(Kind.SellExactIn, coinBal / 10, "");
@@ -849,7 +842,7 @@ contract ReceiveSettingsTest is FeeBase {
         uint256 back = core.ethToBuyback();
         uint256 bal = address(core).balance;
         w.run(1 ether);
-        (,, uint256 bounty) = _routerSplit(1 ether * 690 / 10_000 * 9_638 / 10_000);
+        (, uint256 bounty) = _routerSplit(1 ether * 690 / 10_000 * 9_638 / 10_000);
         uint256 owed = price1 + price2;
         assertEq(core.ethToBuyback() - back, owed * 3_333 / 10_000, "the split of the collection");
         assertEq(core.ethPot() - pot, 2 * bounty + owed - owed * 3_333 / 10_000, "two pushes and the rest of the sale");
@@ -966,7 +959,7 @@ contract BuybackTest is FeeBase {
         assertEq(core.ethPot(), b.pot, "the skim does not return inside the call");
         assertEq(address(feeRouter).balance - b.routerBal, toRouter, "6.65022 points reached the router");
         assertEq(address(feeRouter).balance - b.routerBal, f.skimBounty);
-        (,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
+        (, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         _flush();
         uint256 feeShare = toEngine * core.settings().feeToBuybackBps / 10_000;
         assertEq(core.ethPot() - b.pot, toEngine - feeShare, "the flush returns the engine share to the pot, less the buyback share");
@@ -1807,7 +1800,7 @@ contract UniversalRouterTest is FeeBase {
         uint256 bought = coin.balanceOf(trader);
         assertEq(bought, viaRouter, "same amount out as the plain swapper");
         assertEq(address(feeRouter).balance, 0.0665022 ether, "skim on the buy: 6.65022 points to the router");
-        (,, uint256 toEngine) = _routerSplit(0.0665022 ether);
+        (, uint256 toEngine) = _routerSplit(0.0665022 ether);
         _flush();
         assertEq(core.ethPot() - pot, toEngine, "and the flush books the engine share");
         assertEq(coin.balanceOf(DEAD), dead, "nothing burned");
@@ -1832,7 +1825,7 @@ contract UniversalRouterTest is FeeBase {
         uint256 gross = ethOut * 1000 / 931;
         uint256 inflow = address(feeRouter).balance;
         assertApproxEqAbs(inflow, gross * 69 / 1000 * 9_638 / 10_000, 3, "skim on the sell");
-        (,, uint256 eng) = _routerSplit(inflow);
+        (, uint256 eng) = _routerSplit(inflow);
         _flush();
         assertEq(core.ethPot() - pot, eng);
         assertEq(coin.balanceOf(DEAD), dead, "nothing burned on the sell either");

@@ -35,13 +35,12 @@ contract V2PortFeeTest is FeeBase {
 
     /// 1 eth buy in steady state at each split. 6.9 points of skim (0.069 eth) split by bountyBps 9_638: the router gets
     /// 0.069 * 9_638 / 10_000 = 0.0665022 eth (6.65022 points), the protocol recipient 0.069 less 0.0665022 = 0.0024978 eth
-    /// (0.24978 points). of the router's 66_502_200_000_000_000 wei: tip 5_000 ppm = 332_511_000_000_000, payee 112_778 ppm =
-    /// 7_499_985_111_600_000 (0.7499985 points), engine the rest = 58_669_703_888_400_000 (5.86697 points, the tip comes
-    /// out of the engine's part). the engine part splits between the pot and the buyback by the share setting
+    /// (0.24978 points). of the router's 66_502_200_000_000_000 wei: payee 112_778 ppm =
+    /// 7_499_985_111_600_000 (0.7499985 points), engine the rest = 59_002_214_888_400_000 (5.9002215 points). the engine part splits between the pot and the buyback by the share setting
     function test_exactNumbersAtEachSplit() public {
         _stock();
         uint256[3] memory bps = [uint256(0), 5_000, 10_000];
-        uint256[3] memory toBb = [uint256(0), 29_334_851_944_200_000, 58_669_703_888_400_000];
+        uint256[3] memory toBb = [uint256(0), 29_501_107_444_200_000, 59_002_214_888_400_000];
         for (uint256 i; i < 3; ++i) {
             _share(uint16(bps[i]));
             uint256 payee0 = lc.creatorPayee.balance;
@@ -53,13 +52,12 @@ contract V2PortFeeTest is FeeBase {
             assertEq(f.skimBounty, 0.0665022 ether, "6.65022 points to the router");
             assertEq(f.skimProtocol, 0.0024978 ether, "0.24978 points to the protocol recipient");
             assertEq(f.routerRise, 0.0665022 ether);
-            assertEq(f.tip, 332_511_000_000_000, "tip is 0.5 percent");
-            assertEq(flusher.balance - flusher0, 332_511_000_000_000);
+            assertEq(flusher.balance, flusher0, "the flusher receives nothing");
             assertEq(f.toPayees, 7_499_985_111_600_000, "the single payee");
             assertEq(lc.creatorPayee.balance - payee0, 7_499_985_111_600_000);
-            assertEq(f.balanceRise, 58_669_703_888_400_000, "5.86697 points to the engine");
+            assertEq(f.balanceRise, 59_002_214_888_400_000, "5.9002215 points to the engine");
             assertEq(core.ethToBuyback() - bb0, toBb[i]);
-            assertEq(core.ethPot() - pot0, 58_669_703_888_400_000 - toBb[i]);
+            assertEq(core.ethPot() - pot0, 59_002_214_888_400_000 - toBb[i]);
             assertEq(address(feeRouter).balance, 0, "the router is empty");
             _solvent();
         }

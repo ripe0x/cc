@@ -10,9 +10,8 @@ contract GasBurningPayee {
     }
 }
 
-/// a seller whose receive consumes all gas when it is given the 50,000 gas of a router tip send and accepts the sale
-/// payout, which carries all gas
-contract BurningTipCaller {
+/// a contract that sells credits to the Core and accepts the payout
+contract ContractSeller {
     address public immutable CORE;
 
     constructor(address core_) {
@@ -24,11 +23,5 @@ contract BurningTipCaller {
         require(ok, "sell failed");
     }
 
-    receive() external payable {
-        if (gasleft() < 60_000) {
-            assembly {
-                invalid()
-            }
-        }
-    }
+    receive() external payable {}
 }

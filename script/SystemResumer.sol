@@ -11,7 +11,7 @@ enum Stage {
     NoCore, // no code at the core address, nothing to resume (run Deploy again)
     CoreOnly, // controller, router and core deployed, the launch through the factory is not sent
     Launched, // coin launched, the router does not point at the core yet
-    Setup, // router engine, payees, tip or the split start still missing (the split start waits for a mined launch)
+    Setup, // router engine, payees or the split start still missing (the split start waits for a mined launch)
     Done // router set up as in the config
 }
 
@@ -36,7 +36,7 @@ abstract contract SystemResumer is SystemDeployer {
         if (r.engine() != core) return Stage.Launched;
         (address[] memory who, uint32[] memory ppm) = r.payees();
         bool payees = who.length == 1 && who[0] == c.creatorPayee && ppm[0] == c.payeePpm;
-        if (!payees || r.tipPpm() != c.tipPpm || r.tipCap() != c.tipCap || r.splitStart() == 0) return Stage.Setup;
+        if (!payees || r.splitStart() == 0) return Stage.Setup;
         return Stage.Done;
     }
 
@@ -82,7 +82,7 @@ abstract contract SystemResumer is SystemDeployer {
         if (lensAt.code.length != 0) return lensAt;
         uint256 g = gasleft();
         address made = _newLens(core_);
-        _step(8, g);
+        _step(7, g);
         if (made != lensAt) revert AddressMismatch("lens");
     }
 

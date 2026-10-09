@@ -5,7 +5,6 @@ pragma solidity ^0.8.28;
 
 interface IFeeRouter {
     error BadPayees();
-    error BadTip();
     error ClaimFailed();
     error FlushFailed();
     error IsLocked();
@@ -20,7 +19,7 @@ interface IFeeRouter {
 
     event Claimed(address indexed payee, uint256 amount);
     event EngineSet(address indexed previous, address indexed engine);
-    event Flushed(address indexed engine, uint256 toEngine, uint256 tip, uint256 toPayees);
+    event Flushed(address indexed engine, uint256 toEngine, uint256 toPayees);
     event Locked(address indexed engine);
     event OwnershipTransferStarted(address indexed owner, address indexed pendingOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -29,15 +28,13 @@ interface IFeeRouter {
     event PayeesSet(address[] payees, uint32[] ppm);
     event SplitStartSet(uint64 at);
     event SplitStarted(uint256 at);
-    event TipFailed(address indexed to, uint256 amount);
-    event TipSet(uint32 ppm, uint96 cap);
 
     receive() external payable;
 
     function acceptOwnership() external;
     function claim(address payee) external;
     function engine() external view returns (address);
-    function flush(address tipTo) external;
+    function flush() external;
     function lock() external;
     function locked() external view returns (bool);
     function owed(address) external view returns (uint256);
@@ -48,11 +45,8 @@ interface IFeeRouter {
     function setEngine(address engine_) external;
     function setPayees(address[] memory who, uint32[] memory ppm) external;
     function setSplitStart(uint64 at) external;
-    function setTip(uint32 ppm, uint96 cap) external;
     function splitOn() external view returns (bool);
     function splitStart() external view returns (uint64);
-    function tipCap() external view returns (uint96);
-    function tipPpm() external view returns (uint32);
     function totalOwed() external view returns (uint256);
     function transferOwnership(address newOwner) external;
 }

@@ -82,7 +82,7 @@ contract ReviewMatrixConfigTest is ReviewHarness {
 
     // ------------------------------------------------------------------ group B: the launch fields
 
-    uint256 internal constant N_LAUNCH = 80;
+    uint256 internal constant N_LAUNCH = 74;
 
     function _mutLaunch(uint256 i) internal view returns (Mut memory m) {
         if (i < 20) return _launchA(i);
@@ -267,75 +267,57 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("router payee ppm 200000 (the top edge)", Class.Hash);
             m.c.payeePpm = 200_000;
         } else if (i == 15) {
-            m = _m("router tip ppm 0 (valid, wrong)", Class.Hash);
-            m.c.tipPpm = 0;
-        } else if (i == 16) {
-            m = _m("router tip ppm 20000 (the top edge)", Class.Hash);
-            m.c.tipPpm = 20_000;
-        } else if (i == 17) {
-            m = _m("router tip cap 0.05 ether (the top edge)", Class.Hash);
-            m.c.tipCap = 0.05 ether;
-        } else if (i == 18) {
-            m = _m("router tip cap 0 (valid, wrong)", Class.Hash);
-            m.c.tipCap = 0;
-        } else if (i == 19) {
             m = _m("router payee ppm 200001 (above the router limit)", Class.Pre);
             m.c.payeePpm = 200_001;
-        } else if (i == 20) {
+        } else if (i == 16) {
             m = _m("router payee ppm 0", Class.Pre);
             m.c.payeePpm = 0;
-        } else if (i == 21) {
-            m = _m("router tip ppm 20001", Class.Pre);
-            m.c.tipPpm = 20_001;
-        } else if (i == 22) {
-            m = _m("router tip cap 0.0501 ether", Class.Pre);
-            m.c.tipCap = 0.0501 ether;
-        } else if (i == 23) {
+        } else if (i == 17) {
             m = _m("router payee = the zero address", Class.Pre);
             m.c.creatorPayee = address(0);
-        } else if (i == 24) {
+        } else if (i == 18) {
             m = _m("router payee = the escrow", Class.Pre);
             m.c.creatorPayee = m.c.stack.escrow;
-        } else if (i == 25) {
+        } else if (i == 19) {
             m = _m("router payee = the hook", Class.Pre);
             m.c.creatorPayee = m.c.stack.hook;
-        } else if (i == 26) {
+        } else if (i == 20) {
             m = _m("router payee = the dead address", Class.Pre);
             m.c.creatorPayee = Mainnet.DEAD;
-        } else if (i == 27) {
+        } else if (i == 21) {
             m = _m("sale: buyOnly on (valid, wrong)", Class.Hash);
             m.c.sale.buyOnly = true;
-        } else if (i == 28) {
+        } else if (i == 22) {
             m = _m("sale: startBps 12000 (valid, wrong)", Class.Hash);
             m.c.sale.startBps = 12_000;
-        } else if (i == 29) {
+        } else if (i == 23) {
             m = _m("sale: stepBps 200 (valid, wrong)", Class.Hash);
             m.c.sale.stepBps = 200;
-        } else if (i == 30) {
+        } else if (i == 24) {
             m = _m("sale: stepEvery 1 hour (valid, wrong)", Class.Hash);
             m.c.sale.stepEvery = 1 hours;
-        } else if (i == 31) {
+        } else if (i == 25) {
             m = _m("sale: floorBps 8000 (valid, wrong)", Class.Hash);
             m.c.sale.floorBps = 8000;
-        } else if (i == 32) {
+        } else if (i == 26) {
             m = _m("sale: startBps 40001", Class.Pre);
             m.c.sale.startBps = 40_001;
-        } else if (i == 33) {
+        } else if (i == 27) {
             m = _m("sale: startBps 999", Class.Pre);
             m.c.sale.startBps = 999;
-        } else if (i == 34) {
+        } else if (i == 28) {
             m = _m("sale: stepBps 5001", Class.Pre);
             m.c.sale.stepBps = 5001;
-        } else if (i == 35) {
+        } else if (i == 29) {
             m = _m("sale: stepEvery 59 seconds", Class.Pre);
             m.c.sale.stepEvery = 59;
-        } else if (i == 36) {
+        } else if (i == 30) {
             m = _m("sale: stepEvery 31 days", Class.Pre);
             m.c.sale.stepEvery = 31 days;
-        } else if (i == 37) {
+        } else if (i == 31) {
             m = _m("sale: floorBps above startBps", Class.Pre);
             m.c.sale.floorBps = m.c.sale.startBps + 1;
-        } else if (i == 38) {
+        } else if (i == 32) {
             m = _m("sale: floorBps 999", Class.Pre);
             m.c.sale.floorBps = 999;
         } else {

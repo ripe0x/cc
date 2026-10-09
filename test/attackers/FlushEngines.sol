@@ -42,7 +42,7 @@ contract ReenteringEngine {
         if (nestedDone) return;
         nestedDone = true;
         // a donation lands in the router mid flush: a broken guard would send it out in the nested call
-        (bool ok,) = address(ROUTER).call{value: 0}(abi.encodeCall(IFeeRouter.flush, (address(this))));
+        (bool ok,) = address(ROUTER).call{value: 0}(abi.encodeCall(IFeeRouter.flush, ()));
         nestedReverted = !ok;
     }
 }
@@ -58,14 +58,14 @@ contract GasBurnerEngine {
     }
 }
 
-/// a contract that calls `flush` and refuses the tip it is paid, and can pull a claim for itself
+/// a contract that calls `flush` and refuses any eth sent to it
 contract RefusingCaller {
     receive() external payable {
-        revert("no tip");
+        revert("no eth");
     }
 
     function go(IFeeRouter r) external {
-        r.flush(address(this));
+        r.flush();
     }
 }
 

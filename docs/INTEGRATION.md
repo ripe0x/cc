@@ -49,13 +49,13 @@ sequence for a seller:
 
 what the call does, in order:
 
-1. `CoreLib.pullFees(router, msg.sender)`: the Core calls `router.flush(msg.sender)` with at most 1,000,000 gas and ignores the outcome. fee eth reaches `ethPot` before any price is read, and the router pays the flush tip to the caller of the Core.
+1. `CoreLib.pullFees(router)`: the Core calls `router.flush()` with at most 1,000,000 gas and ignores the outcome. fee eth reaches `ethPot` before any price is read.
 2. reverts `Empty` for an empty list.
 3. for each id: the caller must own the credit (`ZeroId`, `NotOwner`). the price is the ceiling at the current rate. the spend is checked against the pot (`PotTooSmall`, `ZeroAmount`) and the hourly cap (`HourlyCap`). the rate falls. the credit enters the eth pile with the price as its cost basis. `Credits.transferFrom(caller, core, id)`. event `CreditBought(id, caller, 0, price)`.
 4. `Slippage` when the total is below `minOut`.
 5. the total goes to the caller in one eth transfer, last. a contract caller needs a `receive()` that accepts eth.
 
-what the caller receives: the total payout, and the flush tip when the router held fee eth. the tip is `tipPpm` (5,000 ppm) of the router inflow, at most `tipCap` (0.005 eth) per flush, sent with 50,000 gas. a recipient that refuses it receives nothing (`TipFailed`), the tip goes to the engine with the rest and the sale goes on.
+what the caller receives: the total payout.
 
 the batch size is bounded by the transaction gas cap: the largest batch under 16,777,216 gas is 112 credits at the launch settings (section 13).
 
@@ -115,16 +115,15 @@ buy mode (`buyOnly` true):
 2. `controller.buy{value: v}(sid)` with `v` at least the price (`Underpaid`). the controller calls `core.sellTo(sid, buyer)`, which cancels the listing (`HasBid` while a bid is live), sends the statement to the buyer and books the payment as sale proceeds. the excess of `v` is refunded to the caller last.
 3. events `StatementSoldTo(sid, buyer, price)` on the Core and `Bought(sid, buyer, price)` on the controller. `buy` reverts `NotBuyOnly` in auction mode.
 
-## 7. the fee pull and flush(tipTo)
+## 7. the fee pull and flush()
 
-the pool sends fee eth to the fee router. the router holds it until `flush(address tipTo)`:
+the pool sends fee eth to the fee router. the router holds it until `flush()`:
 
 * anyone may call. `amount = balance - totalOwed`.
-* `tip = min(amount * tipPpm / 1_000_000, tipCap)`, sent to `tipTo` with 50,000 gas. a zero `tipTo` or a refusing recipient leaves the tip in the amount.
 * while the split is on (`splitOn`, from `splitStart`), each payee receives `amount * ppm / 1_000_000` with 100,000 gas. a share that fails is recorded in `owed` and paid by `claim(payee)`.
 * the rest goes to the engine, the Core, whose `receive()` books it: `feeToBuybackBps` to the coin buyback pot, the rest to `ethPot`. `FlushFailed` when the engine refuses it, and the fees stay in the router. `NoEngine` while no engine is set. an empty balance returns early.
 
-the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush(msg.sender)` first, so the flush tip goes to whoever triggers the door. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore`, `flushTip` and `flushToPayees`.
+the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush()` first. `compose` and `composeExit` start the gas measurement of their repay before the pull, so the repay covers the flush. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore` and `flushToPayees`.
 
 ## 8. adopt
 
@@ -135,7 +134,7 @@ sequence:
 1. transfer the credits to the Core. a transferred credit has no record and sits in no pile. compose pages draw from the piles, so the credit joins a page once it is adopted. the owner can send it out with `rescueNft`.
 2. call `core.adopt(ids)`.
 
-the call, in order: the fee pull of section 7, so pending router eth is booked before the price is read (the flush tip goes to the caller). `Empty` for an empty list. for each id: `ZeroId`, `InPile` when the credit is in a pile (the same id twice in a call included), `NotHolder` when another address holds it (an id that does not exist reverts inside Credits). the credit enters the eth pile with the arrival time of the block. event `CreditAdopted(id, cost)`.
+the call, in order: the fee pull of section 7, so pending router eth is booked before the price is read `Empty` for an empty list. for each id: `ZeroId`, `InPile` when the credit is in a pile (the same id twice in a call included), `NotHolder` when another address holds it (an id that does not exist reverts inside Credits). the credit enters the eth pile with the arrival time of the block. event `CreditAdopted(id, cost)`.
 
 the cost basis is `core.ethPrice() * score / 1e4`, at least 1 wei: the price state per whole point at that moment before the clamp, times the score of the credit. the price state is what the engine pays with a funded pot, so a statement built from adopted credits is priced at that level. the read after the clamp of a thin pot would book a basis of 1 wei and the statement price would collapse with it. a donor who inflates the basis of a statement only loses the credits.
 
@@ -179,7 +178,7 @@ what a successor has to implement: a `receive()` that accepts a plain eth call, 
 | `unbookedEth` | Core balance above the booked pots. `skim()` books it |
 | `salesOwed` | sale proceeds waiting in the house. `collectSales()` books them |
 | `routerBalance`, `routerOwed` | eth in the router, and the part owed to payees |
-| `flushToCore`, `flushTip`, `flushToPayees` | what `flush(tipTo)` with a tip recipient sends now |
+| `flushToCore`, `flushToPayees` | what `flush()` sends now |
 | `controller`, `successor` | the addresses now |
 | `controllerLocked`, `exitModuleLocked`, `targetsLocked`, `successorLocked` | the four one way locks |
 | `statements` | `StatementView[]` |
@@ -252,7 +251,7 @@ the fee router (`src/interfaces/IFeeRouter.sol`):
 |---|---|---|
 | `Claimed` | `address indexed payee, uint256 amount` | `claim` paid an owed share |
 | `EngineSet` | `address indexed previous, address indexed engine` | the owner set the engine |
-| `Flushed` | `address indexed engine, uint256 toEngine, uint256 tip, uint256 toPayees` | `flush`: `toEngine` sent to the engine (the Core), `tip` to the tip recipient, `toPayees` shared (paid or owed) |
+| `Flushed` | `address indexed engine, uint256 toEngine, uint256 toPayees` | `flush`: `toEngine` sent to the engine (the Core), `toPayees` shared (paid or owed) |
 | `Locked` | `address indexed engine` | the owner locked the router settings |
 | `OwnershipTransferStarted` | `address indexed owner, address indexed pendingOwner` | the router owner named `pendingOwner` |
 | `OwnershipTransferred` | `address indexed previousOwner, address indexed newOwner` | the router owner changed |
@@ -261,8 +260,6 @@ the fee router (`src/interfaces/IFeeRouter.sol`):
 | `PayeesSet` | `address[] payees, uint32[] ppm` | the owner set the payee list and the shares in ppm |
 | `SplitStartSet` | `uint64 at` | the owner set the split start time |
 | `SplitStarted` | `uint256 at` | the first flush at or after the split start turned the split on |
-| `TipFailed` | `address indexed to, uint256 amount` | the tip recipient refused the tip (50,000 gas limit). the tip goes to the engine with the rest |
-| `TipSet` | `uint32 ppm, uint96 cap` | the owner set the tip ppm and the cap |
 
 the house (`src/interfaces/AuctionHouse.sol`) emits its own auction events; the interface file lists them.
 
@@ -343,7 +340,6 @@ the fee router:
 | error | raised by | meaning |
 |---|---|---|
 | `BadPayees()` | `setPayees` | more than 4 payees, a zero address, a zero share, or a total above 200,000 ppm |
-| `BadTip()` | `setTip` | the tip above 20,000 ppm or the cap above 0.05 eth |
 | `ClaimFailed()` | `claim` | the payee refused the eth |
 | `FlushFailed()` | `flush` | the engine refused the eth |
 | `IsLocked()` | owner setters | the router is locked |
@@ -365,16 +361,16 @@ measured on the pinned fork with foundry 1.8.1. `tx` includes the intrinsic 21,0
 | `sellForEth`, 1 credit, flat bid, cold | tx 491,700 | `test/GasCap.t.sol` `test_gas_sellForEth_batch_launchSettings` |
 | `sellForEth`, each further credit | 145,517 | the same test (fit over 1 to 40 credits) |
 | `sellForEth`, largest batch under the cap | 112 credits, tx 16,670,075 | the same test |
-| `sellForEth`, 1 credit, router empty, call gas | 394,965 | `test/PullFees.t.sol` `test_gasOfThePullOnOneCredit` |
-| `sellForEth`, 1 credit, router holds 1 eth, call gas | 465,847 | the same test |
-| `flush`, most expensive case (four payees and a tip recipient that burn all their gas) | 706,490 | `test/PullFees.t.sol` `test_worstCaseFlushGasAndTheDoorCompletes` |
-| `flush` with the split on, tip and two payees | tx 150,388 | `test/GasCap.t.sol` `test_gas_routerFlush` |
-| `flush` that turns the split on | tx 116,023 | `test/GasCap.t.sol` `test_gas_routerFlush_firstAtSplitStart` |
+| `sellForEth`, 1 credit, router empty, call gas | 394,372 | `test/PullFees.t.sol` `test_gasOfThePullOnOneCredit` |
+| `sellForEth`, 1 credit, router holds 1 eth, call gas | 455,567 | the same test |
+| `flush`, most expensive case (four payees that burn all their gas) | 639,876 | `test/PullFees.t.sol` `test_worstCaseFlushGasAndTheDoorCompletes` |
+| `flush` with the split on, two payees | tx 139,672 | `test/GasCap.t.sol` `test_gas_routerFlush` |
+| `flush` that turns the split on | tx 105,441 | `test/GasCap.t.sol` `test_gas_routerFlush_firstAtSplitStart` |
 | `buyListing` through the CreditStrategy | tx 485,872 | `test/GasCap.t.sol` `test_gas_buyListing_creditStrategy` |
 | `buyListing` through Seaport, basic order | tx 498,098 | `test_gas_buyListing_seaport_basic` |
 | `buyListing` through Seaport, basic order with a fee recipient | tx 535,429 | `test_gas_buyListing_seaport_basicWithFee` |
 | `buyListing` through Seaport, advanced order | tx 511,987 | `test_gas_buyListing_seaport_advanced` |
-| `compose()`, eth lane, 80 credits, first compose | tx 8,728,243 | `test/GasCap.t.sol` `test_gas_compose_ethLane_firstCold` |
+| `compose()`, eth lane, 80 credits, first compose | tx 8,727,886 | `test/GasCap.t.sol` `test_gas_compose_ethLane_firstCold` |
 | `compose()`, second compose | tx 8,677,591 | `test_gas_compose_ethLane_secondWarmAndCold` |
 | `composeExit()`, 80 credits | tx 8,486,449 | `test_gas_composeExit_andExitStatement_exitLane` |
 | `ControllerV1.nextPage`, full eth pile, cold | 238,573 (the Core allows 500,000) | `test_gas_readCaps_nextPageAndStatementPrice` |

@@ -111,9 +111,8 @@ contract LensTest is Fixture {
 
         assertEq(s.routerBalance, address(feeRouter).balance, "routerBalance");
         assertEq(s.routerOwed, feeRouter.totalOwed(), "routerOwed");
-        assertEq(s.flushToCore + s.flushTip + s.flushToPayees, s.routerBalance - s.routerOwed, "the split adds up");
+        assertEq(s.flushToCore + s.flushToPayees, s.routerBalance - s.routerOwed, "the split adds up");
         assertGt(s.flushToPayees, 0, "payee share");
-        assertGt(s.flushTip, 0, "tip");
 
         assertEq(s.controller, address(ctl), "controller");
         assertEq(s.successor, core.successor(), "successor");
@@ -151,25 +150,23 @@ contract LensTest is Fixture {
         ICoreLens.Snapshot memory s = lens.snapshot();
         address payee = lc.creatorPayee;
         uint256 coreBefore = address(core).balance;
-        uint256 tipBefore = flusher.balance;
         uint256 payeeBefore = payee.balance;
         vm.prank(flusher);
-        feeRouter.flush(flusher);
+        feeRouter.flush();
         assertEq(address(core).balance - coreBefore, s.flushToCore, "to the core");
-        assertEq(flusher.balance - tipBefore, s.flushTip, "tip");
         assertEq(payee.balance - payeeBefore, s.flushToPayees, "to the payee");
         ICoreLens.Snapshot memory after_ = lens.snapshot();
-        assertEq(after_.flushToCore + after_.flushTip + after_.flushToPayees, 0, "nothing left to flush");
+        assertEq(after_.flushToCore + after_.flushToPayees, 0, "nothing left to flush");
     }
 
     function test_OK_theFlushFieldsBeforeTheSplit() public {
-        // before the split starts every fee eth goes to the core less the tip
+        // before the split starts every fee eth goes to the core
         autoFlush = false;
         _buyCoin(funder, 3 ether);
         ICoreLens.Snapshot memory s = lens.snapshot();
         assertFalse(feeRouter.splitOn());
         assertEq(s.flushToPayees, 0, "no payee share before the split");
-        assertEq(s.flushToCore + s.flushTip, address(feeRouter).balance);
+        assertEq(s.flushToCore, address(feeRouter).balance);
         assertEq(s.routerOwed, 0);
     }
 

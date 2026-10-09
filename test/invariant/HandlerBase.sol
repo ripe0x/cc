@@ -907,12 +907,10 @@ abstract contract HandlerBase is Test {
         return skim + 2 >= gross && skim <= gross + 2;
     }
 
-    /// what the router sends to the engine out of `amount`, from its own getters before the flush: the tip and the payees'
-    /// parts per million of the gross amount (once the split is on) both come out of it
+    /// what the router sends to the engine out of `amount`, from its own getters before the flush: the payees'
+    /// parts per million of the gross amount (once the split is on) come out of it
     function _routerEngine(uint256 amount) internal view returns (uint256) {
-        uint256 tip = amount * feeRouter.tipPpm() / 1_000_000;
-        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
-        uint256 rest = amount - tip;
+        uint256 rest = amount;
         if (feeRouter.splitOn()) {
             (, uint32[] memory ppm) = feeRouter.payees();
             for (uint256 i; i < ppm.length; ++i) {
@@ -924,7 +922,7 @@ abstract contract HandlerBase is Test {
 
     /// flushes the fee router as the flusher. returns the eth that arrived since the last flush (the router held that plus
     /// what a failed flush left waiting) and what the core must receive. the router's eth may only go to the engine set at
-    /// that time, by the flush rule: the tip to the caller, the payees' parts, the rest to the engine. an engine that
+    /// that time, by the flush rule: the payees' parts, the rest to the engine. an engine that
     /// refuses makes the flush revert and the eth waits
     function _flushRouter() internal returns (uint256 fresh, uint256 toCore) {
         uint256 held = address(feeRouter).balance;
@@ -935,7 +933,7 @@ abstract contract HandlerBase is Test {
         uint256 e0 = eng.balance;
         uint256 w0 = parked;
         vm.prank(flusher);
-        try feeRouter.flush(flusher) {
+        try feeRouter.flush() {
             routerFlushes++;
             if (held != owed && eng.balance - e0 != want) {
                 _flag(V_ROUTER, "the engine got other than the flush rule gives");
@@ -1237,7 +1235,7 @@ abstract contract HandlerBase is Test {
         if (dup) ids[1] = ids[0];
 
         SellPre memory p;
-        p.pull = _beginPull(who);
+        p.pull = _beginPull();
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
@@ -1397,7 +1395,7 @@ abstract contract HandlerBase is Test {
         bool expect
     ) internal {
         LPre memory p;
-        p.pull = _beginPull(keeper);
+        p.pull = _beginPull();
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
@@ -1548,7 +1546,7 @@ abstract contract HandlerBase is Test {
         // the basefee is set before the snapshot of the pull, which restores the block environment
         p.basefee = _logBound(feeSeed, 0.05 gwei, 300 gwei);
         vm.fee(p.basefee);
-        p.pull = _beginPull(keeper);
+        p.pull = _beginPull();
         p.valid = ready && _validPage(lane, ids, format);
         p.st = core.settings();
         p.pot = core.ethPot();
@@ -2049,7 +2047,7 @@ abstract contract HandlerBase is Test {
 
         // the Core pulls the router first, so the state the call prices against is the state after that flush
         address caller = _actor(aSeed >> 32);
-        Pull memory pull = _beginPull(caller);
+        Pull memory pull = _beginPull();
         AdoptPre memory p = _adoptPre(ids);
         _endPull(pull);
         vm.recordLogs();
@@ -2189,16 +2187,15 @@ abstract contract HandlerBase is Test {
         uint256 want;
         address engine;
         uint256 toCore;
-        uint256 tip;
         uint256 routerAfter;
         bool ok;
     }
 
     /// the eth pot doors (`sellForEth`, `buyListing`, `compose`, `composeExit`) start with the Core's pull of the
-    /// router, with `caller` as the tip recipient. this runs the same flush now, under a snapshot, so the state read
+    /// router. this runs the same flush now, under a snapshot, so the state read
     /// between `_beginPull` and `_endPull` is the state the door prices against. the handler writes no storage in
     /// between. `_endPull` restores the state before the pull, and the door then runs the pull itself
-    function _beginPull(address caller) internal returns (Pull memory q) {
+    function _beginPull() internal returns (Pull memory q) {
         q.bal0 = address(core).balance;
         q.pot0 = core.ethPot();
         q.rate0 = core.ethRate();
@@ -2208,12 +2205,10 @@ abstract contract HandlerBase is Test {
         q.engine = feeRouter.engine();
         q.want = q.held > q.owed ? _routerEngine(q.held - q.owed) : 0;
         q.snap = vm.snapshotState();
-        uint256 tip0 = caller.balance;
-        try feeRouter.flush{gas: PULL_GAS}(caller) {
+        try feeRouter.flush{gas: PULL_GAS}() {
             q.ok = true;
         } catch {}
         q.toCore = address(core).balance - q.bal0;
-        q.tip = caller.balance - tip0;
         q.routerAfter = address(feeRouter).balance;
     }
 
@@ -2222,19 +2217,19 @@ abstract contract HandlerBase is Test {
     }
 
     /// after a door succeeded: the pull inside it did what the flush rule gives. the router holds what is owed to
-    /// payees and nothing else after a flush that went through, the engine got its part, the caller got the tip
+    /// payees and nothing else after a flush that went through, the engine got its part
     function _pullChecks(Pull memory q, Vm.Log[] memory logs) internal {
         _potIn(q.toCore - q.toCore * core.settings().feeToBuybackBps / 10_000);
         bool moved = q.ok && q.held > q.owed;
         uint256 flushes;
-        uint256 tipSeen;
+        uint256 toEngineSeen;
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].emitter != address(feeRouter) || logs[i].topics[0] != IFeeRouter.Flushed.selector) continue;
             flushes++;
-            (, tipSeen,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            (toEngineSeen,) = abi.decode(logs[i].data, (uint256, uint256));
         }
         if (flushes != (moved ? 1 : 0)) _flag(V_ROUTER, "the door pulled other than the flush rule gives");
-        if (moved && tipSeen != q.tip) _flag(V_ROUTER, "the door pull paid a tip other than the one the flush paid");
+        if (moved && toEngineSeen != q.want) _flag(V_ROUTER, "the door pull sent the engine other than the flush rule gives");
         if (q.engine != gEngine) _flag(V_ROUTER, "the router engine is not the one the owner set last");
         if (moved && q.engine == address(core) && q.toCore != q.want) {
             _flag(V_ROUTER, "the door pull booked other than the flush rule gives");

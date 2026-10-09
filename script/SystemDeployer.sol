@@ -47,12 +47,12 @@ abstract contract SystemDeployer is LaunchChecks {
     error LaunchNotMined();
 
     /// @dev the steps of `stepGas`, in the order they are sent
-    uint256 internal constant STEPS = 9;
+    uint256 internal constant STEPS = 8;
 
     /// @notice execution gas of the transactions of the last `deploySystem`: controller, router, core, launch, setEngine,
-    /// setPayees, setTip, setSplitStart (measured by `startSplitAfterLaunch`, not by `deploySystem`), lens (sent right after
+    /// setPayees, setSplitStart (measured by `startSplitAfterLaunch`, not by `deploySystem`), lens (sent right after
     /// the core). the library goes first and is measured by the rehearsal
-    uint256[9] internal stepGas;
+    uint256[8] internal stepGas;
 
     /// @notice creates the router, the controller and the core. the script (`NewProd`) uses `new`, a test base uses
     /// `deployCode` on the artifacts, so the test contracts neither import the production sources nor embed their code
@@ -95,7 +95,7 @@ abstract contract SystemDeployer is LaunchChecks {
         if (d.core != coreAt) revert AddressMismatch("core");
         g = gasleft();
         d.lens = _newLens(d.core);
-        _step(8, g);
+        _step(7, g);
         if (d.lens != lensAddress(d.core)) revert AddressMismatch("lens");
 
         d.coin = _launch(c, coinAt, d.router, coreAt);
@@ -147,9 +147,6 @@ abstract contract SystemDeployer is LaunchChecks {
             r.setPayees(who, ppm);
         }
         _step(5, g);
-        g = gasleft();
-        if (r.tipPpm() != c.tipPpm || r.tipCap() != c.tipCap) r.setTip(c.tipPpm, c.tipCap);
-        _step(6, g);
     }
 
     /// @notice the last router transaction, only after the launch transaction is mined: the split starts when the anti
@@ -162,7 +159,7 @@ abstract contract SystemDeployer is LaunchChecks {
         IFeeRouter r = IFeeRouter(payable(router));
         // forge-lint: disable-next-line(unsafe-typecast)
         if (r.splitStart() == 0) r.setSplitStart(uint64(uint256(info.launchedAt) + c.sniperSeconds));
-        _step(7, g);
+        _step(6, g);
     }
 
     /// @notice reverts unless the signer is the deployer the operator named

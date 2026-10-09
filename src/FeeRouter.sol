@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 /// the bounty recipient of the pool. the v2 hook pushes fee eth with the 2,300 gas stipend, so `receive` does nothing at
-/// all: no write, no read, no call, no log. `flush(tipTo)` forwards the balance: a small tip to `tipTo`, a split to up to
-/// four payees once the split has started, the rest to the engine, which books it as fees (docs/FLOW.md 10.2 and 10.6).
+/// all: no write, no read, no call, no log. `flush()` forwards the balance: a split to up to four payees once the split
+/// has started, the rest to the engine, which books it as fees (docs/FLOW.md 10.2 and 10.6).
 /// the engine calls `flush` itself at the start of its entry points (docs/FLOW.md 10.8).
 /// eth waits here until an engine is set. the router owner can point every future fee at any engine with `setEngine`
 /// until `lock`. it never touches what an engine already holds, and it has no token path.
@@ -12,10 +12,6 @@ contract FeeRouter {
     uint256 internal constant MAX_PAYEES = 4;
     /// the payees' total share of a flush, at most. the engine keeps at least the rest
     uint256 internal constant MAX_PAYEE_PPM = 200_000;
-    uint256 internal constant MAX_TIP_PPM = 20_000;
-    uint256 internal constant MAX_TIP_CAP = 0.05 ether;
-    /// gas for the tip send. enough for a wallet or a small receiver, too little to do harm
-    uint256 internal constant SEND_GAS = 50_000;
     /// gas for a payee send (docs/FLOW.md 10.7): a payee may be a splitter contract
     uint256 internal constant PAYEE_GAS = 100_000;
 
@@ -30,9 +26,6 @@ contract FeeRouter {
     bool private _busy;
     /// timestamp of the first flush that turns the split on, zero means never
     uint64 public splitStart;
-    /// the tip of a flush: `min(amount * tipPpm / 1e6, tipCap)`
-    uint32 public tipPpm = 5_000;
-    uint96 public tipCap = 0.005 ether;
     uint32 public payeePpmTotal;
     /// eth credited to payees whose send failed, still held here. `flush` never forwards it
     uint256 public totalOwed;
@@ -52,18 +45,15 @@ contract FeeRouter {
     error ClaimFailed();
     error NothingOwed();
     error BadPayees();
-    error BadTip();
     error SplitIsOn();
 
     event EngineSet(address indexed previous, address indexed engine);
     event Locked(address indexed engine);
-    event Flushed(address indexed engine, uint256 toEngine, uint256 tip, uint256 toPayees);
-    event TipFailed(address indexed to, uint256 amount);
+    event Flushed(address indexed engine, uint256 toEngine, uint256 toPayees);
     event PayeePaid(address indexed payee, uint256 amount);
     event PayeeOwed(address indexed payee, uint256 amount);
     event Claimed(address indexed payee, uint256 amount);
     event PayeesSet(address[] payees, uint32[] ppm);
-    event TipSet(uint32 ppm, uint96 cap);
     event SplitStartSet(uint64 at);
     event SplitStarted(uint256 at);
     event OwnershipTransferStarted(address indexed owner, address indexed pendingOwner);
@@ -88,13 +78,13 @@ contract FeeRouter {
     /// nothing else may be here: the hook gives this call 2,300 gas
     receive() external payable {}
 
-    /// pays out the balance, except what is owed to payees. anyone may call, and the tip goes to `tipTo`. reverts while
+    /// pays out the balance, except what is owed to payees. anyone may call. reverts while
     /// no engine is set (a call to the zero address would burn the eth) and when the engine call fails. an empty
     /// balance returns before the owed amount is read.
     /// payee shares are parts per million of the gross amount flushed, so a payee gets exactly its share of the inflow.
-    /// the tip comes out of the engine's part. before the split starts, and in the one flush that starts it, the payees
-    /// get nothing, so eth that arrived during the anti sniper window is never shared
-    function flush(address tipTo) external {
+    /// before the split starts, and in the one flush that starts it, the payees get nothing, so eth that arrived during
+    /// the anti sniper window is never shared
+    function flush() external {
         if (_busy) revert Reentered();
         address to = engine;
         if (to == address(0)) revert NoEngine();
@@ -102,7 +92,6 @@ contract FeeRouter {
         uint256 amount = address(this).balance - totalOwed;
         if (amount == 0) return;
         _busy = true;
-        uint256 tip = _tip(amount, tipTo);
         uint256 shared;
         if (splitOn) {
             shared = _payPayees(amount);
@@ -110,23 +99,12 @@ contract FeeRouter {
             splitOn = true;
             emit SplitStarted(block.timestamp);
         }
-        // tip and shares are at most 2 percent and 20 percent of the amount: the engine part cannot underflow
-        uint256 toEngine = amount - tip - shared;
+        // the shares are at most 20 percent of the amount: the engine part cannot underflow
+        uint256 toEngine = amount - shared;
         (bool ok,) = to.call{value: toEngine}("");
         _busy = false;
         if (!ok) revert FlushFailed();
-        emit Flushed(to, toEngine, tip, shared);
-    }
-
-    function _tip(uint256 amount, address tipTo) private returns (uint256 tip) {
-        tip = amount * tipPpm / PPM;
-        if (tip > tipCap) tip = tipCap;
-        if (tip == 0 || tipTo == address(0)) return 0;
-        (bool ok,) = tipTo.call{gas: SEND_GAS, value: tip}("");
-        if (!ok) {
-            emit TipFailed(tipTo, tip);
-            return 0;
-        }
+        emit Flushed(to, toEngine, shared);
     }
 
     /// a payee that cannot take its share in `PAYEE_GAS` is credited, never blocks the flush
@@ -191,13 +169,6 @@ contract FeeRouter {
         // forge-lint: disable-next-line(unsafe-typecast)
         payeePpmTotal = uint32(total);
         emit PayeesSet(who, ppm);
-    }
-
-    function setTip(uint32 ppm, uint96 cap) external onlyOwner unlocked {
-        if (ppm > MAX_TIP_PPM || cap > MAX_TIP_CAP) revert BadTip();
-        tipPpm = ppm;
-        tipCap = cap;
-        emit TipSet(ppm, cap);
     }
 
     /// the time of the first flush that starts the split. zero means never. only while the split is not on

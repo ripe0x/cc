@@ -59,8 +59,6 @@ contract ConfigTest is Fixture {
         assertTrue(f.restricted);
         assertEq(f.allowed.length, 0);
         assertEq(f.payeePpm, 112_778);
-        assertEq(f.tipPpm, 5_000);
-        assertEq(f.tipCap, 0.005 ether);
         // the v2 stack is not live: its addresses are placeholders the deploy refuses
         string[] memory unset = unsetFields(f);
         assertEq(unset.length, 5, "the placeholders left in the shipped file");
@@ -83,8 +81,8 @@ contract ConfigTest is Fixture {
     /// 10_000 = 25.047 bps (0.00047 above it). 9_638 is the nearest, and the factory needs minProtocolSkimShareBps at most
     /// 10_000 - 9_638 = 362 (`BPS - bountyBps - minProtocolSkimShareBps >= 0` in `_validateFee`).
     /// router inflow = bounty leg = 0.069 * 9_638 / 10_000 = 0.0665022 ether (665.022 bps). payee target 0.75 points =
-    /// 75 bps = 0.0075 ether, payeePpm = 75 / 665.022 * 1e6 = 112_778.2, rounded down to 112_778. tip 5_000 ppm = 0.5
-    /// percent of the router inflow, capped at 0.005 ether. the engine keeps the rest of the router inflow
+    /// 75 bps = 0.0075 ether, payeePpm = 75 / 665.022 * 1e6 = 112_778.2, rounded down to 112_778.
+    /// the engine receives the rest of the router inflow
     function test_feeSplitDerivation() public pure {
         LaunchConfig memory d = defaultConfig();
         uint256 v = 1 ether;
@@ -105,12 +103,7 @@ contract ConfigTest is Fixture {
         assertLe(payee, payeeTarget);
         assertGt(router * (uint256(d.payeePpm) + 1) / 1e6, payeeTarget, "112_778 is the largest ppm under 0.75 points");
         assertEq(payee, 7_499_985_111_600_000, "payee 0.7499985 points");
-        // tip: 5_000 ppm is 0.5 percent of the router inflow, below the cap at this volume
-        uint256 tip = router * d.tipPpm / 1e6;
-        assertEq(d.tipPpm, 5_000);
-        assertEq(tip, 332_511_000_000_000, "tip 0.0332511 points");
-        assertLt(tip, d.tipCap);
-        assertEq(router - tip - payee, 58_669_703_888_400_000, "engine 5.86697 points");
+        assertEq(router - payee, 59_002_214_888_400_000, "engine 5.9002215 points");
     }
 
     /// the deploy refuses to run while any placeholder is unset or the rate is out of bounds
