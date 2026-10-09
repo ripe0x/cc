@@ -32,7 +32,7 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | climbPerMinBps | 50 | 1 to 1_000 | rate climb per minute, compounded |
 | ceilBps | 12_500 | 10_000 to 30_000 | the rate stays at or below this share of the ceiling anchor |
 | idleLoosenBps | 200 | 0 to 2_000 | the ceiling anchor grows by this share of itself per full 10 minutes since the last fill |
-| clampCredits | 20 | 1 to 1_000 | the climb stops where the hourly cap affords this many average credits |
+| clampCredits | 20 | 1 to 1_000 | the rate stays at or below the rate where the hourly cap affords this many average credits |
 | spendCapBps | 2_000 | 100 to 5_000 | per hour window |
 | bonusCapBps | 2_500 | 0 to 5_000 | |
 | tipSavingsBps | 1_000 | 0 to 2_500 | |
@@ -52,18 +52,25 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | xRateDropPerCredit | 20 | 0 to 1_000 | |
 | xAuctionHalfLife | 6 hours | 10 minutes to 30 days | |
 | exitSliceCredits | 20 | 1 to 1_000 | |
-| rateCap | 123_200_000_000_000 (about 6 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the climb stops at min(funded clamp, ceiling, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
+| rateCap | 123_200_000_000_000 (about 6 * rateStart) | the rate bounds, 1e11 to 1e15 | wei per whole point. the eth rate never exceeds it: the read is at most min(funded clamp, ceiling, rateCap), `setRate` refuses above it, a lower cap pulls the rate down at the checkpoint. "never pay more than this per credit" |
 | exitLaneToBuybackBps | 0 | 0 to 10_000 | share of exit token from EXIT lane exits to the coin buyback, the rest to `xPot` (section 8) |
 | feeToBuybackBps | 0 | 0 to 10_000 | share of the eth booked from the fee router in `receive()` (the hook in v1, superseded by section 10) that goes to the coin buyback, the rest to the pot. last field of the struct (section 9) |
 
 the credit bid is a rate in wei per whole point. state: the rate at the last checkpoint, the rate paid at the last fill (`lastFillRate`, the ceiling anchor, `RATE_START` before the first fill), `lastFillTime`, and the rate paid at the first fill of the current minute bucket (`timestamp / 60`).
 
 * drop: each credit bought at rate `p` sets the rate to `p * (10_000 - dropPerCreditBps) / 10_000`, not below `min(dropFloorBps * minuteStart / 10_000, p)`, where `minuteStart` is the rate paid at the first fill of the same minute bucket. `p` becomes `lastFillRate` and `lastFillTime` is now. `buyListing` is one fill.
-* climb: while funded, the rate from checkpoint time `t` to `now` is `rate * (1 + climbPerMinBps / 10_000) ^ ((now - t) / 60)`, compounded per minute with a fractional minute as a fractional exponent. a rate at or above its limit is returned as stored.
-* limit: the lowest of `rateCap`, the funded clamp `ethPot * spendCapBps / (avgScore * clampCredits)`, and the ceiling `lastFillRate * (10_000 + idleLoosenBps * floor((now - lastFillTime) / 600)) / 10_000 * ceilBps / 10_000`. loosening is linear in the number of idle 10 minute intervals.
+* climb: while funded, the rate from checkpoint time `t` to `now` is `rate * (1 + climbPerMinBps / 10_000) ^ ((now - t) / 60)`, compounded per minute with a fractional minute as a fractional exponent. the read is that rate or the limit, whichever is lower.
+* limit: the lowest of `rateCap`, the funded clamp `ethPot * spendCapBps / (avgScore * clampCredits)`, and the ceiling `lastFillRate * (10_000 + idleLoosenBps * floor((now - lastFillTime) / 600)) * ceilBps / 1e8`. loosening is linear in the number of idle 10 minute intervals.
+* hard bound: the bid never exceeds the limit. a stored rate above it reads as the limit, so a pot that shrinks or a setting that is lowered (`ceilBps`, `spendCapBps`, a higher `clampCredits`) takes effect on the next read. the bound applies while the pot is funded (it affords one average credit at the stored rate). the next checkpoint stores the bounded rate, and the climb resumes from there.
+* `setRate` restates the price: the stored rate and the ceiling anchor both become `rate`. the fill clock and the minute state stay. the limit still bounds the read. `setSettings` keeps the anchor.
 * `buyListing` checks its price against the same rate.
 
-also owner settable at once, each with its own small function and event: `setRate(uint256)` (resets the current eth limit, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
+accepted properties of the rule.
+
+* anyone can checkpoint the rate (a skim of 1 wei, or a fee receipt). the checkpoint stores the bounded rate and moves `checkpointTime`, which delays the climb of the stored rate. the loosening runs from `lastFillTime` and is not delayed, so a checkpoint delays the bid reaching a loosened ceiling by at most 4 minutes per 10 minute step.
+* a seller who sells at falling prices across minutes can drag the anchor down: the minute floor restarts every minute, so each minute the rate can fall 20 percent and the anchor follows the rate paid. the recovery is the loosening of the ceiling or the owner's `setRate`.
+
+also owner settable at once, each with its own small function and event: `setRate(uint256)` (restates the eth rate and its ceiling anchor, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
 the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.21 to the router and 0.69 the protocol leg, fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
 
