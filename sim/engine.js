@@ -382,7 +382,7 @@ export class Core {
     this.ethToBuyback += toBuyback;
     this.checkpoint(now);
     this.ethPot += amount - toBuyback;
-    this.windowPot += amount - toBuyback; // the hourly room follows inflows
+    if (now < this.windowStart + 3600) this.windowPot += amount - toBuyback; // the room of an open hour follows inflows
     this.syncFunded();
     return { toBuyback, toPot: amount - toBuyback };
   }
@@ -458,7 +458,7 @@ export class Core {
     this.ethToBuyback += toBuyback;
     this.checkpoint(now);
     this.ethPot += amount - toBuyback;
-    this.windowPot += amount - toBuyback; // the hourly room follows inflows
+    if (now < this.windowStart + 3600) this.windowPot += amount - toBuyback; // the room of an open hour follows inflows
     this.syncFunded();
     return { toBuyback, toPot: amount - toBuyback };
   }
