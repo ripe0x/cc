@@ -19,7 +19,7 @@ import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 contract BuildIdentityTest is Fixture {
     uint256 internal constant CORE_RUNTIME = 24_501;
     uint256 internal constant CONTROLLER_RUNTIME = 4_464;
-    uint256 internal constant LIB_RUNTIME = 11_593;
+    uint256 internal constant LIB_RUNTIME = 11_650;
 
     function _json(string memory name) internal view returns (string memory) {
         return vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));

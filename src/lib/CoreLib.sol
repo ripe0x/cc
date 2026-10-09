@@ -111,12 +111,12 @@ library CoreLib {
 
     /// @notice the price state and the read of the eth rate (wei per whole point) at `nowTs`, from the stored rate `r` of
     /// checkpoint time `t`. The price state never exceeds `rateCap` or the ceiling `ceilBps` of the anchor. The anchor is
-    /// the rate of the last fill, grown by `idleLoosenBps` per full 10 minutes since the last fill at `anchorTime`. While
-    /// funded (the hourly cap `pot * spendCapBps` affords one average credit at `r`) the price state compounds
-    /// `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops climbing at the funded
-    /// threshold `pot * spendCapBps / avgScore`. The read is the price state, lowered while funded to the clamp
-    /// `pot * spendCapBps / (avgScore * clampCredits)`, the rate the hourly room affords. The clamp lowers the read only
-    /// and never enters the price state, which the Core stores. Never reverts: the Core calls it from `receive()`
+    /// the rate of the last fill, grown by `idleLoosenBps` per full 10 minutes since the last fill at `anchorTime`. The
+    /// price state compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops
+    /// climbing at the clamp `pot * spendCapBps / (avgScore * clampCredits)`, the rate the hourly room affords. A price
+    /// state above the clamp holds its value. While funded (the hourly cap affords one average credit at `r`) the read is
+    /// the price state lowered to the clamp. The clamp lowers the read and stops the climb, and never lowers the price
+    /// state, which the Core stores. Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view
@@ -131,8 +131,8 @@ library CoreLib {
         price = r;
         if (r >= cap) {
             price = cap;
-        } else if (funded && nowTs > t && r != 0) {
-            uint256 target = cap.min(room / s.avgScore);
+        } else if (nowTs > t && r != 0 && r < cap.min(room / (uint256(s.avgScore) * s.clampCredits))) {
+            uint256 target = cap.min(room / (uint256(s.avgScore) * s.clampCredits));
             // forge-lint: disable-start(unsafe-typecast)
             int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
                 * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;

@@ -324,12 +324,12 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.ethRate(), clamp, "the read is the clamp of 20 credits");
         assertEq(core.rateAtCheckpoint(), 4e12, "and the clamp is not stored");
         _warp(10 minutes);
-        assertEq(core.ethRate(), clamp, "held there while the price state climbs");
-        // the pot is large enough not to clamp: the read is the price state, which climbed behind the clamp
+        assertEq(core.ethRate(), clamp, "held there");
+        // the price state does not climb above the clamp: it waited at the opening rate
         _fund(10 ether);
-        assertApproxEqRel(core.rateAtCheckpoint(), 4_204_560_528_163, 1e9, "10 minutes at 0.5 percent");
+        assertEq(core.rateAtCheckpoint(), 4e12, "the price state waited at the opening rate");
         _warp(10 minutes);
-        assertApproxEqRel(core.ethRate(), 4_419_582_308_747, 1e9, "20 minutes at 0.5 percent");
+        assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9, "then 10 minutes at 0.5 percent");
     }
 
     /// the same rule at another average score: funded needs `pot * spendCap >= avgScore * rate`, to the wei, and at

@@ -38,8 +38,8 @@ contract RateFuzzTest is Fixture {
     }
 
     /// the price state after `mins` whole minutes from the stored rate `r`: at most `rateCap` and the loosened ceiling of
-    /// the anchor (idle for `idle` seconds), and while funded an integer walk of `climbPerMinBps` a minute up to the
-    /// funded threshold `pot * spendCapBps / avgScore`
+    /// the anchor (idle for `idle` seconds), and an integer walk of `climbPerMinBps` a minute up to the clamp
+    /// `pot * spendCapBps / (avgScore * clampCredits)`, which a price state above it holds
     function _priceAfter(Settings memory s, uint256 r, uint256 pot, uint256 anchor, uint256 idle, uint256 mins)
         internal
         pure
@@ -48,9 +48,9 @@ contract RateFuzzTest is Fixture {
         uint256 cap = BidModel.ceiling(s, anchor, idle);
         if (cap > s.rateCap) cap = s.rateCap;
         if (r >= cap) return cap;
-        if (!BidModel.funded(s, pot, r)) return r;
-        uint256 target = pot * s.spendCapBps / s.avgScore;
+        uint256 target = pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits);
         if (target > cap) target = cap;
+        if (r >= target) return r;
         for (uint256 j; j < mins; ++j) {
             r = r * (10_000 + s.climbPerMinBps) / 10_000;
             if (r >= target) return target;

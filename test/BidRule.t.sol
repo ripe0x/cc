@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Fixture} from "./utils/Fixture.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {Settings, Mainnet, ICreditStrategy} from "../src/interfaces/Interfaces.sol";
@@ -10,6 +11,8 @@ import {Settings, Mainnet, ICreditStrategy} from "../src/interfaces/Interfaces.s
 /// hourly room, the settings bounds, and the recovery after a gap in the market price. exact numbers at the launch
 /// settings, hand arithmetic throughout
 contract BidRuleTest is Fixture {
+    using stdStorage for StdStorage;
+
     uint256 internal constant START = 4e12;
 
     /// @dev books `eth` into the buying pot through the real `skim` door
@@ -349,6 +352,27 @@ contract BidRuleTest is Fixture {
         _warp(30);
         // 30 seconds at 0.5 percent a minute: 4e12 * 1.005^0.5
         assertApproxEqRel(core.ethRate(), 4_009_987_531_153, 1e9, "and climbing");
+    }
+
+    /// a pot with under one credit of room for 10 hours does not raise the price state: the climb stops at the clamp, so a
+    /// refill resumes from the price before the starvation
+    function test_starvedPotDoesNotRaiseThePriceState() public {
+        _potTo(20 ether);
+        _sellOne();
+        uint256 price = core.rateAtCheckpoint();
+        // drain the pot to under one average credit of room
+        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(1e15));
+        vm.deal(address(core), 1e15);
+        core.skim();
+        assertEq(core.rateAtCheckpoint(), price, "the price state is not lowered by the small pot");
+        _warp(10 hours);
+        assertEq(core.ethRate(), price, "and a starved pot does not raise it");
+        _potTo(20 ether);
+        assertEq(core.rateAtCheckpoint(), price, "the checkpoint at the refill stores the price from before");
+        assertEq(core.ethRate(), price, "the read after the refill is that price");
+        _warp(10 minutes);
+        // 1.005^10 = 1.0511401320407896
+        assertApproxEqRel(core.ethRate(), price * 1_051_140_132_040_790_000 / 1e18, 1e9, "and it climbs from there");
     }
 
     /// at the end of an hour the room falls under 20 credits: the last fills pay the clamp and the anchor stays the price

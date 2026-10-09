@@ -33,7 +33,7 @@ library BidModel {
     }
 
     /// @dev the price state after `dt` seconds from the stored rate `r`: at most `rateCap` and the ceiling, and while funded
-    /// compounding `climbPerMinBps` a minute up to the funded threshold `pot * spendCapBps / avgScore`
+    /// compounding `climbPerMinBps` a minute up to the clamp (a price state above the clamp holds)
     function price(Settings memory s, uint256 r, uint256 pot, uint256 anchor, uint256 idle, uint256 dt)
         internal
         pure
@@ -41,8 +41,8 @@ library BidModel {
     {
         uint256 cap = FixedPointMathLib.min(ceiling(s, anchor, idle), s.rateCap);
         if (r >= cap) return cap;
-        if (!funded(s, pot, r) || dt == 0 || r == 0) return r;
-        uint256 target = FixedPointMathLib.min(cap, pot * s.spendCapBps / s.avgScore);
+        uint256 target = FixedPointMathLib.min(cap, clamp(s, pot));
+        if (dt == 0 || r == 0 || r >= target) return r;
         // forge-lint: disable-start(unsafe-typecast)
         int256 x =
             FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14)) * int256(dt * 1e18 / 60) / 1e18;

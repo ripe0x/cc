@@ -312,7 +312,7 @@ contract FlowTest is Fixture {
         assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
         assertEq(
-            core.ethRate(), uint256(1e16) * 2000 / 4_330_000, "unfunded, flat at the price state the change stored"
+            core.ethRate(), 4e12, "unfunded, flat at the price state the change stored"
         );
         s.avgScore = 4_330_000;
         s.spendCapBps = 2_000;
