@@ -7,7 +7,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | item | state |
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
-| engine | ported to the artcoins v2 stack and tested: 986 tests pass, 0 fail, 9 skipped (995 total; the 9 skipped are the deep invariant suites), full run on foundry 1.8.1 with isolate on |
+| engine | ported to the artcoins v2 stack and tested: 1028 tests pass, 0 fail, 9 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on. deep run (64 runs, depth 200) of the 7 Deep suites: 6 clean, InvariantsPhase1Deep has one handler model gap in `invariant_11` (NEXT item 7) |
 | contracts | `src/Core.sol` 24,150 bytes runtime (426 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 18,487 (linked library, 6,089 bytes of room), `src/ControllerV1.sol` 4,464, `src/FeeRouter.sol` 5,043, `src/CoreLens.sol` 9,009 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |
@@ -39,7 +39,7 @@ docs/NEXT.md is the list: what the owner decided but is not built, what waits fo
 |---|---|
 | naming | the phase 2 contracts are referred to only as `exitModule` and `exitToken` in code, comments, tests, docs and commit messages. never name or describe them |
 | tests | mainnet fork tests pinned to a block, real contracts only (live ones, and v2 from its vendored build output). the only doubles are test/standins and attacker contracts |
-| toolchain | foundry 1.8.1 (isolate on, the default since 1.8.0), solc 0.8.30. the suite is green on it: 986 pass, 0 fail, 9 skipped (the deep invariant suites) of 995 tests |
+| toolchain | foundry 1.8.1 (isolate on, the default since 1.8.0), solc 0.8.30. the suite is green on it with REHEARSAL=1: 1028 pass, 0 fail, 9 skipped (the deep invariant suites). deep runs: `INVARIANT_DEEP=1 FOUNDRY_INVARIANT_RUNS=64 FOUNDRY_INVARIANT_DEPTH=200 forge test --match-contract '^<Suite>Deep$'`, 375 to 475 s per suite |
 | build | section 6. a clean build is about 4 minutes and 3 gb. the full suite is about 25 minutes: run it in the background and poll, or by path. after changing a production contract's external surface run `script/tools/gen-interfaces.sh` and repin test/BuildIdentity.t.sol |
 | small machines | never run two forge processes at once on 8 gb. a sandbox that reclaims idle sessions kills background work: keep a foreground loop alive while agents run |
 | rpc | public endpoints rate limit (429, 408). rerun a suite alone with `-j 1` before treating that as a failure |
