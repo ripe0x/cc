@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { simulate, W } from './engine.js';
+// the sim defaults before the launch values became the defaults, so the recorded csv rows stay reproducible
+const PRE = { bidRule: 'built', rateStart: 1.54e13, climbPerMin: 1, clampCredits: 1, idleLoosenPct: 0, reimburseBps: 11000, bountyBps: 9000, routerPayeePpm: 161031 };
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const cfg = isMainThread ? { seeds: arg('seeds', '1,2,3').split(',').map(Number), phase: +arg('phase', 1), base: arg('base', 'A'), loosen: +arg('loosen', 1) } : workerData.cfg;
@@ -32,7 +34,7 @@ function runSeed(job, seed) {
     }
     prev = n;
   };
-  const r = simulate(o), S = r.S, st = r.stats, H = r.H;
+  const r = simulate(Object.assign({}, PRE, o)), S = r.S, st = r.stats, H = r.H;
   const m = {
     first_fill_min: first == null ? NaN : first, recover_min: recover == null ? NaN : recover,
     credits_per_day: S.credits[H] / (H / 24), credits_day90: S.credits[H], paid_vs_market: st.costVsMarket, max_bid_over_market: st.rateMaxBidRatio,

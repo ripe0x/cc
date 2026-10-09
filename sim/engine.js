@@ -18,7 +18,7 @@ export const SETTINGS = {
   bonusCapBps: 2500, // the controller pays no bonus, so no effect
   tipSavingsBps: 1000,
   tipCapBps: 200,
-  reimburseBps: 11000,
+  reimburseBps: 8000,
   reimburseCapBps: 500,
   saleFloorBps: 7500, // the hard floor: no sale of a statement below cost * saleFloorBps / 10000, whatever the controller asks
   auctionDuration: 24 * 3600, // runs from the first bid
@@ -34,7 +34,7 @@ export const SETTINGS = {
   xRateDropPerCredit: 20,
   xAuctionHalfLife: 6 * 3600,
   exitSliceCredits: 20,
-  rateCap: 123200000000000, // wei per whole point, 8 times rateStart: the eth rate never passes it (climb clamp, setRate)
+  rateCap: 123200000000000, // wei per whole point, about 6 times rateStart: the eth rate never passes it (climb clamp, setRate)
   exitLaneToBuybackBps: 0, // share of exitToken from exit lane exits to the coin buyback, rest to the exit bid pot
   feeToBuybackBps: 0, // share of swap fee eth booked in receive() that goes to the buyback instead of the pot
 };
@@ -112,22 +112,23 @@ export const CORE_PARAMS = {
 export const SIM_DEFAULTS = {
   seed: 7,
   days: 90,
-  stepSec: 3600, // time step after the first hour, seconds. a divisor of 3600. rates quoted per hour or per day, the hourly cap and arrival counts scale with the step
-  rateStart: 1.54e13, // 75 percent of the market price over avgScore: 0.75 * 0.0089e18 / 433
-  // bid rule. 'built': climbs per hour (doubling per idle day), drops dropBps times the share of the pot spent.
+  stepSec: 60, // time step after the first hour, seconds. a divisor of 3600. 60 matches the minute bucket of the contract's drop floor and climb; hourly steps distort the stepped rule (bid up to 3x market). rates quoted per hour or per day, the hourly cap and arrival counts scale with the step
+  rateStart: 20554000000000, // launch opening rate (script/config/mainnet.json rateStart): 100 percent of the market price over avgScore, 0.0089e18 / 433
+  // bid rule. 'stepped' is the launch rule (src/lib/CoreLib.sol climb and drop) and the default. 'built' is the earlier rule, kept for the
+  // comparison in docs/BID-STUDY.md: climbs per hour (doubling per idle day), drops dropBps times the share of the pot spent.
   // 'dropToLast': after a fill the bid is dropToPct of the rate that fill paid, then climbs climbPerMin percent per minute, no ceiling.
   // 'stepped': a fill drops the bid dropPerCreditPct, not below dropToPct of the bid at the first fill of that timestamp; climbs climbPerMin
   // percent per minute, never above ceilPct of the rate of the last fill (of rateStart before any fill). the funded clamp and rateCap apply to all rules
-  bidRule: 'built',
+  bidRule: 'stepped',
   dropToPct: 80,
-  climbPerMin: 1,
+  climbPerMin: 0.5,
   dropPerCreditPct: 0.5,
   ceilPct: 125,
   // seller model toggle: one seller with an unlimited supply sells one credit per step whenever the bid has reached throttleFrac of the market price
   throttler: false,
   throttleFrac: 0.95,
-  clampCredits: 1, // the climb stops where the hourly cap affords this many average credits (1 as built)
-  idleLoosenPct: 0, // stepped: percent added to the ceiling anchor every idleLoosenMin minutes while no fill happens, 0 = none
+  clampCredits: 20, // the climb stops where the hourly cap affords this many average credits (launch 20, the built rule had 1)
+  idleLoosenPct: 2, // stepped: percent added to the ceiling anchor every idleLoosenMin minutes while no fill happens (launch 2, linear), 0 = none
   idleLoosenMin: 10,
   ceilDecayHours: 0, // stepped: half life of the ceiling headroom since the last fill, 0 = none
   askFloor: 0, // lowest seller ask as a multiple of the market price (0: none, asks are lognormal around 1)
@@ -143,14 +144,14 @@ export const SIM_DEFAULTS = {
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
   baselineSkimBps: 6900, // of 100000: 6.9 points of volume (script/config/mainnet.json launch.baselineSkimBps)
-  bountyBps: 9000, // of the baseline skim, to the fee router. the other 10 percent is the protocol leg, never the engine's
+  bountyBps: 9638, // of the baseline skim, to the fee router. the other 362 of 10000 is the protocol leg, not the engine's
   sniperStartBps: 90000,
   sniperEndBps: 6900, // falls to the baseline
   sniperSeconds: 1800,
   // the fee router (docs/FLOW.md 10.6, 10.7): a flush pays the caller a tip off the top, then, once the split has started, the
   // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
   routerTipPpm: 5000, // 0.5 percent. the cap of 0.005 eth a flush is ignored, which makes the tip an upper bound
-  routerPayeePpm: 161031, // the one launch payee, 1.0 point of volume at the baseline (of the gross router inflow)
+  routerPayeePpm: 112778, // the one launch payee, 0.75 points of volume at the baseline (of the gross router inflow)
   routerSplitStartSec: 1800, // the mined launch time plus the 30 minute window, no margin
   startTick: -175000,
   positionUpper: 887200,

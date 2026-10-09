@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { simulate, summary, W } from './engine.js';
+// the sim defaults before the launch values became the defaults, so the recorded csv rows stay reproducible
+const PRE = { bidRule: 'built', rateStart: 1.54e13, climbPerMin: 1, clampCredits: 1, idleLoosenPct: 0, reimburseBps: 11000, bountyBps: 9000, routerPayeePpm: 161031 };
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 // a worker thread does not inherit process.argv, so the main thread passes the settings in workerData
@@ -42,7 +44,7 @@ export const COLS = ['rule', 'params', 'market', 'credits_day1', 'credits_day3',
 
 function runOne(job) {
   const rows = SEEDS.map((seed) => {
-    const r = simulate(Object.assign({ days: DAYS, stepSec: STEP, seed }, MARKETS[job.market], job.over));
+    const r = simulate(Object.assign({}, PRE, { days: DAYS, stepSec: STEP, seed }, MARKETS[job.market], job.over));
     const s = summary(r, DAYS);
     return {
       credits_day1: r.at(1).credits, credits_day3: r.at(3).credits, credits_day7: r.at(7).credits, credits_day30: r.at(30).credits, credits_day90: r.at(DAYS).credits,
@@ -70,7 +72,7 @@ if (!isMainThread) {
     const lines = ['rule,params,hour,credits_in_hour,avg_paid_vs_market_in_hour,bid_over_market_at_hour_end,market_vs_start_at_hour_end,pot_eth_at_hour_end'];
     for (const [rule, params] of pick) {
       const job = rules().find((r) => r.rule === rule && r.params === params);
-      const r = simulate(Object.assign({ days: 2, stepSec: STEP, seed: SEEDS[0] }, MARKETS.falling, job.over)), S = r.S;
+      const r = simulate(Object.assign({}, PRE, { days: 2, stepSec: STEP, seed: SEEDS[0] }, MARKETS.falling, job.over)), S = r.S;
       for (let h = 1; h <= 24; h++) {
         const dc = S.cumCost[h] - S.cumCost[h - 1], dm = S.cumMkt[h] - S.cumMkt[h - 1];
         lines.push([rule, params, h, S.credits[h] - S.credits[h - 1], dm > 0 ? fmt(dc / dm) : '', fmt(S.bidRatio[h]), fmt(S.mktPerCredit[h] / r.params.priceP0), fmt(S.pot[h])].join(','));

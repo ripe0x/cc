@@ -11,8 +11,11 @@ const near = (a, b, tol, msg) => {
 };
 const ok = (c, msg) => { n++; assert.ok(c, msg); };
 const H = 3600;
+// the sim defaults are the launch bid rule (stepped). the checks below that port the earlier rule and its hand computed values run on these earlier defaults
+const LEGACY = { stepSec: 3600, bidRule: 'built', rateStart: 1.54e13, climbPerMin: 1, clampCredits: 1, idleLoosenPct: 0, reimburseBps: 11000 };
+const simL = (o = {}) => simulate(Object.assign({}, LEGACY, o));
 const fresh = (over = {}, pot = 1000) => {
-  const c = new Core(Object.assign({}, DEFAULTS, over), 0);
+  const c = new Core(Object.assign({}, DEFAULTS, LEGACY, over), 0);
   c.addFees(pot, 0);
   return c;
 };
@@ -28,9 +31,17 @@ const R0 = 1.54e13;
   const STEPPED = { dropPerCreditBps: 50, dropFloorBps: 8000, climbPerMinBps: 50, ceilBps: 12500, idleLoosenBps: 200, clampCredits: 20 };
   const BUILT_ONLY = ['climbBaseBps', 'climbDoubleEvery', 'climbMaxBps', 'dropBps'];
   for (const [k, v] of Object.entries(STEPPED)) if (cfg.settings[k] !== undefined) near(cfg.settings[k], v, 1e-12, 'launch stepped bid rule ' + k);
+  // the sim defaults are the launch bid rule: stepped, field for field with the config (bps to percent)
+  ok(DEFAULTS.bidRule === 'stepped', 'the default bid rule is stepped');
+  near(DEFAULTS.dropPerCreditPct, cfg.settings.dropPerCreditBps / 100, 1e-12, 'default dropPerCreditPct');
+  near(DEFAULTS.dropToPct, cfg.settings.dropFloorBps / 100, 1e-12, 'default dropToPct');
+  near(DEFAULTS.climbPerMin, cfg.settings.climbPerMinBps / 100, 1e-12, 'default climbPerMin');
+  near(DEFAULTS.ceilPct, cfg.settings.ceilBps / 100, 1e-12, 'default ceilPct');
+  near(DEFAULTS.idleLoosenPct, cfg.settings.idleLoosenBps / 100, 1e-12, 'default idleLoosenPct');
+  near(DEFAULTS.clampCredits, cfg.settings.clampCredits, 1e-12, 'default clampCredits');
+  near(DEFAULTS.rateStart, cfg.rateStart, 1e-12, 'default rateStart');
   for (const [k, v] of Object.entries(cfg.settings)) {
     if (k in STEPPED) continue;
-    if (k === 'reimburseBps' && v !== SETTINGS[k]) continue; // launch 8000 since commit 5f61f2c. the sim keeps 11000 so the study rows stay comparable
     if (k === 'reserveBps') { ok(SETTINGS.reserveBps === undefined, 'reserveBps is gone from the model'); continue; }
     if (moved && k === 'exitAfter') continue; // 72 hours in the old file, 105 hours in the new rules
     near(SETTINGS[k], k === 'buybackSlice' ? v / 1e18 : v, 1e-12, 'setting ' + k);
@@ -38,7 +49,7 @@ const R0 = 1.54e13;
   for (const k of newFields) if (cfg.settings[k] !== undefined) near(SETTINGS[k], cfg.settings[k], 1e-12, 'setting ' + k);
   for (const k of Object.keys(SETTINGS)) ok(BUILT_ONLY.includes(k) || cfg.settings[k] !== undefined || (moved && (newFields.includes(k) || k === 'reserveBps')), 'the config carries ' + k);
   if (cfg.controller) for (const k of Object.keys(CONTROLLER)) near(+CONTROLLER[k], +cfg.controller[k], 1e-12, 'controller ' + k);
-  // the launch rateStart is 100 percent of market (stepped rule). the sim default is the built rule's 75 percent, the study sets rateStart per run
+  // the launch rateStart is 100 percent of market
   near(cfg.rateStart, (0.0089 * W) / 433, 1e-3, 'launch rateStart is 100 percent of the 0.0089 market');
   // the pool and router values of the v2 launch
   for (const k of ['baselineSkimBps', 'bountyBps', 'sniperStartBps']) near(DEFAULTS[k], cfg.launch[k], 1e-12, 'launch ' + k);
@@ -46,7 +57,6 @@ const R0 = 1.54e13;
   near(DEFAULTS.sniperEndBps, cfg.launch.baselineSkimBps, 1e-12, 'the sniper skim falls to the baseline');
   ok(cfg.launch.lpFee === 0, 'no lp fee, so no lp income in the model');
   near(DEFAULTS.routerPayeePpm, cfg.router.payeePpm, 1e-12, 'router payeePpm'); near(DEFAULTS.routerTipPpm, cfg.router.tipPpm, 1e-12, 'router tipPpm');
-  near(DEFAULTS.rateStart, (0.75 * 0.0089 * W) / 433, 2e-3, 'rateStart is 75 percent of the market price over avgScore');
   assert.equal(firstViolation(SETTINGS), null); n++;
   assert.equal(controllerViolation(CONTROLLER), null); n++;
   // the rules of docs/FLOW.md section 9 at launch
@@ -81,15 +91,15 @@ const R0 = 1.54e13;
 // funded flag as built: pot * spendCapBps >= avgScore * rate, 0.033341 eth at the launch rate
 {
   const need = (4330000 * R0) / 2000 / W;
-  const lo = new Core(Object.assign({}, DEFAULTS), 0);
+  const lo = new Core(Object.assign({}, DEFAULTS, LEGACY), 0);
   lo.addFees(need * 0.999, 0);
   assert.equal(lo.funded, false); n++;
   near(lo.ethRate(100 * H), R0, 1e-12, 'unfunded rate does not climb');
-  const hi = new Core(Object.assign({}, DEFAULTS), 0);
+  const hi = new Core(Object.assign({}, DEFAULTS, LEGACY), 0);
   hi.addFees(need * 1.001, 0);
   assert.equal(hi.funded, true); n++;
   // old rule counterfactual: the pot affords one average credit, 433 * rate
-  const old = new Core(Object.assign({}, DEFAULTS, { fundedRule: 'old' }), 0);
+  const old = new Core(Object.assign({}, DEFAULTS, LEGACY, { fundedRule: 'old' }), 0);
   old.addFees((433 * R0 * 1.01) / W, 0);
   assert.equal(old.funded, true); n++;
 }
@@ -321,14 +331,14 @@ const R0 = 1.54e13;
 // feeToBuybackBps: the share of swap fee eth booked in receive() that goes to the buyback pot, the rest to the pot
 {
   for (const [bps, bb] of [[0, 0], [2500, 0.25], [5000, 0.5], [10000, 1]]) {
-    const c = new Core(Object.assign({}, DEFAULTS, { feeToBuybackBps: bps }), 0);
+    const c = new Core(Object.assign({}, DEFAULTS, LEGACY, { feeToBuybackBps: bps }), 0);
     const r = c.addFees(8, 0);
     near(c.ethToBuyback, 8 * bb, 1e-12, 'fee share to buyback at ' + bps); near(c.ethPot, 8 * (1 - bb), 1e-12, 'fee share to pot at ' + bps);
     near(r.toBuyback + r.toPot, 8, 1e-12, 'fee split adds up at ' + bps); near(c.feeToBuyback, 8 * bb, 1e-12, 'fee share booked at ' + bps);
   }
   const z = fresh({ feeToBuybackBps: 0 }, 10); near(z.ethToBuyback, 0, 1e-12, 'launch value 0 sends no fee to the buyback'); near(z.ethPot, 10, 1e-12, 'all of it to the pot');
   // 5000: half; the funded flag follows the pot only (the buyback share is not in the pot)
-  const h = new Core(Object.assign({}, DEFAULTS, { feeToBuybackBps: 5000 }), 0);
+  const h = new Core(Object.assign({}, DEFAULTS, LEGACY, { feeToBuybackBps: 5000 }), 0);
   const need = (4330000 * R0) / 2000 / W;
   h.addFees(need * 1.5, 0); assert.equal(h.funded, false); h.addFees(need * 1, 0); assert.equal(h.funded, true); n += 2; // pot 1.25 need after the second booking
   // a change applies to the next booking, sale proceeds are not touched by it
@@ -341,7 +351,7 @@ const R0 = 1.54e13;
 // conservation of eth through the Core: fees, sales, reimbursement, spend and the buyback slice all come from and go to one ledger
 {
   for (const over of [{}, { buyOnly: true }, { feeToBuybackBps: 5000 }, { buyOnly: true, feeToBuybackBps: 2500, saleToBuybackBps: 7500 }, { feeToBuybackBps: 10000, saleToBuybackBps: 0 }]) {
-    const c = new Core(Object.assign({}, DEFAULTS, { gasGwei: 1 }, over), 0);
+    const c = new Core(Object.assign({}, DEFAULTS, LEGACY, { gasGwei: 1 }, over), 0);
     let inflow = 0, out = 0;
     c.addFees(20, 0); inflow += 20;
     c.addFees(3.3, 50); inflow += 3.3;
@@ -380,7 +390,7 @@ const R0 = 1.54e13;
   bad({ rateCap: 1e11 - 1 }, 'rateCap'); bad({ rateCap: 1e15 + 1 }, 'rateCap');
   bad({ exitLaneToBuybackBps: 10001 }, 'exitLaneToBuybackBps');
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, saleFloorBps: 1000, feeToBuybackBps: 10000, auctionDuration: 6 * 3600, buybackSlice: 2, exitAfter: 3600, rateCap: 1e15 })), null); n++;
-  assert.equal(SETTINGS.rateCap, 8 * DEFAULTS.rateStart); n++;
+  assert.equal(SETTINGS.rateCap, 123200000000000); n++;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { xRateFloor: 9800 })), 'xRateFloor'); n++;
 }
 // rateCap: the climb clamps at it, setRate refuses above it, a lower cap pulls the rate down at the checkpoint
@@ -495,16 +505,16 @@ const R0 = 1.54e13;
   ok(p.sell(1).eth < 1e-9); // nothing to sell below the start tick
 }
 // skim schedule: anti sniper 90 points falling to the 6.9 point baseline over 30 minutes. the router gets 90 percent of the baseline
-// plus the whole extra, a flush tip comes out of the engine's part and after the split start the payee takes 161,031 ppm of the gross inflow
+// plus the whole extra, a flush tip comes out of the engine's part and after the split start the payee takes 112,778 ppm of the gross inflow
 {
   near(skimFraction(DEFAULTS, 0), 0.9, 1e-12, 'launch skim'); near(skimFraction(DEFAULTS, 900), (0.9 + 0.069) / 2, 1e-12, 'midway');
   near(skimFraction(DEFAULTS, 1800), 0.069, 1e-12, 'end of window'); near(skimFraction(DEFAULTS, 99999), 0.069, 1e-12, 'baseline');
-  near(routerFeeFraction(DEFAULTS, 0.069), 0.0621, 1e-12, 'router 6.21 points'); near(routerFeeFraction(DEFAULTS, 0.9), 0.0621 + 0.831, 1e-12, 'extra to the router');
+  near(routerFeeFraction(DEFAULTS, 0.069), 0.0665022, 1e-12, 'router 6.65022 points'); near(routerFeeFraction(DEFAULTS, 0.9), 0.0665022 + 0.831, 1e-12, 'extra to the router');
   const tip = 1 - 5000 / 1e6;
-  near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0621 * (1 - 5000 / 1e6 - 161031 / 1e6), 1e-12, 'engine share after the split start');
-  near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 51.7905, 1e-3, 'engine 5.18 points of 1 eth is 51.79 finney');
-  near(engineFeeFraction(DEFAULTS, 0.9, 0), (0.0621 + 0.831) * tip, 1e-12, 'the window is not shared with the payee');
-  near(engineFeeFraction(DEFAULTS, 0.069, 1799), 0.0621 * tip, 1e-12, 'nor is anything before the split start');
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600), 0.0665022 * (1 - 5000 / 1e6 - 112778 / 1e6), 1e-12, 'engine share after the split start');
+  near(engineFeeFraction(DEFAULTS, 0.069, 3600) * 1e3, 58.66970, 1e-4, 'engine 5.86697 points of 100 eth (docs/FLOW.md 10.9) is 58.67 finney of 1 eth');
+  near(engineFeeFraction(DEFAULTS, 0.9, 0), (0.0665022 + 0.831) * tip, 1e-12, 'the window is not shared with the payee');
+  near(engineFeeFraction(DEFAULTS, 0.069, 1799), 0.0665022 * tip, 1e-12, 'nor is anything before the split start');
   let d0 = 0;
   for (let t = 0; t < 3600; t += 120) d0 += stepVolume(DEFAULTS, t, 120);
   near(d0, 1557 * 0.586, 1e-9, 'first hour volume');
@@ -513,10 +523,10 @@ const R0 = 1.54e13;
 }
 // whole runs: deterministic, every eth identity closes, nothing negative
 {
-  const a = simulate({ days: 20, seed: 3 }), b = simulate({ days: 20, seed: 3 }), c = simulate({ days: 20, seed: 4 });
+  const a = simL({ days: 20, seed: 3 }), b = simL({ days: 20, seed: 3 }), c = simL({ days: 20, seed: 4 });
   assert.deepEqual(a.S.pot, b.S.pot); n++;
   assert.notDeepEqual(a.S.pot, c.S.pot); n++;
-  for (const r of [a, simulate({ days: 40, flatBps: 0, floorBps: 6000, saleFloorBps: 6000, seed: 5 }), simulate({ days: 40, buyOnly: true, feeToBuybackBps: 2500, seed: 6 }), simulate({ days: 40, buyerWaits: 'floor', feeToBuybackBps: 10000, seed: 8 }), simulate({ days: 40, phase2Day: 12, xp: 3e-5, stmtPick: 'random' })]) {
+  for (const r of [a, simL({ days: 40, flatBps: 0, floorBps: 6000, saleFloorBps: 6000, seed: 5 }), simL({ days: 40, buyOnly: true, feeToBuybackBps: 2500, seed: 6 }), simL({ days: 40, buyerWaits: 'floor', feeToBuybackBps: 10000, seed: 8 }), simL({ days: 40, phase2Day: 12, xp: 3e-5, stmtPick: 'random' })]) {
     ok(Math.abs(r.stats.potCheck) < 1e-6, 'pot accounting ' + r.stats.potCheck);
     ok(Math.abs(r.stats.buybackCheck) < 1e-9, 'buyback accounting ' + r.stats.buybackCheck);
     ok(Math.abs(r.stats.houseCheck) < 1e-9, 'house accounting ' + r.stats.houseCheck);
@@ -524,55 +534,55 @@ const R0 = 1.54e13;
     ok(r.S.burned[r.H] <= 1e9);
   }
   // the engine never stops buying because statements are unsold: no buyers at all, statements pile up, credits keep coming
-  const none = simulate({ days: 30, stmtPerDay: 0, stmtFloorPerDay: 0, seed: 3 });
+  const none = simL({ days: 30, stmtPerDay: 0, stmtFloorPerDay: 0, seed: 3 });
   ok(none.T.sold === 0 && none.S.waiting[none.H] > 100, 'no statement sells, many wait');
-  ok(none.S.credits[none.H] > 0.8 * simulate({ days: 30, seed: 3 }).S.credits[30 * 24], 'credits keep coming with no sale at all, at least 80 percent of the base run at day 30');
+  ok(none.S.credits[none.H] > 0.8 * simL({ days: 30, seed: 3 }).S.credits[30 * 24], 'credits keep coming with no sale at all, at least 80 percent of the base run at day 30');
   // every sale clears at or above the hard floor (cost * saleFloorBps) and at or above the price the buyer saw
-  const e = simulate({ days: 30, seed: 3 });
+  const e = simL({ days: 30, seed: 3 });
   ok(e.T.sold > 0 && e.T.soldPrice >= e.T.soldFloor * (1 - 1e-9), 'sales clear at or above the hard floor');
   ok(e.stats.bidsPerSale >= 1, 'every sale has at least one bid');
   ok(e.stats.saleOverCost >= 0.75 && e.stats.saleOverCost <= 1.2, 'average sale price over cost sits between the floor and the start');
   // buy only: every sale is one instant payment, no bid, nothing waits in the house, no auction is ever live
-  const bo = simulate({ days: 30, seed: 3, buyOnly: true });
+  const bo = simL({ days: 30, seed: 3, buyOnly: true });
   ok(bo.T.sold > 0 && bo.T.soldInstant === bo.T.sold, 'every buy only sale is instant'); assert.equal(bo.stats.bidsPerSale, 1); assert.equal(bo.live.length, 0); n += 2;
   ok(bo.S.pending.every((x) => x === 0), 'nothing waits in the house in buy only mode'); ok(bo.T.soldPrice >= bo.T.soldFloor * (1 - 1e-9), 'buy only sales clear at the hard floor or above');
   ok(e.T.soldInstant === 0, 'auction mode has no instant sales');
   // the pessimistic run: a buyer who waits for the floor pays the lowest price of every statement it takes, and none sells young
-  const wf = simulate({ days: 30, seed: 3, buyerWaits: 'floor' });
+  const wf = simL({ days: 30, seed: 3, buyerWaits: 'floor' });
   ok(wf.T.sold > 0 && Math.abs(wf.stats.saleOverCost - 0.75) < 1e-9 && wf.stats.saleAtFloorShare === 1, 'waiting buyers pay the floor');
   ok(wf.stats.saleAgeHours >= 105, 'and only after the asking price has reached it');
   // a settings change mid run: controller settings on day 5, the mode and the floors on day 10, all read at once
-  const sw = simulate({ days: 20, seed: 3, schedule: [{ day: 5, patch: { flatBps: 5000, startBps: 13000, stepBps: 200 } }, { day: 10, patch: { floorBps: 6000, saleFloorBps: 6000, buyOnly: true, feeToBuybackBps: 2500, saleToBuybackBps: 7500 } }] });
+  const sw = simL({ days: 20, seed: 3, schedule: [{ day: 5, patch: { flatBps: 5000, startBps: 13000, stepBps: 200 } }, { day: 10, patch: { floorBps: 6000, saleFloorBps: 6000, buyOnly: true, feeToBuybackBps: 2500, saleToBuybackBps: 7500 } }] });
   assert.equal(sw.core.s.flatBps, 5000); assert.equal(sw.core.c.floorBps, 6000); assert.equal(sw.core.s.saleFloorBps, 6000); assert.equal(sw.core.c.buyOnly, true); n += 4;
   assert.equal(sw.core.c.startBps, 13000); assert.equal(sw.core.s.saleToBuybackBps, 7500); assert.equal(sw.core.s.feeToBuybackBps, 2500); assert.equal(sw.T.settingsChanges, 2); n += 4;
   ok(sw.T.soldInstant > 0 && sw.T.soldInstant < sw.T.sold, 'sales before the flip went through auctions, after it instantly');
   ok(sw.core.feeToBuyback > 0, 'the fee share starts at its change'); ok(Math.abs(sw.stats.potCheck) < 1e-6, 'accounting closes across settings changes');
   ok(Math.abs(sw.stats.buybackCheck) < 1e-9, 'buyback accounting closes across settings changes');
-  const f0 = simulate({ days: 20, seed: 3 }), f1 = simulate({ days: 20, seed: 3, feeToBuybackBps: 10000 });
+  const f0 = simL({ days: 20, seed: 3 }), f1 = simL({ days: 20, seed: 3, feeToBuybackBps: 10000 });
   assert.equal(f0.core.feeToBuyback, 0); ok(f1.core.feeToBuyback > 0.9 * f1.S.cumFees[f1.H], 'at 10000 every fee goes to the buyback'); n++;
   ok(f1.T.sold >= 0 && f1.S.credits[f1.H] < f0.S.credits[f0.H], 'sending the fees to the buyback leaves less to buy credits');
   // the buyer's willingness to pay is a multiple of the MARKET cost of 80 credits, the asking price a share of what the engine PAID: a low willingness
   // sells less under the same asking curve (the engine paid more than market for most parts), and lowering the asking curve lets it buy again
-  const w55 = simulate({ days: 30, seed: 3, wtpMult: 0.55 }), w100 = simulate({ days: 30, seed: 3 });
+  const w55 = simL({ days: 30, seed: 3, wtpMult: 0.55 }), w100 = simL({ days: 30, seed: 3 });
   ok(w55.T.sold > 0 && w55.T.sold < 0.7 * w100.T.sold, 'a lower willingness to pay sells fewer statements at the same asking prices');
-  const w55low = simulate({ days: 30, seed: 3, wtpMult: 0.55, startBps: 5000, floorBps: 3000, saleFloorBps: 3000 });
+  const w55low = simL({ days: 30, seed: 3, wtpMult: 0.55, startBps: 5000, floorBps: 3000, saleFloorBps: 3000 });
   ok(w55low.T.sold > 1.8 * w55.T.sold, 'the same buyers buy more when the asking curve is lower'); ok(w55low.stats.saleOverCost < 0.5, 'and they pay a lower share of cost');
-  const p2 = simulate({ days: 30, phase2Day: 10, xp: 3e-5, seed: 3 });
+  const p2 = simL({ days: 30, phase2Day: 10, xp: 3e-5, seed: 3 });
   ok(p2.T.exited > 0 && p2.T.exitedAge > 0, 'unbid listings exit through the exitModule');
   const s = summary(a); ok(s.credits > 0 && s.potGoneDay > 1 && s.statements > 0, 'summary reads the run');
 }
 // sub-hour step: the default is the hourly step, minute and five minute steps give the same economy within sampling noise, and the books close
 {
-  const h = simulate({ days: 30, seed: 1 }), h2 = simulate({ days: 30, seed: 1, stepSec: 3600 });
+  const h = simL({ days: 30, seed: 1 }), h2 = simL({ days: 30, seed: 1, stepSec: 3600 });
   assert.deepEqual(h.S.credits, h2.S.credits); n++;
-  const m5 = simulate({ days: 30, seed: 1, stepSec: 300 }), m1 = simulate({ days: 30, seed: 1, stepSec: 60 });
+  const m5 = simL({ days: 30, seed: 1, stepSec: 300 }), m1 = simL({ days: 30, seed: 1, stepSec: 60 });
   for (const m of [m5, m1]) {
     const c = m.S.credits[m.H], c0 = h.S.credits[h.H];
     ok(c > 0.9 * c0 && c < 1.1 * c0, 'credits bought at a sub hour step stay within 10 percent of the hourly step');
     ok(Math.abs(m.stats.potCheck) < 1e-6 && Math.abs(m.stats.houseCheck) < 1e-6, 'accounting closes at a sub hour step');
     assert.equal(m.S.pot.length, h.S.pot.length); n++;
   }
-  assert.throws(() => simulate({ days: 2, stepSec: 7 })); n++;
+  assert.throws(() => simL({ days: 2, stepSec: 7 })); n++;
 }
 // bid rules dropToLast and stepped
 {
@@ -623,12 +633,12 @@ const R0 = 1.54e13;
   // whole runs: books close, the stepped bid never exceeds its ceiling at a step end, the throttler sells at its fraction of the market
   const rs = (share) => (share * 0.0089e18) / 433;
   for (const o of [{ bidRule: 'dropToLast' }, { bidRule: 'stepped', ceilPct: 110 }]) {
-    const r = simulate(Object.assign({ days: 6, seed: 2, stepSec: 60, rateStart: rs(1), climbPerMin: 1 }, o));
+    const r = simL(Object.assign({ days: 6, seed: 2, stepSec: 60, rateStart: rs(1), climbPerMin: 1 }, o));
     ok(Math.abs(r.stats.potCheck) < 1e-6 && Math.abs(r.stats.houseCheck) < 1e-6, 'accounting closes under ' + o.bidRule);
     ok(r.S.credits[r.H] > 0 && r.stats.idleHoursMax >= 0);
     if (o.bidRule === 'stepped') ok(r.core.ethRate(r.H * 3600) <= r.core.lastPaidRate * 1.1 * (1 + 1e-9) || r.core.ethRate(r.H * 3600) <= r.p.rateStart * 1.1, 'stepped ceiling at the end of a run');
   }
-  const a = simulate({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1) }), b = simulate({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1), throttler: true });
+  const a = simL({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1) }), b = simL({ days: 4, seed: 2, stepSec: 60, bidRule: 'dropToLast', rateStart: rs(1), throttler: true });
   ok(a.T.throttled === 0 && b.T.throttled > 0, 'the throttler sells credits when on');
   ok(Math.abs(b.stats.potCheck) < 1e-6, 'accounting closes with the throttler');
   // market paths
@@ -647,8 +657,8 @@ const R0 = 1.54e13;
   near(d.ethRate(10 * 3600), R * (1 + 0.5 * Math.pow(2, -10)), 1e-12, 'no fill yet: headroom halves every hour from time zero');
   d.spend(0.001, 0); const lp = d.lastPaidRate;
   near(d.ethRate(3600), Math.min(R * 0.995 * Math.pow(2, 60), lp * 1.25), 1e-9, 'after one half life the headroom is halved');
-  const f = simulate({ days: 3, seed: 2, askFloor: 0.8 });
-  const g = simulate({ days: 3, seed: 2 }); ok(f.stats.costVsMarket >= g.stats.costVsMarket - 0.2, 'a floor on seller asks does not lower the price paid');
+  const f = simL({ days: 3, seed: 2, askFloor: 0.8 });
+  const g = simL({ days: 3, seed: 2 }); ok(f.stats.costVsMarket >= g.stats.costVsMarket - 0.2, 'a floor on seller asks does not lower the price paid');
 }
 // idle loosening of the stepped ceiling anchor, gap path, forced fill, bot drain, stall metric
 {
@@ -665,14 +675,14 @@ const R0 = 1.54e13;
   near(q(5.9, 30), 1, 1e-12, 'gap path before the jump'); near(q(6, 30), 1.3, 1e-12, 'gap path after the jump'); near(q(80, 100), 2, 1e-12, 'gap path stays');
   const rs = (share) => (share * 0.0089e18) / 433;
   const base = { days: 2, seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 };
-  const ff = simulate(Object.assign({ forceFillHour: 6, forceFillFrac: 0.5 }, base));
+  const ff = simL(Object.assign({ forceFillHour: 6, forceFillFrac: 0.5 }, base));
   ok(Math.abs(ff.stats.potCheck) < 1e-6, 'accounting closes with a forced fill'); ok(ff.T.throttled === 0, 'a forced fill is not counted as a throttler credit');
-  const bd = simulate(Object.assign({ botDrain: true, holdPot: 5, volScale: 0, strategyOn: false }, base));
+  const bd = simL(Object.assign({ botDrain: true, holdPot: 5, volScale: 0, strategyOn: false }, base));
   ok(bd.S.credits[bd.H] > 0 && bd.stats.gapHoursMax <= 1.01, 'with a bot draining the hourly cap each hour the longest gap is about an hour (pacing)');
-  const st0 = simulate(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 0, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
-  const st1 = simulate(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 2, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
+  const st0 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 0, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
+  const st1 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 2, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
   ok(st0.stats.stallHours > st1.stats.stallHours, 'idle loosening shortens the stall after a gap up'); ok(st0.stats.stallRuns.length >= 1 && st0.stats.stallHoursMax > 2, 'a stall run is recorded');
-  const hp = simulate(Object.assign({ holdPot: 0.1, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
+  const hp = simL(Object.assign({ holdPot: 0.1, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
   ok(hp.stats.stallHours > 0, 'a pot of 0.1 eth at a 0.03 market with clampCredits 20 stalls');
 }
 // stepped: the clamp bounds the bid that is read and paid, and is never stored. the drop and the anchor use the price state rate
@@ -697,5 +707,13 @@ const R0 = 1.54e13;
   near(e.priceRate(1000 * MIN), e.clamp(), 1e-12, 'the climb target is the clamp when it is under the ceiling'); near(e.ethRate(1000 * MIN), e.clamp(), 1e-12, 'read at the clamp');
   const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000, rateCap: R * 1.2 }, 1000);
   near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'rateCap bounds the price state'); d.rateAtCheckpoint = R * 3; near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'a stored rate above a bound reads as the bound');
+}
+// the unmodified defaults are the launch run: stepped rule at 60 second steps, the launch router split, books close
+{
+  const r = simulate({ days: 6, seed: 3 });
+  ok(r.params.bidRule === 'stepped' && r.params.stepSec === 60 && r.params.clampCredits === 20, 'the default run is the stepped launch rule at minute steps');
+  ok(Math.abs(r.stats.potCheck) < 1e-6 && Math.abs(r.stats.houseCheck) < 1e-6, 'accounting closes on the default run');
+  ok(r.stats.rateMaxBidRatio < 1.6, 'the default bid stays under 1.6x the market (rate cap and ceiling): ' + r.stats.rateMaxBidRatio);
+  ok(summary(r, 6).credits > 5000, 'the default run buys credits in week one');
 }
 console.log(`ok, ${n} checks passed`);

@@ -5,7 +5,7 @@ import { simulate, summary, WTP_Q, interp, W } from './engine.js';
 const OUT = new URL('./results/', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
 const SEEDS5 = [1, 2, 3, 4, 5], SEEDS3 = [1, 2, 3];
-// rateStart as a share of the market price of a credit (0.0089 eth, 433 average points): 0.75 gives the launch default 1.54e13
+// rateStart as a share of the market price of a credit (0.0089 eth, 433 average points): 1.0 gives the launch default 2.06e13
 export const rateAt = (share, price = 0.0089) => (share * price * W) / 433;
 
 // flat numeric metrics of one run
@@ -89,7 +89,7 @@ batches.q2 = () => {
   }
   // the same share at other market prices: the rule scales with price
   out.price = [];
-  for (const p0 of [0.0045, 0.018, 0.03]) out.price.push(Object.assign({ p0 }, many({ priceP0: p0, rateStart: rateAt(0.75, p0) }, SEEDS3)));
+  for (const p0 of [0.0045, 0.018, 0.03]) out.price.push(Object.assign({ p0 }, many({ priceP0: p0, rateStart: rateAt(1.0, p0) }, SEEDS3)));
   return out;
 };
 
@@ -144,19 +144,22 @@ batches.q5 = () => {
   return out;
 };
 
-// ---- q6: dropBps, climbBaseBps, spendCapBps
+// ---- q6: the stepped bid rule: drop per credit, drop floor, climb per minute, ceiling, idle loosening, clamp, and the hourly cap
 batches.q6 = () => {
-  const out = { base: many({}, SEEDS5), sweeps: {}, small: {} };
-  out.sweeps.dropBps = sweep('dropBps', [0, 500, 1000, 2000, 3000, 5000], {}, SEEDS5);
-  out.sweeps.climbBaseBps = sweep('climbBaseBps', [25, 50, 100, 200, 400], {}, SEEDS5);
-  out.sweeps.spendCapBps = sweep('spendCapBps', [500, 1000, 2000, 4000, 10000], {}, SEEDS5);
-  // a hard case: a low opening limit and a falling market, where the climb and the drop have work to do
-  const hard = { rateStart: rateAt(0.4), pricePath: 'recovery' };
-  out.hardRecovery = {
-    dropBps: sweep('dropBps', [0, 1000, 2000, 5000], hard), climbBaseBps: sweep('climbBaseBps', [25, 100, 400], hard), spendCapBps: sweep('spendCapBps', [500, 2000, 10000], hard),
-  };
-  const dec = { pricePath: 'decline' };
-  out.decline = { dropBps: sweep('dropBps', [0, 1000, 2000, 5000], dec), spendCapBps: sweep('spendCapBps', [500, 2000, 10000], dec) };
+  const out = { base: many({}, SEEDS5), sweeps: {} };
+  const S = out.sweeps;
+  S.dropPerCreditPct = sweep('dropPerCreditPct', [0.25, 0.5, 1, 2], {}, SEEDS5);
+  S.dropToPct = sweep('dropToPct', [50, 80, 95], {}, SEEDS5);
+  S.climbPerMin = sweep('climbPerMin', [0.25, 0.5, 1, 2], {}, SEEDS5);
+  S.ceilPct = sweep('ceilPct', [110, 125, 150, 200], {}, SEEDS5);
+  S.idleLoosenPct = sweep('idleLoosenPct', [0, 1, 2, 5], {}, SEEDS5);
+  S.clampCredits = sweep('clampCredits', [1, 5, 20, 50], {}, SEEDS5);
+  S.spendCapBps = sweep('spendCapBps', [500, 1000, 2000, 4000], {}, SEEDS5);
+  // hard cases: a low opening limit in a recovering market and a declining market
+  const hard = { rateStart: rateAt(0.4), pricePath: 'recovery' }, dec = { pricePath: 'decline' };
+  const pick = { dropPerCreditPct: [0.25, 0.5, 2], climbPerMin: [0.25, 0.5, 2], ceilPct: [110, 125, 200], clampCredits: [1, 20] };
+  out.hardRecovery = {}; out.decline = {};
+  for (const [k, vals] of Object.entries(pick)) { out.hardRecovery[k] = sweep(k, vals, hard); out.decline[k] = sweep(k, vals, dec); }
   return out;
 };
 
@@ -165,7 +168,7 @@ batches.q7 = () => {
   const out = { volume: [], stmtDemand: [], wtp: [] };
   for (const v of [1, 5, 17, 50, 150]) {
     const o = { volPreset: 'custom', volTail: v, volHalfLifeDays: 2 };
-    out.volume.push(Object.assign({ ethPerDay: v, feesPerDay: v * 0.0518 }, many(o, SEEDS5)));
+    out.volume.push(Object.assign({ ethPerDay: v, feesPerDay: v * 0.0587 }, many(o, SEEDS5)));
     // statement demand 5 times higher, to see what the sale side can do when the buyers are there
     out.stmtDemand.push(Object.assign({ ethPerDay: v }, many(Object.assign({ stmtPerDay: 40, stmtFloorPerDay: 10 }, o), SEEDS3)));
   }
@@ -204,9 +207,9 @@ batches.q9 = () => {
   const tests = [
     ['volScale', 0.25, 4], ['priceP0', 0.0045, 0.018], ['pricePath', 'decline', 'recovery'], ['askSigma', 0.15, 0.4], ['impactElast', 0, 0.3],
     ['offersPerHour', 60, 400], ['supplyElast', 0.5, 3], ['bookChurn', 0.02, 0.15], ['stmtPerDay', 3, 20], ['wtpMult', 0.7, 1.3],
-    ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.0)], ['flatBps', 0, 10000], ['startBps', 9000, 13000], ['stepEvery', 3600, 6 * 3600], ['floor, both floors', { floorBps: 5000, saleFloorBps: 5000 }, { floorBps: 7500, saleFloorBps: 7500 }],
+    ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.25)], ['flatBps', 0, 10000], ['startBps', 9000, 13000], ['stepEvery', 3600, 6 * 3600], ['floor, both floors', { floorBps: 5000, saleFloorBps: 5000 }, { floorBps: 7500, saleFloorBps: 7500 }],
     ['buyOnly', false, true], ['feeToBuybackBps', 0, 2500], ['buyerWaits', 'no', 'floor'], ['auctionDuration', 6 * 3600, 72 * 3600],
-    ['saleToBuybackBps', 0, 10000], ['dropBps', 500, 4000], ['spendCapBps', 1000, 4000], ['climbBaseBps', 50, 200], ['gasGwei', 0.5, 10],
+    ['saleToBuybackBps', 0, 10000], ['dropPerCreditPct', 0.25, 2], ['climbPerMin', 0.25, 2], ['ceilPct', 110, 200], ['clampCredits', 1, 50], ['idleLoosenPct', 0, 5], ['spendCapBps', 1000, 4000], ['gasGwei', 0.5, 10],
     ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7], ['exitAfter', 24 * 3600, 7 * 86400], ['stmtPick', 'cheapest', 'random'],
   ];
   const out = { base, rows: [] };
@@ -240,10 +243,10 @@ export const COMBOS = {
   split0: { saleToBuybackBps: 0 },
   split10000: { saleToBuybackBps: 10000 },
   open50: { rateStart: rateAt(0.5) },
-  open100: { rateStart: rateAt(1.0) },
+  open75: { rateStart: rateAt(0.75) },
   blend5000: { flatBps: 5000 },
   perPoint: { flatBps: 0 },
-  drop5000: { dropBps: 5000 },
+  drop2pct: { dropPerCreditPct: 2 },
 };
 batches.q10 = () => {
   const out = {};
