@@ -171,7 +171,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event ExitModuleSet(address exitModule, address exitToken, uint256 unitPerPoint);
     event TargetAdded(address target);
     event TargetRemoved(address target);
-    event CoinRescued(address indexed to, uint256 amount);
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event SuccessorSet(address successor);
     event SuccessorLocked();
@@ -1002,7 +1001,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// pool manager callback of `buyback`. swaps exact eth in for coin, which comes to the core. returns the eth
-    /// spent, skim included, and the coin bought. the coin is restricted and the core is on its allowlist.
+    /// spent, skim included, and the coin bought. the take of the coin from the pool manager passes the restriction of the
+    /// coin through the transfer allowance the hook grants for the swap.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(MANAGER)) revert OnlyPoolManager();
         (uint256 owed, uint256 bought) =
@@ -1108,15 +1108,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function lockTargets() external onlyOwner {
         targetsLocked = true;
         emit TargetsLocked();
-    }
-
-    /// sends coin the core holds to `to`. the core holds coin only in passing (the buyback burns what it buys in the same
-    /// call), so this reaches only coin that was sent to it, which the allowlist of the restricted coin permits.
-    /// coin only: never eth, credits, statements or the exit token. owner only and guarded, both checked by the library,
-    /// to which the call is handed untouched (the bytes saved keep the runtime under the size limit). it refuses the
-    /// zero address, sends and logs `CoinRescued`
-    function rescueCoin(address, uint256) external {
-        _toLib();
     }
 
     /// sends an ERC721 token the core holds to `to` with `transferFrom`: a credit only while it is not in a pile, a

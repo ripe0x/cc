@@ -99,14 +99,14 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         router = vm.computeCreateAddress(deployer, nonce + 1);
         core = vm.computeCreateAddress(deployer, nonce + 2);
         base.stack.feeSource = router;
-        address coinAt = predictCoin(base, deployer, router, core);
+        address coinAt = predictCoin(base, deployer, router);
         vm.startPrank(deployer);
         address controller;
         if (n >= 2) controller = address(Prod.newController(core, base.sale));
         if (n >= 3) address(Prod.newRouter(deployer));
         if (n >= 4) Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings);
         if ((n >= 5 && !skipLens) || (n >= 4 && lensEarly)) Prod.newLens(core, LENS_SALT, CREATE2_DEPLOYER);
-        if (n >= 5) coin = _launch(base, coinAt, router, core);
+        if (n >= 5) coin = _launch(base, coinAt, router);
         IFeeRouter r = IFeeRouter(payable(router));
         if (n >= 6) r.setEngine(core);
         if (n >= 7) {
@@ -450,7 +450,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         );
         this.resume(deployer, base, core);
         // sending the saved core creation at the next nonce gives the predicted core, and Resume goes on from there
-        address coinAt = predictCoin(base, deployer, router, core);
+        address coinAt = predictCoin(base, deployer, router);
         vm.startPrank(deployer);
         address c2 = address(Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings));
         vm.stopPrank();

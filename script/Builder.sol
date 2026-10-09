@@ -25,8 +25,9 @@ abstract contract SystemBuilder is ConfigReader {
     /// @notice the v2 factory config of the launch. the token admin is the owner. the bounty recipient is the fee
     /// router and the one project locker slot is the creator (the lp fee is 0, so it earns nothing today). the protocol
     /// slot is appended by the factory, so the project slot is `10_000 - protocolBps`. the coin is restricted and its
-    /// allowlist holds the Core (docs/FLOW.md 29) and `l.allowed`, nothing else
-    function buildConfig(LaunchConfig memory l, address tokenAdmin, address router, address core)
+    /// allowlist is `l.allowed` plus the entries the factory seeds. the Core is not listed: the buyback take reaches it through the
+    /// transfer allowance the hook grants for the swap (docs/FLOW.md decision 29)
+    function buildConfig(LaunchConfig memory l, address tokenAdmin, address router)
         internal
         pure
         returns (IArtCoinsFactoryV2.DeploymentConfigV2 memory c)
@@ -76,12 +77,7 @@ abstract contract SystemBuilder is ConfigReader {
         c.mev = IArtCoinsFactoryV2.MevConfigV2({
             module: l.mevModule, startingSkimBps: l.sniperStartBps, windowSeconds: l.sniperSeconds
         });
-        address[] memory allowed = new address[](l.allowed.length + 1);
-        allowed[0] = core;
-        for (uint256 i; i < l.allowed.length; ++i) {
-            allowed[i + 1] = l.allowed[i];
-        }
-        c.restriction = IArtCoinsFactoryV2.RestrictionConfigV2({restricted: l.restricted, allowed: allowed});
+        c.restriction = IArtCoinsFactoryV2.RestrictionConfigV2({restricted: l.restricted, allowed: l.allowed});
         c.extensions = new IArtCoinsFactoryV2.ExtensionConfigV2[](0);
     }
 
@@ -97,13 +93,13 @@ abstract contract SystemBuilder is ConfigReader {
     }
 
     /// @notice the address the v2 factory will give the coin, from its own `predictToken`. it depends on the sender
-    /// (the owner, who signs the launch), the whole config (router and Core included) and mutable factory state
+    /// (the owner, who signs the launch), the whole config (the router included) and mutable factory state
     /// (the default allowlist and the hook escrow), so read it right before the launch
-    function predictCoin(LaunchConfig memory l, address sender, address router, address core)
+    function predictCoin(LaunchConfig memory l, address sender, address router)
         internal
         view
         returns (address)
     {
-        return IArtCoinsFactoryV2(l.stack.factory).predictToken(sender, buildConfig(l, l.owner, router, core));
+        return IArtCoinsFactoryV2(l.stack.factory).predictToken(sender, buildConfig(l, l.owner, router));
     }
 }

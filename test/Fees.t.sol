@@ -1664,7 +1664,7 @@ interface IPermit2 {
 }
 
 /// the restricted v2 token, as far as the credits engine depends on it: the pool is the only way to move coin, the Core
-/// is on the allowlist and the router is not
+/// and the router are not on the allowlist
 contract RestrictedCoinTest is FeeBase {
     TestLiquidityHelper internal lp;
 
@@ -1674,9 +1674,9 @@ contract RestrictedCoinTest is FeeBase {
         _stock();
     }
 
-    function test_theLaunchIsRestrictedAndAllowlistsTheCoreOnly() public view {
+    function test_theLaunchIsRestrictedAndTheCoreIsNotAllowlisted() public view {
         assertTrue(coin.restricted());
-        assertTrue(coin.isAllowed(address(core)), "the Core is on the allowlist (FLOW 29)");
+        assertFalse(coin.isAllowed(address(core)), "the Core is not on the allowlist (FLOW 29)");
         assertFalse(coin.isAllowed(address(feeRouter)), "the router is not");
         assertFalse(coin.isAllowed(owner));
         assertFalse(coin.isAllowed(trader));
@@ -1723,35 +1723,6 @@ contract RestrictedCoinTest is FeeBase {
         coin.approve(address(lp), type(uint256).max);
         vm.expectRevert();
         lp.modify{value: 5 ether}(side, 174_000, 176_040, 1e23);
-        vm.stopPrank();
-    }
-
-    /// the Core is allowlisted: anyone can send coin to it, the owner can rescue it, nobody else can
-    function test_coinSentToTheCoreSitsThereUntilTheOwnerRescuesIt() public {
-        // a holder cannot send to the Core directly (the holder is not allowlisted and neither side is the pool)... but the
-        // Core is allowlisted, so the rule passes
-        uint256 amount = 1_000e18;
-        vm.prank(trader);
-        coin.transfer(address(core), amount);
-        assertEq(coin.balanceOf(address(core)), amount);
-
-        address to = _user("rescue to");
-        vm.prank(trader);
-        vm.expectRevert(ICore.OnlyOwner.selector);
-        core.rescueCoin(to, amount);
-
-        vm.expectEmit(true, false, false, true, address(core));
-        emit ICore.CoinRescued(to, amount);
-        vm.prank(owner);
-        core.rescueCoin(to, amount);
-        assertEq(coin.balanceOf(to), amount);
-        assertEq(coin.balanceOf(address(core)), 0);
-
-        vm.startPrank(owner);
-        vm.expectRevert(ICore.ZeroAddress.selector);
-        core.rescueCoin(address(0), 1);
-        vm.expectRevert();
-        core.rescueCoin(to, 1);
         vm.stopPrank();
     }
 }

@@ -7,9 +7,9 @@ import {IArtCoinsHookV2, IArtCoinsLpLockerV2, IArtCoinsFactoryV2} from "../src/i
 /// the launch the builder makes on the live v2 stack, read back from the real factory, hook, locker and coin
 /// (docs/FLOW.md 10.1 with the 10.6 amendment). the fixture launches through `deploySystem`
 contract LaunchV2Test is Fixture {
-    function test_theCoinIsRestrictedAndOnlyTheCoreIsAllowed() public view {
+    function test_theCoinIsRestrictedAndTheCoreIsNotAllowed() public view {
         assertTrue(coin.restricted(), "restricted");
-        assertTrue(coin.isAllowed(address(core)), "the core is on the allowlist");
+        assertFalse(coin.isAllowed(address(core)), "the core is not on the allowlist");
         assertFalse(coin.isAllowed(address(feeRouter)), "the router is not");
         assertEq(coin.admin(), owner, "the token admin is the owner");
         assertEq(coin.canonicalHook(), lc.stack.hook);

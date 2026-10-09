@@ -470,7 +470,7 @@ contract ConfigTest is Fixture {
         c = lc;
         c.stack.escrow = address(0xE5C);
         postflightAs(c, address(core), owner);
-        assertEq(_failedNames(), "core: escrow, code: stack addresses, factory: deploymentInfo names the coin, hook, locker, mev module, escrow and pool of the config, coin: allowlist holds the Core, the locker, the escrow and the config entries, coin: the locker and the escrow are pinned");
+        assertEq(_failedNames(), "core: escrow, code: stack addresses, factory: deploymentInfo names the coin, hook, locker, mev module, escrow and pool of the config, coin: allowlist holds the locker, the escrow and the config entries, coin: the locker and the escrow are pinned");
 
         // the auction factory of the config is not the one the core was built with
         c = lc;

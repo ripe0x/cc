@@ -79,7 +79,7 @@ abstract contract SystemDeployer is LaunchChecks {
         address routerAt = vm.computeCreateAddress(owner, nonce + 1);
         address coreAt = vm.computeCreateAddress(owner, nonce + 2);
         c.stack.feeSource = routerAt;
-        address coinAt = predictCoin(c, owner, routerAt, coreAt);
+        address coinAt = predictCoin(c, owner, routerAt);
 
         uint256 g = gasleft();
         d.controller = _newController(coreAt, c);
@@ -98,7 +98,7 @@ abstract contract SystemDeployer is LaunchChecks {
         _step(7, g);
         if (d.lens != lensAddress(d.core)) revert AddressMismatch("lens");
 
-        d.coin = _launch(c, coinAt, d.router, coreAt);
+        d.coin = _launch(c, coinAt, d.router);
         d.launchKey = poolKeyOf(d.coin, c.stack);
         d.poolId = keccak256(abi.encode(d.launchKey));
         _setupRouter(c, d.router, d.core);
@@ -118,14 +118,14 @@ abstract contract SystemDeployer is LaunchChecks {
 
     /// @notice the launch through the factory as its owner, paying the live deploy fee. checks the coin address
     /// against the prediction the Core was built with
-    function _launch(LaunchConfig memory c, address coinAt, address router, address core)
+    function _launch(LaunchConfig memory c, address coinAt, address router)
         internal
         returns (address coin)
     {
         IArtCoinsFactoryV2 factory = IArtCoinsFactoryV2(c.stack.factory);
         uint256 fee = factory.deployFee();
         uint256 g = gasleft();
-        coin = factory.deployTokenAsOwner{value: fee}(buildConfig(c, c.owner, router, core), c.protocolBps);
+        coin = factory.deployTokenAsOwner{value: fee}(buildConfig(c, c.owner, router), c.protocolBps);
         _step(3, g);
         if (coin != coinAt) revert AddressMismatch("coin");
     }

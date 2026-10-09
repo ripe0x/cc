@@ -116,7 +116,6 @@ library CoreLib {
     error BadSwap();
     error ZeroAddress();
     error OnlyOwner();
-    event CoinRescued(address indexed to, uint256 amount);
     /// the credit is in a pile of the Core
     error InPile();
     /// the statement is on the books of the Core
@@ -315,19 +314,6 @@ library CoreLib {
         bought = uint256(uint128(d.amount1()));
         pm.take(key.currency1, address(this), bought);
         // forge-lint: disable-end(unsafe-typecast)
-    }
-
-    /// @notice sends coin the Core holds to `to`. the Core's `rescueCoin` forwards its call here untouched, so the owner
-    /// check and the reentrancy guard are here: `msg.sender` is the caller of the Core and the guard is the Core's own
-    /// (solady's storage guard, the same slot: the word holds the Core's address while a guarded call runs and the
-    /// library's `codesize()` after it, and any nonzero value other than the Core's address counts as free)
-    function rescueCoin(address to, uint256 amount) external {
-        _onlyOwner();
-        if (to == address(0)) revert ZeroAddress();
-        _enter();
-        SafeTransferLib.safeTransfer(ICoinOf(address(this)).COIN(), to, amount);
-        _leave();
-        emit CoinRescued(to, amount);
     }
 
     /// @notice sends the ERC721 token `id` of `token` that the Core holds to `to` with `transferFrom`. a credit leaves only

@@ -26,12 +26,11 @@ contract LaunchTest is Fixture {
     }
 
     function test_predictedCoinEqualsDeployed() public view {
-        assertEq(predictCoin(owner, address(core), "Fixture Coin", "FIXT", FIXTURE_SALT), address(coin));
-        // the prediction depends on the token admin, the salt, the Core (it is on the allowlist) and the name
-        assertTrue(predictCoin(creator, address(core), "Fixture Coin", "FIXT", FIXTURE_SALT) != address(coin));
-        assertTrue(predictCoin(owner, address(core), "Fixture Coin", "FIXT", bytes32(0)) != address(coin));
-        assertTrue(predictCoin(owner, address(ctl), "Fixture Coin", "FIXT", FIXTURE_SALT) != address(coin));
-        assertTrue(predictCoin(owner, address(core), "Other", "FIXT", FIXTURE_SALT) != address(coin));
+        assertEq(predictCoin(owner, "Fixture Coin", "FIXT", FIXTURE_SALT), address(coin));
+        // the prediction depends on the token admin, the salt and the name
+        assertTrue(predictCoin(creator, "Fixture Coin", "FIXT", FIXTURE_SALT) != address(coin));
+        assertTrue(predictCoin(owner, "Fixture Coin", "FIXT", bytes32(0)) != address(coin));
+        assertTrue(predictCoin(owner, "Other", "FIXT", FIXTURE_SALT) != address(coin));
     }
 
     function test_predictionDependsOnTheSender() public view {
@@ -117,11 +116,10 @@ contract LaunchTest is Fixture {
         assertEq(coin.canonicalHook(), lc.stack.hook);
         assertEq(coin.poolManager(), Mainnet.POOL_MANAGER);
         assertEq(coin.launcher(), lc.stack.factory);
-        assertTrue(coin.isAllowed(address(core)), "the Core is on the allowlist");
         assertTrue(coin.isAllowed(lc.stack.locker) && coin.isPinned(lc.stack.locker), "the locker is pinned");
         assertTrue(coin.isAllowed(lc.stack.escrow) && coin.isPinned(lc.stack.escrow), "the escrow is pinned");
-        assertFalse(coin.isPinned(address(core)), "the Core entry is the admin's to manage");
-        address[7] memory off = [
+        address[8] memory off = [
+            address(core),
             address(feeRouter),
             owner,
             creator,
@@ -170,11 +168,11 @@ contract LaunchTest is Fixture {
     }
 
     function _view() internal view returns (LaunchConfigView memory v) {
-        v.cfg = buildConfig(owner, address(core), creator, "Fixture Coin", "FIXT", FIXTURE_SALT);
+        v.cfg = buildConfig(owner, creator, "Fixture Coin", "FIXT", FIXTURE_SALT);
     }
 
     function _config(address admin, bytes32 salt) internal view returns (IArtCoinsFactoryV2.DeploymentConfigV2 memory) {
-        return buildConfig(admin, address(core), creator, "Fixture Coin", "FIXT", salt);
+        return buildConfig(admin, creator, "Fixture Coin", "FIXT", salt);
     }
 
     function test_secondLaunchWithSameSaltFails() public {

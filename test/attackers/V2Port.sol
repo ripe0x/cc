@@ -63,7 +63,7 @@ contract ClaimMidExit is IExitModule {
 }
 
 /// a stranger holding coin that calls the Core's `buyback` and, in the same transaction, tries to spend the transfer
-/// allowance the hook granted for the buyback's take. the Core is on the allowlist, so the take leaves it unconsumed
+/// allowance the hook granted for the buyback's take. the Core is not on the allowlist, so the take consumes the whole allowance
 contract LeftoverSpender {
     IArtCoinsTokenV2 public immutable COIN;
     ICore public immutable CORE;

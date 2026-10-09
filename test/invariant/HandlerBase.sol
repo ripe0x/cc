@@ -1078,9 +1078,8 @@ abstract contract HandlerBase is Test {
     }
 
     /// tries to move coin between wallets and into a side pool. the coin is restricted: the pool is the only way to
-    /// move it, so a wallet to wallet transfer must revert and move nothing. a transfer to the core is the one thing that
-    /// passes (the core is on the allowlist), and the owner takes it out again with `rescueCoin`. the books of the core
-    /// must not move either way
+    /// move it, so a wallet to wallet transfer must revert and move nothing. a transfer to the core reverts as well (the
+    /// core is not on the allowlist). the books of the core must not move
     function walletMove(uint256 aSeed, uint256 amtSeed) external checked {
         uint8 a = A_WALLET_MOVE;
         address who = _actor(aSeed);
@@ -1099,12 +1098,11 @@ abstract contract HandlerBase is Test {
             _ok(a);
         }
         if (amtSeed % 3 == 0) {
-            // a gift to the core is accepted and sits there, the owner rescues it. nothing is booked
             vm.prank(who);
-            coin.transfer(address(core), amt);
-            vm.prank(owner);
-            core.rescueCoin(who, amt);
-            if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "rescueCoin left coin in the core");
+            try coin.transfer(address(core), amt) returns (bool) {
+                _flag(V_SUPPLY, "a transfer of the restricted coin to the core went through");
+            } catch {}
+            if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "the core holds coin");
         }
         _eth(b0, 0, 0, "walletMove");
         if (core.ethPot() != pot0) _flag(V_POT, "a coin move changed the pot");

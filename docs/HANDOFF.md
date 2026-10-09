@@ -19,7 +19,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 
 | topic | as built |
 |---|---|
-| coin | name and symbol `CC`. launched on artcoins v2 as a `restricted` coin (no wallet to wallet transfers), no transfer tax, the Core on the coin's allowlist |
+| coin | name and symbol `CC`. launched on artcoins v2 as a `restricted` coin (no wallet to wallet transfers), no transfer tax, the Core off the coin's allowlist |
 | owner | 0xCB43078C32423F5348Cab5885911C3B5faE217F9: engine owner, creator, token admin, and the artcoins factory owner. the artcoins protocol is a separate business: never describe its revenue as the engine owner's income |
 | trading fee | 6.9 percent skim in eth, no lp fee. anti sniper: 90 points falling to 6.9 over 30 minutes |
 | fee path | pool, then `FeeRouter` (the pool's fee recipient: empty receive, `flush()` forwards), then the Core. the Core calls `flush` itself at the start of `sellForEth`, `buyListing`, `compose` and `composeExit` (FLOW 10.8), so no keeper is needed. the router pays one payee (the owner address, 0.75 points of volume, 112,778 ppm of the router inflow, to be repointed at the owner's own splitter), the rest to the engine. everything from the sniper window goes to the engine. the router's engine is owner settable until a one way lock, so a later engine can take over the fees |
@@ -27,7 +27,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | statements | priced by the controller: 110 percent of cost falling one point every 3 hours to 75 percent. auction mode on the engine's own pnd auction house at launch, buy only mode is a controller switch. hard floor 75 percent in the Core |
 | sale proceeds | 50 percent back to the pot, 50 percent buys and burns the coin, both adjustable |
 | phase 2 | `exitModule` and `exitToken` placeholders. unsold statements redeem after 105 hours listed with no bid. module replaceable by the owner |
-| owner control | every setting, the controller, the exitModule, targets, the router: changed at once, no timelock. four one way locks on the Core (the fourth closes `setSuccessor`), one on the router, two step owner handover on both. `rescueCoin` and `rescueNft` move stuck coin and stuck NFTs, `migrate` moves everything the Core tracks to the successor. the owner refused extra hard limits |
+| owner control | every setting, the controller, the exitModule, targets, the router: changed at once, no timelock. four one way locks on the Core (the fourth closes `setSuccessor`), one on the router, two step owner handover on both. `rescueNft` moves stuck NFTs, `migrate` moves everything the Core tracks to the successor. the owner refused extra hard limits |
 
 ## 3. open work
 
@@ -55,7 +55,7 @@ docs/NEXT.md is the list: what the owner decided but is not built, what waits fo
 | owner step on the v2 factory before launch | lower the minimum protocol skim share to 362 (`setMinProtocolSkimShareBps(362)`). preflight names it. the factory accepts the launch lp fee of 0 because the baseline skim is above 0 |
 | owner power over the fee stream | the coin admin (the owner) repoints the hook bounty recipient and the creator reward slot recipient until `coin.lockRecipients()`, which freezes both. the router lock does not cover the hook recipient. postflight warns while the recipients are not locked. whether to call `lockRecipients()` after launch is open (NEXT item 15) |
 | fees per 100 eth of volume as built | skim 6.9 eth. protocol 0.24978 (`bountyBps` 9,638 leaves it 362 of 10,000), router 6.65022, of which payee 0.7499985 (112,778 ppm), engine 5.90022. inside the anti sniper window the payee share is 0 and the engine receives the router inflow. at comparable volume (1,961 eth in 90 days, the first 30 minutes of fees to the engine) the payee receives about 12 eth |
-| owner powers over assets | `migrate` moves the eth pots, exit token pots and credits to the successor with no delay, until `lockSuccessor()` (the held statements stay in the Core and are sold out there); `rescueNft` takes stuck NFTs out; `rescueCoin` stuck coin. the successor is unset at launch and the lock is a later decision. a stolen owner key can move the whole engine at once: use a multisig, watch `SuccessorSet` and `Migrated` (docs/ARCHITECTURE.md section 10, FLOW 10.10) |
+| owner powers over assets | `migrate` moves the eth pots, exit token pots and credits to the successor with no delay, until `lockSuccessor()` (the held statements stay in the Core and are sold out there); `rescueNft` takes stuck NFTs out. the successor is unset at launch and the lock is a later decision. a stolen owner key can move the whole engine at once: use a multisig, watch `SuccessorSet` and `Migrated` (docs/ARCHITECTURE.md section 10, FLOW 10.10) |
 | pricing rule | the bid drops only in proportion to the share of the pot spent, so it follows a falling market badly. NEXT item 10 |
 
 ## 6. the build loop (done)

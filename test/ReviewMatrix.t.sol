@@ -632,7 +632,7 @@ contract ReviewMatrixStateTest is ReviewHarness {
             vm.startPrank(deployer);
         } else if (i == 5) {
             (l, w) = ("the predicted coin address has code (salt reuse, a copycat)", Class.Pre);
-            vm.etch(predictCoin(base, deployer, _routerAt(), _coreAt()), hex"00");
+            vm.etch(predictCoin(base, deployer, _routerAt()), hex"00");
         } else if (i == 6) {
             (l, w) = ("the predicted controller address has code", Class.Pre);
             vm.etch(_controllerAt(), hex"00");

@@ -58,7 +58,7 @@ abstract contract SystemResumer is SystemDeployer {
         ) revert CoreMismatch("stack");
         if (launching) {
             // before the launch the factory prediction for the deployer and this config must give the Core's coin
-            (bool ok, address want) = _predict(c, deployer, c.stack.feeSource, core_);
+            (bool ok, address want) = _predict(c, deployer, c.stack.feeSource);
             if (!ok || want != core.COIN()) revert CoreMismatch("coin prediction (config or deployer)");
         }
     }
@@ -106,7 +106,7 @@ abstract contract SystemResumer is SystemDeployer {
 
         if (from == Stage.CoreOnly) {
             _requireOwner(c, deployer);
-            _launch(c, d.coin, d.router, core_);
+            _launch(c, d.coin, d.router);
         }
         if (from != Stage.Done) {
             address ro = IFeeRouter(payable(d.router)).owner();

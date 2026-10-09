@@ -6,9 +6,11 @@ import {ICore} from "../src/interfaces/ICore.sol";
 import {Mainnet} from "../src/interfaces/Interfaces.sol";
 import {LeftoverSpender} from "./attackers/V2Port.sol";
 
-/// the restricted v2 coin as the engine meets it: the Core is on the allowlist (FLOW 29), the router and everyone else
-/// are not. real coin, real pool, real hook
+/// the restricted v2 coin as the engine meets it: the Core, the router and every holder are off the allowlist (FLOW 29).
+/// real coin, real pool, real hook
 contract V2PortRestrictionTest is FeeBase {
+    error TransferRestricted(address from, address to, uint256 amount);
+
     function setUp() public override {
         super.setUp();
         _stock();
@@ -18,33 +20,27 @@ contract V2PortRestrictionTest is FeeBase {
         return pmBefore - coin.balanceOf(Mainnet.POOL_MANAGER);
     }
 
-    /// the allowlisted Core leaves the allowance the hook granted for the take unconsumed: a stranger can spend it
-    /// inside the same transaction, on a move to the pool manager, and not without a buyback in the transaction. the
-    /// allowance is exactly the coin the buyback bought (transient, gone with the transaction)
-    function test_ACCEPTED_buybackLeavesAnAllowanceAStrangerCanSpendInTheSameTransaction() public {
+    /// the Core is off the allowlist: the take of the bought coin consumes the whole allowance the hook granted for the swap,
+    /// so no allowance is left to spend in the same transaction. the Core ends the buyback holding no coin
+    function test_buybackConsumesTheWholeAllowance() public {
         _fillEthBuyback();
+        assertFalse(coin.isAllowed(address(core)), "the Core is not on the allowlist");
         LeftoverSpender s = new LeftoverSpender(address(coin), address(core), Mainnet.POOL_MANAGER);
         _buyCoin(address(s), 2 ether);
         uint256 held = coin.balanceOf(address(s));
         assertGt(held, 1_000e18);
-        uint256 pm0 = coin.balanceOf(Mainnet.POOL_MANAGER);
         uint256 supply0 = coin.totalSupply();
-        assertFalse(s.spendAlone(1e18), "without a buyback in the transaction the same move reverts");
         s.run(1_000e18);
-        uint256 bought = supply0 - coin.totalSupply();
-        assertGt(bought, 0, "the buyback burned");
-        assertEq(s.leftover(), bought, "the unconsumed allowance equals the coin bought");
-        assertTrue(s.spent(), "the stranger spent it inside the transaction");
-        assertEq(coin.balanceOf(address(s)), held - 1_000e18);
-        assertEq(coin.balanceOf(Mainnet.POOL_MANAGER) + bought, pm0 + 1_000e18, "the moved coin sits in the pool manager");
-        // the allowance is transient storage of the coin: a forge test is one transaction, so its end cannot be shown here
+        assertGt(supply0 - coin.totalSupply(), 0, "the buyback burned");
+        assertEq(s.leftover(), 0, "the take consumed the whole allowance");
+        assertFalse(s.spent(), "nothing was left to spend");
+        assertEq(coin.balanceOf(address(s)), held, "the stranger's coin did not move");
+        assertEq(coin.balanceOf(address(core)), 0, "the Core holds no coin after the buyback");
     }
 
-    /// the buyback takes only what the pool paid out, burns exactly that, and leaves coin that is already in the Core
-    function test_buybackBurnsWhatItBoughtNotWhatTheCoreHolds() public {
+    /// the buyback burns exactly the coin the pool paid out
+    function test_buybackBurnsWhatItBought() public {
         _fillEthBuyback();
-        vm.prank(trader);
-        coin.transfer(address(core), 5_000e18);
         uint256 pm0 = coin.balanceOf(Mainnet.POOL_MANAGER);
         uint256 supply0 = coin.totalSupply();
         vm.prank(keeper);
@@ -52,7 +48,7 @@ contract V2PortRestrictionTest is FeeBase {
         uint256 bought = _bought(pm0);
         assertGt(bought, 0);
         assertEq(supply0 - coin.totalSupply(), bought);
-        assertEq(coin.balanceOf(address(core)), 5_000e18, "the donation was not touched");
+        assertEq(coin.balanceOf(address(core)), 0);
         _solvent();
     }
 
@@ -96,29 +92,44 @@ contract V2PortRestrictionTest is FeeBase {
         _solvent();
     }
 
-    /// the Core is on the allowlist: a wallet can send it coin. it is inert (no pot, no book counts it) until the owner
-    /// rescues it. nobody else can move it
-    function test_donatedCoinIsInertAndRescuable() public {
+    /// a holder that is not on the allowlist cannot send coin to the Core: the Core is not on it either
+    function test_aWalletCannotSendCoinToTheCore() public {
+        uint256 pot = core.ethPot();
+        uint256 bb = core.ethToBuyback();
+        vm.prank(trader);
+        vm.expectRevert(abi.encodeWithSelector(TransferRestricted.selector, trader, address(core), 1_000e18));
+        coin.transfer(address(core), 1_000e18);
+        assertEq(coin.balanceOf(address(core)), 0);
+        assertEq(core.ethPot(), pot);
+        assertEq(core.ethToBuyback(), bb);
+        _solvent();
+    }
+
+    /// the restriction passes a transfer when either side is on the allowlist. coin sent from a holder the coin admin
+    /// lists stays in the Core, outside every book, and the buyback burns only what it bought
+    function test_ACCEPTED_coinFromAListedHolderStaysInTheCore() public {
+        vm.prank(owner);
+        coin.setAllowed(trader, true);
         _fillEthBuyback();
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
         vm.prank(trader);
         coin.transfer(address(core), 1_000e18);
+        assertEq(coin.balanceOf(address(core)), 1_000e18);
         assertEq(core.ethPot(), pot);
         assertEq(core.ethToBuyback(), bb);
+        uint256 pm0 = coin.balanceOf(Mainnet.POOL_MANAGER);
+        uint256 supply0 = coin.totalSupply();
+        vm.prank(keeper);
+        core.buyback();
+        assertEq(supply0 - coin.totalSupply(), _bought(pm0), "the buyback burned only what it bought");
+        assertEq(coin.balanceOf(address(core)), 1_000e18, "the sent coin was not touched");
         _solvent();
-        vm.prank(trader);
-        vm.expectRevert(ICore.OnlyOwner.selector);
-        core.rescueCoin(trader, 1);
-        vm.prank(owner);
-        core.rescueCoin(creator, 1_000e18);
-        assertEq(coin.balanceOf(creator), 1_000e18);
-        assertEq(coin.balanceOf(address(core)), 0);
     }
 
-    /// with the restriction turned off by the coin admin, plain transfers work, a donation to the Core is inert in the same
-    /// way, and the buyback and the rescue behave as before
-    function test_unrestrictedDonationIsInert() public {
+    /// with the restriction turned off by the coin admin, plain transfers work, a transfer to the Core is inert in the same
+    /// way, and the buyback behaves as before
+    function test_unrestrictedTransferToTheCoreIsInert() public {
         vm.prank(owner);
         coin.unrestrict();
         assertFalse(coin.restricted());
@@ -134,28 +145,7 @@ contract V2PortRestrictionTest is FeeBase {
         vm.prank(keeper);
         core.buyback();
         assertEq(supply0 - coin.totalSupply(), _bought(pm0));
-        assertEq(coin.balanceOf(address(core)), 1e18, "the donation stays");
+        assertEq(coin.balanceOf(address(core)), 1e18, "the transferred coin stays");
         _solvent();
-        vm.prank(owner);
-        core.rescueCoin(friend, 1e18);
-        assertEq(coin.balanceOf(address(core)), 0);
-    }
-
-    /// the coin admin can take the Core off the allowlist again: the buyback's take then consumes exactly the allowance the
-    /// hook granted, nothing is left to spend, and nobody can send coin to the Core any more
-    function test_buybackWorksAfterTheAdminDelistsTheCore() public {
-        _fillEthBuyback();
-        vm.prank(owner);
-        coin.setAllowed(address(core), false);
-        assertFalse(coin.isAllowed(address(core)));
-        uint256 supply0 = coin.totalSupply();
-        vm.prank(keeper);
-        core.buyback();
-        assertLt(coin.totalSupply(), supply0, "bought and burned");
-        assertEq(coin.transferAllowance(), 0, "the take consumed the whole allowance");
-        assertEq(coin.balanceOf(address(core)), 0);
-        vm.prank(trader);
-        vm.expectRevert();
-        coin.transfer(address(core), 1e18);
     }
 }

@@ -286,7 +286,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _noCode("predicted router is empty", routerAt);
         _noCode("predicted controller is empty", vm.computeCreateAddress(deployer, nonce));
         _noCode("predicted core is empty", coreAt);
-        (bool ok, address coinAt) = _predict(c, deployer, routerAt, coreAt);
+        (bool ok, address coinAt) = _predict(c, deployer, routerAt);
         _check(
             "predicted coin is empty",
             ok && coinAt.code.length == 0,
@@ -421,7 +421,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _check(
             "factory: default allowlist is empty",
             n == 0,
-            "the coin allowlist then holds the stack seeds and the Core only (owner: setDefaultAllowed([]))"
+            "the coin allowlist then holds the stack seeds only (owner: setDefaultAllowed([]))"
         );
     }
 
@@ -432,7 +432,7 @@ abstract contract LaunchChecks is PostflightChecks {
         uint64 nonce = _controllerNonce(deployer);
         address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
-        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(c, c.owner, routerAt, coreAt);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(c, c.owner, routerAt);
         (bool ok, address coin, uint256 gas, bytes memory why) = _simulateLaunch(c, deployer, cfg);
         _check(
             "factory: deployTokenAsOwner accepts the config (simulated)",

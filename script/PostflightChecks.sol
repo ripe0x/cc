@@ -62,7 +62,7 @@ abstract contract PostflightChecks is PostflightPool {
         (bool ok, uint256 n) = _coreNonce(core_, deployer);
         if (!ok) return;
         address routerAt = vm.computeCreateAddress(deployer, n - 1);
-        (bool okp, address want) = _predict(c, deployer, routerAt, core_);
+        (bool okp, address want) = _predict(c, deployer, routerAt);
         _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
     }
 

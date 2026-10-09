@@ -150,7 +150,6 @@ a successor Core (section 9) receives credits without records and adopts them th
 | `lockSuccessor()` | closes `setSuccessor` permanently. allowed while the successor is zero, which disables `migrate` | `OnlyOwner` |
 | `migrate(maxCredits)` | moves in batches: `ethPot + ethToBuyback` by one plain call, `xPot + xToBuyback` by `transfer`, up to `maxCredits` from the head of each pile by `transferFrom`. the held statements, their listings and their records stay in the Core | `OnlyOwner`, `NoSuccessor`, `Reentrancy`, `CallFailed` |
 | `rescueNft(token, id, to)` | sends an ERC721 the Core holds to `to`: a credit only while it is outside both piles, a statement only while the Core has no record of it, any other ERC721 freely | `OnlyOwner`, `ZeroAddress`, `InPile`, `Held`, `NotHolder` |
-| `rescueCoin(to, amount)` | sends coin the Core holds to `to` | `OnlyOwner`, `ZeroAddress` |
 
 what a successor has to implement: a `receive()` that accepts a plain eth call, and an exit token and Credits that it accepts by `transfer` and `transferFrom`, so the `onERC721Received` of the successor is skipped. `migrate` transfers eth, exit token and credits. the old Core keeps its statements and sells them out itself, so call `collectSales` and `syncStatement` there and call `migrate` again to move the proceeds, until it moves nothing. `maxCredits` applies to each pile, and 0 moves the pots only. the successor builds its pile with `adopt`.
 
@@ -200,7 +199,6 @@ the Core (`src/interfaces/ICore.sol`):
 | event | fields | emitted when |
 |---|---|---|
 | `Buyback` | `address indexed caller, uint256 amountIn, uint256 tip` | `buyback`: `amountIn` eth swapped for coin and the coin burned, `tip` paid to `caller` |
-| `CoinRescued` | `address indexed to, uint256 amount` | `rescueCoin` |
 | `Composed` | `uint256 indexed sid, Lane lane, uint8 format, uint256 cost, uint256 reimbursement, address indexed caller` | `compose` or `composeExit`. `lane` 0 or 1, `format` the Statements format, `cost` the cost basis of the statement (the bases of the 80 credits plus `reimbursement` on the eth lane), `reimbursement` the gas repayment sent to `caller` |
 | `ControllerLocked` | (empty) | `lockController` |
 | `ControllerSet` | `address controller` | `setController` (also at construction) |
@@ -320,7 +318,7 @@ the Core. an error named here is declared in `ICore`, and the ones raised inside
 | `TooEarly()` | `exitStatement` | the listing is younger than `exitAfter` |
 | `TooSoon()` | `buyback` | fewer than `buybackDelay` blocks since the last buyback |
 | `Underpaid()` | `exitStatement` | the module returned less than the rating times the unit |
-| `ZeroAddress()` | constructor, `rescueCoin`, `rescueNft`, `setController` | a zero address argument |
+| `ZeroAddress()` | constructor, `rescueNft`, `setController` | a zero address argument |
 | `ZeroAmount()` | `sellForEth` | a spend of 0 wei: the bid is 0 (empty pot) for that credit |
 | `ZeroId()` | `sellForEth`, `buyListing`, `adopt` | credit id 0 |
 

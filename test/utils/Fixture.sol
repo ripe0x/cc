@@ -211,19 +211,18 @@ abstract contract Fixture is Test, ProdDeployer {
         l.salt = salt;
     }
 
-    function predictCoin(address tokenAdmin, address core_, string memory name, string memory symbol, bytes32 salt)
+    function predictCoin(address tokenAdmin, string memory name, string memory symbol, bytes32 salt)
         internal
         view
         returns (address)
     {
         LaunchConfig memory l = _cfg(name, symbol, salt);
         l.owner = tokenAdmin;
-        return predictCoin(l, owner, address(feeRouter), core_);
+        return predictCoin(l, owner, address(feeRouter));
     }
 
     function buildConfig(
         address tokenAdmin,
-        address core_,
         address creator_,
         string memory name,
         string memory symbol,
@@ -231,7 +230,7 @@ abstract contract Fixture is Test, ProdDeployer {
     ) internal view returns (IArtCoinsFactoryV2.DeploymentConfigV2 memory) {
         LaunchConfig memory l = _cfg(name, symbol, salt);
         l.creator = creator_;
-        return buildConfig(l, tokenAdmin, address(feeRouter), core_);
+        return buildConfig(l, tokenAdmin, address(feeRouter));
     }
 
     function poolKeyOf(address coin_) internal view returns (PoolKey memory) {

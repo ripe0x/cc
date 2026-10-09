@@ -9,7 +9,7 @@ we own four contracts. everything else is live, or for the artcoins v2 stack a c
 | name | role | address |
 |---|---|---|
 | Core | custody and every rule, books the router's flushes as fees, owner of its auction house | ours, predicted at deploy |
-| CoreLib | linked library of the Core: settings write, rate and auction math, the buyback swap, `rescueCoin` | ours, deployed before the Core |
+| CoreLib | linked library of the Core: settings write, rate and auction math, the buyback swap, `rescueNft` | ours, deployed before the Core |
 | ControllerV1 | first policy module, immutable | ours, predicted at deploy |
 | FeeRouter | bounty recipient of the pool. empty `receive`, permissionless `flush()` (payees, engine), called by the Core at the start of its eth pot doors, owner setters closed by one way `lock` | ours, predicted at deploy |
 | Core's auction house | where statements are listed, created by the Core in its constructor, owned by it forever | created at deploy |

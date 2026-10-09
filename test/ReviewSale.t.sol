@@ -1122,7 +1122,7 @@ contract ReviewSaleTest is Fixture {
     function test_OK_sizeMarginOfTheCore() public {
         uint256 size = vm.getDeployedCode("Core.sol:Core").length;
         emit log_named_uint("core runtime bytes", size);
-        // the v2 brief (docs/FLOW.md 10.6) asks for at least 60 bytes of headroom, `rescueCoin` took the old 150 (decision)
+        // the v2 brief (docs/FLOW.md 10.6) asks for at least 60 bytes of headroom
         assertGe(24_576 - size, 60, "the brief asks for a margin of at least 60");
     }
 

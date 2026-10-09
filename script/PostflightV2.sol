@@ -149,13 +149,13 @@ abstract contract PostflightV2 is SystemBuilder, Report {
     }
 
     /// @notice the factory's `predictToken` through a staticcall that reports a failure instead of reverting
-    function _predict(LaunchConfig memory c, address sender, address router, address core)
+    function _predict(LaunchConfig memory c, address sender, address router)
         internal
         view
         returns (bool ok, address coin)
     {
         bytes memory data =
-            abi.encodeCall(IArtCoinsFactoryV2.predictToken, (sender, buildConfig(c, c.owner, router, core)));
+            abi.encodeCall(IArtCoinsFactoryV2.predictToken, (sender, buildConfig(c, c.owner, router)));
         uint256 w;
         (ok, w) = _word(c.stack.factory, data);
         coin = address(uint160(w));
@@ -217,23 +217,24 @@ abstract contract PostflightV2 is SystemBuilder, Report {
             !t.recipientsLocked(),
             "recipientsLocked(): the admin can no longer repoint the hook bounty recipient or a locker reward recipient"
         );
-        _warn("warn: core holds no coin", t.balanceOf(core) == 0, "stray coin, the owner can call rescueCoin");
     }
 
-    /// @dev the allowlist cannot be listed on chain. what is checked: the Core, the locker and the escrow are on it (the
-    /// locker and the escrow pinned), every extra entry of the config is, and no other account of the system is
+    /// @dev the allowlist cannot be listed on chain. what is checked: the locker and the escrow are on it (pinned), every
+    /// extra entry of the config is, and no account of the system is: the Core is off it, the buyback take passes the
+    /// restriction through the transfer allowance the hook grants
     function _postAllowlist(LaunchConfig memory c, address core, IArtCoinsTokenV2 t, bool ch) private {
-        bool listed = t.isAllowed(core) && t.isAllowed(c.stack.locker) && t.isAllowed(c.stack.escrow);
+        bool listed = t.isAllowed(c.stack.locker) && t.isAllowed(c.stack.escrow);
         for (uint256 i; i < c.allowed.length; ++i) {
             listed = listed && t.isAllowed(c.allowed[i]);
         }
-        _soft(ch, "coin: allowlist holds the Core, the locker, the escrow and the config entries", listed, "isAllowed", "COIN_CHANGED=1");
+        _soft(ch, "coin: allowlist holds the locker, the escrow and the config entries", listed, "isAllowed", "COIN_CHANGED=1");
         _check(
             "coin: the locker and the escrow are pinned",
             t.isPinned(c.stack.locker) && t.isPinned(c.stack.escrow),
             "isPinned(locker), isPinned(escrow)"
         );
-        address[11] memory off = [
+        address[12] memory off = [
+            core,
             c.stack.feeSource,
             c.owner,
             c.creator,
@@ -250,7 +251,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         for (uint256 i; i < off.length; ++i) {
             none = none && !t.isAllowed(off[i]);
         }
-        _soft(ch, "coin: allowlist holds none of router, owner, creator, payee, hook, factory, mev module, house, controller", none, "isAllowed", "COIN_CHANGED=1");
+        _soft(ch, "coin: allowlist holds none of core, router, owner, creator, payee, hook, factory, mev module, house, controller", none, "isAllowed", "COIN_CHANGED=1");
     }
 }
 

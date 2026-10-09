@@ -71,7 +71,6 @@ interface ICore {
     error ZeroId();
 
     event Buyback(address indexed caller, uint256 amountIn, uint256 tip);
-    event CoinRescued(address indexed to, uint256 amount);
     event Composed(
         uint256 indexed sid, Lane lane, uint8 format, uint256 cost, uint256 reimbursement, address indexed caller
     );
@@ -173,7 +172,6 @@ interface ICore {
     function rateAtCheckpoint() external view returns (uint256);
     function removeTarget(address target) external;
     function repriceStatement(uint256 sid) external;
-    function rescueCoin(address, uint256) external;
     function rescueNft(address, uint256, address) external;
     function scoreOf(uint256 id) external view returns (uint256);
     function sellForEth(uint256[] memory ids, uint256 minOut) external;

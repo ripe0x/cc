@@ -324,7 +324,7 @@ contract ReviewPort is Fixture {
     function test_FIXED_launchHijackCannotTakeThePredictedCoin() public {
         bytes32 salt = keccak256("hijack victim");
         address coreAt = vm.computeCreateAddress(owner, vm.getNonce(owner) + 1);
-        address coinAt = predictCoin(owner, coreAt, "Victim", "VIC", salt);
+        address coinAt = predictCoin(owner, "Victim", "VIC", salt);
         vm.startPrank(owner);
         ICore core2 = Prod.newCore(
             owner, coinAt, address(Prod.newController(coreAt, lc.sale)), lc.stack, lc.rateStart, lc.settings
@@ -332,7 +332,7 @@ contract ReviewPort is Fixture {
         vm.stopPrank();
         assertEq(address(core2), coreAt);
 
-        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, coreAt, creator, "Victim", "VIC", salt);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, creator, "Victim", "VIC", salt);
         uint256 fee = FACTORY.deployFee();
         vm.deal(attacker, 1 ether);
         vm.prank(attacker);

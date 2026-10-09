@@ -651,7 +651,7 @@ contract ReviewFeePathTest is FeeBase {
         address stranger = _user("stranger");
         vm.deal(stranger, 1 ether);
         address coreAt = vm.computeCreateAddress(owner, vm.getNonce(owner) + 1);
-        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, coreAt, creator, "S", "S", keccak256("s"));
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(owner, creator, "S", "S", keccak256("s"));
         uint256 fee = FACTORY.deployFee();
         vm.prank(stranger);
         vm.expectRevert();

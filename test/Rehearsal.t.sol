@@ -151,7 +151,7 @@ contract RehearsalTest is Test, ProdDeployer {
             stepGas[3] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
-                        IArtCoinsFactoryV2.deployTokenAsOwner, (buildConfig(c, c.owner, d.router, d.core), c.protocolBps)
+                        IArtCoinsFactoryV2.deployTokenAsOwner, (buildConfig(c, c.owner, d.router), c.protocolBps)
                     )
                 ),
             stepGas[4] + 21_000 + 1_024,

@@ -40,7 +40,7 @@ contract ReviewDeployTest is ReviewHarness {
         assertEq(this.runPre(base, other), "factory: owner is the deployer, factory: deployTokenAsOwner accepts the config (simulated)");
         console.log("MUT deployer swap (another signer than the factory owner) || SAFE REVERT at deploy || NotFactoryOwner");
         // the coin address depends on the sender, so the swap would have launched somewhere else
-        assertTrue(predictCoin(base, deployer, _routerAt(), _coreAt()) != predictCoin(base, other, _routerAt(), _coreAt()));
+        assertTrue(predictCoin(base, deployer, _routerAt()) != predictCoin(base, other, _routerAt()));
     }
 
     /// the live default fee of the auction factory is zero and the preflight row says so. a non zero fee is a warning in
@@ -144,13 +144,13 @@ contract ReviewDeployTest is ReviewHarness {
         address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
         address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
         c.stack.feeSource = routerAt;
-        address coinAt = predictCoin(c, deployer, routerAt, coreAt);
+        address coinAt = predictCoin(c, deployer, routerAt);
         vm.startPrank(deployer);
         st.controller = address(Prod.newController(coreAt, c.sale));
         if (n >= 2) st.router = address(Prod.newRouter(deployer));
         if (n >= 3) st.core = _newCoreOf(c, coinAt, st.controller);
         if (n >= 4) {
-            st.coin = _launch(c, coinAt, st.router, coreAt);
+            st.coin = _launch(c, coinAt, st.router);
             st.key = poolKeyOf(st.coin, c.stack);
         }
         vm.stopPrank();
@@ -166,7 +166,7 @@ contract ReviewDeployTest is ReviewHarness {
         uint256 fee = FACTORY.deployFee();
         assertEq(ICore(payable(st.core)).COIN().code.length, 0, "no coin yet");
         assertEq(st.core.balance, 0, "the core holds nothing");
-        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(base, base.owner, st.router, st.core);
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(base, base.owner, st.router);
         vm.startPrank(watcher);
         vm.expectRevert();
         FACTORY.deployTokenAsOwner{value: fee}(cfg, base.protocolBps);

@@ -153,7 +153,7 @@ contract GasCapTest is SeaportBase {
     /// router, so the set up transactions are the first ones)
     function test_gas_deploy_4_5_launchAndRouterSetup() public {
         IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg =
-            buildConfig(owner, address(core), creator, "Gas Coin", "GASC", keccak256("gas cap coin"));
+            buildConfig(owner, creator, "Gas Coin", "GASC", keccak256("gas cap coin"));
         uint256 fee = FACTORY.deployFee();
         bytes memory data = abi.encodeCall(IArtCoinsFactoryV2.deployTokenAsOwner, (cfg, lc.protocolBps));
         vm.deal(owner, 1 ether);
@@ -236,9 +236,8 @@ contract GasCapTest is SeaportBase {
         _row("flush that turns the split on (engine only)", g, data);
     }
 
-    /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), `skim()` books it, a payee claim on the
-    /// router and `rescueCoin`
-    function test_gas_escrowClaim_skim_rescue_routerClaim() public {
+    /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), and `skim()` books it
+    function test_gas_escrowClaim_skim() public {
         _skipToSplitStart();
         _buyCoin(funder, 5 ether);
         vm.deal(v2.hook, 1 ether);
@@ -260,16 +259,6 @@ contract GasCapTest is SeaportBase {
         core.skim();
         g -= gasleft();
         _row("skim books the claimed eth", g, data);
-
-        vm.prank(funder);
-        coin.transfer(address(core), 1_000e18);
-        data = abi.encodeCall(core.rescueCoin, (creator, 1_000e18));
-        _cool(address(core));
-        vm.prank(owner);
-        g = gasleft();
-        core.rescueCoin(creator, 1_000e18);
-        g -= gasleft();
-        _row("rescueCoin", g, data);
     }
 
     // ------------------------------------------------------------------ compose, exit, overprint
