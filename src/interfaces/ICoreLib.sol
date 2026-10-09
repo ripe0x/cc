@@ -13,7 +13,10 @@ interface ICoreLib {
     event CoinRescued(address indexed to, uint256 amount);
     event SettingsSet(Settings settings);
 
-    function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs) external view returns (uint256);
+    function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
+        external
+        view
+        returns (uint256 price, uint256 read);
     function decay(uint256 start, uint256 elapsed, uint256 halfLife) external pure returns (uint256 p);
     function unpack(uint256 a, uint256 b, uint256 c) external pure returns (Settings memory s);
 

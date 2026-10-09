@@ -311,7 +311,9 @@ contract FlowTest is Fixture {
         // the pot of 1e16 cannot afford one 6M credit at the stored rate under a 1 percent cap: 1e18 is below 1.4e18
         assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
-        assertEq(core.ethRate(), held, "unfunded, flat at the rate the change stored");
+        assertEq(
+            core.ethRate(), uint256(1e16) * 2000 / 4_330_000, "unfunded, flat at the price state the change stored"
+        );
         s.avgScore = 4_330_000;
         s.spendCapBps = 2_000;
         _owner(s);

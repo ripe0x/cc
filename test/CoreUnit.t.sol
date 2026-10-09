@@ -319,16 +319,17 @@ contract CoreUnitTest is CoreBase {
 
         _fund(1.4e16);
         assertTrue(core.funded());
-        // 20 credits of room at this pot is below the opening rate: the read is the clamp, no climb is credited
+        // 20 credits of room at this pot is below the opening rate: the read is the clamp, the price state is not
         uint256 clamp = core.ethPot() * 2000 / (4_330_000 * 20);
-        assertEq(core.ethRate(), clamp, "bounded by the clamp of 20 credits");
+        assertEq(core.ethRate(), clamp, "the read is the clamp of 20 credits");
+        assertEq(core.rateAtCheckpoint(), 4e12, "and the clamp is not stored");
         _warp(10 minutes);
-        assertEq(core.ethRate(), clamp, "and held there");
-        // the pot is large enough not to clamp: the climb runs on from the stored clamp
+        assertEq(core.ethRate(), clamp, "held there while the price state climbs");
+        // the pot is large enough not to clamp: the read is the price state, which climbed behind the clamp
         _fund(10 ether);
-        assertEq(core.rateAtCheckpoint(), clamp);
+        assertApproxEqRel(core.rateAtCheckpoint(), 4_204_560_528_163, 1e9, "10 minutes at 0.5 percent");
         _warp(10 minutes);
-        assertApproxEqRel(core.ethRate(), clamp * 1_051_140_132_040_790_000 / 1e18, 1e9, "10 minutes at 0.5 percent");
+        assertApproxEqRel(core.ethRate(), 4_419_582_308_747, 1e9, "20 minutes at 0.5 percent");
     }
 
     /// the same rule at another average score: funded needs `pot * spendCap >= avgScore * rate`, to the wei, and at
@@ -523,10 +524,10 @@ contract CoreUnitTest is CoreBase {
         _atTheClamp(false);
     }
 
-    /// the pot shrinks while the rate sits at its clamp. the next checkpoint stores the rate bounded by the clamp of the
-    /// smaller pot, and the rate stays there. no real path shrinks the pot without also dropping the rate, so the pot
-    /// slot is written directly and the balance is set to match
-    function test_rate_followsAPotThatShrinks() public {
+    /// the pot shrinks below one average credit while the rate sits at its funded threshold. the next checkpoint applies
+    /// no climb under the smaller pot and the rate never rises again. no real path shrinks the pot without also
+    /// dropping the rate, so the pot slot is written directly and the balance is set to match
+    function test_rate_goesUnfundedAfterPotDrops() public {
         _clampCredits(1);
         _fund(0.02 ether);
         _warp(100 hours);
@@ -536,12 +537,10 @@ contract CoreUnitTest is CoreBase {
         stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(1e15));
         vm.deal(address(core), 1e15);
         _fund(1);
-        uint256 shrunk = core.ethPot() * 2000 / 4_330_000;
-        assertEq(core.rateAtCheckpoint(), shrunk, "the smaller pot bounds the rate at the checkpoint");
-        assertLt(shrunk, cap);
-        assertTrue(core.funded(), "the funded threshold is the clamp of one credit");
+        assertEq(core.rateAtCheckpoint(), cap, "no climb applied under the smaller pot");
+        assertFalse(core.funded());
         _warp(500 hours);
-        assertEq(core.ethRate(), shrunk, "held at the clamp of the smaller pot");
+        assertEq(core.ethRate(), cap, "never rises while unfunded");
         _solvent();
     }
 

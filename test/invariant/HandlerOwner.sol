@@ -157,6 +157,7 @@ abstract contract HandlerOwner is HandlerHouse {
         uint256 pot;
         uint256 toBuyback;
         uint256 rate;
+        uint256 price;
         uint256 xRate;
         uint256 xPrice;
         uint256 xPot;
@@ -170,6 +171,7 @@ abstract contract HandlerOwner is HandlerHouse {
         p.pot = core.ethPot();
         p.toBuyback = core.ethToBuyback();
         p.rate = core.ethRate();
+        p.price = _priceNow(core.settings());
         p.xRate = core.xRate();
         p.xPrice = core.exitAuctionPrice();
         p.xPot = core.xPot();
@@ -220,19 +222,18 @@ abstract contract HandlerOwner is HandlerHouse {
 
     function _afterSettings(Settings memory ns, Settings memory cur, OPre memory p) internal {
         _opost(p, "setSettings");
-        // invariant 6 across a settings call: the call checkpoints the rate it found. the read is that rate bounded by the
-        // new rate cap and, while funded, by the clamp and the ceiling of the new settings
-        uint256 wantStored = p.rate > ns.rateCap ? ns.rateCap : p.rate;
-        uint256 wantRate = wantStored;
-        if (core.funded()) {
+        // invariant 6 across a settings call: the call checkpoints under the old settings, so it stores the price state it
+        // found. the read under the new settings is that price state, bounded by the new ceiling and rate cap and, while
+        // funded, lowered to the new clamp
+        {
             (uint256 anchor,,) = _anchorState();
-            uint256 clamp = BidModel.clamp(ns, core.ethPot());
-            uint256 ceil = BidModel.ceiling(ns, anchor, block.timestamp - core.lastFillTime());
-            uint256 limit = clamp < ceil ? clamp : ceil;
-            if (wantRate > limit) wantRate = limit;
+            uint256 stored = core.rateAtCheckpoint();
+            uint256 want = BidModel.read(
+                ns, core.ethPot(), stored, BidModel.price(ns, stored, core.ethPot(), anchor, block.timestamp - core.lastFillTime(), 0)
+            );
+            if (stored != p.price) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
+            if (core.ethRate() != want) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
         }
-        if (core.ethRate() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
-        if (core.rateAtCheckpoint() != wantStored) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
         _fundedCheck();
         if (phase2()) _xFundedCheck();
         // the exit rate is held inside the new band and nothing else
@@ -462,12 +463,11 @@ abstract contract HandlerOwner is HandlerHouse {
             _ok(a);
             if (stranger || !good) _flag(V_SETTINGS, "setRate accepted a stranger or a rate out of bounds");
             _opost(p, "setRate");
-            uint256 want = rate;
-            if (core.funded()) {
-                uint256 clamp = BidModel.clamp(core.settings(), core.ethPot());
-                if (want > clamp) want = clamp;
-            }
+            Settings memory cs = core.settings();
             (uint256 anchor,,) = _anchorState();
+            uint256 want = BidModel.read(
+                cs, core.ethPot(), rate, BidModel.price(cs, rate, core.ethPot(), rate, block.timestamp - core.lastFillTime(), 0)
+            );
             if (core.ethRate() != want || core.rateAtCheckpoint() != rate || anchor != rate) {
                 _flag(V_RATE_BOUND, "setRate did not land on the rate and the anchor");
             }

@@ -585,14 +585,14 @@ contract LifecycleComposeTest is Fixture {
     function test_auction_multiSliceBuybackAfterTheOwnerLowersTheSlice() public {
         _prepare();
         Settings memory s = core.settings();
-        s.buybackSlice = 0.2 ether;
+        s.buybackSlice = 0.02 ether;
         s.buybackDelay = 3;
         _setSettings(s);
         (, uint256 price) = _sellStatement(alice);
         _collectSales();
-        assertGt(core.ethToBuyback(), 2 * 0.2 ether);
+        assertGt(core.ethToBuyback(), 2 * 0.02 ether);
         assertEq(core.ethToBuyback(), price / 2);
-        assertEq(_buybackAndCheck(buybacker), 0.2 ether);
+        assertEq(_buybackAndCheck(buybacker), 0.02 ether);
 
         vm.prank(buybacker);
         vm.expectRevert(ICore.TooSoon.selector);
@@ -610,10 +610,10 @@ contract LifecycleComposeTest is Fixture {
             vm.roll(block.number + 3);
             uint256 rest = core.ethToBuyback();
             last = _buybackAndCheck(buybacker);
-            assertEq(last, rest.min(0.2 ether));
+            assertEq(last, rest.min(0.02 ether));
         }
         assertEq(core.ethToBuyback(), 0);
-        assertLt(last, 0.2 ether, "the last slice was partial");
+        assertLt(last, 0.02 ether, "the last slice was partial");
         vm.roll(block.number + 3);
         vm.expectRevert(ICore.NothingToBuy.selector);
         core.buyback();

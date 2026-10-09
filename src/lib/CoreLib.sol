@@ -109,31 +109,41 @@ library CoreLib {
         // forge-lint: disable-end(unsafe-typecast)
     }
 
-    /// @notice the eth rate (wei per whole point) at `nowTs`, climbed from the stored rate `r` of checkpoint time `t`.
-    /// The rate compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and never exceeds
-    /// the lowest of three limits: `rateCap`, the funded clamp `pot * spendCapBps / (avgScore * clampCredits)`, and the
-    /// ceiling `ceilBps` of the anchor. The anchor is the rate of the last fill, grown by `idleLoosenBps` per full 10
-    /// minutes since the last fill at `anchorTime`. A stored rate above the limit reads as the limit. Never reverts: the
-    /// Core calls it from `receive()`
+    /// @notice the price state and the read of the eth rate (wei per whole point) at `nowTs`, from the stored rate `r` of
+    /// checkpoint time `t`. The price state never exceeds `rateCap` or the ceiling `ceilBps` of the anchor. The anchor is
+    /// the rate of the last fill, grown by `idleLoosenBps` per full 10 minutes since the last fill at `anchorTime`. While
+    /// funded (the hourly cap `pot * spendCapBps` affords one average credit at `r`) the price state compounds
+    /// `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops climbing at the funded
+    /// threshold `pot * spendCapBps / avgScore`. The read is the price state, lowered while funded to the clamp
+    /// `pot * spendCapBps / (avgScore * clampCredits)`, the rate the hourly room affords. The clamp lowers the read only
+    /// and never enters the price state, which the Core stores. Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view
-        returns (uint256)
+        returns (uint256 price, uint256 read)
     {
         Settings storage s = SettingsStore.load();
-        uint256 cap = (pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits)).min(s.rateCap);
-        uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * ((nowTs - anchorTime) / 10 minutes);
-        cap = cap.min(RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8);
-        if (r == 0) return r;
-        if (r >= cap) return cap;
-        if (nowTs == t) return r;
-        // forge-lint: disable-start(unsafe-typecast)
-        int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
-            * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;
-        // growing past the limit: the limit decides, and the exponential cannot overflow
-        if (x >= FixedPointMathLib.lnWad(int256(cap * 1e18 / r))) return cap;
-        return r.mulWad(uint256(FixedPointMathLib.expWad(x))).min(cap);
-        // forge-lint: disable-end(unsafe-typecast)
+        uint256 room = pot * s.spendCapBps;
+        bool funded = room >= uint256(s.avgScore) * r;
+        uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * (nowTs.zeroFloorSub(anchorTime) / 10 minutes);
+        uint256 cap = RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8;
+        cap = cap.min(s.rateCap);
+        price = r;
+        if (r >= cap) {
+            price = cap;
+        } else if (funded && nowTs > t && r != 0) {
+            uint256 target = cap.min(room / s.avgScore);
+            // forge-lint: disable-start(unsafe-typecast)
+            int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
+                * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;
+            // growing past the target: the target decides, and the exponential cannot overflow
+            price = x >= FixedPointMathLib.lnWad(int256(target * 1e18 / r))
+                ? target
+                : r.mulWad(uint256(FixedPointMathLib.expWad(x))).min(target);
+            // forge-lint: disable-end(unsafe-typecast)
+        }
+        read = price;
+        if (funded) read = read.min(room / (uint256(s.avgScore) * s.clampCredits));
     }
 
     /// @notice the rate after one credit is bought at `paid`, and the anchor update of that fill. The rate falls

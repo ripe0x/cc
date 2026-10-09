@@ -306,17 +306,72 @@ contract BidRuleTest is Fixture {
 
     // ------------------------------------------------------------------ hard bounds
 
-    /// a fill shrinks the pot until the clamp of 20 credits sits below the dropped rate: the read is the clamp
-    function test_clampBoundsTheReadAfterAFillShrinksThePot() public {
+    /// the clamp lowers the read only: after a fill shrinks the pot the read is the clamp and the stored price state is
+    /// the dropped rate. a second fill pays the clamp, drops the price state as a fill at full price would, and the
+    /// anchor is the price state at that fill
+    function test_clampLowersTheReadAndNotThePriceState() public {
         // 20 credits of hourly room at the opening rate: pot * 2000 / (4.33e6 * 20) = 4e12
         _potTo(20 * uint256(4_330_000) * START / 2_000);
         assertEq(core.ethRate(), START);
         _sellOne();
-        uint256 pot = core.ethPot();
-        uint256 clamp = pot * 2_000 / (4_330_000 * 20);
-        assertGt(core.rateAtCheckpoint(), clamp, "the stored rate is above the clamp");
-        assertTrue(core.funded());
+        uint256 price1 = START * 9_950 / 10_000;
+        assertEq(core.rateAtCheckpoint(), price1, "the price state dropped 0.5 percent");
+        uint256 clamp = core.ethPot() * 2_000 / (4_330_000 * 20);
+        assertLt(clamp, price1, "the clamp of the smaller pot is below the price state");
         assertEq(core.ethRate(), clamp, "and the read is the clamp");
+        // the next fill pays the clamp
+        uint256 id = _credits(seller, 1)[0];
+        uint256 before = seller.balance;
+        vm.prank(seller);
+        core.sellForEth(_one(id));
+        assertEq(seller.balance - before, 4_330_000 * clamp / 1e4, "paid at the clamp");
+        (uint256 anchor, uint256 start,) = _anchor();
+        assertEq(anchor, price1, "the anchor is the price state at the fill, not the rate paid");
+        assertEq(start, START, "the minute started at the first price state");
+        assertEq(core.rateAtCheckpoint(), price1 * 9_950 / 10_000, "the drop is the one of a fill at full price");
+    }
+
+    /// a checkpoint at a small funded pot stores the price state, not the clamp: when the pot grows the read is back at
+    /// the opening rate at once
+    function test_launch_smallPotDoesNotDragThePriceState() public {
+        _potTo(0.05 ether);
+        core.skim();
+        vm.deal(address(core), address(core).balance + 1);
+        core.skim();
+        assertTrue(core.funded());
+        uint256 clamp = core.ethPot() * 2_000 / (4_330_000 * 20);
+        assertLt(clamp, START / 3, "the clamp is a fraction of the opening rate");
+        assertEq(core.ethRate(), clamp);
+        assertEq(core.rateAtCheckpoint(), START, "the checkpoint stored the price state");
+        _potTo(100 ether);
+        assertEq(core.rateAtCheckpoint(), START);
+        assertEq(core.ethRate(), START, "back at the opening rate");
+        _warp(30);
+        // 30 seconds at 0.5 percent a minute: 4e12 * 1.005^0.5
+        assertApproxEqRel(core.ethRate(), 4_009_987_531_153, 1e9, "and climbing");
+    }
+
+    /// at the end of an hour the room falls under 20 credits: the last fills pay the clamp and the anchor stays the price
+    /// state at each fill
+    function test_hourEnd_clampedFillsKeepTheAnchor() public {
+        _potTo(20 * uint256(4_330_000) * START / 2_000);
+        uint256 price = START;
+        for (uint256 i; i < 10; ++i) {
+            uint256 pot = core.ethPot();
+            uint256 clamp = pot * 2_000 / (4_330_000 * 20);
+            uint256 read = price < clamp ? price : clamp;
+            assertEq(core.ethRate(), read);
+            uint256 id = _credits(seller, 1)[0];
+            uint256 before = seller.balance;
+            vm.prank(seller);
+            core.sellForEth(_one(id));
+            assertEq(seller.balance - before, 4_330_000 * read / 1e4, "paid the read");
+            if (i > 0) assertLt(read, price, "the clamp binds from the second fill");
+            (uint256 anchor,,) = _anchor();
+            assertEq(anchor, price, "the anchor is the price state at the fill");
+            price = price * 9_950 / 10_000;
+            assertEq(core.rateAtCheckpoint(), price, "and the price state drops as at full price");
+        }
     }
 
     /// the owner lowers `ceilBps` below the stored rate: the read is the new ceiling

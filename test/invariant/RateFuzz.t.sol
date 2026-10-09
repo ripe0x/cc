@@ -37,32 +37,30 @@ contract RateFuzzTest is Fixture {
         return (uint256(s.avgScore) * rate + s.spendCapBps - 1) / s.spendCapBps;
     }
 
-    /// @dev the limit of the climb at `idle` seconds since the last fill, whose rate was `anchor`: the lowest of the funded
-    /// clamp, `rateCap` and the loosened ceiling
-    function _limitOf(Settings memory s, uint256 pot, uint256 anchor, uint256 idle) internal pure returns (uint256) {
-        uint256 c = BidModel.clamp(s, pot);
-        uint256 ceil = BidModel.ceiling(s, anchor, idle);
-        return c < ceil ? c : ceil;
-    }
-
-    /// the rate after `mins` whole minutes of climbing from `r` at `climbBps` a minute, stopped at `limit`. a rate at or
-    /// above the limit is the limit
-    function _model(uint256 r, uint256 mins, uint256 limit, uint256 climbBps) internal pure returns (uint256) {
-        if (limit <= r) return limit;
+    /// the price state after `mins` whole minutes from the stored rate `r`: at most `rateCap` and the loosened ceiling of
+    /// the anchor (idle for `idle` seconds), and while funded an integer walk of `climbPerMinBps` a minute up to the
+    /// funded threshold `pot * spendCapBps / avgScore`
+    function _priceAfter(Settings memory s, uint256 r, uint256 pot, uint256 anchor, uint256 idle, uint256 mins)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 cap = BidModel.ceiling(s, anchor, idle);
+        if (cap > s.rateCap) cap = s.rateCap;
+        if (r >= cap) return cap;
+        if (!BidModel.funded(s, pot, r)) return r;
+        uint256 target = pot * s.spendCapBps / s.avgScore;
+        if (target > cap) target = cap;
         for (uint256 j; j < mins; ++j) {
-            r = r * (10_000 + climbBps) / 10_000;
-            if (r >= limit) return limit;
+            r = r * (10_000 + s.climbPerMinBps) / 10_000;
+            if (r >= target) return target;
         }
         return r;
     }
 
-    /// the rate of the last of `n` credits bought from rate `r` in one minute, and the rate after them
-    function _afterFills(Settings memory s, uint256 r, uint256 n) internal pure returns (uint256 last, uint256 next) {
-        next = r;
-        for (uint256 i; i < n; ++i) {
-            last = next;
-            next = BidModel.dropOnce(s, next, r);
-        }
+    /// the read for the price state `p` of the stored rate `r`: lowered to the clamp while funded
+    function _readOf(Settings memory s, uint256 pot, uint256 r, uint256 p) internal pure returns (uint256) {
+        return BidModel.read(s, pot, r, p);
     }
 
     /// the price the core pays for a credit of `score` at `rate`, written out from docs/FLOW.md (no controller bonus)
@@ -102,7 +100,7 @@ contract RateFuzzTest is Fixture {
     }
 
     /// the climb while unfilled: funded from the start, whole minutes of waiting, under random climb, ceiling, clamp, cap
-    /// and average score.
+    /// and average score. the price state climbs, the read is lowered to the clamp
     /// forge-config: default.fuzz.runs = 40
     function testFuzz_climbCompoundsPerMinute(uint256 seed, uint256 potSeed, uint256 waitSeed) public {
         Settings memory s = _randomSettings(seed, false);
@@ -113,10 +111,11 @@ contract RateFuzzTest is Fixture {
         _fund(pot);
         assertTrue(core.funded());
         _warp(mins * 1 minutes);
-        uint256 limit = _limitOf(s, pot, START, block.timestamp - core.lastFillTime());
-        uint256 want = _model(START, mins, limit, s.climbPerMinBps);
-        assertApproxEqRel(core.ethRate(), want, 1e-7 ether, "compounded per minute, limited");
-        assertLe(core.ethRate(), limit, "never above the limit");
+        uint256 p = _priceAfter(s, START, pot, START, block.timestamp - core.lastFillTime(), mins);
+        assertApproxEqRel(
+            core.ethRate(), _readOf(s, pot, START, p), 1e-7 ether, "compounded per minute, then the clamp"
+        );
+        assertLe(core.ethRate(), p + p / 1e9, "never above the price state");
     }
 
     /// no climb while the pot cannot afford one average credit at the hourly cap, and no retroactive climb once it can,
@@ -138,18 +137,18 @@ contract RateFuzzTest is Fixture {
         uint256 top = bound(topSeed, min - pot, min - pot + 100 ether);
         _fund(top);
         assertTrue(core.funded());
-        uint256 limit0 = _limitOf(s, pot + top, START, block.timestamp - core.lastFillTime());
-        assertEq(core.ethRate(), limit0 < START ? limit0 : START, "no retroactive climb, bounded by the limit");
-        uint256 start = core.rateAtCheckpoint();
+        assertEq(core.rateAtCheckpoint(), START, "no retroactive climb, and the clamp is not stored");
+        uint256 clamp = BidModel.clamp(s, pot + top);
+        assertEq(core.ethRate(), clamp < START ? clamp : START, "the read is the clamp when it binds");
 
         uint256 mins = bound(wait, 0, 240);
         _warp(mins * 1 minutes);
-        uint256 limit = _limitOf(s, pot + top, START, block.timestamp - core.lastFillTime());
-        assertApproxEqRel(core.ethRate(), _model(start, mins, limit, s.climbPerMinBps), 1e-7 ether);
+        uint256 p = _priceAfter(s, START, pot + top, START, block.timestamp - core.lastFillTime(), mins);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot + top, START, p), 1e-7 ether);
     }
 
-    /// a settings call keeps the stored rate exactly, even when it flips the funded flag, and the climb after it follows
-    /// the new settings from the change on. no climb is credited under the wrong numbers.
+    /// a settings call stores the price state it found, even when it flips the funded flag, and the climb after it
+    /// follows the new settings from the change on. no climb is credited under the wrong numbers.
     /// forge-config: default.fuzz.runs = 40
     function testFuzz_settingsChangeKeepsTheRateAndClimbsOnTheNewNumbers(
         uint256 seedA,
@@ -164,31 +163,29 @@ contract RateFuzzTest is Fixture {
         _fund(pot);
         m1 = bound(m1, 0, 240);
         _warp(m1 * 1 minutes);
-        uint256 r1 = core.ethRate();
-        uint256 limit1 = _limitOf(a, pot, START, block.timestamp - core.lastFillTime());
-        assertApproxEqRel(r1, _model(START, m1, limit1, a.climbPerMinBps), 1e-7 ether);
+        uint256 p1 = _priceAfter(a, START, pot, START, block.timestamp - core.lastFillTime(), m1);
+        assertApproxEqRel(core.ethRate(), _readOf(a, pot, START, p1), 1e-7 ether);
         Settings memory b = _randomSettings(seedB, false);
         _setSettings(b);
-        bool fundedNow = pot * b.spendCapBps >= uint256(b.avgScore) * r1;
-        uint256 limitB = _limitOf(b, pot, START, block.timestamp - core.lastFillTime());
+        uint256 r1 = core.rateAtCheckpoint();
+        assertApproxEqRel(r1, p1, 1e-7 ether, "the call stores the price state it found");
+        uint256 idle = block.timestamp - core.lastFillTime();
         assertEq(
             core.ethRate(),
-            fundedNow && limitB < r1 ? limitB : r1,
-            "the read is the rate it found, bounded by the new limit"
+            _readOf(b, pot, r1, _priceAfter(b, r1, pot, START, idle, 0)),
+            "the read under the new settings"
         );
-        assertEq(core.rateAtCheckpoint(), r1, "and stores it");
-        assertEq(core.funded(), fundedNow, "the funded flag follows the new numbers");
+        assertEq(core.funded(), BidModel.funded(b, pot, r1), "the funded flag follows the new numbers");
         m2 = bound(m2, 0, 240);
         _warp(m2 * 1 minutes);
-        uint256 limit2 = _limitOf(b, pot, START, block.timestamp - core.lastFillTime());
-        uint256 want = fundedNow ? _model(r1, m2, limit2, b.climbPerMinBps) : r1;
-        assertApproxEqRel(core.ethRate(), want, 1e-7 ether, "climbing on the new settings");
+        uint256 p2 = _priceAfter(b, r1, pot, START, block.timestamp - core.lastFillTime(), m2);
+        assertApproxEqRel(core.ethRate(), _readOf(b, pot, r1, p2), 1e-7 ether, "climbing on the new settings");
     }
 
-    /// a fill drops the rate by `dropPerCreditBps` per credit, no lower than `dropFloorBps` of the rate at the first
-    /// fill of the minute, and makes the rate paid the ceiling anchor. the price is the blend of the flat share and the
-    /// score share. the climb, the ceiling and the clamp stay at the launch values and the pot is large, so the hourly
-    /// cap never binds
+    /// a fill pays the read and drops the price state by `dropPerCreditBps` per credit, no lower than `dropFloorBps` of
+    /// the price state at the first fill of the minute. the anchor is the price state at the last fill, not the rate
+    /// paid. the price is the blend of the flat share and the score share. the climb, the ceiling and the clamp stay at
+    /// the launch values and the pot is large, so the hourly cap never binds
     /// forge-config: default.fuzz.runs = 30
     function testFuzz_fillDropsPerCreditAndSetsTheAnchor(uint256 seed, uint256 potSeed, uint256 waitSeed, uint256 count)
         public
@@ -202,42 +199,50 @@ contract RateFuzzTest is Fixture {
         _fund(pot);
         _warp(mins * 1 minutes);
         uint256[] memory ids = _credits(alice, n);
-        uint256 r = core.ethRate();
-        uint256 limit = _limitOf(s, pot, START, block.timestamp - core.lastFillTime());
-        assertApproxEqRel(r, _model(START, mins, limit, s.climbPerMinBps), 1e-7 ether);
+        uint256 p0 = _priceAfter(s, START, pot, START, block.timestamp - core.lastFillTime(), mins);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot, START, p0), 1e-7 ether);
+        // the price state is stored by the first fill's checkpoint: use what the Core stored
         uint256 paid;
-        uint256 rn = r;
-        for (uint256 i; i < n; ++i) {
-            paid += _price(core.scoreOf(ids[i]), rn, s);
-            rn = BidModel.dropOnce(s, rn, r);
-        }
+        uint256 pn;
+        uint256 last;
+        (paid, pn, last, p0) = _fillModel(s, ids, pot, p0);
         uint256 before = alice.balance;
         vm.prank(alice);
         core.sellForEth(ids);
-        assertEq(alice.balance - before, paid);
-        assertEq(core.rateAtCheckpoint(), rn, "dropped per credit, no lower than the minute floor");
-        assertEq(core.ethPot(), pot - paid);
+        assertApproxEqAbs(alice.balance - before, paid, n * 1e6);
+        assertApproxEqRel(core.rateAtCheckpoint(), pn, 1e-7 ether, "dropped per credit on the price state");
         assertEq(core.lastFillTime(), block.timestamp);
-        (uint256 last,) = _afterFills(s, r, n);
-        uint256 anchor;
-        {
-            uint256 minuteStart;
-            (anchor, minuteStart,) = _anchor();
-            assertEq(anchor, last, "the rate paid at the last fill is the anchor");
-            assertEq(minuteStart, r, "the minute started at the first rate paid");
-        }
-        _climbAfterFill(s, rn, anchor);
+        (uint256 anchor, uint256 minuteStart,) = _anchor();
+        assertApproxEqRel(anchor, last, 1e-7 ether, "the price state at the last fill is the anchor");
+        assertApproxEqRel(minuteStart, p0, 1e-7 ether, "the minute started at the first price state");
+        _climbAfterFill(s, core.rateAtCheckpoint(), anchor);
     }
 
-    /// the anchor restarted: ten minutes later the climb is the base, unless the rate sits at its limit
+    /// the credits of one call: what is paid at the read of each, the price state after them, the price state at the
+    /// last fill, and the price state at the first
+    function _fillModel(Settings memory s, uint256[] memory ids, uint256 pot, uint256 p0)
+        internal
+        view
+        returns (uint256 paid, uint256 pn, uint256 last, uint256 first)
+    {
+        pn = p0;
+        first = p0;
+        for (uint256 i; i < ids.length; ++i) {
+            last = pn;
+            uint256 rd = BidModel.read(s, pot, pn, pn);
+            uint256 price = _price(core.scoreOf(ids[i]), rd, s);
+            paid += price;
+            pot -= price;
+            pn = BidModel.dropOnce(s, pn, first);
+        }
+    }
+
+    /// the anchor restarted: ten minutes later the climb is the base, unless the price state sits at its limit
     function _climbAfterFill(Settings memory s, uint256 rn, uint256 anchor) internal {
         _warp(10 minutes);
-        if (core.funded()) {
-            uint256 limit = _limitOf(s, core.ethPot(), anchor, 10 minutes);
-            assertApproxEqRel(core.ethRate(), _model(rn, 10, limit, s.climbPerMinBps), 1e-7 ether);
-        } else {
-            assertEq(core.ethRate(), rn, "unfunded after the fill: no climb");
-        }
+        uint256 pot = core.ethPot();
+        uint256 p = _priceAfter(s, rn, pot, anchor, 10 minutes, 10);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot, rn, p), 1e-7 ether);
     }
 
     /// the hourly cap, with a random spend cap: an exact prediction of which sells pass, and the window reopens an hour

@@ -412,12 +412,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                ETH RATE
     //////////////////////////////////////////////////////////////*/
 
-    /// wei per whole point right now, climbed lazily from the checkpoint. the climb, its clamp and its ceiling are in
-    /// `CoreLib.climb`
-    function ethRate() public view returns (uint256 r) {
-        r = rateAtCheckpoint;
-        if (!funded) return r;
-        return CoreLib.climb(r, ethPot, lastFillTime, checkpointTime, block.timestamp);
+    /// wei per whole point right now: the price state (`rateAtCheckpoint` climbed lazily, bounded by the ceiling and
+    /// `rateCap`) lowered to the clamp of the hourly room. the clamp bounds what the engine pays and never enters the
+    /// price state. the math is in `CoreLib.climb`
+    function ethRate() public view returns (uint256 read) {
+        (, read) = _climb();
+    }
+
+    function _climb() private view returns (uint256, uint256) {
+        return CoreLib.climb(rateAtCheckpoint, ethPot, lastFillTime, checkpointTime, block.timestamp);
     }
 
     /// the most wei the core pays for credit id right now, bonus included.
@@ -426,7 +429,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     function _checkpoint() private {
-        rateAtCheckpoint = ethRate();
+        (rateAtCheckpoint,) = _climb();
         checkpointTime = uint64(block.timestamp);
     }
 
@@ -603,7 +606,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (id == 0) revert ZeroId();
         if (CREDITS.ownerOf(id) == address(this)) revert AlreadyOwned();
         _checkpoint();
-        uint256 ceiling = _ceiling(id, rateAtCheckpoint);
+        uint256 ceiling = _ceiling(id, ethRate());
         if (value > ethPot) revert PotTooSmall();
         if (value > ceiling) revert AboveCeiling();
         _requireRoom(value);
@@ -1191,8 +1194,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             xStartTime = uint64(block.timestamp);
         }
         xRateAtCheckpoint = xRateAtCheckpoint.min(s.xRateCap).max(s.xRateFloor);
-        // a lower rate cap pulls the rate down to it now (the checkpoint above is this block)
-        rateAtCheckpoint = rateAtCheckpoint.min(s.rateCap);
         _syncFunded();
         if (module) _syncXFunded();
     }

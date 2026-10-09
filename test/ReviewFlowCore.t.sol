@@ -26,12 +26,11 @@ contract ReviewFlowCoreTest is Fixture {
         h.spendCapBps = uint16(spendCap);
         h.dropPerCreditBps = 1;
         h.dropFloorBps = 10_000;
-        h.clampCredits = 1;
         h.avgScore = uint32(avg);
     }
 
     /// the owner raises the rate cap and sets the hot (but in bounds) settings: spend cap, score and the rate drop at
-    /// their loosest (a floor of 100 percent holds the rate through a batch, one credit of clamp room). the rate is then set to the top of the rate bounds
+    /// their loosest (a floor of 100 percent holds the rate through a batch). the rate is then set to the top of the rate bounds
     function _hotSettings() internal view returns (Settings memory h) {
         h = _hot(5_000, 6_000_000);
         h.rateCap = uint64(RATE_START_MAX_WEI);
@@ -55,13 +54,21 @@ contract ReviewFlowCoreTest is Fixture {
         core.setRate(RATE_START_MAX_WEI);
         vm.stopPrank();
         uint256 price = core.ceilingOf(_credits(seller, 1)[0]);
-        assertEq(price, 0.6 ether, "0.6 eth for one average credit at the rate top and avgScore 6M");
-        uint256 n = pot * 5_000 / 10_000 / price;
-        uint256[] memory ids = _credits(seller, n);
-        uint256 b = seller.balance;
-        vm.prank(seller);
-        core.sellForEth(ids);
-        uint256 got = seller.balance - b;
+        uint256 room = pot * 5_000 / 10_000;
+        assertApproxEqAbs(price, room / 20, 1e3, "a twentieth of the hourly room: the clamp lowers what is paid");
+        // the clamp falls as the pot is spent: credit after credit until the next one would pass the room
+        uint256 got;
+        uint256 n;
+        for (uint256 j; j < 300; ++j) {
+            uint256[] memory one = _credits(seller, 1);
+            uint256 p = core.ceilingOf(one[0]);
+            if (got + p > room) break;
+            uint256 b = seller.balance;
+            vm.prank(seller);
+            core.sellForEth(one);
+            got += seller.balance - b;
+            ++n;
+        }
         vm.startPrank(owner);
         core.setSettings(launch);
         core.setRate(rate0);
@@ -72,7 +79,7 @@ contract ReviewFlowCoreTest is Fixture {
         emit log_named_uint("per tx: market value of the credits (wei)", n * MARKET);
         assertLe(got, pot / 2, "never above the spend cap of 50 percent");
         assertGe(got, pot * 45 / 100, "at least 45 percent in one block");
-        assertGt(got, n * MARKET * 50, "paid 50x market");
+        assertGt(got, n * MARKET * 25, "paid 25x market");
         _solvent();
     }
 
@@ -101,23 +108,20 @@ contract ReviewFlowCoreTest is Fixture {
                 if (r < RATE_START_MIN_WEI) break;
                 vm.prank(owner);
                 core.setRate(r);
-                // the read is bounded by the clamp: at the launch settings a credit costs a twentieth of the room
-                uint256[] memory first = _credits(seller, 1);
-                uint256 k = room / core.ceilingOf(first[0]);
-                if (k == 0) break;
-                credits += k;
-                uint256[] memory ids = new uint256[](k);
-                ids[0] = first[0];
-                if (k > 1) {
-                    uint256[] memory more = _credits(seller, k - 1);
-                    for (uint256 j = 1; j < k; ++j) {
-                        ids[j] = more[j - 1];
-                    }
+                // the read is bounded by the clamp: a credit costs a twentieth of the room and the clamp falls as the
+                // pot is spent, so the seller sells credit after credit until the next one would pass the room
+                uint256 spent;
+                for (uint256 j; j < 300; ++j) {
+                    uint256[] memory one = _credits(seller, 1);
+                    uint256 p = core.ceilingOf(one[0]);
+                    if (p == 0 || spent + p > room) break;
+                    uint256 b = seller.balance;
+                    vm.prank(seller);
+                    core.sellForEth(one);
+                    spent += seller.balance - b;
+                    ++credits;
                 }
-                uint256 b = seller.balance;
-                vm.prank(seller);
-                core.sellForEth(ids);
-                total += seller.balance - b;
+                total += spent;
                 if (h == 0) {
                     emit log_named_uint(
                         mode == 0
@@ -132,7 +136,7 @@ contract ReviewFlowCoreTest is Fixture {
             );
             emit log_named_uint("per day: share of the pot, bps", total * 10_000 / pot0);
             emit log_named_uint("per day: market value of the credits (wei)", credits * MARKET);
-            assertGt(total, pot0 * (mode == 0 ? 99 : 95) / 100, "the seller took it");
+            assertGt(total, pot0 * (mode == 0 ? 90 : 95) / 100, "the seller took it");
             _solvent();
         }
     }
@@ -408,6 +412,9 @@ contract ReviewFlowCoreTest is Fixture {
         s.rateCap = 5e13;
         _setSettings(s);
         assertEq(core.ethRate(), 5e13, "the rate follows the cap down");
+        // the next checkpoint stores the bounded rate
+        vm.deal(address(core), address(core).balance + 1);
+        core.skim();
         assertEq(core.rateAtCheckpoint(), 5e13);
         // a rate cap above the rate does not touch the rate
         s.rateCap = 2e14;

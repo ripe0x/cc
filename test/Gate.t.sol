@@ -54,14 +54,19 @@ contract GateTest is Fixture {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 want =
             r0.mulWad(uint256(FixedPointMathLib.powWad(1.005e18, int256((block.timestamp - t0) * 1e18 / 1 minutes))));
+        // the read is the climb, lowered to the clamp of 20 credits of the room the pot has
+        uint256 clamp = core.ethPot() * 2000 / (4_330_000 * 20);
+        if (want > clamp) want = clamp;
         assertApproxEqRel(core.ethRate(), want, 1e12, "0.5 percent a minute right after a fill, ten minutes");
-        assertGt(core.ethRate(), r0);
+        assertGt(core.ethRate(), 0, "the bid is open");
         // one of them sells on the house: nothing about the bid changes, and the other keeps waiting
         _bid(funder, s1, _live(s1).reserve);
         _endAuction(s1);
         uint256 rateBefore = core.ethRate();
         _collectSales();
-        assertEq(core.ethRate(), rateBefore, "booking the proceeds does not touch the rate");
+        assertGe(
+            core.ethRate(), rateBefore, "booking the proceeds raises the pot and so the clamp, never the price state"
+        );
         _sellOne();
         assertEq(uint256(_live(s2).status), uint256(ICore.StatementStatus.Listed));
         _solvent();

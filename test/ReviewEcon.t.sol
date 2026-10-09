@@ -244,15 +244,20 @@ contract RateModelFuzz is ReviewEconBase {
         mAnchor = core.RATE_START();
     }
 
-    /// the model rate at `to`, from its checkpoint, under the settings now
-    function _modelAt(uint256 to) internal view returns (uint256) {
-        if (!mFunded) return mRate;
-        return BidModel.climb(core.settings(), mRate, core.ethPot(), mAnchor, to - mLast, to - mTime);
+    /// the model price state at `to`, from its checkpoint, under the settings now
+    function _priceAt(uint256 to) internal view returns (uint256) {
+        return BidModel.price(core.settings(), mRate, core.ethPot(), mAnchor, to - mLast, to - mTime);
     }
 
-    /// a checkpoint of the model at now, before an op that changes the pot, the settings or the fill clock
+    /// the model read at `to`: the price state lowered to the clamp while funded
+    function _modelAt(uint256 to) internal view returns (uint256) {
+        return BidModel.read(core.settings(), core.ethPot(), mRate, _priceAt(to));
+    }
+
+    /// a checkpoint of the model at now, before an op that changes the pot, the settings or the fill clock. it stores the
+    /// price state
     function _checkpoint() internal {
-        mRate = _modelAt(block.timestamp);
+        mRate = _priceAt(block.timestamp);
         mTime = block.timestamp;
     }
 
@@ -294,8 +299,6 @@ contract RateModelFuzz is ReviewEconBase {
         s.rateCap = uint64(1e13 + (seed >> 120) % (1e15 - 1e13 + 1));
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);
-        // a lower rate cap pulls the rate down to it at the checkpoint
-        if (mRate > s.rateCap) mRate = s.rateCap;
         _syncFunded();
     }
 
@@ -330,7 +333,8 @@ contract RateModelFuzz is ReviewEconBase {
             if (!mFunded) {
                 uint256 r = core.ethRate();
                 vm.warp(block.timestamp + 2 days);
-                assertEq(core.ethRate(), r, "unfunded, no climb");
+                assertGe(core.ethRate(), r, "the read does not fall with time");
+                assertLe(core.ethRate(), core.rateAtCheckpoint(), "unfunded: no climb above the stored rate");
                 vm.warp(block.timestamp - 2 days);
             }
         }

@@ -647,7 +647,7 @@ contract ReceiveSettingsTest is FeeBase {
             booked += amounts[i];
             assertEq(core.ethPot(), booked, "every push booked");
             assertEq(core.checkpointTime(), block.timestamp, "checkpointed at the push");
-            assertEq(core.rateAtCheckpoint(), rate, "the climbed rate was locked in first");
+            assertGe(core.rateAtCheckpoint(), rate, "the price state was locked in first, the read is at most that");
             assertEq(address(core).balance, core.ethPot() + core.ethToBuyback());
         }
     }
