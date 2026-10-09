@@ -45,7 +45,7 @@
     "xRateDropPerCredit": 20,
     "xAuctionHalfLife": 21600,
     "exitSliceCredits": 20,
-    "rateCap": 123200000000000,
+    "rateCap": 205540000000000,
     "exitLaneToBuybackBps": 0,
     "feeToBuybackBps": 0
   },

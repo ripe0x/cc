@@ -128,7 +128,7 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
         // the funded clamp of the hourly cap is 20 percent of the pot over 20 credits of 4.33M, 2.3e14, above the rate
         // cap of about 6 * rateStart, so after a long climb the rate sits at the rate cap
         _warp(10_000 hours);
-        assertEq(core.ethRate(), 123_200_000_000_000);
+        assertEq(core.ethRate(), 205_540_000_000_000);
         assertGt(core.ethPot() * 2000 / (4_330_000 * 20), core.ethRate());
         _solvent();
     }

@@ -107,7 +107,7 @@ contract FlowTest is Fixture {
         assertEq(s.xRateDropPerCredit, 20);
         assertEq(s.xAuctionHalfLife, 6 hours);
         assertEq(s.exitSliceCredits, 20);
-        assertEq(s.rateCap, 123_200_000_000_000);
+        assertEq(s.rateCap, 205_540_000_000_000);
         assertEq(s.exitLaneToBuybackBps, 0);
         assertEq(s.feeToBuybackBps, 0);
     }

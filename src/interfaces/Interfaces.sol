@@ -248,7 +248,7 @@ library Mainnet {
             xRateDropPerCredit: 20,
             xAuctionHalfLife: 6 hours,
             exitSliceCredits: 20,
-            rateCap: 123_200_000_000_000,
+            rateCap: 205_540_000_000_000,
             exitLaneToBuybackBps: 0,
             feeToBuybackBps: 0
         });

@@ -405,7 +405,7 @@ contract ReviewFlowCoreTest is Fixture {
         vm.deal(address(core), address(core).balance + 100 ether);
         core.skim();
         Settings memory s = core.settings();
-        assertEq(s.rateCap, 123_200_000_000_000, "launch value");
+        assertEq(s.rateCap, 205_540_000_000_000, "launch value");
         vm.prank(owner);
         vm.expectRevert(ICore.BadRate.selector);
         core.setRate(uint256(s.rateCap) + 1);
