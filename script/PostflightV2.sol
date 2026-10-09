@@ -144,7 +144,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
     {
         bytes memory out;
         (ok, out) = factory.staticcall(abi.encodeCall(IArtCoinsFactoryV2.deploymentInfo, (coin)));
-        if (ok && out.length >= 384) info = abi.decode(out, (IArtCoinsFactoryV2.DeploymentInfoV2));
+        if (ok && out.length >= 416) info = abi.decode(out, (IArtCoinsFactoryV2.DeploymentInfoV2));
         else ok = false;
     }
 

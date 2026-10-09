@@ -100,6 +100,12 @@ abstract contract PostflightPool is PostflightV2 {
                 vm.toString(k.lpFeePips)
             )
         );
+        (bool okf, uint256 floor) = _word(c.stack.hook, abi.encodeCall(IArtCoinsHookV2.minProtocolShareBps, (poolId)));
+        _check(
+            "hook: the pool protocol floor leaves room for the bounty",
+            okf && floor + uint256(c.bountyBps) <= 10_000,
+            string.concat("minProtocolShareBps ", vm.toString(floor), " bounty ", vm.toString(c.bountyBps))
+        );
         address fa = c.stack.factory;
         (bool ok, address live) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.protocolRecipient, ()));
         _info("hook: protocol recipient (the launcher protocol, not the engine owner)", vm.toString(k.protocolRecipient));

@@ -55,7 +55,7 @@ const R0 = 1.54e13;
   for (const k of ['baselineSkimBps', 'bountyBps', 'sniperStartBps']) near(DEFAULTS[k], cfg.launch[k], 1e-12, 'launch ' + k);
   near(DEFAULTS.sniperSeconds, cfg.launch.sniperSeconds, 1e-12, 'launch sniperSeconds');
   near(DEFAULTS.sniperEndBps, cfg.launch.baselineSkimBps, 1e-12, 'the sniper skim falls to the baseline');
-  ok(cfg.launch.lpFee === 0, 'no lp fee, so no lp income in the model');
+  ok(cfg.launch.lpFeePips === 0, 'no lp fee, so no lp income in the model');
   near(DEFAULTS.routerPayeePpm, cfg.router.payeePpm, 1e-12, 'router payeePpm'); near(DEFAULTS.routerTipPpm, cfg.router.tipPpm, 1e-12, 'router tipPpm');
   assert.equal(firstViolation(SETTINGS), null); n++;
   assert.equal(controllerViolation(CONTROLLER), null); n++;

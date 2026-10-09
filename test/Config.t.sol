@@ -75,7 +75,6 @@ contract ConfigTest is Fixture {
         _requireConfig(c);
     }
 
-    /// the deploy refuses to run while any placeholder is unset or the rate is out of bounds
     /// the launch fee split derived from the v2 hook math (`ArtCoinsHookV2._split`), per 1 ether of volume. all rates in bps
     /// of volume. baseline skim 690 bps (6.9 points), skim = V * 690 / 10_000 = 0.069 ether.
     /// bounty leg = skim * bountyBps / 10_000, protocol leg = skim - bounty leg (steady state, no referral).
@@ -83,8 +82,8 @@ contract ConfigTest is Fixture {
     /// 9_638 gives 690 * 362 / 10_000 = 24.978 bps (0.24978 points, 0.00022 below the target), 9_637 gives 690 * 363 /
     /// 10_000 = 25.047 bps (0.00047 above it). 9_638 is the nearest, and the factory needs minProtocolSkimShareBps at most
     /// 10_000 - 9_638 = 362 (`BPS - bountyBps - minProtocolSkimShareBps >= 0` in `_validateFee`).
-    /// router inflow = bounty leg = 0.069 * 9_638 / 10_000 = 0.0665022 ether (66.5022 bps). payee target 0.75 points =
-    /// 75 bps = 0.0075 ether, payeePpm = 75 / 66.5022 * 1e6 = 112_778.2, rounded down to 112_778. tip 5_000 ppm = 0.5
+    /// router inflow = bounty leg = 0.069 * 9_638 / 10_000 = 0.0665022 ether (665.022 bps). payee target 0.75 points =
+    /// 75 bps = 0.0075 ether, payeePpm = 75 / 665.022 * 1e6 = 112_778.2, rounded down to 112_778. tip 5_000 ppm = 0.5
     /// percent of the router inflow, capped at 0.005 ether. the engine keeps the rest of the router inflow
     function test_feeSplitDerivation() public pure {
         LaunchConfig memory d = defaultConfig();
@@ -114,6 +113,7 @@ contract ConfigTest is Fixture {
         assertEq(router - tip - payee, 58_669_703_888_400_000, "engine 5.86697 points");
     }
 
+    /// the deploy refuses to run while any placeholder is unset or the rate is out of bounds
     function test_deployRefusesPlaceholders() public {
         LaunchConfig memory c = defaultConfig();
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "owner"));

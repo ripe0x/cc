@@ -15,7 +15,7 @@ we own four contracts. everything else is live, or for the artcoins v2 stack a c
 | Core's auction house | where statements are listed, created by the Core in its constructor, owned by it forever | created at deploy |
 | pnd auction factory | creates auction houses | 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 |
 | ArtCoinsTokenV2 | the coin, restricted, launched through the factory | created at launch |
-| ArtCoinsFactoryV2, skim hook, lp locker, fee escrow, anti sniper module | the v2 stack, reference commit 87a7522 of ripe0x/artcoins branch v2 | config input, not on mainnet yet |
+| ArtCoinsFactoryV2, skim hook, lp locker, fee escrow, anti sniper module | the v2 stack, reference commit d4aa46b (branch v2-legibility of the launcher repo) | config input, not on mainnet yet |
 
 ## flow
 
@@ -92,7 +92,7 @@ the system launches on the artcoins v2 stack. everything a launch needs is in on
 |---|---|
 | 1 | fill the config. set `rateStart` on launch day to the market price of a credit (default 2.0554e13 for 0.0089 eth), the rule is in docs/DEPLOY.md |
 | 2 | rehearse: `REHEARSAL=1 forge test --match-path test/Rehearsal.t.sol -vv` |
-| 3 | owner command, once: `setMinLpFee(0)` on the v2 factory (the launch uses an lp fee of 0) |
+| 3 | owner command, once: `setMinProtocolSkimShareBps(362)` on the v2 factory (the factory minimum protocol share of the baseline skim, 1,000 on the v2 mainnet environment, must leave room for `bountyBps` 9,638) |
 | 4 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
 | 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow --ledger` through a private relay, with `CONFIG_HASH` set. nine transactions, the library first, the router setup last. a half finished deploy is finished with `script/Resume.s.sol` |
 | 6 | verify CoreLib, ControllerV1, FeeRouter and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |

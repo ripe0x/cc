@@ -253,6 +253,7 @@ library V2Stack {
         require(f.minProtocolSkimShareBps() == p.minProtocolSkimShareBps, "v2: min skim share");
         require(f.defaultAllowed().length == 0, "v2: default allowed must ship empty");
         require(f.deprecated(), "v2: factory must ship deprecated");
+        require(f.STACK_VERSION() == 2, "v2: stack version");
     }
 
     /// @notice the vendored FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`,

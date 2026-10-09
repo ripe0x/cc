@@ -50,7 +50,7 @@ struct LaunchConfig {
     // `flush`. later payees are set through `setPayees`
     address creatorPayee;
     /// the payee's share of the gross flush, ppm. the router receives bountyBps / 10_000 of the baseline skim: 9_638 / 10_000
-    /// of 690 bps is 66.5022 bps of volume (6.65022 points). 112_778 ppm of that is 0.75 points of volume:
+    /// of 690 bps is 665.022 bps of volume (6.65022 points). 112_778 ppm of that is 0.75 points of volume:
     /// 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down
     uint32 payeePpm;
     uint32 tipPpm;

@@ -258,7 +258,7 @@ the router's payee list holds ONE entry at launch: the creator address (the conf
 
 | # | decision |
 |---|---|
-| 31 | the protocol keeps 362 of every 10_000 of the skim and the router receives the rest: `bountyBps` 9_638. the payee share is 0.75 points of volume. the factory owner lowers the factory `minProtocolSkimShareBps` to 362 before the launch (a global factory setting, frozen per pool at creation), and preflight fails with the command named when the factory minimum is above 362 |
+| 31 | the protocol keeps 362 of every 10_000 of the skim and the router receives the rest: `bountyBps` 9_638. the payee share is 0.75 points of volume. the factory owner lowers the factory `minProtocolSkimShareBps` to at most 362 before the launch, 362 chosen so the pool floor equals the protocol's 0.25 points (the factory rule is `bountyBps <= min(9999, 10_000 - minProtocolSkimShareBps)`, a global factory setting, frozen per pool at creation), and preflight fails with the command named when the factory minimum is above 362 |
 
 per 100 eth of volume at launch values (skim `baselineSkimBps` 690 is 6.9 points, 6.9 eth):
 

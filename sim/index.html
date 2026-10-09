@@ -271,10 +271,10 @@ const SIM_DEFAULTS = {
   whipsawStartDay: 2, // pricePath 'whipsaw': day the fall starts
   fundedRule: 'built', // 'built' = the hourly cap affords one average credit, 'old' = the pot affords one (counterfactual)
   schedule: [], // [{ day, patch }]: owner changes settings on that day. patch may hold any setting and `rate` (setRate, wei per point)
-  baselineSkimBps: 6900, // of 100000: 6.9 points of volume (script/config/mainnet.json launch.baselineSkimBps)
+  baselineSkimBps: 690, // bps of volume: 6.9 points (script/config/mainnet.json launch.baselineSkimBps)
   bountyBps: 9638, // of the baseline skim, to the fee router. the other 362 of 10000 is the protocol leg, not the engine's
-  sniperStartBps: 90000,
-  sniperEndBps: 6900, // falls to the baseline
+  sniperStartBps: 9000,
+  sniperEndBps: 690, // falls to the baseline
   sniperSeconds: 1800,
   // the fee router (docs/FLOW.md 10.6, 10.7): a flush pays the caller a tip off the top, then, once the split has started, the
   // payee its parts per million of the rest. everything before the split start goes to the engine. no lp fee, no lp income
@@ -771,14 +771,14 @@ function pathPrice(p, tSec) {
 }
 // anti sniper skim as a fraction of notional at time t seconds after launch
 function skimFraction(p, t) {
-  const base = p.baselineSkimBps / 1e5;
+  const base = p.baselineSkimBps / 1e4;
   if (t >= p.sniperSeconds) return base;
-  const f = (p.sniperStartBps - ((p.sniperStartBps - p.sniperEndBps) * t) / p.sniperSeconds) / 1e5;
+  const f = (p.sniperStartBps - ((p.sniperStartBps - p.sniperEndBps) * t) / p.sniperSeconds) / 1e4;
   return Math.max(base, f);
 }
 // share of a swap's notional the fee router receives: 90 percent of the baseline skim plus all of the anti sniper extra
 function routerFeeFraction(p, f) {
-  const base = p.baselineSkimBps / 1e5;
+  const base = p.baselineSkimBps / 1e4;
   return base * (p.bountyBps / BPS) + Math.max(0, f - base);
 }
 // share of a swap's notional that lands in the engine's pot at t seconds after launch: the router's inflow less the flush tip,
