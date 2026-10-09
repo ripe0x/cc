@@ -474,7 +474,8 @@ abstract contract InvariantsBase is InvariantFixture {
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal virtual {
-        a = a % 44;
+        a = a % 45;
+        if (a == 44) return handler.adopt(w, x, y);
         if (a == 43) return handler.migrate(w, x);
         if (a == 42) return handler.rescueNft(w, x);
         if (a == 40) return handler.flush(w, x);
@@ -587,6 +588,7 @@ abstract contract InvariantsBase is InvariantFixture {
         _try(12, 5);
         _try(15, 5);
         // credits in, so the eth pile reaches 80
+        assertTrue(_try(44, 40), "no adopt");
         _try(2, 40);
         _try(2, 40);
         _try(2, 40);

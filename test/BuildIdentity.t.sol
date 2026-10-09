@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
 import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
+import {ICore} from "../src/interfaces/ICore.sol";
 
 /// @notice proof that the suite exercises the production build. tests and scripts compile on the default profile (no
 /// via_ir), the production contracts on the via_ir profile (foundry.toml). this test fails unless
@@ -17,9 +18,9 @@ import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 /// the generated interfaces are not part of the proof: `script/tools/gen-interfaces.sh --check` covers them, and the
 /// two library functions the abi does not list are pinned to the artifact selectors below.
 contract BuildIdentityTest is Fixture {
-    uint256 internal constant CORE_RUNTIME = 24_043;
+    uint256 internal constant CORE_RUNTIME = 24_077;
     uint256 internal constant CONTROLLER_RUNTIME = 4_464;
-    uint256 internal constant LIB_RUNTIME = 18_002;
+    uint256 internal constant LIB_RUNTIME = 18_487;
     uint256 internal constant LENS_RUNTIME = 8_961;
 
     function _json(string memory name) internal view returns (string memory) {
@@ -126,6 +127,7 @@ contract BuildIdentityTest is Fixture {
         string memory j = _json("CoreLib");
         assertEq(_id(j, "swapIn(address,address,uint24,int24,address,uint256)"), ICoreLib.swapIn.selector, "swapIn");
         assertEq(_id(j, "setSettings(Settings)"), bytes4(keccak256("setSettings(Settings)")), "setSettings");
+        assertEq(_id(j, "adopt(uint256[])"), ICore.adopt.selector, "adopt");
     }
 
     function _id(string memory j, string memory sig) internal view returns (bytes4) {

@@ -175,6 +175,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event SuccessorSet(address successor);
     event SuccessorLocked();
+    /// `adopt` put a credit the core held without a record into the eth pile at cost basis `cost`
+    event CreditAdopted(uint256 indexed id, uint256 cost);
     /// `migrate` moved assets to the successor: eth, credits, statements, exit token, and the statements it skipped
     event Migrated(
         address indexed successor,
@@ -1154,6 +1156,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                 revert(p, returndatasize())
             }
         }
+    }
+
+    /// puts credits the core holds without a record into the eth pile, anyone may call. the cost basis of each is the
+    /// price state per point now (`ethPrice`) times the score of the credit, at least 1 wei. nothing is paid and the
+    /// rate state, the hourly room and the pots are unchanged. reverts for a credit that is in a pile (`InPile`), that
+    /// the core does not hold (`NotHolder`), for the zero id (`ZeroId`) and for an empty list (`Empty`). logs
+    /// `CreditAdopted`. the body is `CoreLib.adopt`, called with the calldata untouched
+    function adopt(uint256[] calldata) external nonReentrant {
+        _toLib();
     }
 
     /// removes an allowed target at once.

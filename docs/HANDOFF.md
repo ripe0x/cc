@@ -8,7 +8,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
 | engine | ported to the artcoins v2 stack and tested: 986 tests pass, 0 fail, 9 skipped (995 total; the 9 skipped are the deep invariant suites), full run on foundry 1.8.1 with isolate on |
-| contracts | `src/Core.sol` 23,837 bytes runtime (739 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 17,470 (linked library, 7,106 bytes of room), `src/ControllerV1.sol` 4,464, `src/FeeRouter.sol` 5,043 |
+| contracts | `src/Core.sol` 24,077 bytes runtime (499 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 18,487 (linked library, 6,089 bytes of room), `src/ControllerV1.sol` 4,464, `src/FeeRouter.sol` 5,043, `src/CoreLens.sol` 8,961 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |
 | gas | every transaction fits the 16,777,216 mainnet cap (test/GasCap.t.sol). compose is the largest, 9.3 million. a keeper must send compose with a gas limit above 10 million |

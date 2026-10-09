@@ -318,6 +318,7 @@ mechanism of 33:
 | # | decision |
 |---|---|
 | 34 | a read only lens contract, `CoreLens`, answers the whole state a seller, a buyer or a keeper decides on in one `eth_call`. it has no storage and no state changing function, and the Core does not call it. the deploy creates it right after the Core and postflight verifies its pointers |
+| 35 | `adopt(uint256[] ids)`: anyone puts credits the Core holds without a record into the eth pile. the cost basis of a credit is the price state per whole point at that moment times its score, `ethPrice() * score / 1e4`, at least 1 wei. the owner decided the basis is the bid at that moment, so the cost basis of a statement built from adopted credits stays at the level of the market that existed when they arrived |
 
 mechanism of 34:
 * pointers: the Core is the constructor argument. the router is `Core.FEE_SOURCE()` and the house is `Core.HOUSE()`, both read once in the constructor and held as immutables. Credits and Statements are the mainnet constants. the controller is read from `Core.controller()` on every call, so a controller replaced by the owner is followed.
@@ -327,3 +328,13 @@ mechanism of 34:
 * the reads of the controller (`nextPage` ready flag, `priceOf`) are bounded staticcalls. a controller without code, a revert or a short answer reads as not ready and as asking price zero. `priceOf` is asked for eth lane statements that have a listing time.
 * a statement is `listed` while its auction is live on the house (status Listed, Bid or Ended). the status values are those of `Core.statementStatus`.
 * `snapshot()` costs about 146,000 gas with no statements and 56,000 more per held statement (`test_GAS_snapshotPerStatement`). `statementsPage(start, n)` reads a slice of `heldStatements`.
+
+mechanism of 35:
+* a credit is adoptable when `CREDITS.ownerOf(id)` is the Core and `inPile` is false. `Empty` for an empty list, `ZeroId` for id zero, `InPile` for a credit already in a pile (the same id twice in one call included), `NotHolder` for a credit another address holds. an id that does not exist reverts inside Credits. one bad id reverts the whole call.
+* the price state is the first value of `CoreLib.climb` for the stored rate, the pot, the fill clock and the checkpoint time, computed for the current second. the clamp that lowers the read for a thin pot does not enter, and no checkpoint is written. with an empty pot the read is zero and the basis is still the price state times the score.
+* the record written is the one `_push` writes: cost, lane Eth, `inPile`, arrival time now, links to the tail. no payment, no spend: `windowSpent`, `rateAtCheckpoint`, `checkpointTime`, `lastFillTime`, the anchor words of `RateStore` and the pots keep their values.
+* the compose of the controller then treats the credit as any other: the statement cost is the sum of the bases plus the compose reimbursement.
+* a credit that left through `migrate` keeps its old record with `inPile` false. if it returns to the Core, `adopt` writes a new record over it.
+* `adopt` is guarded by the reentrancy lock of the Core. `buyListing` calls an arbitrary target, and an `adopt` of the credit being bought from inside that call would put it in the pile before `buyListing` does.
+* the successor of a `migrate` receives credits without records. `adopt` on the successor builds its pile from them, in the order of the call. the successor prices them with its own price state.
+* the Core runtime goes from 24,043 to 24,077 bytes (the forwarder 34), `CoreLib` from 18,002 to 18,487. tests in `test/Adopt.t.sol`, the action `adopt` in `HandlerBase` with the ghost pile and the model price (`BidModel`).

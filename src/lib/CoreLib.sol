@@ -132,6 +132,7 @@ library CoreLib {
     error CallFailed();
     event SuccessorSet(address successor);
     event SuccessorLocked();
+    event CreditAdopted(uint256 indexed id, uint256 cost);
     event Migrated(
         address indexed successor,
         uint256 eth,
@@ -358,6 +359,27 @@ library CoreLib {
         ICredits(token).transferFrom(address(this), to, id);
         _leave();
         emit NftRescued(token, id, to);
+    }
+
+    /// @notice puts credits the Core holds without a record into the eth pile, anyone may call. The cost basis of a
+    /// credit is the price state per whole point at `block.timestamp` (`climb`, before the clamp, no checkpoint is
+    /// written) times the score of the credit, at least 1 wei. Nothing is paid, and the rate state, the hourly window
+    /// and the pots are unchanged. `acquiredAt` is the current time. Reverts `Empty` for an empty list, `ZeroId` for id
+    /// zero, `InPile` for a credit that is in a pile (the same id twice included), and `NotHolder` for a credit
+    /// the Core does not hold. The Core forwards its call here untouched, under its own reentrancy guard
+    function adopt(uint256[] calldata ids) external {
+        if (ids.length == 0) revert Empty();
+        CoreState storage c = state();
+        (uint256 price,) = _climb(c.rateAtCheckpoint, c.ethPot, c.lastFillTime, c.checkpointTime, block.timestamp);
+        for (uint256 i; i < ids.length; ++i) {
+            uint256 id = ids[i];
+            if (id == 0) revert ZeroId();
+            if (c.credits[id].inPile) revert InPile();
+            if (CREDITS.ownerOf(id) != address(this)) revert NotHolder();
+            uint256 cost = (price * scoreOf(id) / 1e4).max(1);
+            push(c.piles[Lane.Eth], c.credits, Lane.Eth, id, cost);
+            emit CreditAdopted(id, cost);
+        }
     }
 
     /// @notice sets the successor to which `migrate` sends the assets. the zero address means no migration. reverts

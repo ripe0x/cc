@@ -77,6 +77,7 @@ interface ICore {
     );
     event ControllerLocked();
     event ControllerSet(address controller);
+    event CreditAdopted(uint256 indexed id, uint256 cost);
     event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
     event EthRateFill(uint256 spent, uint256 rate, uint256 pot);
     event ExitBuyback(address indexed caller, uint256 slice, uint256 coinIn);
@@ -134,6 +135,7 @@ interface ICore {
     function XRATE_START() external view returns (uint256);
     function acceptOwnership() external;
     function addTarget(address t) external;
+    function adopt(uint256[] memory) external;
     function allowedTarget(address) external view returns (bool);
     function buyListing(uint256 value, bytes memory data, uint256 id, address target) external;
     function buyback() external;

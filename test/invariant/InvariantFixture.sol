@@ -339,6 +339,7 @@ abstract contract InvariantFixture is Fixture {
         s[n++] = HandlerBase.buyback.selector;
         s[n++] = HandlerBase.skim.selector;
         s[n++] = HandlerBase.donate.selector;
+        s[n++] = HandlerBase.adopt.selector;
         s[n++] = HandlerBase.controllerSeed.selector;
         s[n++] = HandlerBase.controllerSwap.selector;
         s[n++] = HandlerBase.overprint.selector;

@@ -115,7 +115,9 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_RESCUE_NFT = 42;
     // the successor doors and the migration of everything the core tracks
     uint8 internal constant A_MIGRATE = 43;
-    uint256 internal constant N_ACTIONS = 44;
+    // anyone puts credits the core holds without a record into the eth pile
+    uint8 internal constant A_ADOPT = 44;
+    uint256 internal constant N_ACTIONS = 45;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -389,7 +391,8 @@ abstract contract HandlerBase is Test {
             "flush",
             "repoint",
             "rescueNft",
-            "migrate"
+            "migrate",
+            "adopt"
         ];
         names = n;
         controllers.push(w.v1);
@@ -1983,6 +1986,136 @@ abstract contract HandlerBase is Test {
         }
         if (phase2() && amtSeed % 3 == 0) _xt().mint(address(core), amt * 1000);
         _rsCheck(rs, 0);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                                 ADOPT
+    //////////////////////////////////////////////////////////////*/
+
+    /// anyone adopts credits the core holds without a record. by mode: an actor sends 1 to 4 of its credits straight to
+    /// the core and adopts them (each gets the cost basis of the model price state times its score, at least 1 wei, and
+    /// the rate state, the window, the pots and the balance stay as they were), adopts a credit that is in a pile
+    /// (`InPile`), adopts a credit an actor holds (`NotHolder`), adopts an empty list (`Empty`) or the zero id
+    /// (`ZeroId`). a refused call changes nothing
+    function adopt(uint256 aSeed, uint256 nSeed, uint256 mode) external checked {
+        uint8 a = A_ADOPT;
+        address who = _actor(aSeed);
+        uint256 m = mode % 9;
+        uint256[] memory ids;
+        bytes4 want;
+        if (m < 5) {
+            uint256 len = inventory[who].length;
+            if (len == 0) return _skip(a);
+            ids = new uint256[](bound(nSeed, 1, 4).min(len));
+            for (uint256 k; k < ids.length; ++k) {
+                ids[k] = inventory[who][(nSeed / 7 + k) % len];
+            }
+            if (_hasDuplicate(ids)) return _skip(a);
+            for (uint256 k; k < ids.length; ++k) {
+                vm.prank(who);
+                CREDITS.transferFrom(who, address(core), ids[k]);
+                _removeFrom(inventory[who], ids[k]);
+            }
+        } else if (m == 5 || m == 6) {
+            uint256 n = cgList.length;
+            if (n == 0) return _skip(a);
+            uint256 id;
+            for (uint256 k; k < n && id == 0; ++k) {
+                uint256 c = cgList[(nSeed + k) % n];
+                if (cg[c].inPile) id = c;
+            }
+            if (id == 0) return _skip(a);
+            ids = new uint256[](1);
+            ids[0] = id;
+            want = ICore.InPile.selector;
+        } else if (m == 7) {
+            uint256 len = inventory[who].length;
+            if (len == 0) return _skip(a);
+            ids = new uint256[](1);
+            ids[0] = inventory[who][nSeed % len];
+            want = ICore.NotHolder.selector;
+        } else {
+            ids = new uint256[](nSeed % 2);
+            want = ids.length == 0 ? ICore.Empty.selector : ICore.ZeroId.selector;
+        }
+
+        AdoptPre memory p = _adoptPre(ids);
+        _att(a);
+        vm.prank(_actor(aSeed >> 32));
+        try core.adopt(ids) {
+            if (want != bytes4(0)) _flag(V_MODEL, "adopt took an id that must be refused");
+            else _ok(a);
+        } catch (bytes memory why) {
+            if (want == bytes4(0) || bytes4(why) != want) _unexpected(a, why);
+            _failed(p.b0, p.rs.pot, p.rs.rate, "adopt");
+        }
+        _adoptPost(p, ids, want == bytes4(0));
+        _rsCheck(p.rs, 0);
+    }
+
+    struct AdoptPre {
+        RS rs;
+        uint256 b0;
+        uint256 tb0;
+        uint256 room0;
+        uint256 size0;
+        uint256 anchor0;
+        uint256 floor0;
+        uint256 bucket0;
+        uint256[] costs;
+    }
+
+    /// the state an adopt must leave alone, and the cost basis the model gives each id
+    function _adoptPre(uint256[] memory ids) internal view returns (AdoptPre memory p) {
+        p.rs = _rs();
+        p.b0 = address(core).balance;
+        p.tb0 = core.ethToBuyback();
+        p.room0 = core.hourlyRoom();
+        p.size0 = core.pileSize(Lane.Eth);
+        uint256 price = _priceNow(p.rs.st);
+        p.costs = new uint256[](ids.length);
+        for (uint256 k; k < ids.length; ++k) {
+            p.costs[k] = (price * _score(ids[k]) / 1e4).max(1);
+        }
+        (p.anchor0, p.floor0, p.bucket0) = _anchorState();
+    }
+
+    /// after the call: the pile grew by the ids when the call was meant to pass and not at all otherwise, each adopted
+    /// credit has the modelled record (and enters the ghost), and the rate state, the window, the pots and the balance
+    /// are as before
+    function _adoptPost(AdoptPre memory p, uint256[] memory ids, bool passes) internal {
+        uint256 grew = core.pileSize(Lane.Eth) - p.size0;
+        if (grew != (passes ? ids.length : 0)) {
+            _flag(V_MODEL, "adopt changed the eth pile by another number than its credits");
+        }
+        if (passes && grew == ids.length) {
+            for (uint256 k; k < ids.length; ++k) {
+                (bool inPile, Lane lane, uint256 cost, uint64 at) = core.creditInfo(ids[k]);
+                if (!inPile || lane != Lane.Eth || cost != p.costs[k] || at != block.timestamp) {
+                    _flag(V_MODEL, "an adopted credit has another record than the price state times its score");
+                }
+                _addCredit(ids[k], 0, p.costs[k]);
+            }
+        }
+        (uint256 anchor1, uint256 floor1, uint256 bucket1) = _anchorState();
+        if (
+            core.rateAtCheckpoint() != p.rs.stored || core.checkpointTime() != p.rs.cp
+                || core.lastFillTime() != p.rs.lastFill || anchor1 != p.anchor0 || floor1 != p.floor0
+                || bucket1 != p.bucket0
+        ) _flag(V_RATE_BOUND, "adopt moved the rate state");
+        if (core.hourlyRoom() != p.room0) _flag(V_WINDOW, "adopt used hourly room");
+        if (core.ethPot() != p.rs.pot || core.ethToBuyback() != p.tb0 || address(core).balance != p.b0) {
+            _flag(V_POT, "adopt moved eth or a pot");
+        }
+    }
+
+    function _hasDuplicate(uint256[] memory ids) internal pure returns (bool) {
+        for (uint256 i; i < ids.length; ++i) {
+            for (uint256 j = i + 1; j < ids.length; ++j) {
+                if (ids[i] == ids[j]) return true;
+            }
+        }
+        return false;
     }
 
     /// anyone flushes the fee router, now and then after sending it some eth. whatever the engine is, only the engine set

@@ -289,6 +289,7 @@ anyone can run these. none is needed for safety, they keep the engine moving. no
 | collect the creator slot | `locker.collectRewards(coin)` | pays the caller a keeper reward and pushes the recipient shares. at lp fee 0 there is no lp income, so this moves only dust |
 | book stray eth | `core.skim()` | books eth the Core received from anyone but the router (for example a partial fill refund from the escrow, claimed with the escrow's `claim`) |
 | compose statements | `core.compose()`, `core.composeExit()` | the caller is repaid gas. set the gas limit above 10 million (about 8 million are used for 80 credits, the cap is 16,777,216) |
+| adopt credits | `core.adopt(ids)` | puts credits that were transferred to the Core outside its doors into the eth pile at the basis of the price state now. event `CreditAdopted` |
 | collect sales | `core.collectSales()` | moves statement sale proceeds into the pots. `buyback()` calls it first |
 | buyback | `core.buyback()` | burns coin bought with one slice of the buyback pot, caller tip `keeperTipBps` |
 | reprice | `core.repriceStatement(sid)` | permissionless, listings with no bid |
