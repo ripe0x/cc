@@ -586,8 +586,10 @@ contract ReviewFundedTest is Fixture {
         if (c.funded()) {
             assertLe(AVG * r, pot * 2000, "funded: the hourly cap affords an average credit at the live rate");
         }
-        // the rate never climbs while the cap cannot afford an average credit
-        if (pot * 2000 < AVG * stored) assertEq(r, stored, "no climb while unaffordable");
+        // the price state never climbs while the cap cannot afford an average credit, and the read is the clamp
+        if (pot * 2000 < AVG * stored) {
+            assertEq(r, pot * 2000 / (AVG * 20), "the read is the clamp while unaffordable");
+        }
     }
 
     /// forge-config: default.fuzz.runs = 400
@@ -621,7 +623,11 @@ contract ReviewFundedTest is Fixture {
                 try c.sellForEth(ids) {}
                 catch (bytes memory why) {
                     bytes4 sel = bytes4(why);
-                    assertTrue(sel == ICore.HourlyCap.selector || sel == ICore.PotTooSmall.selector, "unexpected revert");
+                    assertTrue(
+                        sel == ICore.HourlyCap.selector || sel == ICore.PotTooSmall.selector
+                            || sel == ICore.ZeroAmount.selector,
+                        "unexpected revert"
+                    );
                 }
                 vm.stopPrank();
             } else {

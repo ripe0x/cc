@@ -130,7 +130,8 @@ contract CoreUnitTest is CoreBase {
         assertTrue(core.allowedTarget(Mainnet.SEAPORT));
         assertTrue(core.allowedTarget(Mainnet.CREDIT_STRATEGY));
         assertTrue(CREDITS.isApprovedForAll(address(core), address(STATEMENTS)));
-        assertEq(core.ethRate(), 4e12);
+        assertEq(core.rateAtCheckpoint(), 4e12);
+        assertEq(core.ethRate(), 0, "an empty pot reads zero");
         assertEq(core.xRate(), 6000);
         assertEq(core.lastFillTime(), launchTime);
         assertFalse(core.funded());
@@ -216,7 +217,7 @@ contract CoreUnitTest is CoreBase {
         s.rateCap = 1e15;
         ICore hi = this.mk(owner, address(coin), address(ctl), lc.stack, 1e15, s);
         assertEq(lo.RATE_START(), 1e11);
-        assertEq(lo.ethRate(), 1e11);
+        assertEq(lo.rateAtCheckpoint(), 1e11);
         assertEq(hi.RATE_START(), 1e15);
         assertEq(hi.rateAtCheckpoint(), 1e15);
     }
@@ -297,32 +298,26 @@ contract CoreUnitTest is CoreBase {
     //////////////////////////////////////////////////////////////*/
 
     function test_rate_unfundedNeverClimbs() public {
-        assertEq(core.ethRate(), 4e12);
+        assertEq(core.rateAtCheckpoint(), 4e12);
+        assertEq(core.ethRate(), 0, "an empty pot reads zero");
         _warp(1000 hours);
-        assertEq(core.ethRate(), 4e12);
+        assertEq(core.ethRate(), 0);
 
         // one avg credit costs 1.732e15 at the start rate and the hourly cap is 20 percent of the pot, so funded needs
-        // a pot of 5 average credits (8.66e15). between 1 and 5 average credits the rate does not climb
-        _fund(1.7e15);
-        assertFalse(core.funded());
-        _warp(1000 hours);
-        assertEq(core.ethRate(), 4e12);
-        _fund(3e15);
-        assertFalse(core.funded(), "about 2.7 average credits");
-        _warp(1000 hours);
-        assertEq(core.ethRate(), 4e12);
-        _fund(3.9e15);
-        assertEq(core.ethPot(), 8.6e15);
-        assertFalse(core.funded(), "just under 5 average credits");
-        _warp(1000 hours);
-        assertEq(core.ethRate(), 4e12);
-
-        _fund(1.4e16);
+        // a pot of 5 average credits (8.66e15). below 20 average credits of hourly room the read is the clamp, which
+        // follows the pot, and the price state holds
+        uint256 last;
+        uint256[4] memory steps = [uint256(1.7e15), 3e15, 3.9e15, 1.4e16];
+        for (uint256 i; i < steps.length; ++i) {
+            _fund(steps[i]);
+            _warp(1000 hours);
+            assertEq(core.ethRate(), core.ethPot() * 2000 / (4_330_000 * 20), "the read is the clamp of 20 credits");
+            assertGe(core.ethRate(), last, "the read does not fall as the pot grows");
+            last = core.ethRate();
+            assertEq(core.rateAtCheckpoint(), 4e12, "the price state holds at the opening rate");
+        }
         assertTrue(core.funded());
-        // 20 credits of room at this pot is below the opening rate: the read is the clamp, the price state is not
-        uint256 clamp = core.ethPot() * 2000 / (4_330_000 * 20);
-        assertEq(core.ethRate(), clamp, "the read is the clamp of 20 credits");
-        assertEq(core.rateAtCheckpoint(), 4e12, "and the clamp is not stored");
+        uint256 clamp = last;
         _warp(10 minutes);
         assertEq(core.ethRate(), clamp, "held there");
         // the price state does not climb above the clamp: it waited at the opening rate
@@ -342,7 +337,7 @@ contract CoreUnitTest is CoreBase {
         _fund(1.2e16 - 1);
         assertFalse(core.funded(), "one wei short of 6M * 4e12 / 20 percent");
         _warp(1000 hours);
-        assertEq(core.ethRate(), 4e12);
+        assertEq(core.ethRate(), 3_999_999_999_999, "one wei short: the clamp is one wei under the rate");
         _fund(1);
         assertTrue(core.funded());
         _warp(1000 hours);
@@ -540,7 +535,9 @@ contract CoreUnitTest is CoreBase {
         assertEq(core.rateAtCheckpoint(), cap, "no climb applied under the smaller pot");
         assertFalse(core.funded());
         _warp(500 hours);
-        assertEq(core.ethRate(), cap, "never rises while unfunded");
+        assertEq(core.ethRate(), core.ethPot() * 2000 / 4_330_000, "the read is the clamp of the smaller pot");
+        _fund(1);
+        assertEq(core.rateAtCheckpoint(), cap, "the price state never rose");
         _solvent();
     }
 
@@ -771,7 +768,7 @@ contract CoreUnitTest is CoreBase {
         core.sellForEth(_one(0));
 
         vm.prank(alice);
-        vm.expectRevert(ICore.PotTooSmall.selector);
+        vm.expectRevert(ICore.ZeroAmount.selector);
         core.sellForEth(ids);
 
         _fund(10 ether);

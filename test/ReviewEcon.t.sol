@@ -251,7 +251,7 @@ contract RateModelFuzz is ReviewEconBase {
 
     /// the model read at `to`: the price state lowered to the clamp while funded
     function _modelAt(uint256 to) internal view returns (uint256) {
-        return BidModel.read(core.settings(), core.ethPot(), mRate, _priceAt(to));
+        return BidModel.read(core.settings(), core.ethPot(), _priceAt(to));
     }
 
     /// a checkpoint of the model at now, before an op that changes the pot, the settings or the fill clock. it stores the

@@ -10,7 +10,7 @@ Rules.
 2. `dropToLast`: after each fill the bid is `dropToPct` of the rate that fill paid, then climbs `climbPerMin` percent a minute with no ceiling. Opens at 100 percent of market. Studied: climb 0.5, 1, 2 and `dropToPct` 80 (the owner's setting), 90, 95.
 3. `stepped`: each fill drops the bid by `dropPerCreditPct`, down to a floor of `dropToPct` (80) of the bid at the first fill of that minute. The bid climbs `climbPerMin` percent a minute and never exceeds `ceilPct` of the rate of the last fill (of the opening bid before any fill). Opens at 100 percent of market. Studied: drop 0.25, 0.5, 1; climb 0.5, 1, 2; ceiling 110, 125, 150 (27 settings).
 
-Every rule keeps the hourly spend cap (20 percent of the pot per hour) and the funded clamp (the bid stops climbing where the hourly cap no longer affords one average credit) and `rateCap`.
+Every rule keeps the hourly spend cap (20 percent of the pot per hour) and the clamp (the current pot times the hourly share over `clampCredits` average credits, which lowers the read and stops the climb) and `rateCap`.
 
 Markets, all with the comparable coin volume preset and 90 days.
 
@@ -278,7 +278,7 @@ The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (
 2. The price state holds the stored rate and the anchor. It climbs per minute toward min(ceiling, rateCap, clamp), where the clamp is the hourly room divided by `clampCredits`. A stored rate above the ceiling or `rateCap` reads as that bound. A stored rate above the clamp holds its value: the clamp stops the climb and never lowers the price state.
 3. While funded (the hourly cap affords one average credit at the stored rate) the read bid is the price state lowered to the clamp. The read bid is what a seller is paid. A fill drops the price state rate and sets the anchor to the price state rate at the fill, the clamp is never stored.
 
-The earlier sim stored the clamped read value at every checkpoint, climbed from it, and used it as the fill price and the anchor, so a small pot dragged the stored rate and the anchor down to the clamp. It also froze the rate whenever the funded flag was false. The built rule is untouched (the credit counts of the built rows equal the earlier grid).
+A checkpoint stores the price state. The fill price is the read, and the drop, the minute floor and the anchor use the price state at the fill, so a small pot leaves the stored rate and the anchor at the price state.
 
 Setting for all rows: stepped B (drop 0.5, climb 0.5, ceiling 125, drop floor 80), `idleLoosenPct` 2 per 10 minutes, `clampCredits` 20, comparable volume, minute steps, three seeds. Data: `sim/results/bid-rule-stalls-contract.csv`. The older `sim/results/bid-rule-stalls.csv` keeps the earlier semantics.
 

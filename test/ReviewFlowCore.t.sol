@@ -395,6 +395,9 @@ contract ReviewFlowCoreTest is Fixture {
     /// the rate cap is a hard ceiling: setRate refuses above it, the cap is bounded like the rate, a lower cap pulls
     /// the rate down at the checkpoint, and a higher cap lets the climb go on
     function test_FIXED_rateCapIsAHardCeiling() public {
+        // a pot of 100 eth leaves the clamp above every rate in this test
+        vm.deal(address(core), address(core).balance + 100 ether);
+        core.skim();
         Settings memory s = core.settings();
         assertEq(s.rateCap, 123_200_000_000_000, "launch value");
         vm.prank(owner);

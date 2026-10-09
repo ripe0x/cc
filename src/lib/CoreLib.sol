@@ -110,13 +110,10 @@ library CoreLib {
     }
 
     /// @notice the price state and the read of the eth rate (wei per whole point) at `nowTs`, from the stored rate `r` of
-    /// checkpoint time `t`. The price state never exceeds `rateCap` or the ceiling `ceilBps` of the anchor. The anchor is
-    /// the rate of the last fill, grown by `idleLoosenBps` per full 10 minutes since the last fill at `anchorTime`. The
-    /// price state compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops
-    /// climbing at the clamp `pot * spendCapBps / (avgScore * clampCredits)`, the rate the hourly room affords. A price
-    /// state above the clamp holds its value. While funded (the hourly cap affords one average credit at `r`) the read is
-    /// the price state lowered to the clamp. The clamp lowers the read and stops the climb, and never lowers the price
-    /// state, which the Core stores. Never reverts: the Core calls it from `receive()`
+    /// checkpoint time `t`. The price state compounds `climbPerMinBps` per minute up to min(`rateCap`, ceiling, clamp)
+    /// and holds a value above that bound. The ceiling is `ceilBps` of the last fill rate grown by `idleLoosenBps` per
+    /// full 10 minutes since `anchorTime`. The clamp is `pot * spendCapBps / (avgScore * clampCredits)`. The read is
+    /// min(price state, clamp). Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view
@@ -124,15 +121,15 @@ library CoreLib {
     {
         Settings storage s = SettingsStore.load();
         uint256 room = pot * s.spendCapBps;
-        bool funded = room >= uint256(s.avgScore) * r;
+        uint256 clamp = room / (uint256(s.avgScore) * s.clampCredits);
         uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * (nowTs.zeroFloorSub(anchorTime) / 10 minutes);
         uint256 cap = RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8;
         cap = cap.min(s.rateCap);
         price = r;
         if (r >= cap) {
             price = cap;
-        } else if (nowTs > t && r != 0 && r < cap.min(room / (uint256(s.avgScore) * s.clampCredits))) {
-            uint256 target = cap.min(room / (uint256(s.avgScore) * s.clampCredits));
+        } else if (nowTs > t && r != 0 && r < cap.min(clamp)) {
+            uint256 target = cap.min(clamp);
             // forge-lint: disable-start(unsafe-typecast)
             int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
                 * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;
@@ -142,25 +139,24 @@ library CoreLib {
                 : r.mulWad(uint256(FixedPointMathLib.expWad(x))).min(target);
             // forge-lint: disable-end(unsafe-typecast)
         }
-        read = price;
-        if (funded) read = read.min(room / (uint256(s.avgScore) * s.clampCredits));
+        read = price.min(clamp);
     }
 
-    /// @notice the rate after one credit is bought at `paid`, and the anchor update of that fill. The rate falls
-    /// `dropPerCreditBps` below `paid`, and stays at or above `dropFloorBps` of the rate paid at the first fill of the
-    /// current minute bucket (`nowTs / 60`). `paid` becomes the ceiling anchor
-    function drop(uint256 paid, uint256 nowTs) external returns (uint256) {
+    /// @notice the rate after one credit is bought with the price state `price` at the fill, and the anchor update of
+    /// that fill. The rate falls `dropPerCreditBps` below `price` and stays at or above `dropFloorBps` of the price state
+    /// at the first fill of the current minute bucket (`nowTs / 60`). A `price` already below that floor (restated by
+    /// `setRate` or lowered by a bound) starts a new floor at `price`. `price` becomes the ceiling anchor
+    function drop(uint256 price, uint256 nowTs) external returns (uint256) {
         Settings storage s = SettingsStore.load();
         RateStore.Anchor storage a = RateStore.load();
         // forge-lint: disable-next-line(unsafe-typecast)
         uint64 bucket = uint64(nowTs / 1 minutes);
-        if (bucket != a.minuteBucket) {
+        if (bucket != a.minuteBucket || price < a.minuteStartRate * s.dropFloorBps / 10_000) {
             a.minuteBucket = bucket;
-            a.minuteStartRate = paid;
+            a.minuteStartRate = price;
         }
-        a.lastFillRate = paid;
-        return
-            (paid * (10_000 - s.dropPerCreditBps) / 10_000).max((a.minuteStartRate * s.dropFloorBps / 10_000).min(paid));
+        a.lastFillRate = price;
+        return (price * (10_000 - s.dropPerCreditBps) / 10_000).max(a.minuteStartRate * s.dropFloorBps / 10_000);
     }
 
     /// @notice `start` halved `elapsed / halfLife` times, with the fraction of a half life by the exponential. zero

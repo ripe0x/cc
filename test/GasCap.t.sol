@@ -451,6 +451,12 @@ contract GasCapTest is SeaportBase {
             ++n;
         }
         (uint256 gn, uint256 tn) = _sellBatch(exit_, n);
+        // a size measured under the cap during the walk can measure over it again: the edge is the last size whose final
+        // measurement is under the cap
+        while (tn >= CAP) {
+            --n;
+            (gn, tn) = _sellBatch(exit_, n);
+        }
         (, uint256 tn1) = _sellBatch(exit_, n + 1);
         console.log(string.concat(label, ": LARGEST BATCH under the cap"), n);
         console.log(string.concat(label, ": gas per credit at the largest batch"), tn / n);

@@ -9,9 +9,9 @@ library RateStore {
     bytes32 internal constant SLOT = bytes32(uint256(0x4e200413f073f368));
 
     struct Anchor {
-        /// the rate paid at the last fill. the rate at deployment before the first fill
+        /// the price state at the last fill. the rate at deployment before the first fill
         uint256 lastFillRate;
-        /// the rate paid at the first fill of the minute bucket `minuteBucket`
+        /// the price state at the first fill of the minute bucket `minuteBucket`
         uint256 minuteStartRate;
         /// `timestamp / 60` of the first fill of the current minute
         uint64 minuteBucket;

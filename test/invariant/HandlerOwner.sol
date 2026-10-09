@@ -229,7 +229,9 @@ abstract contract HandlerOwner is HandlerHouse {
             (uint256 anchor,,) = _anchorState();
             uint256 stored = core.rateAtCheckpoint();
             uint256 want = BidModel.read(
-                ns, core.ethPot(), stored, BidModel.price(ns, stored, core.ethPot(), anchor, block.timestamp - core.lastFillTime(), 0)
+                ns,
+                core.ethPot(),
+                BidModel.price(ns, stored, core.ethPot(), anchor, block.timestamp - core.lastFillTime(), 0)
             );
             if (stored != p.price) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
             if (core.ethRate() != want) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
@@ -466,7 +468,9 @@ abstract contract HandlerOwner is HandlerHouse {
             Settings memory cs = core.settings();
             (uint256 anchor,,) = _anchorState();
             uint256 want = BidModel.read(
-                cs, core.ethPot(), rate, BidModel.price(cs, rate, core.ethPot(), rate, block.timestamp - core.lastFillTime(), 0)
+                cs,
+                core.ethPot(),
+                BidModel.price(cs, rate, core.ethPot(), rate, block.timestamp - core.lastFillTime(), 0)
             );
             if (core.ethRate() != want || core.rateAtCheckpoint() != rate || anchor != rate) {
                 _flag(V_RATE_BOUND, "setRate did not land on the rate and the anchor");
@@ -652,7 +656,9 @@ abstract contract HandlerOwner is HandlerHouse {
         if (core.exitAuctionPrice() != p.xPrice || core.xStartPrice() != start0 || core.xStartTime() != at0) {
             _flag(V_AUCTION, "a module set moved the exit auction");
         }
-        if (core.allowedTarget(address(next))) _flag(V_OWNER, "a module set left the allowed target flag of the module");
+        if (core.allowedTarget(address(next))) {
+            _flag(V_OWNER, "a module set left the allowed target flag of the module");
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -686,9 +692,13 @@ abstract contract HandlerOwner is HandlerHouse {
         vm.prank(ro);
         try feeRouter.setEngine(target) {
             routerRepoints++;
-            if (gRouterLocked) _flag(V_ROUTER, "setEngine worked on a locked router");
-            else if (target == address(0) || target.code.length == 0) _flag(V_ROUTER, "setEngine took an address with no code");
-            else gEngine = target;
+            if (gRouterLocked) {
+                _flag(V_ROUTER, "setEngine worked on a locked router");
+            } else if (target == address(0) || target.code.length == 0) {
+                _flag(V_ROUTER, "setEngine took an address with no code");
+            } else {
+                gEngine = target;
+            }
         } catch {
             bool bad = !gRouterLocked && target != address(0) && target.code.length != 0;
             if (bad) _flag(V_ROUTER, "setEngine refused a good engine");

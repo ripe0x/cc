@@ -77,7 +77,7 @@ contract EconDialsTest is Fixture {
     }
 
     function test_drop_floorAtTheHighestBoundHoldsTheRate() public {
-        uint256 r0 = core.ethRate();
+        uint256 r0 = core.rateAtCheckpoint();
         _manyFills(500, 10_000, 10_000);
         assertEq(core.rateAtCheckpoint(), _anchorMinuteStart(), "a floor of 100 percent never lets the rate fall");
         assertGe(core.rateAtCheckpoint(), r0 - 1);

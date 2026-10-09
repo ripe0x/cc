@@ -113,7 +113,8 @@ struct Settings {
     uint16 ceilBps;
     /// growth of the ceiling anchor per full 10 minutes since the last fill, bps of the anchor
     uint16 idleLoosenBps;
-    /// the climb stops where the hourly cap affords this many average credits
+    /// the clamp of the rate: the current pot times `spendCapBps` over `avgScore` times this many credits. the read of
+    /// the rate is at most the clamp and the climb stops there
     uint16 clampCredits;
     /// share of the pot that may be spent per hour window, bps
     uint16 spendCapBps;
@@ -148,8 +149,8 @@ struct Settings {
     uint32 xAuctionHalfLife;
     /// credits worth of exit token per exit buyback slice
     uint16 exitSliceCredits;
-    /// the most the eth rate can ever be, wei per whole point: the owner's "never pay more than this per credit". the
-    /// climb stops here, `setRate` refuses above it and a lower cap pulls the rate down at once. the rate bounds apply
+    /// the most the eth rate can be, wei per whole point. the price state and the read stay at or below it, `setRate`
+    /// refuses above it, and the rate bounds apply to it
     uint64 rateCap;
     /// share of exit token from EXIT lane exits that goes to the coin buyback, bps, the rest to the exit bid pot
     uint16 exitLaneToBuybackBps;

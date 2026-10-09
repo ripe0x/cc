@@ -215,12 +215,15 @@ abstract contract PostflightChecks is PostflightPool {
             core.ethPot() + core.ethToBuyback() <= address(core).balance,
             string.concat("balance ", vm.toString(address(core).balance))
         );
-        // the live rate moves once the pot is funded or a credit is bought, and the owner may reset it with `setRate`, so
-        // it is exact only at launch: a difference is a warning
+        // the stored price state moves once the pot is funded or a credit is bought, and the owner may reset it with
+        // `setRate`, so it is exact only at launch: a difference is a warning. the read `ethRate()` is zero while the pot is
+        // empty
         _warn(
-            "warn: ethRate is rateStart",
-            core.ethPot() != 0 || core.ethRate() == c.rateStart,
-            string.concat("ethRate ", vm.toString(core.ethRate()), " rateStart ", vm.toString(c.rateStart))
+            "warn: price state is rateStart",
+            core.ethPot() != 0 || core.rateAtCheckpoint() == c.rateStart,
+            string.concat(
+                "rateAtCheckpoint ", vm.toString(core.rateAtCheckpoint()), " rateStart ", vm.toString(c.rateStart)
+            )
         );
     }
 

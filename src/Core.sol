@@ -413,8 +413,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// wei per whole point right now: the price state (`rateAtCheckpoint` climbed lazily, bounded by the ceiling and
-    /// `rateCap`) lowered to the clamp of the hourly room. the clamp bounds what the engine pays and never enters the
-    /// price state. the math is in `CoreLib.climb`
+    /// `rateCap`) lowered to the clamp `ethPot * spendCapBps / (avgScore * clampCredits)`. the clamp follows the current
+    /// pot and is not stored. the hourly room, `windowPot * spendCapBps / BPS - windowSpent`, is a separate check in
+    /// `_requireRoom`, and a sell batch that crosses it reverts whole with `HourlyCap`. the math is in `CoreLib.climb`
     function ethRate() public view returns (uint256 read) {
         (, read) = _climb();
     }
@@ -433,8 +434,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         checkpointTime = uint64(block.timestamp);
     }
 
-    /// funded means the hourly cap can afford one average credit at the stored rate. the clamp of the rate is
-    /// `clampCredits` times stricter: it holds the rate where the hourly cap affords `clampCredits` average credits
+    /// funded means the pot affords one average credit at the stored rate: `ethPot * spendCapBps >= avgScore * rate`
     function _syncFunded() private {
         Settings storage s = _st();
         funded = ethPot * s.spendCapBps >= uint256(s.avgScore) * rateAtCheckpoint;

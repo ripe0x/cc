@@ -50,9 +50,11 @@ abstract contract OwnerBase is Fixture {
             address token = core.exitToken() == address(0) ? address(spareToken) : core.exitToken();
             return abi.encodeCall(ICore.setExitModule, (address(new MockExitModule(token, UNIT))));
         }
-        if (i == D_TARGETS) return abi.encodeCall(ICore.addTarget, (address(uint160(0xA0000 + block.number + gasleft() % 97))));
+        if (i == D_TARGETS) {
+            return abi.encodeCall(ICore.addTarget, (address(uint160(0xA0000 + block.number + gasleft() % 97))));
+        }
         if (i == D_SETTINGS) return abi.encodeCall(ICore.setSettings, (core.settings()));
-        if (i == D_RATE) return abi.encodeCall(ICore.setRate, (core.ethRate()));
+        if (i == D_RATE) return abi.encodeCall(ICore.setRate, (core.rateAtCheckpoint()));
         if (i == D_XRATE) return abi.encodeCall(ICore.setXRate, (core.xRate()));
         if (i == D_REMOVE) return abi.encodeCall(ICore.removeTarget, (address(0xDEAD1)));
         return abi.encodeCall(ICore.transferOwnership, (address(0)));

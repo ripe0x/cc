@@ -715,9 +715,8 @@ abstract contract HandlerBase is Test {
         return bucket == block.timestamp / 60 ? start : rate;
     }
 
-
     /// the price state of the eth rate right now, from the stored rate and the anchor: bounded by the ceiling and `rateCap`,
-    /// climbing while funded, never lowered by the clamp
+    /// climbing up to the clamp
     function _priceNow(Settings memory st) internal view returns (uint256) {
         (uint256 anchor,,) = _anchorState();
         return BidModel.price(
@@ -732,16 +731,25 @@ abstract contract HandlerBase is Test {
 
     /// invariant 6 and its companions, against the settings in force over the interval (they cannot change inside
     /// one action or one warp, only the owner's calls change them and those are checked on their own). across a warp
-    /// the read is the model read from the state the interval started in: the price state climbs while funded and stops
-    /// at the ceiling, the funded threshold and `rateCap`, and the clamp lowers the read only. a rate that was unfunded
-    /// does not rise. the stored funded flag must agree with the pot and the stored rate
+    /// the read equals the model read from the state the interval started in. in an interval without time passing
+    /// (any action except a warp, `setRate` and `setSettings`) the stored rate is at most the larger of the stored rate
+    /// and the price state at the start of the interval, and the read is at most the larger of the read at the start
+    /// and the clamp of the pot at the end.
+    /// the stored funded flag must agree with the pot and the stored rate
     function _rsCheck(RS memory s, uint256 dt) internal {
         uint256 rate1 = core.ethRate();
+        uint256 p =
+            BidModel.price(s.st, s.stored, s.pot, s.anchor, block.timestamp - s.lastFill, block.timestamp - s.cp);
         if (dt != 0) {
-            uint256 p = BidModel.price(s.st, s.stored, s.pot, s.anchor, block.timestamp - s.lastFill, block.timestamp - s.cp);
-            uint256 want = BidModel.read(s.st, s.pot, s.stored, p);
-            if (rate1 + rate1 / 1e9 + 4 < want || want + want / 1e9 + 4 < rate1) {
+            if (rate1 != BidModel.read(s.st, s.pot, p)) {
                 _flag(V_RATE_BOUND, "the rate after a warp differs from the model");
+            }
+        } else {
+            if (core.rateAtCheckpoint() > s.stored.max(p)) {
+                _flag(V_RATE_BOUND, "the stored rate rose with no time passing");
+            }
+            if (rate1 > s.rate.max(BidModel.clamp(s.st, core.ethPot()))) {
+                _flag(V_RATE_BOUND, "the rate rose above the previous read and the clamp with no time passing");
             }
         }
         _fundedCheck();
@@ -814,7 +822,6 @@ abstract contract HandlerBase is Test {
         return _hostileNow() ? _maxPrice(score, rate, s) : readBefore;
     }
 
-    /// what the rate becomes after a spend of x from pot p.
     /// the stored price state and the read after the sells of one call at `costs`: each credit drops the price state, and the
     /// read after it is the price state lowered to the clamp of the smaller pot
     function _rateAfterSells(Settings memory st, SellPre memory p, uint256[] memory costs)
@@ -824,18 +831,22 @@ abstract contract HandlerBase is Test {
     {
         stored = p.price;
         uint256 pot = p.pot;
+        uint256 start = p.minuteStart;
         for (uint256 i; i < costs.length; ++i) {
-            stored = _dropped(st, stored, p.minuteStart);
+            start = BidModel.startAfter(st, stored, start);
+            stored = _dropped(st, stored, start);
             pot -= costs[i];
         }
         r = _readAfterFill(st, stored, pot);
     }
 
-    /// the read right after a fill: the stored price state, lowered to the clamp of the pot left while funded
+    /// the read right after a fill: the stored price state, lowered to the clamp of the pot left
     function _readAfterFill(Settings memory st, uint256 stored, uint256 pot) internal pure returns (uint256) {
-        return BidModel.read(st, pot, stored, stored);
+        return BidModel.read(st, pot, stored);
     }
 
+    /// the rate after one credit bought with the price state `r`, where `start` is the price state at the first fill of
+    /// the minute
     function _dropped(Settings memory st, uint256 r, uint256 start) internal pure returns (uint256) {
         return BidModel.dropOnce(st, r, start);
     }
@@ -920,7 +931,9 @@ abstract contract HandlerBase is Test {
         vm.prank(flusher);
         try feeRouter.flush() {
             routerFlushes++;
-            if (held != owed && eng.balance - e0 != want) _flag(V_ROUTER, "the engine got other than the flush rule gives");
+            if (held != owed && eng.balance - e0 != want) {
+                _flag(V_ROUTER, "the engine got other than the flush rule gives");
+            }
             if (address(feeRouter).balance != owed) _flag(V_ROUTER, "a flush left eth in the router");
             parked = 0;
             toCore = eng == address(core) ? want : 0;
@@ -1430,8 +1443,8 @@ abstract contract HandlerBase is Test {
                                   TIME
     //////////////////////////////////////////////////////////////*/
 
-    /// mostly minutes to hours, now and then days. the rate climbs 1 to 8 percent an hour while funded, so a
-    /// fuzz that warps days at a time pins it at the funded clamp, where 20 percent of the pot buys one average credit.
+    /// mostly minutes to hours, now and then days. the price state climbs 1 to 8 percent an hour, so a
+    /// fuzz that warps days at a time pins it at the clamp.
     function warp(uint256 dtSeed) external checked {
         _att(A_WARP);
         _advance(dtSeed % 10 == 0 ? _logBound(dtSeed / 10, 1 hours, 3 days) : _logBound(dtSeed / 10, 60, 6 hours), 0);
@@ -1656,7 +1669,9 @@ abstract contract HandlerBase is Test {
         }
         if (seen != 1) _flag(V_MODEL, "a listing did not emit exactly one StatementListed");
         (bool priced, uint256 want) = _wantReserve(sid, cost, uint64(block.timestamp), saleFloorBps);
-        if (!priced || reserve != want) _flag(V_SALE_FLOOR, "the listing reserve is not the controller price, floored");
+        if (!priced || reserve != want) {
+            _flag(V_SALE_FLOOR, "the listing reserve is not the controller price, floored");
+        }
         IAuctionHouse.Auction memory au = house.getAuction(id);
         if (au.reservePrice != reserve || au.tokenOwner != address(core) || au.tokenId != sid || au.amount != 0) {
             _flag(V_SALE_FLOOR, "the house record differs from what the core listed");

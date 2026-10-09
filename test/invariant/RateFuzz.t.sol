@@ -58,9 +58,9 @@ contract RateFuzzTest is Fixture {
         return r;
     }
 
-    /// the read for the price state `p` of the stored rate `r`: lowered to the clamp while funded
-    function _readOf(Settings memory s, uint256 pot, uint256 r, uint256 p) internal pure returns (uint256) {
-        return BidModel.read(s, pot, r, p);
+    /// the read for the price state `p`: lowered to the clamp
+    function _readOf(Settings memory s, uint256 pot, uint256 p) internal pure returns (uint256) {
+        return BidModel.read(s, pot, p);
     }
 
     /// the price the core pays for a credit of `score` at `rate`, written out from docs/FLOW.md (no controller bonus)
@@ -112,9 +112,7 @@ contract RateFuzzTest is Fixture {
         assertTrue(core.funded());
         _warp(mins * 1 minutes);
         uint256 p = _priceAfter(s, START, pot, START, block.timestamp - core.lastFillTime(), mins);
-        assertApproxEqRel(
-            core.ethRate(), _readOf(s, pot, START, p), 1e-7 ether, "compounded per minute, then the clamp"
-        );
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot, p), 1e-7 ether, "compounded per minute, then the clamp");
         assertLe(core.ethRate(), p + p / 1e9, "never above the price state");
     }
 
@@ -132,7 +130,7 @@ contract RateFuzzTest is Fixture {
         if (pot != 0) _fund(pot);
         assertFalse(core.funded());
         _warp(idle * 1 hours);
-        assertEq(core.ethRate(), START, "frozen while unfunded");
+        assertEq(core.ethRate(), _readOf(s, pot, START), "the price state holds and the read is the clamp");
 
         uint256 top = bound(topSeed, min - pot, min - pot + 100 ether);
         _fund(top);
@@ -144,7 +142,7 @@ contract RateFuzzTest is Fixture {
         uint256 mins = bound(wait, 0, 240);
         _warp(mins * 1 minutes);
         uint256 p = _priceAfter(s, START, pot + top, START, block.timestamp - core.lastFillTime(), mins);
-        assertApproxEqRel(core.ethRate(), _readOf(s, pot + top, START, p), 1e-7 ether);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot + top, p), 1e-7 ether);
     }
 
     /// a settings call stores the price state it found, even when it flips the funded flag, and the climb after it
@@ -164,22 +162,20 @@ contract RateFuzzTest is Fixture {
         m1 = bound(m1, 0, 240);
         _warp(m1 * 1 minutes);
         uint256 p1 = _priceAfter(a, START, pot, START, block.timestamp - core.lastFillTime(), m1);
-        assertApproxEqRel(core.ethRate(), _readOf(a, pot, START, p1), 1e-7 ether);
+        assertApproxEqRel(core.ethRate(), _readOf(a, pot, p1), 1e-7 ether);
         Settings memory b = _randomSettings(seedB, false);
         _setSettings(b);
         uint256 r1 = core.rateAtCheckpoint();
         assertApproxEqRel(r1, p1, 1e-7 ether, "the call stores the price state it found");
         uint256 idle = block.timestamp - core.lastFillTime();
         assertEq(
-            core.ethRate(),
-            _readOf(b, pot, r1, _priceAfter(b, r1, pot, START, idle, 0)),
-            "the read under the new settings"
+            core.ethRate(), _readOf(b, pot, _priceAfter(b, r1, pot, START, idle, 0)), "the read under the new settings"
         );
         assertEq(core.funded(), BidModel.funded(b, pot, r1), "the funded flag follows the new numbers");
         m2 = bound(m2, 0, 240);
         _warp(m2 * 1 minutes);
         uint256 p2 = _priceAfter(b, r1, pot, START, block.timestamp - core.lastFillTime(), m2);
-        assertApproxEqRel(core.ethRate(), _readOf(b, pot, r1, p2), 1e-7 ether, "climbing on the new settings");
+        assertApproxEqRel(core.ethRate(), _readOf(b, pot, p2), 1e-7 ether, "climbing on the new settings");
     }
 
     /// a fill pays the read and drops the price state by `dropPerCreditBps` per credit, no lower than `dropFloorBps` of
@@ -200,7 +196,7 @@ contract RateFuzzTest is Fixture {
         _warp(mins * 1 minutes);
         uint256[] memory ids = _credits(alice, n);
         uint256 p0 = _priceAfter(s, START, pot, START, block.timestamp - core.lastFillTime(), mins);
-        assertApproxEqRel(core.ethRate(), _readOf(s, pot, START, p0), 1e-7 ether);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot, p0), 1e-7 ether);
         // the price state is stored by the first fill's checkpoint: use what the Core stored
         uint256 paid;
         uint256 pn;
@@ -229,7 +225,7 @@ contract RateFuzzTest is Fixture {
         first = p0;
         for (uint256 i; i < ids.length; ++i) {
             last = pn;
-            uint256 rd = BidModel.read(s, pot, pn, pn);
+            uint256 rd = BidModel.read(s, pot, pn);
             uint256 price = _price(core.scoreOf(ids[i]), rd, s);
             paid += price;
             pot -= price;
@@ -242,7 +238,7 @@ contract RateFuzzTest is Fixture {
         _warp(10 minutes);
         uint256 pot = core.ethPot();
         uint256 p = _priceAfter(s, rn, pot, anchor, 10 minutes, 10);
-        assertApproxEqRel(core.ethRate(), _readOf(s, pot, rn, p), 1e-7 ether);
+        assertApproxEqRel(core.ethRate(), _readOf(s, pot, p), 1e-7 ether);
     }
 
     /// the hourly cap, with a random spend cap: an exact prediction of which sells pass, and the window reopens an hour

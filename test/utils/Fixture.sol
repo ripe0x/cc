@@ -352,6 +352,13 @@ abstract contract Fixture is Test, ProdDeployer {
         revert("ceiling never cleared");
     }
 
+    /// @notice the smallest pot at which the clamp of the eth rate is not below the stored rate:
+    /// `rate * avgScore * clampCredits / spendCapBps`
+    function _unclampedPot() internal view returns (uint256) {
+        Settings memory s = core.settings();
+        return core.rateAtCheckpoint() * s.avgScore * s.clampCredits / s.spendCapBps;
+    }
+
     /// @notice sells `n` fresh credits into the eth bid, which puts them in the eth pile in the order returned.
     /// funds the pot first when it cannot carry the sale, and moves past the hourly cap window if it must
     function _fillEthPile(uint256 n) internal returns (uint256[] memory ids) {
@@ -363,6 +370,8 @@ abstract contract Fixture is Test, ProdDeployer {
             vm.prank(owner);
             core.setRate(opening);
         }
+        uint256 room = _unclampedPot();
+        if (core.ethPot() < room) _fundPot(room);
         uint256 total;
         for (uint256 i; i < n; ++i) {
             total += core.ceilingOf(ids[i]);

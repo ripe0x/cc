@@ -739,7 +739,7 @@ contract SeaportTest is SeaportBase {
 contract SeaportColdTest is SeaportBase {
     function test_fail_valueAbovePot() public {
         uint256 id = _list();
-        uint256 price = core.ceilingOf(id) / 2;
+        uint256 price = 1e15;
         OrderComponents memory c = _open(id, price, 0);
         assertEq(core.ethPot(), 0);
         _expectFail(id, price, _basicData(c), ICore.PotTooSmall.selector);
@@ -747,15 +747,16 @@ contract SeaportColdTest is SeaportBase {
 
     function test_fail_hourlyCap() public {
         uint256 id = _list();
-        uint256 price = core.ceilingOf(id) / 2;
+        // a sale into a small pot opens the hourly window with a room of about 4e14. the pot then grows until the
+        // ceiling is the full price state, which is above the room left in the window
+        _fundPotNear(2e15);
+        uint256[] memory sold = _credits(seller, 1);
+        vm.prank(seller);
+        core.sellForEth(sold);
+        _fundPot(1 ether);
+        uint256 price = core.ceilingOf(id);
         OrderComponents memory c = _open(id, price, 0);
         bytes memory data = _basicData(c);
-        // a pot of about three prices: the order is affordable but is above a fifth of the pot. the first flush after
-        // the window sends the router's whole inflow (6.18 points) to the pot, the split starts after it
-        _skipSniperWindow();
-        _buyCoin(funder, price * 3 * 10_000 / 620);
-        assertGt(core.ethPot(), price * 5 / 2);
-        assertLt(core.ethPot(), price * 7 / 2);
         _expectFail(id, price, data, ICore.HourlyCap.selector);
     }
 }
