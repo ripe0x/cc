@@ -30,13 +30,14 @@ struct LaunchConfig {
     int24 startTick;
     int24 positionLower;
     int24 positionUpper;
+    /// the baseline skim in bps of volume (690 is 6.9 percent)
     uint24 baselineSkimBps;
     /// the engine's share of the baseline skim, bps. the protocol keeps the rest
     uint16 bountyBps;
     uint24 maxReferralBps;
-    /// pips (1e6). the v2 factory floors it at its `minLpFee`
-    uint24 lpFee;
-    /// the anti sniper skim at the first block, falling to the baseline (v2 has no end value) over `sniperSeconds`
+    /// pips (1e6)
+    uint24 lpFeePips;
+    /// the anti sniper skim at the first block in bps of volume, falling to the baseline over `sniperSeconds`
     uint24 sniperStartBps;
     uint32 sniperSeconds;
     /// the protocol's share of the locker rewards, bps. 0 appends no protocol slot. the factory default is 2_000
@@ -48,8 +49,9 @@ struct LaunchConfig {
     // the fee router (docs/FLOW.md 10.6): one payee at launch, by parts per million of a flush, the tip of the caller of
     // `flush`. later payees are set through `setPayees`
     address creatorPayee;
-    /// the payee's share of the gross flush, ppm. the router receives 6.65022 points of volume (9_638 / 10_000 of the 6.9
-    /// point skim), so 112_778 ppm is 0.75 points of volume: 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down
+    /// the payee's share of the gross flush, ppm. the router receives bountyBps / 10_000 of the baseline skim: 9_638 / 10_000
+    /// of 690 bps is 66.5022 bps of volume (6.65022 points). 112_778 ppm of that is 0.75 points of volume:
+    /// 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down
     uint32 payeePpm;
     uint32 tipPpm;
     uint96 tipCap;
@@ -82,11 +84,11 @@ abstract contract ConfigReader is CommonBase {
         c.startTick = -175_000;
         c.positionLower = -175_000;
         c.positionUpper = 887_200;
-        c.baselineSkimBps = 6_900;
+        c.baselineSkimBps = 690;
         c.bountyBps = 9638;
         c.maxReferralBps = 0;
-        c.lpFee = 0;
-        c.sniperStartBps = 90_000;
+        c.lpFeePips = 0;
+        c.sniperStartBps = 9_000;
         c.sniperSeconds = 1800;
         c.protocolBps = 2000;
         c.restricted = true;
@@ -184,7 +186,7 @@ abstract contract ConfigReader is CommonBase {
         c.baselineSkimBps = _u24(j, ".launch.baselineSkimBps");
         c.bountyBps = _u16(j, ".launch.bountyBps");
         c.maxReferralBps = _u24(j, ".launch.maxReferralBps");
-        c.lpFee = _u24(j, ".launch.lpFee");
+        c.lpFeePips = _u24(j, ".launch.lpFeePips");
         c.sniperStartBps = _u24(j, ".launch.sniperStartBps");
         c.sniperSeconds = _u32(j, ".launch.sniperSeconds");
         c.protocolBps = _u16(j, ".launch.protocolBps");

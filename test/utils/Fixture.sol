@@ -159,12 +159,11 @@ abstract contract Fixture is Test, ProdDeployer {
         flusher = _user("flusher");
         router = new TestSwapRouter();
 
-        // the v2 stack, deployed by `owner`, who is its owner. the launch needs the factory minimum lp fee at 0
+        // the v2 stack, deployed by `owner`, who is its owner. the launch bounty needs the factory minimum protocol skim share at 362
         v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         ESCROW = IArtCoinsFeeEscrowV2(v2.escrow);
         vm.startPrank(owner);
-        FACTORY.setMinLpFee(0);
         FACTORY.setMinProtocolSkimShareBps(362);
         vm.stopPrank();
         vm.deal(owner, 1 ether);

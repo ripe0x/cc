@@ -161,23 +161,23 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("sniperSeconds 0", Class.Pre);
             m.c.sniperSeconds = 0;
         } else if (i == 1) {
-            m = _m("sniperStartBps 5000 below the baseline", Class.Pre);
-            m.c.sniperStartBps = 5000;
+            m = _m("sniperStartBps 500 below the baseline", Class.Pre);
+            m.c.sniperStartBps = 500;
         } else if (i == 2) {
             m = _m("maxReferralBps 1000", Class.Pre);
             m.c.maxReferralBps = 1000;
         } else if (i == 3) {
-            m = _m("lpFee 5000", Class.Pre);
-            m.c.lpFee = 5000;
+            m = _m("lpFeePips 5000", Class.Pre);
+            m.c.lpFeePips = 5000;
         } else if (i == 4) {
-            m = _m("lpFee 3000 (the factory default floor)", Class.Pre);
-            m.c.lpFee = 3000;
+            m = _m("lpFeePips 3000 (the v4 default tier)", Class.Pre);
+            m.c.lpFeePips = 3000;
         } else if (i == 5) {
-            m = _m("baselineSkimBps 60000", Class.Pre);
-            m.c.baselineSkimBps = 60_000;
+            m = _m("baselineSkimBps 6000", Class.Pre);
+            m.c.baselineSkimBps = 6_000;
         } else if (i == 6) {
-            m = _m("baselineSkimBps 10000 (the v1 value)", Class.Pre);
-            m.c.baselineSkimBps = 10_000;
+            m = _m("baselineSkimBps 1000 (the v1 value)", Class.Pre);
+            m.c.baselineSkimBps = 1_000;
         } else if (i == 7) {
             m = _m("sniperSeconds 86400", Class.Pre);
             m.c.sniperSeconds = 86_400;
@@ -197,11 +197,11 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("protocolBps 10000", Class.Pre);
             m.c.protocolBps = 10_000;
         } else if (i == 13) {
-            m = _m("sniperStartBps 90001 above the module limit", Class.Pre);
-            m.c.sniperStartBps = 90_001;
+            m = _m("sniperStartBps 9001 above the module limit", Class.Pre);
+            m.c.sniperStartBps = 9_001;
         } else if (i == 14) {
-            m = _m("sniperStartBps 6900 equal to the baseline", Class.Pre);
-            m.c.sniperStartBps = 6900;
+            m = _m("sniperStartBps 690 equal to the baseline", Class.Pre);
+            m.c.sniperStartBps = 690;
         } else if (i == 15) {
             m = _m("sniperSeconds 300", Class.Pre);
             m.c.sniperSeconds = 300;
@@ -209,8 +209,8 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("sniperSeconds 3601", Class.Pre);
             m.c.sniperSeconds = 3601;
         } else if (i == 17) {
-            m = _m("sniperStartBps 20000 (below the rule)", Class.Pre);
-            m.c.sniperStartBps = 20_000;
+            m = _m("sniperStartBps 2000 (below the rule)", Class.Pre);
+            m.c.sniperStartBps = 2_000;
         } else if (i == 18) {
             m = _m("bountyBps 9999 with the override flag on", Class.Pre);
             (m.c.bountyBps, m.c.allowBounty) = (9999, true);
@@ -240,8 +240,8 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("sniperSeconds 600 (the lowest edge)", Class.Hash);
             m.c.sniperSeconds = 600;
         } else if (i == 6) {
-            m = _m("sniperStartBps 50000 (valid, wrong)", Class.Hash);
-            m.c.sniperStartBps = 50_000;
+            m = _m("sniperStartBps 5000 (valid, wrong)", Class.Hash);
+            m.c.sniperStartBps = 5_000;
         } else if (i == 7) {
             m = _m("name changed", Class.Hash);
             m.c.name = "Review Coin Two";
@@ -684,11 +684,11 @@ contract ReviewMatrixStateTest is ReviewHarness {
     /// @dev the owner commands on the v2 factory and the hook that change what a launch is
     function _state2(uint256 i) private returns (string memory l, Class w) {
         if (i == 14) {
-            (l, w) = ("factory min lp fee 3000 (the owner command setMinLpFee(0) not run)", Class.Pre);
-            FACTORY.setMinLpFee(3000);
+            (l, w) = ("factory min protocol skim share 1000 (the owner command setMinProtocolSkimShareBps(362) not run)", Class.Pre);
+            FACTORY.setMinProtocolSkimShareBps(1000);
         } else if (i == 15) {
-            (l, w) = ("factory min lp fee 1 (any floor above the config lp fee)", Class.Pre);
-            FACTORY.setMinLpFee(1);
+            (l, w) = ("factory min protocol skim share 363 (one above the 362 the bounty 9638 leaves)", Class.Pre);
+            FACTORY.setMinProtocolSkimShareBps(363);
         } else if (i == 16) {
             (l, w) = ("factory min protocol skim share 1500 (bounty 9638 no longer fits)", Class.Pre);
             FACTORY.setMinProtocolSkimShareBps(1500);
@@ -702,16 +702,17 @@ contract ReviewMatrixStateTest is ReviewHarness {
             (l, w) = ("mev module disabled on the factory", Class.Pre);
             FACTORY.setMevModule(v2.mev, false);
         } else if (i == 20) {
-            (l, w) = ("escrow disabled on the factory", Class.Pre);
-            FACTORY.setEscrow(v2.escrow, false);
+            (l, w) = ("locker launcher flag for the factory removed", Class.Pre);
+            (bool okL,) = v2.locker.call(abi.encodeWithSignature("setLauncher(address,bool)", v2.factory, false));
+            require(okL, "locker setLauncher");
         } else if (i == 21) {
             (l, w) = ("factory default allowlist holds an account (it would join the coin allowlist)", Class.Pre);
             address[] memory a = new address[](1);
             a[0] = creator;
             FACTORY.setDefaultAllowed(a);
         } else if (i == 22) {
-            (l, w) = ("factory referral payout is an EOA", Class.Pre);
-            FACTORY.setReferralPayout(payable(creator));
+            (l, w) = ("factory team fee recipient unset (the deploy fee has no recipient)", Class.Pre);
+            FACTORY.setTeamFeeRecipient(address(0));
         } else if (i == 23) {
             (l, w) = ("the fee escrow has no code", Class.Pre);
             vm.etch(v2.escrow, "");

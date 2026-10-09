@@ -116,7 +116,7 @@ abstract contract FeeBase is Fixture {
     /// @dev steady state expectation for a gross eth notional: 6.9 points of skim, 96.38 percent of it (the bounty leg) to the
     /// router, the rest the protocol leg
     function _expected(uint256 gross) internal pure returns (uint256 toRouter, uint256 toProtocol) {
-        uint256 skim = gross * 6_900 / 100_000;
+        uint256 skim = gross * 690 / 10_000;
         toRouter = skim * 9_638 / 10_000;
         toProtocol = skim - toRouter;
     }
@@ -278,18 +278,18 @@ contract FeeFlowTest is FeeBase {
         uint256 got = ctlr.balance + ESCROW.balances(ctlr, address(0)) - before;
         assertEq(got, f.skimProtocol);
         // 5 eth * 6.9 points = 0.345 eth of skim, the protocol keeps 362 of 10_000: 0.012489 eth
-        assertEq(got, 5 ether * 6_900 / 100_000 * 362 / 10_000);
+        assertEq(got, 5 ether * 690 / 10_000 * 362 / 10_000);
     }
 
     /// the extra of the anti sniper window all reaches the router, and through it the pot, the payees take nothing of it
     function test_sniperWindowExtraLandsInThePot() public {
         (uint24 bps,) = IArtCoinsMevSkimV2(v2.mev).currentSkimBps(poolId);
-        assertEq(bps, 90_000);
+        assertEq(bps, 9_000);
         assertFalse(feeRouter.splitOn(), "no split in the window");
         Flow memory f = _flow(Kind.BuyExactIn, 1 ether, "");
-        uint256 base = 1 ether * 6_900 / 100_000;
+        uint256 base = 1 ether * 690 / 10_000;
         uint256 bountyShare = base * 9_638 / 10_000;
-        uint256 extra = 1 ether * uint256(bps) / 100_000 - base;
+        uint256 extra = 1 ether * uint256(bps) / 10_000 - base;
         assertEq(f.routerRise, bountyShare + extra, "the whole extra goes to the bounty recipient");
         assertEq(f.skimProtocol, base - bountyShare, "the protocol leg does not grow in the window");
         assertEq(f.toPayees, 0);
@@ -300,15 +300,15 @@ contract FeeFlowTest is FeeBase {
         // halfway through the window the rate has decayed to 50 percent (linearly from 90 to the baseline, 6.9)
         vm.warp(launchTime + SNIPER_WINDOW / 2);
         (bps,) = IArtCoinsMevSkimV2(v2.mev).currentSkimBps(poolId);
-        assertEq(bps, 90_000 - (90_000 - 6_900) / 2);
+        assertEq(bps, 9_000 - (9_000 - 690) / 2);
         f = _flow(Kind.BuyExactIn, 1 ether, "");
-        assertEq(f.routerRise, bountyShare + 1 ether * uint256(bps) / 100_000 - base);
+        assertEq(f.routerRise, bountyShare + 1 ether * uint256(bps) / 10_000 - base);
         assertEq(f.toPayees, 0);
 
         // sells pay the extra too
         f = _flow(Kind.SellExactIn, coin.balanceOf(trader) / 4, "");
         (bps,) = IArtCoinsMevSkimV2(v2.mev).currentSkimBps(poolId);
-        assertGt(f.routerRise, f.gross * 6_900 / 100_000 * 9_638 / 10_000);
+        assertGt(f.routerRise, f.gross * 690 / 10_000 * 9_638 / 10_000);
 
         _skipSniperWindow();
         f = _flow(Kind.BuyExactIn, 1 ether, "");
@@ -345,7 +345,7 @@ contract FeeFlowTest is FeeBase {
         uint256 pot = core.ethPot();
         _buyCoin(trader, 5 ether);
         assertEq(core.ethPot(), pot, "no flush, no booking");
-        assertEq(address(feeRouter).balance, 5 ether * 6_900 / 100_000 * 9_638 / 10_000);
+        assertEq(address(feeRouter).balance, 5 ether * 690 / 10_000 * 9_638 / 10_000);
         _flush();
         assertGt(core.ethPot(), pot);
     }
@@ -849,7 +849,7 @@ contract ReceiveSettingsTest is FeeBase {
         uint256 back = core.ethToBuyback();
         uint256 bal = address(core).balance;
         w.run(1 ether);
-        (,, uint256 bounty) = _routerSplit(1 ether * 6_900 / 100_000 * 9_638 / 10_000);
+        (,, uint256 bounty) = _routerSplit(1 ether * 690 / 10_000 * 9_638 / 10_000);
         uint256 owed = price1 + price2;
         assertEq(core.ethToBuyback() - back, owed * 3_333 / 10_000, "the split of the collection");
         assertEq(core.ethPot() - pot, 2 * bounty + owed - owed * 3_333 / 10_000, "two pushes and the rest of the sale");

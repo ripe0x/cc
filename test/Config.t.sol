@@ -50,11 +50,11 @@ contract ConfigTest is Fixture {
         assertEq(f.stack.auctionFactory, Mainnet.AUCTION_FACTORY);
         assertEq(abi.encode(f.settings), abi.encode(Mainnet.defaultSettings()), "settings block is the launch values");
         // the launch values of docs/FLOW.md 10.1 and 10.6
-        assertEq(f.baselineSkimBps, 6_900);
+        assertEq(f.baselineSkimBps, 690);
         assertEq(f.bountyBps, 9_638);
-        assertEq(f.lpFee, 0);
+        assertEq(f.lpFeePips, 0);
         assertEq(f.maxReferralBps, 0);
-        assertEq(f.sniperStartBps, 90_000);
+        assertEq(f.sniperStartBps, 9_000);
         assertEq(f.sniperSeconds, 1800);
         assertTrue(f.restricted);
         assertEq(f.allowed.length, 0);
@@ -76,6 +76,44 @@ contract ConfigTest is Fixture {
     }
 
     /// the deploy refuses to run while any placeholder is unset or the rate is out of bounds
+    /// the launch fee split derived from the v2 hook math (`ArtCoinsHookV2._split`), per 1 ether of volume. all rates in bps
+    /// of volume. baseline skim 690 bps (6.9 points), skim = V * 690 / 10_000 = 0.069 ether.
+    /// bounty leg = skim * bountyBps / 10_000, protocol leg = skim - bounty leg (steady state, no referral).
+    /// protocol target 0.25 points = 25 bps = 0.0025 ether. the protocol share of the skim is (10_000 - bountyBps) / 10_000:
+    /// 9_638 gives 690 * 362 / 10_000 = 24.978 bps (0.24978 points, 0.00022 below the target), 9_637 gives 690 * 363 /
+    /// 10_000 = 25.047 bps (0.00047 above it). 9_638 is the nearest, and the factory needs minProtocolSkimShareBps at most
+    /// 10_000 - 9_638 = 362 (`BPS - bountyBps - minProtocolSkimShareBps >= 0` in `_validateFee`).
+    /// router inflow = bounty leg = 0.069 * 9_638 / 10_000 = 0.0665022 ether (66.5022 bps). payee target 0.75 points =
+    /// 75 bps = 0.0075 ether, payeePpm = 75 / 66.5022 * 1e6 = 112_778.2, rounded down to 112_778. tip 5_000 ppm = 0.5
+    /// percent of the router inflow, capped at 0.005 ether. the engine keeps the rest of the router inflow
+    function test_feeSplitDerivation() public pure {
+        LaunchConfig memory d = defaultConfig();
+        uint256 v = 1 ether;
+        uint256 skim = v * d.baselineSkimBps / 10_000;
+        assertEq(skim, 0.069 ether);
+        uint256 router = skim * d.bountyBps / 10_000;
+        uint256 protocol = skim - router;
+        assertEq(router, 66_502_200_000_000_000, "router inflow 6.65022 points");
+        assertEq(protocol, 2_497_800_000_000_000, "protocol leg 0.24978 points");
+        assertEq(10_000 - uint256(d.bountyBps), 362, "the factory minProtocolSkimShareBps the bounty needs");
+        // the neighbouring bounty values are further from the 0.25 point target (0.0025 ether)
+        uint256 target = 0.0025 ether;
+        uint256 protocolAt9637 = skim - skim * 9_637 / 10_000; // 2.5047e15, above the target
+        assertLt(target - protocol, protocolAt9637 - target, "9_638 is the nearest to 0.25 points");
+        // payee: the largest ppm whose share of the router inflow does not exceed 0.75 points (0.0075 ether)
+        uint256 payeeTarget = 0.0075 ether;
+        uint256 payee = router * d.payeePpm / 1e6;
+        assertLe(payee, payeeTarget);
+        assertGt(router * (uint256(d.payeePpm) + 1) / 1e6, payeeTarget, "112_778 is the largest ppm under 0.75 points");
+        assertEq(payee, 7_499_985_111_600_000, "payee 0.7499985 points");
+        // tip: 5_000 ppm is 0.5 percent of the router inflow, below the cap at this volume
+        uint256 tip = router * d.tipPpm / 1e6;
+        assertEq(d.tipPpm, 5_000);
+        assertEq(tip, 332_511_000_000_000, "tip 0.0332511 points");
+        assertLt(tip, d.tipCap);
+        assertEq(router - tip - payee, 58_669_703_888_400_000, "engine 5.86697 points");
+    }
+
     function test_deployRefusesPlaceholders() public {
         LaunchConfig memory c = defaultConfig();
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "owner"));
@@ -248,23 +286,6 @@ contract ConfigTest is Fixture {
 
     // ------------------------------------------------------------------ the owner commands the launch needs on v2
 
-    /// the factory floor of the lp fee: until the owner sets it to 0 the preflight fails, with the command named
-    function test_preflightNeedsMinLpFeeZero() public {
-        address d2 = _funded();
-        vm.prank(owner);
-        FACTORY.setMinLpFee(3_000);
-        preflight(lc, d2);
-        assertEq(
-            _failedNames(),
-            "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)"
-        );
-        assertTrue(bytes(_rowDetail("factory: min lp fee is at most the config lp fee")).length > 0);
-        vm.prank(owner);
-        FACTORY.setMinLpFee(0);
-        preflight(lc, d2);
-        assertEq(_failedNames(), "");
-    }
-
     function test_preflightProtocolSkimFloorAgainstTheBounty() public {
         address d2 = _funded();
         vm.prank(owner);
@@ -311,7 +332,7 @@ contract ConfigTest is Fixture {
         assertEq(list, "factory: owner is the deployer, factory: deployTokenAsOwner accepts the config (simulated)");
     }
 
-    function test_preflightEnabledStackAndEscrow() public {
+    function test_preflightEnabledStack() public {
         address d2 = _funded();
         vm.startPrank(owner);
         FACTORY.setHook(lc.stack.hook, false);
@@ -320,12 +341,6 @@ contract ConfigTest is Fixture {
         assertEq(_failedNames(), "factory: hook enabled, factory: deployTokenAsOwner accepts the config (simulated)");
         vm.startPrank(owner);
         FACTORY.setHook(lc.stack.hook, true);
-        FACTORY.setEscrow(lc.stack.escrow, false);
-        vm.stopPrank();
-        preflight(lc, d2);
-        assertEq(_failedNames(), "factory: escrow enabled");
-        vm.startPrank(owner);
-        FACTORY.setEscrow(lc.stack.escrow, true);
         FACTORY.setLocker(lc.stack.locker, false);
         vm.stopPrank();
         preflight(lc, d2);
@@ -407,15 +422,15 @@ contract ConfigTest is Fixture {
         assertEq(_failedNames(), ctlRow);
     }
 
-    /// V2R-5: the coin's image, metadata and context are read back. the admin changing them fails the row until the
+    /// V2R-5: the coin's image and description are read back. the admin changing them fails the row until the
     /// operator names the change (COIN_CHANGED=1), then it is a warning
-    function test_FIXED_postflightReadsTheCoinImageMetadataAndContext() public {
-        string memory row = "coin: image, metadata and context are empty as launched";
+    function test_FIXED_postflightReadsTheCoinImageAndDescription() public {
+        string memory row = "coin: image and description are empty as launched";
         postflightAs(lc, address(core), owner);
         assertTrue(_warnClean(row), "empty at launch");
         vm.startPrank(owner);
         (bool ok1,) = address(coin).call(abi.encodeWithSignature("updateImage(string)", "ipfs://img"));
-        (bool ok2,) = address(coin).call(abi.encodeWithSignature("updateMetadata(string)", "{}"));
+        (bool ok2,) = address(coin).call(abi.encodeWithSignature("updateDescription(string)", "{}"));
         vm.stopPrank();
         assertTrue(ok1 && ok2, "the admin updates the coin");
         postflightAs(lc, address(core), owner);
@@ -424,7 +439,7 @@ contract ConfigTest is Fixture {
         coinFlag = true;
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "");
-        assertFalse(_warnClean("warn: coin: image, metadata and context are empty as launched"));
+        assertFalse(_warnClean("warn: coin: image and description are empty as launched"));
     }
 
     function test_supplyConstantMatchesCore() public view {
@@ -452,7 +467,7 @@ contract ConfigTest is Fixture {
         c = lc;
         c.owner = creator;
         postflightAs(c, address(core), owner);
-        assertEq(_failedNames(), "core: owner, coin: original admin is the config owner, coin: admin is the config owner, router: owner is the config owner");
+        assertEq(_failedNames(), "core: owner, coin: admin is the config owner, router: owner is the config owner");
 
         c = lc;
         c.bountyBps = 8000;
@@ -462,7 +477,7 @@ contract ConfigTest is Fixture {
         c = lc;
         c.stack.escrow = address(0xE5C);
         postflightAs(c, address(core), owner);
-        assertEq(_failedNames(), "core: escrow, code: stack addresses, coin: allowlist holds the Core, the locker, the escrow and the config entries, coin: the locker and the escrow are pinned");
+        assertEq(_failedNames(), "core: escrow, code: stack addresses, factory: deploymentInfo names the coin, hook, locker, mev module, escrow and pool of the config, coin: allowlist holds the Core, the locker, the escrow and the config entries, coin: the locker and the escrow are pinned");
 
         // the auction factory of the config is not the one the core was built with
         c = lc;

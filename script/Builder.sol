@@ -37,20 +37,19 @@ abstract contract SystemBuilder is ConfigReader {
             symbol: l.symbol,
             salt: l.salt,
             image: "",
-            metadata: "",
-            context: "",
+            description: "",
             totalSupply: l.supply,
             renderer: address(0)
         });
         c.pool = IArtCoinsFactoryV2.PoolConfigV2({
             hook: l.stack.hook,
-            tickIfToken0IsArtCoin: l.startTick,
+            tickIfToken0IsCoin: l.startTick,
             tickSpacing: l.stack.tickSpacing,
             extension: address(0),
             extensionData: ""
         });
         c.fee = IArtCoinsFactoryV2.FeeConfigV2({
-            lpFee: l.lpFee,
+            lpFeePips: l.lpFeePips,
             baselineSkimBps: l.baselineSkimBps,
             bountyBps: l.bountyBps,
             maxReferralBpsOfVolume: l.maxReferralBps,

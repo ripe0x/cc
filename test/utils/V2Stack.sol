@@ -30,7 +30,7 @@ interface IV2Reads {
 }
 
 /// @notice deploys the real artcoins v2 stack onto the pinned fork from the vendored artifacts (test/v2-artifacts)
-/// and wires it as script/v2/DeployV2Lib.sol does (v2 commit 87a7522), with the mainnet values of
+/// and wires it as script/v2/DeployV2Lib.sol does (v2 commit d4aa46b), with the mainnet values of
 /// script/v2/env/mainnet.env. nothing here imitates a v2 contract: all code comes from the artifacts.
 /// the caller is the owner for the whole deploy (the broadcaster equals the owner, so no ownership handover).
 /// `deprecated` stays true, as DeployV2Lib leaves it: only the owner can launch, through `deployTokenAsOwner`
@@ -48,17 +48,14 @@ library V2Stack {
     uint256 internal constant MAINNET_DEPLOY_FEE = 0.069 ether;
     uint16 internal constant MAINNET_PROTOCOL_BPS = 2000;
     uint16 internal constant MAINNET_MIN_PROTOCOL_SKIM_SHARE_BPS = 1000;
-    uint24 internal constant MAINNET_MIN_LP_FEE = 3000;
 
     struct Params {
         address owner;
         address treasury;
         uint16 treasuryBps;
-        address referralPayout; // 0 = the escrow, as DeployV2Lib
         uint256 deployFee;
         uint16 protocolBps;
         uint16 minProtocolSkimShareBps;
-        uint24 minLpFee;
     }
 
     struct Stack {
@@ -83,7 +80,6 @@ library V2Stack {
         p.deployFee = MAINNET_DEPLOY_FEE;
         p.protocolBps = MAINNET_PROTOCOL_BPS;
         p.minProtocolSkimShareBps = MAINNET_MIN_PROTOCOL_SKIM_SHARE_BPS;
-        p.minLpFee = MAINNET_MIN_LP_FEE;
     }
 
     /// @notice deploys, wires and checks the stack. gas of the whole run is the caller's to measure
@@ -162,19 +158,15 @@ library V2Stack {
         _call(s.locker, abi.encodeWithSignature("setLauncher(address,bool)", s.factory, true));
         _call(s.locker, abi.encodeWithSignature("setKeeperRewardBps(uint256)", 0));
 
-        address payout = p.referralPayout == address(0) ? s.escrow : p.referralPayout;
         IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(s.factory);
         f.setHook(s.hook, true);
         f.setLocker(s.locker, true);
         f.setMevModule(s.mev, true);
-        f.setEscrow(s.escrow, true);
         f.setProtocolRecipient(payable(s.controller));
-        f.setReferralPayout(payable(payout));
         f.setTeamFeeRecipient(p.owner);
         f.setDeployFee(p.deployFee);
         f.setDefaultProtocolFeeBps(p.protocolBps);
         f.setMinProtocolSkimShareBps(p.minProtocolSkimShareBps);
-        f.setMinLpFee(p.minLpFee);
         // defaultAllowed ships empty, the factory stays deprecated, as DeployV2Lib leaves them
     }
 
@@ -250,18 +242,15 @@ library V2Stack {
 
     function _checkFactory(Stack memory s, Params memory p) private view {
         IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(s.factory);
-        address payout = p.referralPayout == address(0) ? s.escrow : p.referralPayout;
         require(f.poolManager() == Mainnet.POOL_MANAGER, "v2: factory PoolManager");
         require(f.tokenDeployer() == s.tokenDeployer, "v2: factory deployer");
         require(IV2Reads(s.tokenDeployer).factory() == s.factory, "v2: deployer binding");
         require(f.enabledHooks(s.hook) && f.enabledLockers(s.locker), "v2: factory hook or locker");
-        require(f.enabledMevModules(s.mev) && f.enabledEscrows(s.escrow), "v2: factory mev or escrow");
+        require(f.enabledMevModules(s.mev), "v2: factory mev");
         require(f.protocolRecipient() == s.controller, "v2: protocol recipient");
-        require(f.referralPayout() == payout && payout.code.length != 0, "v2: referral payout");
         require(f.teamFeeRecipient() == p.owner, "v2: team fee recipient");
         require(f.deployFee() == p.deployFee && f.defaultProtocolFeeBps() == p.protocolBps, "v2: fees");
         require(f.minProtocolSkimShareBps() == p.minProtocolSkimShareBps, "v2: min skim share");
-        require(f.minLpFee() == p.minLpFee, "v2: min lp fee");
         require(f.defaultAllowed().length == 0, "v2: default allowed must ship empty");
         require(f.deprecated(), "v2: factory must ship deprecated");
     }
@@ -269,7 +258,7 @@ library V2Stack {
     /// @notice the vendored FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`,
     /// owner `owner`, the coin bound later by `setup`. the caller still registers it as an escrow depositor
     /// (`escrow.addDepositor(swapper, false)`, owner only) and calls `setup(coin)` as the deployer
-    function deploySwapper(Stack memory s, address owner, address endRecipient, address artCoin)
+    function deploySwapper(Stack memory s, address owner, address endRecipient, address coin_)
         internal
         returns (address swapper)
     {
@@ -281,7 +270,7 @@ library V2Stack {
             poolFee: Mainnet.POOL_FEE,
             tickSpacing: Mainnet.TICK_SPACING,
             endRecipient: endRecipient,
-            artCoin: artCoin,
+            coin: coin_,
             maxSlippageBps: 500,
             minBlocksBetweenConverts: 5,
             maxStepIn: 1000 ether

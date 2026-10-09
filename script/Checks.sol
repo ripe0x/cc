@@ -35,7 +35,7 @@ abstract contract LaunchChecks is PostflightChecks {
     uint256 internal constant KNOWN_SCORE = 1_324_012;
     // the pinned launch rules (docs/DEPLOY.md section 2). a value outside them fails preflight. the three overrides in
     // the config file open exactly the rules that say so, and are part of the config hash
-    uint24 internal constant PIN_BASELINE_SKIM = 6_900;
+    uint24 internal constant PIN_BASELINE_SKIM = 690;
     uint16 internal constant PIN_BOUNTY_BPS = 9638;
     uint16 internal constant PIN_PROTOCOL_BPS = 2000;
     /// @dev the most the launch pays the factory. a fee above it is a factory state change the signed config never saw
@@ -44,8 +44,8 @@ abstract contract LaunchChecks is PostflightChecks {
     uint32 internal constant ROUTER_MAX_PAYEE_PPM = 200_000;
     uint32 internal constant ROUTER_MAX_TIP_PPM = 20_000;
     uint96 internal constant ROUTER_MAX_TIP_CAP = 0.05 ether;
-    uint24 internal constant SNIPER_START_MIN = 50_000;
-    uint24 internal constant SNIPER_START_MAX = 90_000;
+    uint24 internal constant SNIPER_START_MIN = 5_000;
+    uint24 internal constant SNIPER_START_MAX = 9_000;
     uint32 internal constant SNIPER_SECONDS_MIN = 600;
     uint32 internal constant SNIPER_SECONDS_MAX = 3600;
     uint24 internal constant DYNAMIC_FEE_FLAG = 0x800000;
@@ -207,7 +207,7 @@ abstract contract LaunchChecks is PostflightChecks {
     }
 
     function _ruleEconomics(LaunchConfig memory c) private {
-        _eq("rule: baseline skim bps is 6900", uint256(c.baselineSkimBps), PIN_BASELINE_SKIM);
+        _eq("rule: baseline skim bps is 690", uint256(c.baselineSkimBps), PIN_BASELINE_SKIM);
         bool bountyOk = c.bountyBps == PIN_BOUNTY_BPS || (c.allowBounty && c.bountyBps <= 9999);
         _check(
             "rule: bounty bps is 9638",
@@ -216,14 +216,14 @@ abstract contract LaunchChecks is PostflightChecks {
         );
         _check(
             "rule: referral cap and lp fee are zero",
-            c.maxReferralBps == 0 && c.lpFee == 0,
-            string.concat("referral ", vm.toString(c.maxReferralBps), " lp fee ", vm.toString(c.lpFee))
+            c.maxReferralBps == 0 && c.lpFeePips == 0,
+            string.concat("referral ", vm.toString(c.maxReferralBps), " lp fee ", vm.toString(c.lpFeePips))
         );
     }
 
     function _ruleSniper(LaunchConfig memory c) private {
         _check(
-            "rule: sniper start bps in 50000 to 90000 and above the baseline",
+            "rule: sniper start bps in 5000 to 9000 and above the baseline",
             c.sniperStartBps >= SNIPER_START_MIN && c.sniperStartBps <= SNIPER_START_MAX
                 && c.sniperStartBps > c.baselineSkimBps,
             vm.toString(c.sniperStartBps)
@@ -361,13 +361,10 @@ abstract contract LaunchChecks is PostflightChecks {
         _check("factory: locker enabled", ok && b, "enabledLockers(locker)");
         (ok, b) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.enabledMevModules, (c.mevModule)));
         _check("factory: mev module enabled", ok && b, "enabledMevModules(module)");
-        (ok, b) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.enabledEscrows, (c.stack.escrow)));
-        _check("factory: escrow enabled", ok && b, "enabledEscrows(escrow)");
     }
 
-    /// @dev the fee knobs of the factory against the config: the deploy fee and the deployer balance, the lp fee floor
-    /// (`setMinLpFee(0)` is the owner command that opens lpFee 0), the protocol skim share floor against the bounty
-    /// (`setMinProtocolSkimShareBps(362)` is the owner command that opens bountyBps 9_638)
+    /// @dev the fee knobs of the factory against the config: the deploy fee and the deployer balance, the protocol skim
+    /// share floor against the bounty (`setMinProtocolSkimShareBps(362)` is the owner command that opens bountyBps 9_638)
     function _preFees(LaunchConfig memory c, address deployer) private {
         address fa = c.stack.factory;
         (bool ok, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
@@ -381,13 +378,6 @@ abstract contract LaunchChecks is PostflightChecks {
             "rule: the factory deploy fee is at most 0.1 ether",
             ok && fee <= PIN_DEPLOY_FEE_MAX,
             string.concat("fee ", vm.toString(fee), " (the v2 launch fee is 0.069 ether)")
-        );
-        uint256 minLp;
-        (ok, minLp) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.minLpFee, ()));
-        _check(
-            "factory: min lp fee is at most the config lp fee",
-            ok && minLp <= c.lpFee,
-            string.concat("minLpFee ", vm.toString(minLp), " lpFee ", vm.toString(c.lpFee), " (owner: setMinLpFee)")
         );
         uint256 minShare;
         (ok, minShare) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.minProtocolSkimShareBps, ()));
@@ -426,9 +416,6 @@ abstract contract LaunchChecks is PostflightChecks {
         address fa = c.stack.factory;
         (bool ok, address p) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.protocolRecipient, ()));
         _check("factory: protocol recipient set (the launcher protocol, not the engine owner)", ok && p != address(0), vm.toString(p));
-        address r;
-        (ok, r) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.referralPayout, ()));
-        _check("factory: referral payout is a contract", ok && r.code.length != 0, vm.toString(r));
         (bool okf, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
         _info("factory: deploy fee paid by the launch", okf ? vm.toString(fee) : "unreadable");
         (ok, p) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.teamFeeRecipient, ()));
@@ -578,12 +565,12 @@ abstract contract LaunchChecks is PostflightChecks {
                 " over ",
                 vm.toString(c.sniperSeconds),
                 "s lp fee ",
-                vm.toString(c.lpFee)
+                vm.toString(c.lpFeePips)
             )
         );
         _info(
             "signoff: protocol leg",
-            "the protocol leg (362 of 10_000 of the skim, 0.24978 points of volume) and the protocol locker slot belong to the launcher protocol, a separate business from this engine and its owner"
+            "the protocol leg (362 of 10_000 of the baseline skim, 0.24978 points of volume) and the protocol locker slot belong to the launcher protocol, a separate business from this engine and its owner"
         );
         _preSettingsRows(c);
         _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));

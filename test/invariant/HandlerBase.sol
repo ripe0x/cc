@@ -874,19 +874,19 @@ abstract contract HandlerBase is Test {
         }
     }
 
-    /// the skim rate the live anti sniper module reports for the next swap, in hundred thousandths. 90 percent at
-    /// launch, falling linearly to the 6.9 percent baseline over the window
+    /// the skim rate the live anti sniper module reports for the next swap, in bps of volume. 9_000 (90 percent) at
+    /// launch, falling linearly to the 690 bps (6.9 percent) baseline over the window
     function _skimBps() internal view returns (uint256 bps) {
         (uint24 b,) = IArtCoinsMevSkimV2(mev).currentSkimBps(poolId);
         bps = b;
-        if (bps < 6_900) bps = 6_900;
+        if (bps < 690) bps = 690;
     }
 
     /// the legs of a skim of `skim` eth at the rate `bps`, from the rules of the hook written out independently: the
     /// baseline part of the skim (6.9 points over the live rate) splits 90 percent to the router (the bounty recipient)
     /// and the rest to the protocol, and the whole extra above the baseline goes to the router
     function _expectSkim(uint256 skim, uint256 bps) internal pure returns (uint256 bounty, uint256 protocol) {
-        uint256 base = skim * 6_900 / bps;
+        uint256 base = skim * 690 / bps;
         if (base > skim) base = skim;
         uint256 share = base * 9_638 / 10_000;
         protocol = base - share;
@@ -896,14 +896,14 @@ abstract contract HandlerBase is Test {
     /// whether `skim` is the skim the hook takes on a swap whose pool eth amount was `volume`. a buy (eth in) skims
     /// on top of the pool amount, a sell skims out of it. exact input swaps round down once, so two wei of play
     function _skimTotalOk(uint256 volume, bool buy, uint256 bps, uint256 skim) internal pure returns (bool) {
-        // a buy skims on top of the pool amount. a sell reports either the gross eth out (skim = volume * bps / 1e5) or
-        // the net one (skim = volume * bps / (1e5 - bps)), by the kind of exact swap. the rounding of the pool amount is
-        // scaled by bps / (100_000 - bps), which is 9 at the 90 point start
-        uint256 tol = 3 + 2 * bps / (100_000 - bps);
-        uint256 onTop = volume * bps / (100_000 - bps);
+        // a buy skims on top of the pool amount. a sell reports either the gross eth out (skim = volume * bps / 1e4) or
+        // the net one (skim = volume * bps / (1e4 - bps)), by the kind of exact swap. the rounding of the pool amount is
+        // scaled by bps / (10_000 - bps), which is 9 at the 90 point start
+        uint256 tol = 3 + 2 * bps / (10_000 - bps);
+        uint256 onTop = volume * bps / (10_000 - bps);
         if (skim + tol >= onTop && skim <= onTop + tol) return true;
         if (buy) return false;
-        uint256 gross = volume * bps / 100_000;
+        uint256 gross = volume * bps / 10_000;
         return skim + 2 >= gross && skim <= gross + 2;
     }
 
@@ -1057,7 +1057,7 @@ abstract contract HandlerBase is Test {
         p.buy = true;
         p.bps = _skimBps();
         // an exact out buy pays the gross up of the skim on top, which is large inside the window
-        uint256 value = p.exactIn ? eth : eth * 2 * 100_000 / (100_000 - p.bps) + 1e12;
+        uint256 value = p.exactIn ? eth : eth * 2 * 10_000 / (10_000 - p.bps) + 1e12;
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 spec = p.exactIn ? -int256(eth) : int256(_coinFor(eth * 8 / 10));
         p.bal = address(core).balance;
@@ -1149,7 +1149,7 @@ abstract contract HandlerBase is Test {
     /// be booked into the pot. `exactVolume` is the eth volume the swap must have skimmed on, when known
     function _afterSwap(SwapPre memory p, Vm.Log[] memory logs, uint256 exactVolume, string memory what) internal {
         (uint256 volume, uint256 bounty, uint256 protocol) = _skimOf(logs);
-        if (p.bps > 6_900) windowSwaps++;
+        if (p.bps > 690) windowSwaps++;
         // the hook paid the bounty leg to the router, nothing reached the core yet. the flush books the engine share
         if (core.ethPot() != p.pot || address(core).balance != p.bal) _flag(V_POT, "the core booked before the flush");
         (uint256 held, uint256 toCore) = _flushRouter();
@@ -1178,7 +1178,7 @@ abstract contract HandlerBase is Test {
         // the whole skim is at most 90 percent of the gross eth of the swap. an exact output swap grosses the
         // skim up on top of the eth the pool moved
         uint256 gross = p.buy ? volume + bounty + protocol : volume;
-        if ((bounty + protocol) * 100_000 > gross * 90_000 + 100_000) {
+        if ((bounty + protocol) * 10_000 > gross * 9_000 + 10_000) {
             _flag(V_POT, "skim above 90 percent of the swap");
         }
     }
@@ -1865,7 +1865,7 @@ abstract contract HandlerBase is Test {
         }
         (uint256 volume, uint256 bounty, uint256 protocol) = _skimOf(logs);
         uint256 budget = p.slice - p.tip0;
-        if (p.bps > 6_900) windowSwaps++;
+        if (p.bps > 690) windowSwaps++;
         if (bought == 0) _flag(V_BUYBACK, "buyback bought no coin");
         if (burned != bought) _flag(V_BUYBACK, "buyback did not burn exactly the coin it bought");
         if (spent == 0 || spent > budget) _flag(V_BUYBACK, "buyback spent more than the slice less the tip");
@@ -1904,7 +1904,7 @@ abstract contract HandlerBase is Test {
         uint256 spent,
         uint256 bought
     ) internal {
-        bool dust = volume == 0 && spent * p.bps / 100_000 == 0;
+        bool dust = volume == 0 && spent * p.bps / 10_000 == 0;
         uint256 sum = volume + bounty + protocol;
         if ((sum != spent) && !dust) _flag(V_BUYBACK, "buyback skim volume plus skim is not the eth spent");
         (uint256 eb, uint256 ep) = _expectSkim(bounty + protocol, p.bps);
@@ -2561,7 +2561,7 @@ abstract contract HandlerBase is Test {
         p.pot = core.ethPot();
         p.tb = core.ethToBuyback();
         p.rate = core.ethRate();
-        uint256 value = _ethFor(coinOut) * 3 * 100_000 / (100_000 - p.bps) + 1e12;
+        uint256 value = _ethFor(coinOut) * 3 * 10_000 / (10_000 - p.bps) + 1e12;
         vm.deal(who, who.balance + value);
         vm.recordLogs();
         vm.prank(who);

@@ -58,8 +58,9 @@ contract V2StackTest is Test {
         stackGas = g - gasleft();
     }
 
-    /// the engine launch values on the v2 factory (FLOW section 10.1): bounty 9000, lp fee 3000, skim 10 points,
-    /// sniper 90 falling to 10 over 30 minutes, restricted, protocol slot at the factory default 2000
+    /// a launch on the v2 factory at the mainnet factory minimums: bounty 9000 (the 1000 minimum protocol skim share
+    /// leaves 9000), lp fee 3000 pips, baseline skim 1000 bps (10 points), sniper 9000 bps falling to 1000 over 30
+    /// minutes, restricted, protocol slot at the factory default 2000
     function _config(address bountyRecipient, bytes32 salt) internal view returns (F.DeploymentConfigV2 memory c) {
         c.token = F.TokenConfigV2({
             tokenAdmin: owner,
@@ -67,21 +68,20 @@ contract V2StackTest is Test {
             symbol: "FLOW",
             salt: salt,
             image: "ipfs://image",
-            metadata: "{}",
-            context: "{}",
+            description: "{}",
             totalSupply: 1e27,
             renderer: address(0)
         });
         c.pool = F.PoolConfigV2({
             hook: s.hook,
-            tickIfToken0IsArtCoin: -175000,
+            tickIfToken0IsCoin: -175000,
             tickSpacing: 200,
             extension: address(0),
             extensionData: ""
         });
         c.fee = F.FeeConfigV2({
-            lpFee: 3000,
-            baselineSkimBps: 10000,
+            lpFeePips: 3000,
+            baselineSkimBps: 1000,
             bountyBps: 9000,
             maxReferralBpsOfVolume: 0,
             bountyRecipient: payable(bountyRecipient)
@@ -104,7 +104,7 @@ contract V2StackTest is Test {
             tickUpper: hi,
             positionBps: pb
         });
-        c.mev = F.MevConfigV2({module: s.mev, startingSkimBps: 90000, windowSeconds: 1800});
+        c.mev = F.MevConfigV2({module: s.mev, startingSkimBps: 9000, windowSeconds: 1800});
         c.restriction = F.RestrictionConfigV2({restricted: true, allowed: new address[](0)});
     }
 
@@ -143,7 +143,6 @@ contract V2StackTest is Test {
         console.log("v2 stack deploy gas (incl. hook salt mining and checks)", stackGas);
         assertEq(F(s.factory).owner(), owner);
         assertTrue(F(s.factory).deprecated());
-        assertEq(F(s.factory).minLpFee(), 3000);
         assertEq(F(s.factory).deployFee(), 0.069 ether);
         assertEq(uint160(s.hook) & 0x3FFF, 0x28CC);
     }
@@ -152,14 +151,14 @@ contract V2StackTest is Test {
         EmptyRecipient r = new EmptyRecipient();
         (address coin, PoolKey memory key) = _launch(address(r), bytes32(uint256(1)));
         IArtCoinsTokenV2 t = IArtCoinsTokenV2(coin);
-        assertTrue(F(s.factory).isArtCoin(coin));
+        assertTrue(F(s.factory).isCoin(coin));
         assertTrue(t.restricted(), "restricted");
         assertEq(t.admin(), owner);
         assertEq(t.totalSupply(), 1e27);
         assertEq(t.canonicalHook(), s.hook);
         assertEq(IArtCoinsHookV2(s.hook).skimConfig(t.canonicalPoolId()).bountyRecipient, address(r));
         assertEq(IArtCoinsHookV2(s.hook).skimConfig(t.canonicalPoolId()).bountyBps, 9000);
-        assertEq(IArtCoinsHookV2(s.hook).skimConfig(t.canonicalPoolId()).lpFee, 3000);
+        assertEq(IArtCoinsHookV2(s.hook).skimConfig(t.canonicalPoolId()).lpFeePips, 3000);
         // the engine, router and swapper are not on the allowlist, the locker and escrow are seeded and pinned
         assertFalse(t.isAllowed(address(swapper)));
         assertTrue(t.isAllowed(s.locker) && t.isPinned(s.locker));
@@ -245,12 +244,13 @@ contract V2StackTest is Test {
         IArtCoinsFeeEscrowV2(s.escrow).addDepositor(sw, false);
         IFeeAutoSwapperV2(sw).setup(coin);
         assertTrue(IFeeAutoSwapperV2(sw).setupFinalized());
-        assertEq(IFeeAutoSwapperV2(sw).artCoin(), coin);
+        assertEq(IFeeAutoSwapperV2(sw).coin(), coin);
         assertEq(IFeeAutoSwapperV2(sw).endRecipient(), address(r));
         assertEq(IFeeAutoSwapperV2(sw).feeEscrow(), s.escrow);
     }
 
-    /// the v1 launch values do not fit the mainnet env knobs (V2-PORT section 5.1): bounty 9500 and lp fee 0 revert
+    /// the v1 launch values do not fit the mainnet env knobs (V2-PORT section 5.1): bounty 9500 reverts, and a launch
+    /// with no fee on either leg (lp fee and baseline skim both 0) reverts
     function test_v1LaunchValuesRevert() public {
         EmptyRecipient r = new EmptyRecipient();
         F.DeploymentConfigV2 memory c = _config(address(r), bytes32(uint256(6)));
@@ -259,9 +259,61 @@ contract V2StackTest is Test {
         vm.expectRevert(abi.encodeWithSignature("BountyBpsTooHigh(uint16,uint16)", 9500, 9000));
         F(s.factory).deployTokenAsOwner{value: p.deployFee}(c, p.protocolBps);
         c.fee.bountyBps = 9000;
-        c.fee.lpFee = 0;
+        c.fee.lpFeePips = 0;
+        c.fee.baselineSkimBps = 0;
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSignature("LpFeeBelowMinimum()"));
+        vm.expectRevert(abi.encodeWithSignature("ZeroFeeLaunch()"));
         F(s.factory).deployTokenAsOwner{value: p.deployFee}(c, p.protocolBps);
+    }
+
+    /// the coin admin repoints the hook bounty recipient until it calls `lockRecipients()`. a caller that is not the
+    /// admin is refused, and after the lock the admin is refused too
+    function test_coinAdminRepointsTheBountyRecipientUntilLocked() public {
+        EmptyRecipient r = new EmptyRecipient();
+        EmptyRecipient r2 = new EmptyRecipient();
+        (address coin, PoolKey memory key) = _launch(address(r), bytes32(uint256(8)));
+        IArtCoinsTokenV2 t = IArtCoinsTokenV2(coin);
+        bytes32 pid = t.canonicalPoolId();
+        IArtCoinsHookV2 h = IArtCoinsHookV2(s.hook);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSignature("NotCoinAdmin()"));
+        h.setBountyRecipient(pid, payable(address(r2)));
+        vm.prank(owner);
+        h.setBountyRecipient(pid, payable(address(r2)));
+        assertEq(h.skimConfig(pid).bountyRecipient, address(r2));
+        uint256 before = address(r2).balance;
+        _buy(key, 1 ether);
+        assertGt(address(r2).balance, before, "the new recipient is paid");
+        assertFalse(t.recipientsLocked());
+        vm.prank(owner);
+        t.lockRecipients();
+        assertTrue(t.recipientsLocked());
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("RecipientsLocked()"));
+        h.setBountyRecipient(pid, payable(address(r)));
+    }
+
+    /// the coin admin repoints a locker reward slot until `lockRecipients()`, and the protocol slot is frozen
+    function test_coinAdminRepointsALockerRewardRecipient() public {
+        EmptyRecipient r = new EmptyRecipient();
+        (address coin,) = _launch(address(r), bytes32(uint256(9)));
+        IArtCoinsLpLockerV2 l = IArtCoinsLpLockerV2(s.locker);
+        address next = makeAddr("next reward recipient");
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSignature("NotCoinAdmin()"));
+        l.setRewardRecipient(coin, 0, next);
+        vm.prank(owner);
+        l.setRewardRecipient(coin, 0, next);
+        assertEq(l.rewardRecipients(coin)[0], next);
+        (bool hasSlot, uint256 idx) = l.protocolSlotIndex(coin);
+        assertTrue(hasSlot, "the factory appended the protocol slot");
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("ProtocolSlotFrozen()"));
+        l.setRewardRecipient(coin, idx, next);
+        vm.prank(owner);
+        IArtCoinsTokenV2(coin).lockRecipients();
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("RecipientsLocked()"));
+        l.setRewardRecipient(coin, 0, address(r));
     }
 }

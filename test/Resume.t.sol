@@ -68,7 +68,6 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         vm.startPrank(owner);
-        FACTORY.setMinLpFee(0);
         FACTORY.setMinProtocolSkimShareBps(362);
         vm.stopPrank();
         vm.deal(deployer, 5 ether);
@@ -357,20 +356,21 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         _assertDone(core, Stage.CoreOnly);
     }
 
-    /// the factory floor of the lp fee is the owner command: the launch step names the failed row when it is not 0
-    function test_resumeLaunchNeedsMinLpFeeZero() public {
+    /// the factory floor of the protocol skim share is the owner command: the launch step names the failed row when it
+    /// is above 362
+    function test_resumeLaunchNeedsTheMinProtocolSkimShareAt362() public {
         (address core,,) = _steps(4);
         vm.prank(deployer);
-        FACTORY.setMinLpFee(3_000);
+        FACTORY.setMinProtocolSkimShareBps(1_000);
         vm.expectRevert(
             abi.encodeWithSelector(
                 Report.ChecksFailed.selector,
-                "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)"
+                "factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)"
             )
         );
         this.resume(deployer, base, core);
         vm.prank(deployer);
-        FACTORY.setMinLpFee(0);
+        FACTORY.setMinProtocolSkimShareBps(362);
         _assertDone(core, Stage.CoreOnly);
     }
 

@@ -18,9 +18,9 @@ contract LaunchV2Test is Fixture {
 
     function test_skimIsSixPointNineWithNoLpFeeAndTheRouterIsTheBountyRecipient() public view {
         IArtCoinsHookV2.SkimConfig memory k = IArtCoinsHookV2(lc.stack.hook).skimConfig(poolId);
-        assertEq(k.baselineSkimBps, 6_900);
+        assertEq(k.baselineSkimBps, 690);
         assertEq(k.bountyBps, 9_638);
-        assertEq(k.lpFee, 0);
+        assertEq(k.lpFeePips, 0);
         assertEq(k.maxReferralBpsOfVolume, 0);
         assertEq(k.bountyRecipient, address(feeRouter));
         assertEq(k.protocolRecipient, FACTORY.protocolRecipient());
@@ -34,7 +34,7 @@ contract LaunchV2Test is Fixture {
         assertEq(p.locker, lc.stack.locker);
         assertEq(p.mevModule, lc.mevModule);
         assertTrue(IArtCoinsHookV2(lc.stack.hook).isOfficialPool(poolId));
-        assertTrue(FACTORY.isArtCoin(address(coin)));
+        assertTrue(FACTORY.isCoin(address(coin)));
     }
 
     function test_theProjectLockerSlotIsTheCreatorAndTheProtocolSlotIsTheFactoryFloor() public view {
@@ -78,7 +78,7 @@ contract LaunchV2Test is Fixture {
         bal = address(feeRouter).balance;
         _buyCoin(trader(), 1 ether);
         uint256 late = address(feeRouter).balance - bal;
-        assertApproxEqRel(late, uint256(1 ether) * k.baselineSkimBps * k.bountyBps / 100_000 / 10_000, 0.01e18);
+        assertApproxEqRel(late, uint256(1 ether) * k.baselineSkimBps * k.bountyBps / 10_000 / 10_000, 0.01e18);
     }
 
     function _trader() internal returns (address) {

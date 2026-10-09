@@ -259,13 +259,13 @@ contract ReviewDeployTest is ReviewHarness {
         postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
         (uint24 now_,) = IArtCoinsMevSkimV2(base.mevModule).currentSkimBps(d.poolId);
-        assertEq(now_, 90_000, "readable at the launch block");
+        assertEq(now_, 9_000, "readable at the launch block");
         vm.warp(block.timestamp + 900);
         postflightAs(base, d.core, deployer);
         assertEq(_failedNames(), "");
         string memory row = "mev: schedule equals the config (start, end at the baseline, window, start time)";
         LaunchConfig memory c = base;
-        c.sniperStartBps = 80_000;
+        c.sniperStartBps = 8_000;
         postflightAs(c, d.core, deployer);
         assertEq(_failedNames(), row);
         c = base;
@@ -273,7 +273,7 @@ contract ReviewDeployTest is ReviewHarness {
         postflightAs(c, d.core, deployer);
         assertEq(_failedNames(), string.concat(row, ", router: split start is the launch time plus the anti sniper window, exactly"));
         c = base;
-        c.baselineSkimBps = 5000;
+        c.baselineSkimBps = 500;
         postflightAs(c, d.core, deployer);
         assertEq(_failedNames(), string.concat("hook: skim config equals the config, ", row));
         vm.warp(block.timestamp + 901);
@@ -296,10 +296,10 @@ contract ReviewDeployTest is ReviewHarness {
             else if (i == 3) (c.symbol, what) = ("OTH", "symbol");
             else if (i == 4) (c.bountyBps, what) = (8000, "bounty");
             else if (i == 5) (c.maxReferralBps, what) = (100, "referral");
-            else if (i == 6) (c.lpFee, what) = (100, "lpFee");
-            else if (i == 7) (c.baselineSkimBps, what) = (20_000, "baseline");
+            else if (i == 6) (c.lpFeePips, what) = (100, "lpFeePips");
+            else if (i == 7) (c.baselineSkimBps, what) = (2_000, "baseline");
             else if (i == 8) (c.rateStart, what) = (base.rateStart + 1, "rate");
-            else if (i == 9) (c.sniperStartBps, what) = (80_000, "sniper start");
+            else if (i == 9) (c.sniperStartBps, what) = (8_000, "sniper start");
             else if (i == 10) (c.restricted, what) = (false, "restricted");
             else if (i == 11) (c.protocolBps, what) = (1000, "protocolBps");
             else if (i == 12) (c.creatorPayee, what) = (creator, "payee");
@@ -410,7 +410,7 @@ contract ReviewDeployTest is ReviewHarness {
             '"bountyBps": 9638',
             '"payeePpm": 112778',
             '"tipPpm": 5000',
-            '"baselineSkimBps": 6900',
+            '"baselineSkimBps": 690',
             '"sniperSeconds": 1800',
             '"startTick": -175000',
             '"positionUpper": 887200',

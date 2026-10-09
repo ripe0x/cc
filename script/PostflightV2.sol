@@ -124,7 +124,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
 
     function _hookGlobals(address hook) internal view returns (IArtCoinsHookV2.HookGlobals memory g) {
         (bool ok, bytes memory out) = hook.staticcall(abi.encodeCall(IArtCoinsHookV2.globals, ()));
-        if (ok && out.length == 160) g = abi.decode(out, (IArtCoinsHookV2.HookGlobals));
+        if (ok && out.length == 64) g = abi.decode(out, (IArtCoinsHookV2.HookGlobals));
     }
 
     function _hookInfo(address hook, bytes32 poolId) internal view returns (IArtCoinsHookV2.PoolInfo memory p) {
@@ -134,7 +134,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
 
     function _hookSkim(address hook, bytes32 poolId) internal view returns (IArtCoinsHookV2.SkimConfig memory k) {
         (bool ok, bytes memory out) = hook.staticcall(abi.encodeCall(IArtCoinsHookV2.skimConfig, (poolId)));
-        if (ok && out.length == 256) k = abi.decode(out, (IArtCoinsHookV2.SkimConfig));
+        if (ok && out.length == 192) k = abi.decode(out, (IArtCoinsHookV2.SkimConfig));
     }
 
     function _deployment(address factory, address coin)
@@ -144,7 +144,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
     {
         bytes memory out;
         (ok, out) = factory.staticcall(abi.encodeCall(IArtCoinsFactoryV2.deploymentInfo, (coin)));
-        if (ok && out.length >= 288) info = abi.decode(out, (IArtCoinsFactoryV2.DeploymentInfoV2));
+        if (ok && out.length >= 384) info = abi.decode(out, (IArtCoinsFactoryV2.DeploymentInfoV2));
         else ok = false;
     }
 
@@ -199,20 +199,24 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         _eq("coin: canonical hook", t.canonicalHook(), c.stack.hook);
         _eq("coin: canonical pool id", t.canonicalPoolId(), poolId);
         _eq("coin: pool manager", t.poolManager(), c.stack.poolManager);
-        _eq("coin: original admin is the config owner", t.originalAdmin(), c.owner);
         bool ch = _coinChanged();
         _soft(ch, "coin: admin is the config owner", t.admin() == c.owner, vm.toString(t.admin()), "COIN_CHANGED=1");
         _soft(ch, "coin: restricted as in the config", t.restricted() == c.restricted, "restricted()", "COIN_CHANGED=1");
         _soft(
             ch,
-            "coin: image, metadata and context are empty as launched",
-            bytes(t.imageUrl()).length == 0 && bytes(t.metadata()).length == 0 && bytes(t.context()).length == 0,
-            string.concat("image ", t.imageUrl(), " metadata ", t.metadata(), " context ", t.context()),
+            "coin: image and description are empty as launched",
+            bytes(t.imageUrl()).length == 0 && bytes(t.description()).length == 0,
+            string.concat("image ", t.imageUrl(), " description ", t.description()),
             "COIN_CHANGED=1"
         );
         _soft(ch, "coin: no metadata renderer", t.metadataRenderer() == address(0), vm.toString(t.metadataRenderer()), "COIN_CHANGED=1");
         _postAllowlist(c, core, t, ch);
-        _warn("warn: coin allowlist is not locked", !t.locked(), "locked(): the admin can no longer change the allowlist");
+        _warn("warn: coin allowlist is not locked", !t.allowlistLocked(), "allowlistLocked(): the admin can no longer change the allowlist");
+        _warn(
+            "warn: coin fee recipients are not locked",
+            !t.recipientsLocked(),
+            "recipientsLocked(): the admin can no longer repoint the hook bounty recipient or a locker reward recipient"
+        );
         _warn("warn: core holds no coin", t.balanceOf(core) == 0, "stray coin, the owner can call rescueCoin");
     }
 

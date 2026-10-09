@@ -89,28 +89,26 @@ contract LaunchTest is Fixture {
 
     function test_skimConfigReadBack() public {
         IArtCoinsHookV2.SkimConfig memory k = HOOK.skimConfig(poolId);
-        assertEq(k.baselineSkimBps, 6_900);
+        assertEq(k.baselineSkimBps, 690);
         assertEq(k.bountyBps, 9_638);
         assertEq(k.maxReferralBpsOfVolume, 0);
-        assertEq(k.lpFee, 0);
+        assertEq(k.lpFeePips, 0);
         assertEq(k.bountyRecipient, address(feeRouter), "the bounty goes to the router");
         assertEq(k.protocolRecipient, FACTORY.protocolRecipient(), "the protocol leg is the launcher protocol");
-        assertEq(k.referralPayout, FACTORY.referralPayout());
-        assertEq(k.quoteToken, address(0));
         assertTrue(HOOK.isOfficialPool(poolId));
-        // the anti sniper schedule: 90 points at the first block, the baseline once the window is over
+        // the anti sniper schedule: 9_000 bps (90 points) at the first block, the baseline once the window is over
         IArtCoinsMevSkimV2 mev = IArtCoinsMevSkimV2(lc.mevModule);
         IArtCoinsMevSkimV2.SkimSchedule memory s = mev.schedule(poolId);
-        assertEq(s.startingSkimBps, 90_000);
-        assertEq(s.endSkimBps, 6_900, "the baseline is the end value");
+        assertEq(s.startingSkimBps, 9_000);
+        assertEq(s.endSkimBps, 690, "the baseline is the end value");
         assertEq(s.windowSeconds, 1800);
         assertEq(s.startTime, launchTime);
         (uint24 now_, bool active) = mev.currentSkimBps(poolId);
-        assertEq(now_, 90_000);
+        assertEq(now_, 9_000);
         assertTrue(active);
         _skipSniperWindow();
         (now_, active) = mev.currentSkimBps(poolId);
-        assertEq(now_, 6_900);
+        assertEq(now_, 690);
         assertFalse(active);
     }
 
@@ -136,7 +134,8 @@ contract LaunchTest is Fixture {
             assertFalse(coin.isAllowed(off[i]), "nothing else is on the allowlist");
         }
         assertFalse(coin.isAllowed(address(core.HOUSE())));
-        assertFalse(coin.locked());
+        assertFalse(coin.allowlistLocked());
+        assertFalse(coin.recipientsLocked());
     }
 
     function test_noExtensionAndTheTokenAdminIsTheOwner() public {
@@ -151,7 +150,6 @@ contract LaunchTest is Fixture {
         assertEq(info.version, FACTORY.STACK_VERSION());
         assertEq(HOOK.poolInfo(poolId).extension, address(0));
         assertEq(coin.admin(), owner, "token admin is the owner from the first block");
-        assertEq(IArtCoinsTokenV2(address(coin)).originalAdmin(), owner);
         // nobody else holds an admin power
         vm.startPrank(creator);
         vm.expectRevert();
@@ -225,15 +223,17 @@ contract LaunchTest is Fixture {
         assertEq(team.balance, fee, "the fee goes to the team fee recipient");
     }
 
-    /// the owner command of the launch: the factory floors the lp fee, the config needs it at 0
-    function test_launchWithLpFeeZeroNeedsTheMinLpFeeAtZero() public {
+    /// a launch earns on at least one fee leg: lpFeePips 0 with a baseline skim of 0 is refused, lpFeePips 0 with the
+    /// launch baseline skim is the launch
+    function test_launchNeedsAFeeOnOneLeg() public {
         IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = _config(owner, bytes32(uint256(5)));
         uint256 fee = FACTORY.deployFee();
+        assertEq(cfg.fee.lpFeePips, 0);
+        cfg.fee.baselineSkimBps = 0;
         vm.startPrank(owner);
-        FACTORY.setMinLpFee(3_000);
-        vm.expectRevert(bytes4(keccak256("LpFeeBelowMinimum()")));
+        vm.expectRevert(bytes4(keccak256("ZeroFeeLaunch()")));
         FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps);
-        FACTORY.setMinLpFee(0);
+        cfg.fee.baselineSkimBps = lc.baselineSkimBps;
         address c2 = FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps);
         vm.stopPrank();
         assertTrue(c2.code.length != 0);

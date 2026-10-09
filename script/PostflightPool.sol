@@ -39,13 +39,14 @@ abstract contract PostflightPool is PostflightV2 {
 
     function _postFactoryRecord(LaunchConfig memory c, address coin_, bytes32 poolId) private returns (uint40) {
         address fa = c.stack.factory;
-        (bool ok, bool isCoin) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.isArtCoin, (coin_)));
-        _check("factory: the coin is a recorded launch", ok && isCoin, "isArtCoin(coin)");
+        (bool ok, bool isCoin) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.isCoin, (coin_)));
+        _check("factory: the coin is a recorded launch", ok && isCoin, "isCoin(coin)");
         (bool okd, IArtCoinsFactoryV2.DeploymentInfoV2 memory info) = _deployment(fa, coin_);
         _check(
-            "factory: deploymentInfo names the coin, hook, locker, mev module and pool of the config",
+            "factory: deploymentInfo names the coin, hook, locker, mev module, escrow and pool of the config",
             okd && info.token == coin_ && info.hook == c.stack.hook && info.locker == c.stack.locker
-                && info.mevModule == c.mevModule && info.poolId == poolId,
+                && info.mevModule == c.mevModule && info.escrow == c.stack.escrow && info.restricted == c.restricted
+                && info.poolId == poolId,
             string.concat("pool id ", vm.toString(info.poolId))
         );
         (bool okv, uint256 ver) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.STACK_VERSION, ()));
@@ -87,7 +88,7 @@ abstract contract PostflightPool is PostflightV2 {
         _check(
             "hook: skim config equals the config",
             k.baselineSkimBps == c.baselineSkimBps && k.bountyBps == c.bountyBps
-                && k.maxReferralBpsOfVolume == c.maxReferralBps && k.lpFee == c.lpFee && k.quoteToken == address(0),
+                && k.maxReferralBpsOfVolume == c.maxReferralBps && k.lpFeePips == c.lpFeePips,
             string.concat(
                 "baseline ",
                 vm.toString(k.baselineSkimBps),
@@ -96,15 +97,13 @@ abstract contract PostflightPool is PostflightV2 {
                 " referral cap ",
                 vm.toString(k.maxReferralBpsOfVolume),
                 " lp fee ",
-                vm.toString(k.lpFee)
+                vm.toString(k.lpFeePips)
             )
         );
         address fa = c.stack.factory;
         (bool ok, address live) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.protocolRecipient, ()));
         _info("hook: protocol recipient (the launcher protocol, not the engine owner)", vm.toString(k.protocolRecipient));
         _warn("warn: protocol recipient equals the factory protocol recipient", ok && live == k.protocolRecipient, vm.toString(live));
-        (ok, live) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.referralPayout, ()));
-        _warn("warn: referral payout equals the factory referral payout", ok && live == k.referralPayout, vm.toString(live));
     }
 
     /// @dev the frozen anti sniper schedule: start, end (the baseline), window, start time

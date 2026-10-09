@@ -99,19 +99,18 @@ contract RehearsalTest is Test, ProdDeployer {
     }
 
     function _preflight() internal {
-        // before the factory owner sets the minimum lp fee to 0 the preflight names exactly that
+        // before the factory owner sets the minimum protocol skim share to 362 the preflight names exactly that
         IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(c.stack.factory);
         preflight(c, deployer);
-        _print("preflight before the owner commands setMinLpFee(0) and setMinProtocolSkimShareBps(362)");
+        _print("preflight before the owner command setMinProtocolSkimShareBps(362)");
         string memory before_ = _failedNames();
-        if (f.minLpFee() != 0 || f.minProtocolSkimShareBps() > 10_000 - c.bountyBps) {
+        if (f.minProtocolSkimShareBps() > 10_000 - c.bountyBps) {
             assertEq(
                 before_,
-                "factory: min lp fee is at most the config lp fee, factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)",
+                "factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)",
                 "preflight before the owner commands"
             );
             vm.startPrank(deployer);
-            f.setMinLpFee(0);
             f.setMinProtocolSkimShareBps(uint16(10_000 - c.bountyBps));
             vm.stopPrank();
         } else {
@@ -255,8 +254,8 @@ contract RehearsalTest is Test, ProdDeployer {
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
         uint256 bought = coin.balanceOf(trader);
         assertGt(bought, 0, "bought coin through the universal router");
-        // the baseline skim of the config (hundredths of a basis point of volume) times the bounty share of it
-        uint256 want = uint256(1 ether) * c.baselineSkimBps / 100_000 * c.bountyBps / 10_000;
+        // the baseline skim of the config (bps of volume) times the bounty share of it
+        uint256 want = uint256(1 ether) * c.baselineSkimBps / 10_000 * c.bountyBps / 10_000;
         assertEq(address(router).balance, want, "the bounty share of the baseline skim reached the router");
         assertEq(core.ethPot(), pot, "nothing reaches the pot before the flush");
         address keeper = _user("keeper");
