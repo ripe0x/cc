@@ -3,7 +3,7 @@ a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 100% at hour 6,53.667,11
 a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 13% at hour 6,2.3333,652,1394.3,0.89659,1673.3,5020,0.89976,1.0751,0,0,0.98333,0,57.611,,0,0,0,0,0,0,2165.3,5020,5020
 a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 30% at hour 6,7.6667,784,1369.3,0.88992,1663.7,4991,0.89886,1.0751,0,0,0.98333,0,57.117,,0,0,0,0,0,0,2137,4991,4991
 a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 300% at hour 6,100.67,,1151,0.70038,1594.7,4784,0.70228,1.0751,0,0,1.7,0,53.422,,0,0,0,0,0,0,1918,4784,4784
-c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.1 eth, market 0.03",,,,,0,0,0,1,480,480,480,0,0,0,0,0,0,0,480,0,0,0,0
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.1 eth, market 0.03",,,,,0,0,0,0.033333,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
 c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.25 eth, market 0.03",,,,,0,0,0,0.083333,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
 c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.5 eth, market 0.03",,,,,0,0,0,0.16667,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
 c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 1 eth, market 0.03",,,,,0.15,3,0.33333,0.33333,479.95,313.33,313.33,0,0,0,479.95,0,0,0,0,0,0,1,3

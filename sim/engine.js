@@ -293,11 +293,11 @@ export class Core {
     if (r >= target) return r;
     return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), target);
   }
-  // the bid read by a seller. stepped: the price state bid, lowered to the clamp (hourly cap / clampCredits) while funded. the clamp bounds
+  // the bid read by a seller. stepped: the price state bid, lowered to the clamp (hourly cap / clampCredits). the clamp bounds
   // what is paid and is never stored: checkpoint, the drop and the anchor all use the price state rate
   ethRate(now) {
     const s = this.s;
-    if (this.p.bidRule === 'stepped') { const pr = this.priceRate(now); return this.funded ? Math.min(pr, this.clamp()) : pr; }
+    if (this.p.bidRule === 'stepped') return Math.min(this.priceRate(now), this.clamp()); // funded or not; an empty pot reads 0
     let r = this.rateAtCheckpoint;
     if (!this.funded) return r;
     let cap = this.clamp();
@@ -363,7 +363,8 @@ export class Core {
     let r = paid;
     if (rule === 'dropToLast') r = (paid * this.p.dropToPct) / 100;
     else if (rule === 'stepped') {
-      if (now !== this.burstTime) { this.burstTime = now; this.burstBase = paid; }
+      // the minute floor restarts at the price when the price is already under the floor (setRate, lowered caps)
+      if (now !== this.burstTime || paid < (this.burstBase * this.p.dropToPct) / 100) { this.burstTime = now; this.burstBase = paid; }
       r = Math.max(paid * (1 - this.p.dropPerCreditPct / 100), Math.min((this.burstBase * this.p.dropToPct) / 100, paid));
     } else r -= (r * this.s.dropBps * Math.min(x, pot)) / (BPS * pot);
     if (rule !== 'built') this.lastPaidRate = paid;
