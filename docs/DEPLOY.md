@@ -193,12 +193,12 @@ mainnet caps one transaction at 16,777,216 gas (EIP-7825). every transaction of 
 
 | transaction | gas | share of the cap |
 |---|---|---|
-| `compose()`, eth lane, 80 credits, first compose | 9,303,091 | 55.4 percent |
-| `composeExit()`, 80 credits | 8,973,045 | 53.4 percent |
-| `overprint()`, scripted controller, 160 to 640 credits | about 1,371,000 | 8.2 percent |
+| `compose()`, eth lane, 80 credits, first compose | 8,728,243 | 52.0 percent |
+| `composeExit()`, 80 credits | 8,486,449 | 50.5 percent |
+| `overprint()`, scripted controller, 160 to 560 credits | 1,694,385 to 1,807,186 | 10.0 to 10.7 percent |
 | every other call (doors, buybacks, flush, owner calls, the house) | under 500,000 | under 3 percent |
 
-`compose` and `composeExit` sit at about half the cap because the live Statements contract needs about 8 million gas for 80 credits (7.90 to 8.07 million across pages of real credits). a keeper must not hardcode a gas limit under 10 million for them. `sellForEth` and `sellForExitToken` take any number of credits: the cap stops a batch at about 112 credits (flat bid), 90 (score bid, `flatBps` 0) or 98 (exit bid); the eth figures include the pull of a router holding 1 eth, and a larger call simply reverts for its sender. the gas capped reads inside the Core use under half of their caps. `exitModule` is a stand in in these tests: what a real one spends inside `exit` is added to `exitStatement`, and the Core forwards it all the remaining gas.
+`compose` and `composeExit` sit at about half the cap because the live Statements contract needs about 8 million gas for 80 credits (7.90 to 8.07 million across pages of real credits). a keeper must not hardcode a gas limit under 10 million for them. `sellForEth` and `sellForExitToken` take any number of credits: the cap stops a batch at about 112 credits (flat bid), 90 (score bid, `flatBps` 0) or 97 (exit bid); the eth figures include the pull of a router holding 1 eth, and a larger call simply reverts for its sender. the gas capped reads inside the Core use under half of their caps. `exitModule` is a stand in in these tests: what a real one spends inside `exit` is added to `exitStatement`, and the Core forwards it all the remaining gas.
 
 ## 3. verify on etherscan
 

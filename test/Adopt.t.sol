@@ -347,6 +347,23 @@ contract AdoptTest is Fixture {
         assertTrue(p);
     }
 
+    /// gas of `adopt` for one credit and for a page of 80, logged with a bound
+    function test_GAS_adopt() public {
+        uint256[] memory one = _gift(1);
+        uint256 g = gasleft();
+        _adopt(one);
+        uint256 gasOne = g - gasleft();
+        uint256[] memory page = _gift(80);
+        g = gasleft();
+        _adopt(page);
+        uint256 gasPage = g - gasleft();
+        emit log_named_uint("adopt, 1 credit", gasOne);
+        emit log_named_uint("adopt, 80 credits", gasPage);
+        emit log_named_uint("adopt, per credit at 80", gasPage / 80);
+        assertLt(gasOne, 400_000, "one credit");
+        assertLt(gasPage / 80, 250_000, "per credit");
+    }
+
     function test_FUZZ_theBasisIsThePriceStateTimesTheScore(uint256 wait, uint8 count) public {
         wait = bound(wait, 0, 30 days);
         count = uint8(bound(count, 1, 6));
