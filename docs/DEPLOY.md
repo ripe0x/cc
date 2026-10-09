@@ -2,6 +2,8 @@
 
 this is the launch runbook for branch `flow`, on the artcoins v2 stack (v2 repo commit d4aa46b). the whole v2 stack is a config input: the `stack` block of `script/config/mainnet.json` holds every v2 address, the Core takes it as a constructor argument and nothing in `src/` hardcodes an artcoins address. the final run waits for v2 on mainnet: the five v2 addresses in the tracked file are zero placeholders and `Deploy` refuses the file until they are filled.
 
+`script/config/v2-mainnet.json` is the record of the artcoins v2 stack on mainnet: the ten contract addresses, their deploy blocks (26157195 to 26157205), the launcher commit it was deployed from (fbe07c7, contract sources of d4aa46b) and the salt of the hook CREATE2 deployment. tests and scripts read the stack addresses from it.
+
 naming rule: only `exitModule` and `exitToken`. never name or describe them anywhere.
 
 ## 0. what you need
