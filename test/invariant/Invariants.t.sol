@@ -469,7 +469,8 @@ abstract contract InvariantsBase is InvariantFixture {
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal virtual {
-        a = a % 42;
+        a = a % 43;
+        if (a == 42) return handler.rescueNft(w, x);
         if (a == 40) return handler.flush(w, x);
         if (a == 41) return handler.repoint(w, x);
         a = a % 32;
@@ -632,6 +633,7 @@ abstract contract InvariantsBase is InvariantFixture {
         assertTrue(_try(28, 20), "no setRate");
         assertTrue(_try(29, 20), "no setXRate");
         assertTrue(_try(30, 20), "no owner door");
+        assertTrue(_try(42, 60), "no rescue of an NFT");
         // the books keep working under the new settings, whatever they are
         for (uint256 i; i < 6; ++i) {
             _try(26, 5);

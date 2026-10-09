@@ -111,7 +111,9 @@ abstract contract HandlerBase is Test {
     // the fee router: a stranger's flush, and the hostile owner repointing the engine
     uint8 internal constant A_FLUSH = 40;
     uint8 internal constant A_REPOINT = 41;
-    uint256 internal constant N_ACTIONS = 42;
+    // the owner takes a stray NFT out of the core
+    uint8 internal constant A_RESCUE_NFT = 42;
+    uint256 internal constant N_ACTIONS = 43;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -382,7 +384,8 @@ abstract contract HandlerBase is Test {
             "lockDoor",
             "handover",
             "flush",
-            "repoint"
+            "repoint",
+            "rescueNft"
         ];
         names = n;
         controllers.push(w.v1);

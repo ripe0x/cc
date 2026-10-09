@@ -118,6 +118,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error BadAuction();
     /// a stack member that must be a contract has no code
     error NoCode(address who);
+    /// `rescueNft`: the credit is in a pile
+    error InPile();
+    /// `rescueNft`: the statement is on the books of the core
+    error Held();
+    /// `rescueNft`: the core is not the holder of the token, or the token is not an ERC721
+    error NotHolder();
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -161,6 +167,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event TargetAdded(address target);
     event TargetRemoved(address target);
     event CoinRescued(address indexed to, uint256 amount);
+    event NftRescued(address indexed token, uint256 indexed id, address indexed to);
 
     /*//////////////////////////////////////////////////////////////
                               PARAMETERS
@@ -1074,6 +1081,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// to which the call is handed untouched (the bytes saved keep the runtime under the size limit). it refuses the
     /// zero address, sends and logs `CoinRescued`
     function rescueCoin(address, uint256) external {
+        _toLib();
+    }
+
+    /// sends an ERC721 token the core holds to `to` with `transferFrom`: a credit only while it is not in a pile, a
+    /// statement only while the core has no record of it, any other ERC721 freely. owner only and guarded, both checked
+    /// by the library, to which the call is handed untouched. `ownerOf` of the token must answer with the core, so
+    /// the call reaches no ERC20, no coin and no exit token. logs `NftRescued`
+    function rescueNft(address, uint256, address) external {
         _toLib();
     }
 

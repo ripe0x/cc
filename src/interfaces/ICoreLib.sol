@@ -9,7 +9,10 @@ interface ICoreLib {
     error BadSetting(bytes32 field);
     error BadSwap();
     error Empty();
+    error Held();
+    error InPile();
     error NoExitModule();
+    error NotHolder();
     error NotOwner();
     error OnlyOwner();
     error PotTooSmall();
@@ -21,6 +24,7 @@ interface ICoreLib {
     event CoinRescued(address indexed to, uint256 amount);
     event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
     event ExitRateFill(uint256 rate, uint256 pot);
+    event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event SettingsSet(Settings settings);
 
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)

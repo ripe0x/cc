@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Vm} from "forge-std/Test.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
-import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
+import {Lane, Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {HandlerHouse} from "./HandlerHouse.sol";
 import {BidModel} from "../utils/BidModel.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
@@ -706,5 +706,98 @@ abstract contract HandlerOwner is HandlerHouse {
         if (address(feeRouter).balance != held) _flag(V_ROUTER, "setting the engine moved router eth");
         _opost(pre, "repoint");
         _ok(a);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                               RESCUE AN NFT
+    //////////////////////////////////////////////////////////////*/
+
+    /// the owner calls `rescueNft` on every kind of token: a credit in a pile and a held statement (both refused, the
+    /// books and the holder unchanged), a credit an actor sent straight to the core (leaves, to a fresh address, and the
+    /// piles keep their sizes), the coin, the exit token and an address with no code (refused), and a stranger (refused).
+    /// no eth, pot or exit token moves in any of them
+    function rescueNft(uint256 seed, uint256 mode) external checked {
+        uint8 a = A_RESCUE_NFT;
+        Rescue memory r = _rescuePick(seed, mode % 6);
+        if (!r.ok) return _skip(a);
+        address to = address(uint160(uint256(keccak256(abi.encode("rescue", seed)))));
+        OPre memory p = _opre();
+        uint256 books = _rescueBooks();
+        _att(a);
+        vm.prank(r.who);
+        try core.rescueNft(r.token, r.id, to) {
+            if (!r.leaves) _flag(V_OWNER, "rescueNft moved a token that must stay");
+            else if (CREDITS.ownerOf(r.id) != to) _flag(V_OWNER, "a stray credit did not reach the destination");
+        } catch (bytes memory why) {
+            if (r.leaves || bytes4(why) != r.want) _unexpected(a, why);
+        }
+        if (r.token == address(CREDITS) && !r.leaves && CREDITS.ownerOf(r.id) == to) {
+            _flag(V_OWNER, "a credit that must stay left the core");
+        }
+        if (r.token == address(STATEMENTS) && _ownerOf(r.id) == to) _flag(V_OWNER, "a held statement left the core");
+        if (_rescueBooks() != books) _flag(V_OWNER, "rescueNft changed a pile or the held statements");
+        _opost(p, "rescueNft");
+        _ok(a);
+    }
+
+    struct Rescue {
+        bool ok;
+        bool leaves;
+        address token;
+        uint256 id;
+        address who;
+        bytes4 want;
+    }
+
+    function _rescueBooks() internal view returns (uint256) {
+        return uint256(keccak256(abi.encode(core.pileSize(Lane.Eth), core.pileSize(Lane.Exit), core.heldStatements())));
+    }
+
+    /// the token and the caller of one `rescueNft` call, by kind. a stray credit is moved into the core here
+    function _rescuePick(uint256 seed, uint256 m) internal returns (Rescue memory r) {
+        r.who = owner;
+        if (m == 0) {
+            r.token = address(CREDITS);
+            r.id = core.pileHead(seed % 2 == 0 ? Lane.Eth : Lane.Exit);
+            if (r.id == 0) r.id = core.pileHead(seed % 2 == 0 ? Lane.Exit : Lane.Eth);
+            r.ok = r.id != 0;
+            r.want = ICore.InPile.selector;
+        } else if (m == 1) {
+            uint256[] memory held = core.heldStatements();
+            r.ok = held.length != 0;
+            if (r.ok) r.id = held[seed % held.length];
+            r.token = address(STATEMENTS);
+            r.want = ICore.Held.selector;
+        } else if (m == 2) {
+            address from = _actor(seed >> 8);
+            uint256 len = inventory[from].length;
+            if (len == 0) return r;
+            r.id = inventory[from][seed % len];
+            if (CREDITS.ownerOf(r.id) != from) return r;
+            r.token = address(CREDITS);
+            r.leaves = true;
+            r.ok = true;
+            vm.prank(from);
+            CREDITS.transferFrom(from, address(core), r.id);
+            _removeFrom(inventory[from], r.id);
+        } else if (m == 3) {
+            r.token = address(coin);
+            if (phase2() && seed % 2 == 0) r.token = core.exitToken();
+            if (seed % 5 == 0) r.token = address(uint160(seed));
+            r.id = 1 + seed % 1e18;
+            r.ok = true;
+            r.want = ICore.NotHolder.selector;
+        } else if (m == 4) {
+            r.token = address(CREDITS);
+            r.id = core.pileHead(Lane.Eth);
+            r.ok = r.id != 0;
+            r.who = _actor(seed >> 16);
+            r.want = ICore.OnlyOwner.selector;
+        } else {
+            r.token = address(STATEMENTS);
+            r.id = STATEMENTS.supply() + 1 + seed % 5;
+            r.ok = true;
+            r.want = ICore.NotHolder.selector;
+        }
     }
 }

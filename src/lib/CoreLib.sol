@@ -107,6 +107,13 @@ library CoreLib {
     error ZeroAddress();
     error OnlyOwner();
     event CoinRescued(address indexed to, uint256 amount);
+    /// the credit is in a pile of the Core
+    error InPile();
+    /// the statement is on the books of the Core
+    error Held();
+    /// the Core is not the holder of the token, or the token is not an ERC721
+    error NotHolder();
+    event NftRescued(address indexed token, uint256 indexed id, address indexed to);
 
     /// @notice validates the settings, stores them and logs them. the Core forwards its own `setSettings` call here
     /// untouched (same selector), after it checkpointed both rates. the constructor calls it too
@@ -288,9 +295,44 @@ library CoreLib {
     /// check and the reentrancy guard are here: `msg.sender` is the caller of the Core and the guard is the Core's own
     /// (solady's storage guard, the same slot and values: a nonzero value other than the address is "free")
     function rescueCoin(address to, uint256 amount) external {
-        ICoinOf core = ICoinOf(address(this));
-        if (msg.sender != core.owner()) revert OnlyOwner();
+        _onlyOwner();
         if (to == address(0)) revert ZeroAddress();
+        _enter();
+        SafeTransferLib.safeTransfer(ICoinOf(address(this)).COIN(), to, amount);
+        _leave();
+        emit CoinRescued(to, amount);
+    }
+
+    /// @notice sends the ERC721 token `id` of `token` that the Core holds to `to` with `transferFrom`. a credit leaves only
+    /// while it is not in a pile (`Credit.inPile`), a statement only while the Core has no record of it
+    /// (`Statement.held`), every other ERC721 leaves. `ownerOf` must answer with the Core, which an ERC20 or an
+    /// address without code cannot. the Core forwards its call here untouched, the owner check and the reentrancy
+    /// guard are here
+    function rescueNft(address token, uint256 id, address to) external {
+        _onlyOwner();
+        if (to == address(0)) revert ZeroAddress();
+        _enter();
+        CoreState storage c = state();
+        if (token == address(CREDITS)) {
+            if (c.credits[id].inPile) revert InPile();
+        } else if (token == Mainnet.STATEMENTS) {
+            if (c.statements[id].held) revert Held();
+        }
+        (bool ok, bytes memory out) = token.staticcall(abi.encodeCall(ICredits.ownerOf, (id)));
+        if (!ok || out.length != 32 || abi.decode(out, (address)) != address(this)) revert NotHolder();
+        ICredits(token).transferFrom(address(this), to, id);
+        _leave();
+        emit NftRescued(token, id, to);
+    }
+
+    /// the caller of an owner function the Core forwarded here: `msg.sender` is the caller of the Core
+    function _onlyOwner() private view {
+        if (msg.sender != state().owner) revert OnlyOwner();
+    }
+
+    /// takes the reentrancy guard of the Core (solady's storage guard: the same slot and values, a nonzero value other
+    /// than the address is "free")
+    function _enter() private {
         assembly {
             if eq(sload(0x929eee149b4bd21268), address()) {
                 mstore(0x00, 0xab143c06) // `Reentrancy()`
@@ -298,11 +340,12 @@ library CoreLib {
             }
             sstore(0x929eee149b4bd21268, address())
         }
-        SafeTransferLib.safeTransfer(core.COIN(), to, amount);
+    }
+
+    function _leave() private {
         assembly {
             sstore(0x929eee149b4bd21268, codesize())
         }
-        emit CoinRescued(to, amount);
     }
 
     /// @notice the Core's state variables, by name
@@ -425,5 +468,4 @@ interface IRouterFlush {
 
 interface ICoinOf {
     function COIN() external view returns (address);
-    function owner() external view returns (address);
 }

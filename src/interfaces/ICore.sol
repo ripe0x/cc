@@ -37,13 +37,16 @@ interface ICore {
     error ExitTokenChanged();
     error ForbiddenTarget();
     error HasBid();
+    error Held();
     error HourlyCap();
+    error InPile();
     error Locked(bytes32 what);
     error Measuring();
     error NoCode(address who);
     error NoCredit();
     error NoExitModule();
     error NotHeld();
+    error NotHolder();
     error NotInPile(uint256 id);
     error NotListed();
     error NotOwner();
@@ -82,6 +85,7 @@ interface ICore {
     event ListingBought(
         uint256 indexed id, address indexed target, address indexed caller, uint256 cost, uint256 tip, uint256 rate
     );
+    event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event Overprinted(uint256 indexed baseId, uint256 indexed topId, uint256 cost);
     event OwnershipTransferStarted(address indexed owner, address indexed pending);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -159,6 +163,7 @@ interface ICore {
     function removeTarget(address target) external;
     function repriceStatement(uint256 sid) external;
     function rescueCoin(address, uint256) external;
+    function rescueNft(address, uint256, address) external;
     function scoreOf(uint256 id) external view returns (uint256);
     function sellForEth(uint256[] memory ids, uint256 minOut) external;
     function sellForEth(uint256[] memory ids) external;
