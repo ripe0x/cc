@@ -46,9 +46,9 @@ contract RateFuzzTest is Fixture {
     }
 
     /// the rate after `mins` whole minutes of climbing from `r` at `climbBps` a minute, stopped at `limit`. a rate at or
-    /// above the limit is unchanged
+    /// above the limit is the limit
     function _model(uint256 r, uint256 mins, uint256 limit, uint256 climbBps) internal pure returns (uint256) {
-        if (limit <= r) return r;
+        if (limit <= r) return limit;
         for (uint256 j; j < mins; ++j) {
             r = r * (10_000 + climbBps) / 10_000;
             if (r >= limit) return limit;
@@ -116,8 +116,7 @@ contract RateFuzzTest is Fixture {
         uint256 limit = _limitOf(s, pot, START, block.timestamp - core.lastFillTime());
         uint256 want = _model(START, mins, limit, s.climbPerMinBps);
         assertApproxEqRel(core.ethRate(), want, 1e-7 ether, "compounded per minute, limited");
-        assertLe(core.ethRate(), limit < START ? START : limit);
-        assertGe(core.ethRate(), START, "never below the opening rate");
+        assertLe(core.ethRate(), limit, "never above the limit");
     }
 
     /// no climb while the pot cannot afford one average credit at the hourly cap, and no retroactive climb once it can,
@@ -139,12 +138,14 @@ contract RateFuzzTest is Fixture {
         uint256 top = bound(topSeed, min - pot, min - pot + 100 ether);
         _fund(top);
         assertTrue(core.funded());
-        assertEq(core.ethRate(), START, "no retroactive climb");
+        uint256 limit0 = _limitOf(s, pot + top, START, block.timestamp - core.lastFillTime());
+        assertEq(core.ethRate(), limit0 < START ? limit0 : START, "no retroactive climb, bounded by the limit");
+        uint256 start = core.rateAtCheckpoint();
 
         uint256 mins = bound(wait, 0, 240);
         _warp(mins * 1 minutes);
         uint256 limit = _limitOf(s, pot + top, START, block.timestamp - core.lastFillTime());
-        assertApproxEqRel(core.ethRate(), _model(START, mins, limit, s.climbPerMinBps), 1e-7 ether);
+        assertApproxEqRel(core.ethRate(), _model(start, mins, limit, s.climbPerMinBps), 1e-7 ether);
     }
 
     /// a settings call keeps the stored rate exactly, even when it flips the funded flag, and the climb after it follows
@@ -168,9 +169,14 @@ contract RateFuzzTest is Fixture {
         assertApproxEqRel(r1, _model(START, m1, limit1, a.climbPerMinBps), 1e-7 ether);
         Settings memory b = _randomSettings(seedB, false);
         _setSettings(b);
-        assertEq(core.ethRate(), r1, "the call keeps the rate it found");
-        assertEq(core.rateAtCheckpoint(), r1, "and stores it");
         bool fundedNow = pot * b.spendCapBps >= uint256(b.avgScore) * r1;
+        uint256 limitB = _limitOf(b, pot, START, block.timestamp - core.lastFillTime());
+        assertEq(
+            core.ethRate(),
+            fundedNow && limitB < r1 ? limitB : r1,
+            "the read is the rate it found, bounded by the new limit"
+        );
+        assertEq(core.rateAtCheckpoint(), r1, "and stores it");
         assertEq(core.funded(), fundedNow, "the funded flag follows the new numbers");
         m2 = bound(m2, 0, 240);
         _warp(m2 * 1 minutes);

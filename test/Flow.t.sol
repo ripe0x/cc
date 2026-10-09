@@ -301,16 +301,19 @@ contract FlowTest is Fixture {
         _potTo(1e16);
         assertTrue(core.funded());
         _warp(5 hours);
-        // 20 credits of room at 1e16 is below the rate, so the funded rate does not climb
-        assertEq(core.ethRate(), 4e12, "held by the clamp");
+        // 20 credits of room at 1e16 is below the opening rate: the read is the clamp
+        uint256 held = uint256(1e16) * 2000 / (4_330_000 * 20);
+        assertEq(core.ethRate(), held, "bounded by the clamp");
         Settings memory s = core.settings();
         s.avgScore = 6_000_000;
+        s.spendCapBps = 100;
         _owner(s);
-        // the pot of 1e16 cannot afford one 6M credit at 4e12 under a 20 percent cap: 2e19 is below 2.4e19
+        // the pot of 1e16 cannot afford one 6M credit at the stored rate under a 1 percent cap: 1e18 is below 1.4e18
         assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
-        assertEq(core.ethRate(), 4e12, "unfunded, flat");
+        assertEq(core.ethRate(), held, "unfunded, flat at the rate the change stored");
         s.avgScore = 4_330_000;
+        s.spendCapBps = 2_000;
         _owner(s);
         assertTrue(core.funded());
     }

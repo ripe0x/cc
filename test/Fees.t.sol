@@ -388,9 +388,9 @@ contract FeeFlowTest is FeeBase {
         _setSettings(s);
         assertEq(core.rateAtCheckpoint(), old);
         vm.warp(block.timestamp + 50 hours);
-        assertEq(core.ethRate(), old, "no climb after the change: the new ceiling sits below the rate");
+        assertEq(core.ethRate(), core.RATE_START(), "the new ceiling bounds the rate at the anchor");
         _flow(Kind.BuyExactIn, 1 ether, "");
-        assertEq(core.rateAtCheckpoint(), old, "the fee locked the unchanged rate");
+        assertEq(core.rateAtCheckpoint(), core.RATE_START(), "the fee locked the bounded rate");
         assertEq(core.checkpointTime(), block.timestamp);
     }
 }

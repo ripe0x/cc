@@ -430,7 +430,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         checkpointTime = uint64(block.timestamp);
     }
 
-    /// funded means the hourly cap can afford one average credit at the stored rate. the same threshold clamps the climb
+    /// funded means the hourly cap can afford one average credit at the stored rate. the clamp of the rate is
+    /// `clampCredits` times stricter: it holds the rate where the hourly cap affords `clampCredits` average credits
     function _syncFunded() private {
         Settings storage s = _st();
         funded = ethPot * s.spendCapBps >= uint256(s.avgScore) * rateAtCheckpoint;
@@ -1196,9 +1197,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (module) _syncXFunded();
     }
 
-    /// resets the eth limit (wei per whole point) to `rate`, within the rate bounds. the climb restarts from it now
+    /// restates the eth rate (wei per whole point) as `rate`, within the rate bounds. the stored rate and the ceiling
+    /// anchor are both `rate`, the fill clock is unchanged. the clamp and the ceiling still bound the rate on read
     function setRate(uint256 rate) external onlyOwner nonReentrant {
         if (!SettingsBounds.rateInBounds(rate) || rate > _st().rateCap) revert BadRate();
+        RateStore.load().lastFillRate = rate;
         rateAtCheckpoint = rate;
         checkpointTime = uint64(block.timestamp);
         _syncFunded();

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// where the bid anchor state lives: three packed words from a fixed storage slot of the Core, shared by the Core and
+/// where the bid anchor state lives: three words from a fixed storage slot of the Core, shared by the Core and
 /// the linked library, so the library can update it on a fill
 library RateStore {
-    // keccak256("credits.core.rate.v1")
-    bytes32 internal constant SLOT = 0x4e200413f073f3688fb10caa054c801ceec5347eca7dbe3116ccdf1d7ddcb6a5;
+    // the top 64 bits of keccak256("credits.core.rate.v1"). a slot far above the sequential slots of the Core and far
+    // below the hashed slots of its mappings and arrays, three words from here
+    bytes32 internal constant SLOT = bytes32(uint256(0x4e200413f073f368));
 
     struct Anchor {
         /// the rate paid at the last fill. the rate at deployment before the first fill

@@ -818,6 +818,34 @@ abstract contract HandlerBase is Test {
     }
 
     /// what the rate becomes after a spend of x from pot p.
+    /// the stored rate and the read after the sells of one call at `costs`: each credit drops the rate and the read after it
+    /// is the stored rate bounded by the clamp of the smaller pot
+    function _rateAfterSells(Settings memory st, SellPre memory p, uint256[] memory costs)
+        internal
+        pure
+        returns (uint256 stored, uint256 r)
+    {
+        r = p.rate;
+        uint256 pot = p.pot;
+        for (uint256 i; i < costs.length; ++i) {
+            stored = _dropped(st, r, p.minuteStart);
+            pot -= costs[i];
+            r = _readAfterFill(st, stored, pot, r);
+        }
+    }
+
+    /// the read right after a fill: the stored rate, bounded by the clamp of the pot left and the ceiling of the anchor
+    /// (the rate paid) while the stored rate is funded
+    function _readAfterFill(Settings memory st, uint256 stored, uint256 pot, uint256 anchor)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (pot * st.spendCapBps < uint256(st.avgScore) * stored) return stored;
+        uint256 limit = BidModel.clamp(st, pot).min(BidModel.ceiling(st, anchor, 0));
+        return stored.min(limit);
+    }
+
     function _dropped(Settings memory st, uint256 r, uint256 start) internal pure returns (uint256) {
         return BidModel.dropOnce(st, r, start);
     }
@@ -1252,14 +1280,15 @@ abstract contract HandlerBase is Test {
         if (core.ethPot() != p.pot - total) _flag(V_POT, "sellForEth pot not reduced by the price");
 
         // the drop on each fill, independently: dropPerCreditBps per credit, no lower than the minute floor
-        uint256 r = p.rate;
         for (uint256 i; i < ids.length; ++i) {
             _recordSpend(costs[i], p.pot);
-            r = _dropped(st, r, p.minuteStart);
             _addCredit(ids[i], 0, costs[i]);
             _removeFrom(inventory[who], ids[i]);
         }
-        if (core.ethRate() != r) _flag(V_RATE_BOUND, "drop on fill differs from dropPerCreditBps with the minute floor");
+        (uint256 stored, uint256 r) = _rateAfterSells(st, p, costs);
+        if (core.rateAtCheckpoint() != stored || core.ethRate() != r) {
+            _flag(V_RATE_BOUND, "drop on fill differs from dropPerCreditBps with the minute floor");
+        }
         if (core.lastFillTime() != block.timestamp) _flag(V_RATE_BOUND, "fill did not reset the fill clock");
     }
 
@@ -1390,7 +1419,11 @@ abstract contract HandlerBase is Test {
         _eth(p.bal, tip + expectCost, 0, "buyListing");
         if (core.ethPot() != p.pot - cost - tip) _flag(V_POT, "listing pot not reduced by cost and tip");
         _recordSpend(cost + tip, p.pot);
-        if (core.ethRate() != _dropped(st, p.rate, p.minuteStart)) {
+        uint256 stored = _dropped(st, p.rate, p.minuteStart);
+        if (
+            core.rateAtCheckpoint() != stored
+                || core.ethRate() != _readAfterFill(st, stored, p.pot - cost - tip, p.rate)
+        ) {
             _flag(V_RATE_BOUND, "drop on fill differs from dropPerCreditBps with the minute floor");
         }
         if (CREDITS.ownerOf(id) != address(core)) _flag(V_MODEL, "listing did not deliver the credit");

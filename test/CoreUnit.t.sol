@@ -319,15 +319,16 @@ contract CoreUnitTest is CoreBase {
 
         _fund(1.4e16);
         assertTrue(core.funded());
-        assertEq(core.ethRate(), 4e12, "no retroactive climb");
-        // 20 credits of room at this pot is below the rate, so the funded rate holds
+        // 20 credits of room at this pot is below the opening rate: the read is the clamp, no climb is credited
+        uint256 clamp = core.ethPot() * 2000 / (4_330_000 * 20);
+        assertEq(core.ethRate(), clamp, "bounded by the clamp of 20 credits");
         _warp(10 minutes);
-        assertEq(core.ethRate(), 4e12, "held by the clamp of 20 credits");
-        // the pot is large enough not to clamp
+        assertEq(core.ethRate(), clamp, "and held there");
+        // the pot is large enough not to clamp: the climb runs on from the stored clamp
         _fund(10 ether);
-        assertEq(core.rateAtCheckpoint(), 4e12);
+        assertEq(core.rateAtCheckpoint(), clamp);
         _warp(10 minutes);
-        assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9, "10 minutes at 0.5 percent");
+        assertApproxEqRel(core.ethRate(), clamp * 1_051_140_132_040_790_000 / 1e18, 1e9, "10 minutes at 0.5 percent");
     }
 
     /// the same rule at another average score: funded needs `pot * spendCap >= avgScore * rate`, to the wei, and at
@@ -522,10 +523,10 @@ contract CoreUnitTest is CoreBase {
         _atTheClamp(false);
     }
 
-    /// the pot shrinks below one average credit while the rate sits at its clamp. the next checkpoint applies no climb
-    /// under the smaller pot and the rate never rises again. no real path shrinks the pot without also dropping the
-    /// rate, so the pot slot is written directly and the balance is set to match
-    function test_rate_goesUnfundedAfterPotDrops() public {
+    /// the pot shrinks while the rate sits at its clamp. the next checkpoint stores the rate bounded by the clamp of the
+    /// smaller pot, and the rate stays there. no real path shrinks the pot without also dropping the rate, so the pot
+    /// slot is written directly and the balance is set to match
+    function test_rate_followsAPotThatShrinks() public {
         _clampCredits(1);
         _fund(0.02 ether);
         _warp(100 hours);
@@ -535,10 +536,12 @@ contract CoreUnitTest is CoreBase {
         stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(1e15));
         vm.deal(address(core), 1e15);
         _fund(1);
-        assertEq(core.rateAtCheckpoint(), cap, "no climb applied under the smaller pot");
-        assertFalse(core.funded());
+        uint256 shrunk = core.ethPot() * 2000 / 4_330_000;
+        assertEq(core.rateAtCheckpoint(), shrunk, "the smaller pot bounds the rate at the checkpoint");
+        assertLt(shrunk, cap);
+        assertTrue(core.funded(), "the funded threshold is the clamp of one credit");
         _warp(500 hours);
-        assertEq(core.ethRate(), cap, "never rises while unfunded");
+        assertEq(core.ethRate(), shrunk, "held at the clamp of the smaller pot");
         _solvent();
     }
 
@@ -633,6 +636,7 @@ contract CoreUnitTest is CoreBase {
     /// sells one credit at a time until the next one would pass `capBps` of the pot, which is then refused, in the
     /// window and not after it
     function _hourlyCapWindow(uint256 capBps) internal {
+        _clampCredits(1);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         uint256 cap = uint256(0.05 ether) * capBps / 10_000;
@@ -683,6 +687,7 @@ contract CoreUnitTest is CoreBase {
 
     /// and a change applies inside a running window
     function test_hourlyCap_widerCapAdmitsMoreInTheSameWindow() public {
+        _clampCredits(1);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         uint256 n;
@@ -703,6 +708,7 @@ contract CoreUnitTest is CoreBase {
     }
 
     function test_hourlyCap_countsAllIdsOfOneCall() public {
+        _clampCredits(1);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         vm.prank(alice);
@@ -1839,9 +1845,14 @@ contract CoreComposedTest is CoreBase {
         // the Core meters gross gas. the EIP-3529 refund cap returns 20 percent of it to the caller (the compose clears
         // enough storage to reach the cap), so 80 percent of the metered gas is the gas the caller paid
         assertApproxEqAbs(
-            counted * 8_000 / 10_000, c.gasUsed, 100_000, "80 percent of the meter plus the overhead is the net gas of the call"
+            counted * 8_000 / 10_000,
+            c.gasUsed,
+            100_000,
+            "80 percent of the meter plus the overhead is the net gas of the call"
         );
-        assertLe(c.reimb, (c.gasUsed + 400_000) * composeBasefee, "the repayment never exceeds the net gas plus the overhead");
+        assertLe(
+            c.reimb, (c.gasUsed + 400_000) * composeBasefee, "the repayment never exceeds the net gas plus the overhead"
+        );
         assertEq(keeper.balance, c.reimb, "the caller was repaid and nobody else");
     }
 

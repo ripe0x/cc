@@ -2,14 +2,13 @@
 pragma solidity ^0.8.28;
 
 import {Fixture} from "./utils/Fixture.sol";
-import {BidModel} from "./utils/BidModel.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
-import {Settings, Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Settings, Mainnet, ICreditStrategy} from "../src/interfaces/Interfaces.sol";
 
 /// @notice the credit bid rule on the real stack: the drop per credit with its minute floor, the compounded climb per
 /// minute, the ceiling at a share of the last rate paid with its idle loosening, the funded clamp over 20 credits of
 /// hourly room, the settings bounds, and the recovery after a gap in the market price. exact numbers at the launch
-/// settings, the formula of `BidModel` elsewhere
+/// settings, hand arithmetic throughout
 contract BidRuleTest is Fixture {
     uint256 internal constant START = 4e12;
 
@@ -127,9 +126,6 @@ contract BidRuleTest is Fixture {
         _warp(10 minutes);
         // 1.005^10 = 1.0511401320407896
         assertApproxEqRel(core.ethRate(), r1 * 1_051_140_132_040_790_000 / 1e18, 1e9);
-        Settings memory s = core.settings();
-        (uint256 anchor,,) = _anchor();
-        assertEq(core.ethRate(), BidModel.climb(s, r1, core.ethPot(), anchor, 10 minutes, 10 minutes));
         _warp(10 minutes);
         assertApproxEqRel(core.ethRate(), r1 * 1_104_895_577_186_790_000 / 1e18, 1e9, "20 minutes is 1.005^20");
     }
@@ -171,17 +167,16 @@ contract BidRuleTest is Fixture {
         _potTo(20 ether);
         _sellOne();
         (uint256 anchor,,) = _anchor();
-        uint256 base = anchor * 12_500 / 10_000;
         _warp(9 minutes + 59);
-        assertEq(core.ethRate(), base, "no loosening before 10 idle minutes");
+        assertEq(core.ethRate(), anchor * 12_500 / 10_000, "no loosening before 10 idle minutes");
         _warp(1);
-        assertEq(core.ethRate(), base * 10_200 / 10_000, "2 percent after 10 minutes");
+        assertEq(core.ethRate(), anchor * 10_200 * 12_500 / 1e8, "2 percent after 10 minutes");
         _warp(10 minutes - 1);
-        assertEq(core.ethRate(), base * 10_200 / 10_000, "and until 20 minutes");
+        assertEq(core.ethRate(), anchor * 10_200 * 12_500 / 1e8, "and until 20 minutes");
         _warp(1);
-        assertEq(core.ethRate(), base * 10_400 / 10_000, "4 percent after 20 minutes");
+        assertEq(core.ethRate(), anchor * 10_400 * 12_500 / 1e8, "4 percent after 20 minutes");
         _warp(100 minutes);
-        assertEq(core.ethRate(), base * 12_400 / 10_000, "24 percent after 120 minutes");
+        assertEq(core.ethRate(), anchor * 12_400 * 12_500 / 1e8, "24 percent after 120 minutes");
     }
 
     function _fastClimb(Settings memory s) internal pure {
@@ -196,7 +191,7 @@ contract BidRuleTest is Fixture {
         _warp(40 minutes);
         uint256 r = core.ethRate();
         (uint256 anchorBefore,,) = _anchor();
-        assertEq(r, anchorBefore * 12_500 / 10_000 * 10_800 / 10_000, "loosened 8 percent");
+        assertEq(r, anchorBefore * 10_800 * 12_500 / 1e8, "loosened 8 percent");
         _sellOne();
         (uint256 anchor,,) = _anchor();
         assertEq(anchor, r, "the rate paid is the new anchor");
@@ -223,7 +218,7 @@ contract BidRuleTest is Fixture {
         assertEq(core.ethRate(), clamp);
         // more fees lift the clamp, the climb resumes from the stored rate
         _potTo(1 ether);
-        uint256 clamp2 = BidModel.clamp(s, core.ethPot());
+        uint256 clamp2 = core.ethPot() * s.spendCapBps / (uint256(s.avgScore) * 20);
         assertGt(clamp2, clamp);
         _warp(1 days);
         assertEq(core.ethRate(), clamp2);
@@ -309,6 +304,149 @@ contract BidRuleTest is Fixture {
         assertEq(abi.encode(core.settings()), abi.encode(s));
     }
 
+    // ------------------------------------------------------------------ hard bounds
+
+    /// a fill shrinks the pot until the clamp of 20 credits sits below the dropped rate: the read is the clamp
+    function test_clampBoundsTheReadAfterAFillShrinksThePot() public {
+        // 20 credits of hourly room at the opening rate: pot * 2000 / (4.33e6 * 20) = 4e12
+        _potTo(20 * uint256(4_330_000) * START / 2_000);
+        assertEq(core.ethRate(), START);
+        _sellOne();
+        uint256 pot = core.ethPot();
+        uint256 clamp = pot * 2_000 / (4_330_000 * 20);
+        assertGt(core.rateAtCheckpoint(), clamp, "the stored rate is above the clamp");
+        assertTrue(core.funded());
+        assertEq(core.ethRate(), clamp, "and the read is the clamp");
+    }
+
+    /// the owner lowers `ceilBps` below the stored rate: the read is the new ceiling
+    function test_loweredCeilBpsBoundsTheRead() public {
+        _with(_fastClimb);
+        _potTo(20 ether);
+        _sellOne();
+        (uint256 anchor,,) = _anchor();
+        _warp(5 minutes);
+        assertEq(core.ethRate(), anchor * 12_500 / 10_000);
+        Settings memory s = core.settings();
+        s.ceilBps = 10_000;
+        _setSettings(s);
+        assertEq(core.rateAtCheckpoint(), anchor * 12_500 / 10_000, "setSettings stores the rate it found");
+        assertEq(core.ethRate(), anchor, "the new ceiling is 100 percent of the anchor");
+    }
+
+    /// a year of idle loosening never takes the rate above `rateCap`
+    function test_loosenedCeilingNeverPassesTheRateCap() public {
+        _potTo(20 ether);
+        _sellOne();
+        _warp(365 days);
+        assertEq(core.ethRate(), core.settings().rateCap);
+    }
+
+    // ------------------------------------------------------------------ fills and the anchor
+
+    function _listingData(uint256 id) internal pure returns (bytes memory) {
+        return abi.encodeCall(ICreditStrategy.sellTargetNFT, (id));
+    }
+
+    function _forListing() internal returns (uint256 price) {
+        _with(_openCeiling);
+        _potTo(30 ether);
+        price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
+        _liftRateCap();
+        _warpUntilCeiling(LISTED_A, price);
+    }
+
+    /// `buyListing` is one fill: the rate drops once and the anchor is the bid rate at that moment, not the cost
+    function test_buyListingIsOneFillAndTheAnchorIsTheBidRate() public {
+        uint256 price = _forListing();
+        uint256 rate = core.ethRate();
+        vm.prank(keeper);
+        core.buyListing(price, _listingData(LISTED_A), LISTED_A, STRATEGY);
+        (uint256 anchor, uint256 start,) = _anchor();
+        assertEq(anchor, rate, "the anchor is the bid rate");
+        assertEq(start, rate);
+        assertTrue(anchor != price * 1e4 / 4_330_000, "not derived from the cost");
+        assertEq(core.rateAtCheckpoint(), rate * 9_950 / 10_000, "one drop of 0.5 percent");
+        assertEq(core.lastFillTime(), block.timestamp);
+    }
+
+    /// a reverted buy and a sell of no credit change neither the rate nor the anchor
+    function test_revertedBuyAndEmptySellLeaveTheRateAndTheAnchor() public {
+        uint256 price = _forListing();
+        uint256 rate = core.rateAtCheckpoint();
+        (uint256 a0, uint256 s0, uint256 b0) = _anchor();
+        vm.prank(keeper);
+        vm.expectRevert(ICore.CallFailed.selector);
+        core.buyListing(price - 1, _listingData(LISTED_A), LISTED_A, STRATEGY);
+        vm.prank(seller);
+        vm.expectRevert(ICore.Empty.selector);
+        core.sellForEth(new uint256[](0));
+        vm.prank(seller);
+        vm.expectRevert(ICore.ZeroId.selector);
+        core.sellForEth(_one(0));
+        (uint256 a1, uint256 s1, uint256 b1) = _anchor();
+        assertEq(core.rateAtCheckpoint(), rate);
+        assertTrue(a0 == a1 && s0 == s1 && b0 == b1, "the anchor state is unchanged");
+    }
+
+    /// a second fill in the minute bucket, after the climb took the rate above the first rate of the bucket: the floor
+    /// still counts from the first rate, the anchor is the new rate paid
+    function test_secondFillInTheBucketAfterTheClimbRaisedTheRate() public {
+        _with(_fastClimb);
+        _potTo(20 ether);
+        _warp(1 hours);
+        vm.warp((block.timestamp / 60 + 1) * 60 + 5);
+        uint256[] memory ids = _credits(seller, 2);
+        uint256 r0 = core.ethRate();
+        vm.prank(seller);
+        core.sellForEth(_one(ids[0]));
+        _warp(50);
+        uint256 paid = core.ethRate();
+        assertGt(paid, r0, "the climb took the rate above the first rate of the bucket");
+        vm.prank(seller);
+        core.sellForEth(_one(ids[1]));
+        (uint256 anchor, uint256 start,) = _anchor();
+        assertEq(start, r0, "the minute still starts at the first rate paid");
+        assertEq(anchor, paid, "the anchor is the second rate paid");
+        assertEq(
+            core.rateAtCheckpoint(), paid * 9_950 / 10_000, "the floor of 80 percent of the first rate is not reached"
+        );
+    }
+
+    /// `setRate` restates the price: the stored rate and the ceiling anchor are both the new rate, the fill clock and
+    /// the minute start stay
+    function test_setRateRestatesTheRateAndTheAnchorAndKeepsTheFillClock() public {
+        _potTo(20 ether);
+        _sellOne();
+        uint64 fillTime = core.lastFillTime();
+        (, uint256 start0, uint256 bucket0) = _anchor();
+        _warp(30 minutes);
+        vm.prank(owner);
+        core.setRate(6e12);
+        (uint256 anchor, uint256 start, uint256 bucket) = _anchor();
+        assertEq(core.rateAtCheckpoint(), 6e12);
+        assertEq(anchor, 6e12);
+        assertEq(core.lastFillTime(), fillTime);
+        assertTrue(start == start0 && bucket == bucket0, "the minute state is unchanged");
+        assertEq(core.ethRate(), 6e12);
+        // the ceiling follows the restated anchor: 125 percent, plus 3 intervals of 2 percent after 30 idle minutes
+        _warp(1 days);
+        assertEq(core.ethRate(), 6e12 * (10_000 + 200 * 147) * 12_500 / 1e8);
+    }
+
+    /// `setSettings` keeps the anchor, the minute state and the fill clock
+    function test_setSettingsKeepsTheAnchor() public {
+        _potTo(20 ether);
+        _sellOne();
+        (uint256 a0, uint256 s0, uint256 b0) = _anchor();
+        uint64 fillTime = core.lastFillTime();
+        _warp(7 minutes);
+        _with(_fastClimb);
+        (uint256 a1, uint256 s1, uint256 b1) = _anchor();
+        assertTrue(a0 == a1 && s0 == s1 && b0 == b1, "the anchor state is unchanged");
+        assertEq(core.lastFillTime(), fillTime);
+    }
+
     // ------------------------------------------------------------------ gap in the market price
 
     /// @dev the first minute after a jump of the market at which the bid reaches the cheapest ask, `askMultiple` bps of
@@ -333,7 +471,7 @@ contract BidRuleTest is Fixture {
         emit log_named_uint("minutes to the first fill after a +100 percent gap", m);
         assertGt(m, 0, "filled");
         assertLe(m, 60, "within an hour");
-        assertLe(core.ethRate(), anchor * 12_500 / 10_000 * (10_000 + 200 * (m / 10)) / 10_000, "inside the ceiling");
+        assertLe(core.ethRate(), anchor * (10_000 + 200 * (m / 10)) * 12_500 / 1e8, "inside the ceiling");
         // 0.995 * 1.005^m >= 1.2 first at minute 38
         assertEq(m, 38);
     }

@@ -113,6 +113,7 @@ contract EconDialsTest is Fixture {
         Settings memory s = core.settings();
         // forge-lint: disable-next-line(unsafe-typecast)
         s.spendCapBps = uint16(capBps);
+        s.clampCredits = 1;
         _setSettings(s);
         vm.deal(address(core), pot);
         core.skim();

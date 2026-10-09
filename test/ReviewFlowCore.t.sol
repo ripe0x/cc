@@ -26,11 +26,12 @@ contract ReviewFlowCoreTest is Fixture {
         h.spendCapBps = uint16(spendCap);
         h.dropPerCreditBps = 1;
         h.dropFloorBps = 10_000;
+        h.clampCredits = 1;
         h.avgScore = uint32(avg);
     }
 
     /// the owner raises the rate cap and sets the hot (but in bounds) settings: spend cap, score and the rate drop at
-    /// their loosest (a floor of 100 percent holds the rate through a batch). the rate is then set to the top of the rate bounds
+    /// their loosest (a floor of 100 percent holds the rate through a batch, one credit of clamp room). the rate is then set to the top of the rate bounds
     function _hotSettings() internal view returns (Settings memory h) {
         h = _hot(5_000, 6_000_000);
         h.rateCap = uint64(RATE_START_MAX_WEI);
@@ -100,10 +101,19 @@ contract ReviewFlowCoreTest is Fixture {
                 if (r < RATE_START_MIN_WEI) break;
                 vm.prank(owner);
                 core.setRate(r);
-                uint256 k = room / (r * cur.avgScore / 1e4);
+                // the read is bounded by the clamp: at the launch settings a credit costs a twentieth of the room
+                uint256[] memory first = _credits(seller, 1);
+                uint256 k = room / core.ceilingOf(first[0]);
                 if (k == 0) break;
                 credits += k;
-                uint256[] memory ids = _credits(seller, k);
+                uint256[] memory ids = new uint256[](k);
+                ids[0] = first[0];
+                if (k > 1) {
+                    uint256[] memory more = _credits(seller, k - 1);
+                    for (uint256 j = 1; j < k; ++j) {
+                        ids[j] = more[j - 1];
+                    }
+                }
                 uint256 b = seller.balance;
                 vm.prank(seller);
                 core.sellForEth(ids);

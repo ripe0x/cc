@@ -54,7 +54,7 @@ contract LifecycleSwapsTest is Fixture {
         // the pot passes the threshold
         _buyCoin(trader, 0.2 ether);
         assertTrue(core.funded());
-        assertEq(core.ethRate(), core.RATE_START(), "no retroactive climb");
+        assertLe(core.ethRate(), core.RATE_START(), "no retroactive climb");
         // a pot with room for 20 average credits lets the climb start
         _buyCoin(trader, 10 ether);
         _warp(10 hours);

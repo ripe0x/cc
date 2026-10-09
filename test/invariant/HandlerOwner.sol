@@ -5,6 +5,7 @@ import {Vm} from "forge-std/Test.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../../src/interfaces/Interfaces.sol";
 import {HandlerHouse} from "./HandlerHouse.sol";
+import {BidModel} from "../utils/BidModel.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
 import {CountingEngine, RefusingEngine} from "../attackers/FlushEngines.sol";
@@ -219,11 +220,19 @@ abstract contract HandlerOwner is HandlerHouse {
 
     function _afterSettings(Settings memory ns, Settings memory cur, OPre memory p) internal {
         _opost(p, "setSettings");
-        // invariant 6 across a settings call: the stored rate does not jump, the call only checkpoints it
-        // except that a lower rate cap pulls the rate down to the cap
-        uint256 wantRate = p.rate > ns.rateCap ? ns.rateCap : p.rate;
+        // invariant 6 across a settings call: the call checkpoints the rate it found. the read is that rate bounded by the
+        // new rate cap and, while funded, by the clamp and the ceiling of the new settings
+        uint256 wantStored = p.rate > ns.rateCap ? ns.rateCap : p.rate;
+        uint256 wantRate = wantStored;
+        if (core.funded()) {
+            (uint256 anchor,,) = _anchorState();
+            uint256 clamp = BidModel.clamp(ns, core.ethPot());
+            uint256 ceil = BidModel.ceiling(ns, anchor, block.timestamp - core.lastFillTime());
+            uint256 limit = clamp < ceil ? clamp : ceil;
+            if (wantRate > limit) wantRate = limit;
+        }
         if (core.ethRate() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
-        if (core.rateAtCheckpoint() != wantRate) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
+        if (core.rateAtCheckpoint() != wantStored) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
         _fundedCheck();
         if (phase2()) _xFundedCheck();
         // the exit rate is held inside the new band and nothing else
@@ -453,8 +462,14 @@ abstract contract HandlerOwner is HandlerHouse {
             _ok(a);
             if (stranger || !good) _flag(V_SETTINGS, "setRate accepted a stranger or a rate out of bounds");
             _opost(p, "setRate");
-            if (core.ethRate() != rate || core.rateAtCheckpoint() != rate) {
-                _flag(V_RATE_BOUND, "setRate did not land on the rate");
+            uint256 want = rate;
+            if (core.funded()) {
+                uint256 clamp = BidModel.clamp(core.settings(), core.ethPot());
+                if (want > clamp) want = clamp;
+            }
+            (uint256 anchor,,) = _anchorState();
+            if (core.ethRate() != want || core.rateAtCheckpoint() != rate || anchor != rate) {
+                _flag(V_RATE_BOUND, "setRate did not land on the rate and the anchor");
             }
             _fundedCheck();
             if (core.checkpointTime() != block.timestamp) {

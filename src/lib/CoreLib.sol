@@ -15,8 +15,8 @@ import {SettingsBounds} from "./SettingsBounds.sol";
 import {SettingsStore} from "./SettingsStore.sol";
 import {RateStore} from "./RateStore.sol";
 
-/// the one linked library of the Core: the settings write (validation, storage, event), the two pieces of
-/// transcendental math (the eth rate climb and the exit auction decay) and the pool manager swap of the coin buyback.
+/// the one linked library of the Core: the settings write (validation, storage, event), the eth rate (the climb with its
+/// clamp and ceiling, and the drop on a fill), the exit auction decay and the pool manager swap of the coin buyback.
 /// it holds no state of its own and is called by delegatecall, so it works on the Core's storage and balance, and the
 /// Core keeps its runtime under the size limit. deployed once before the Core (docs/DEPLOY.md)
 library CoreLib {
@@ -110,22 +110,23 @@ library CoreLib {
     }
 
     /// @notice the eth rate (wei per whole point) at `nowTs`, climbed from the stored rate `r` of checkpoint time `t`.
-    /// The rate compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and stops at the
-    /// lowest of three limits: `rateCap`, the funded clamp `pot * spendCapBps / (avgScore * clampCredits)`, and the
+    /// The rate compounds `climbPerMinBps` per minute, a fractional minute as a fractional exponent, and never exceeds
+    /// the lowest of three limits: `rateCap`, the funded clamp `pot * spendCapBps / (avgScore * clampCredits)`, and the
     /// ceiling `ceilBps` of the anchor. The anchor is the rate of the last fill, grown by `idleLoosenBps` per full 10
-    /// minutes since the last fill at `anchorTime`. A rate at or above the limit is returned as stored. Never reverts:
-    /// the Core calls it from `receive()`
+    /// minutes since the last fill at `anchorTime`. A stored rate above the limit reads as the limit. Never reverts: the
+    /// Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view
         returns (uint256)
     {
-        if (nowTs == t) return r;
         Settings storage s = SettingsStore.load();
         uint256 cap = (pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits)).min(s.rateCap);
         uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * ((nowTs - anchorTime) / 10 minutes);
         cap = cap.min(RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8);
-        if (r == 0 || cap <= r) return r;
+        if (r == 0) return r;
+        if (r >= cap) return cap;
+        if (nowTs == t) return r;
         // forge-lint: disable-start(unsafe-typecast)
         int256 x = FixedPointMathLib.lnWad(int256(1e18 + uint256(s.climbPerMinBps) * 1e14))
             * int256((nowTs - t) * 1e18 / 1 minutes) / 1e18;
