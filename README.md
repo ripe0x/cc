@@ -74,7 +74,7 @@ set -a; . ./.env; set +a
 forge test
 ```
 
-tests run on a mainnet fork pinned to block 26127622 (`FORK_BLOCK`). the v2 stack is not on mainnet, so the fixture deploys it onto the fork from prebuilt artifacts of the reference commit (`test/v2-artifacts/README.md`, `test/utils/V2Stack.sol`). foundry caches fork state on disk, so the first run is slow. use `--match-path` while iterating, and run one forge command at a time.
+tests run on a mainnet fork pinned to block 26158000 (`FORK_BLOCK`). the v2 stack is not on mainnet, so the fixture deploys it onto the fork from prebuilt artifacts of the reference commit (`test/v2-artifacts/README.md`, `test/utils/V2Stack.sol`). foundry caches fork state on disk, so the first run is slow. use `--match-path` while iterating, and run one forge command at a time.
 
 * real contracts only, the pnd factory, the v2 stack artifacts and the Core's house included. the two stand ins are `MockExitModule` and `MockExitToken` in `test/standins/`, attack contracts are in `test/attackers/`
 * `test/Flow.t.sol` covers the rework, `test/Launch.t.sol` the launch, `test/V2Port.t.sol`, `V2PortRestriction.t.sol` and `V2PortMigration.t.sol` the v2 fee path, the restricted coin and a second Core, `test/Rehearsal.t.sol` forks the latest block and skips unless `REHEARSAL` is set

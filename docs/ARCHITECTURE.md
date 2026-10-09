@@ -244,7 +244,7 @@ nine transactions: the library `CoreLib` (CREATE2 through the deterministic depl
 
 ## 12. tests policy
 
-real contracts only. fork at block 26127622 (`FORK_BLOCK`), rpc from `MAINNET_RPC_URL` in `.env`.
+real contracts only. fork at block 26158000 (`FORK_BLOCK`), rpc from `MAINNET_RPC_URL` in `.env`.
 
 | group | rule |
 |---|---|

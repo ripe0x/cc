@@ -358,7 +358,7 @@ Stack struct change (`engine:src/interfaces/Interfaces.sol` L173): add `feeSourc
 | hook | mined by CREATE2 via deployer 0x4e59... for flags 0x28CC, up to 400k iterations |
 | order | escrow, allowlist, hook, locker, mev, factory, tokenDeployer (`setTokenDeployer`), burnRouter, controller, keeper, wiring, ownership |
 | engine minimum | escrow, hook, locker, mev, factory, tokenDeployer. allowlist may be 0, protocol recipient any nonzero address, referral payout = escrow |
-| fork pin | v2 uses block 26130269, engine uses 26127622 |
+| fork pin | v2 uses block 26130269, engine uses 26158000 |
 
 ### 8.2 toolchain
 

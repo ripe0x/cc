@@ -54,9 +54,9 @@ abstract contract LaunchChecks is PostflightChecks {
     int24 internal constant MAX_TICK = 887_272;
     /// @dev v4 limit of the tick spacing
     int24 internal constant MAX_TICK_SPACING = 32_767;
-    /// @dev supplies at block 26127622. both only grow
+    /// @dev supplies at block 26158000. both only grow
     uint256 internal constant CREDITS_SUPPLY_MIN = 122_154;
-    uint256 internal constant STATEMENTS_SUPPLY_MIN = 148;
+    uint256 internal constant STATEMENTS_SUPPLY_MIN = 176;
 
     /// @notice true when running under `forge script`. a test overrides it to rehearse the script behaviour
     function _scriptContext() internal view virtual returns (bool) {
