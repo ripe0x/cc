@@ -1180,6 +1180,7 @@ abstract contract HandlerBase is Test {
         uint256 sellerBal;
         uint256[] ceil;
         uint256[] score;
+        Pull pull;
     }
 
     /// @dev the ids `sellForEth` offers: walks the actor inventory from a picked offset, within the budget unless overshoot
@@ -1205,7 +1206,6 @@ abstract contract HandlerBase is Test {
     /// and now and then the call is made oversized or with a duplicate id to prove the core refuses it.
     function sellForEth(uint256 aSeed, uint256 nSeed, uint256 pick, uint256 mode) external checked {
         uint8 a = A_SELL_FOR_ETH;
-        _preFlush();
         address who = _actor(aSeed);
         uint256 len = inventory[who].length;
         if (len == 0) return _skip(a);
@@ -1220,6 +1220,7 @@ abstract contract HandlerBase is Test {
         if (dup) ids[1] = ids[0];
 
         SellPre memory p;
+        p.pull = _beginPull(who);
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
@@ -1233,6 +1234,7 @@ abstract contract HandlerBase is Test {
             p.score[i] = _score(ids[i]);
         }
         RS memory rs = _rs();
+        _endPull(p.pull);
         vm.recordLogs();
         _att(a);
         vm.prank(who);
@@ -1240,7 +1242,8 @@ abstract contract HandlerBase is Test {
             _ok(a);
             _afterSell(who, ids, p, rs.st);
         } catch (bytes memory why) {
-            _failed(p.bal, p.pot, p.rate, "sellForEth");
+            _failed(p.pull.bal0, p.pull.pot0, p.pull.rate0, "sellForEth");
+            rs = p.pull.rs0;
             // a hostile controller may answer differently each time it is asked, which moves the ceiling
             if (!overshoot && !dup && !_hostileNow()) _unexpected(a, why);
         }
@@ -1249,6 +1252,7 @@ abstract contract HandlerBase is Test {
 
     function _afterSell(address who, uint256[] memory ids, SellPre memory p, Settings memory st) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
+        _pullChecks(p.pull, logs);
         uint256[] memory costs = new uint256[](ids.length);
         uint256 total;
         uint256 count;
@@ -1296,7 +1300,6 @@ abstract contract HandlerBase is Test {
     /// with a wrong value or wrong calldata or above the ceiling, and must revert without moving eth.
     function listingStrategy(uint256 pick, uint256 mode) external checked {
         uint8 a = A_LISTING_STRATEGY;
-        _preFlush();
         uint256 id;
         uint256 price;
         bool allowed;
@@ -1330,7 +1333,6 @@ abstract contract HandlerBase is Test {
     /// the core's eth where it was.
     function listingHostile(uint256 pick, uint256 modeSeed) external checked {
         uint8 a = A_LISTING_HOSTILE;
-        _preFlush();
         uint256 n = probeIds.length;
         if (n < 2 || !core.allowedTarget(address(probe))) return _skip(a);
         uint256 id = probeIds[pick % n];
@@ -1364,6 +1366,7 @@ abstract contract HandlerBase is Test {
         uint256 keeperBal;
         uint256 ceiling;
         uint256 score;
+        Pull pull;
     }
 
     /// the shared body of the three listing actions. `expectCost` is the cost the target should produce.
@@ -1377,6 +1380,7 @@ abstract contract HandlerBase is Test {
         bool expect
     ) internal {
         LPre memory p;
+        p.pull = _beginPull(keeper);
         p.bal = address(core).balance;
         p.pot = core.ethPot();
         p.rate = core.ethRate();
@@ -1386,13 +1390,16 @@ abstract contract HandlerBase is Test {
         p.ceiling = core.ceilingOf(id);
         p.score = _score(id);
         RS memory rs = _rs();
+        _endPull(p.pull);
+        vm.recordLogs();
         _att(a);
         vm.prank(keeper);
         try core.buyListing(value, data, id, target) {
             _ok(a);
             _afterListing(a, id, value, expectCost, p, rs.st);
         } catch (bytes memory why) {
-            _failed(p.bal, p.pot, p.rate, "buyListing");
+            _failed(p.pull.bal0, p.pull.pot0, p.pull.rate0, "buyListing");
+            rs = p.pull.rs0;
             if (expect) _unexpected(a, why);
         }
         _rsCheck(rs, 0);
@@ -1401,6 +1408,7 @@ abstract contract HandlerBase is Test {
     function _afterListing(uint8 a, uint256 id, uint256 value, uint256 expectCost, LPre memory p, Settings memory st)
         internal
     {
+        _pullChecks(p.pull, vm.getRecordedLogs());
         if (a == A_LISTING_HOSTILE && !probe.honest(probe.mode())) {
             _flag(V_HOSTILE_OK, "a hostile listing target got a buy through");
         }
@@ -1502,6 +1510,7 @@ abstract contract HandlerBase is Test {
         uint256 gasUsed;
         Settings st;
         bool valid;
+        Pull pull;
     }
 
     /// composes the controller's page. rare by gate, because it costs about 8m gas.
@@ -1515,11 +1524,14 @@ abstract contract HandlerBase is Test {
 
     function _compose(uint8 a, Lane lane, uint256 gate, uint256 feeSeed) internal {
         if (lane == Lane.Exit && !phase2()) return _skip(a);
-        _preFlush();
         (bool ready, uint256[] memory ids, uint256 format) = _peekPage(lane);
         // a pile of 80 is composed on one gate in two. a short pile only now and then, to see NotReady
         if (ready ? gate % 2 != 0 : gate % 13 != 0) return _skip(a);
         CPre memory p;
+        // the basefee is set before the snapshot of the pull, which restores the block environment
+        p.basefee = _logBound(feeSeed, 0.05 gwei, 300 gwei);
+        vm.fee(p.basefee);
+        p.pull = _beginPull(keeper);
         p.valid = ready && _validPage(lane, ids, format);
         p.st = core.settings();
         p.pot = core.ethPot();
@@ -1527,8 +1539,6 @@ abstract contract HandlerBase is Test {
         p.bal = address(core).balance;
         p.callerBal = keeper.balance;
         p.supply = STATEMENTS.supply();
-        p.basefee = _logBound(feeSeed, 0.05 gwei, 300 gwei);
-        vm.fee(p.basefee);
         if (p.valid) {
             for (uint256 i; i < 80; ++i) {
                 p.sum += cg[ids[i]].cost;
@@ -1536,6 +1546,7 @@ abstract contract HandlerBase is Test {
         }
         uint256 xb0 = _xBal(address(core));
         RS memory rs = _rs();
+        _endPull(p.pull);
         vm.recordLogs();
         _att(a);
         uint256 g0 = gasleft();
@@ -1546,6 +1557,7 @@ abstract contract HandlerBase is Test {
                 _ok(a);
                 _afterCompose(lane, ids, p);
             } catch (bytes memory why) {
+                rs = p.pull.rs0;
                 _composeFailed(a, p, why);
             }
         } else {
@@ -1554,6 +1566,7 @@ abstract contract HandlerBase is Test {
                 _ok(a);
                 _afterCompose(lane, ids, p);
             } catch (bytes memory why) {
+                rs = p.pull.rs0;
                 _composeFailed(a, p, why);
             }
         }
@@ -1562,7 +1575,7 @@ abstract contract HandlerBase is Test {
     }
 
     function _composeFailed(uint8 a, CPre memory p, bytes memory why) internal {
-        _failed(p.bal, p.pot, p.rate, "compose");
+        _failed(p.pull.bal0, p.pull.pot0, p.pull.rate0, "compose");
         // a hostile controller may fail to price the listing, and then the whole compose reverts
         // a hostile controller may also burn the core's 500_000 gas read of its page. the fuzz controller tries its
         // state changing attacks only inside the core's frame (each one halting a static frame burns the 300_000 gas
@@ -1598,6 +1611,7 @@ abstract contract HandlerBase is Test {
 
     function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
+        _pullChecks(p.pull, logs);
         if (!p.valid) _flag(V_COMPOSE, "composed a page the ghost model considers invalid");
         uint256 sid = STATEMENTS.supply();
         if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != (lane == Lane.Eth ? address(house) : address(core))) {
@@ -1996,12 +2010,81 @@ abstract contract HandlerBase is Test {
         _rsCheck(rs, 0);
     }
 
-    /// the Core pulls the router at the start of the eth pot doors (`sellForEth`, `buyListing`, `compose`). the handler
-    /// flushes first, as the flusher, so the state it records before the door already holds the booked fees and the pull
-    /// inside the door finds an empty router. a flush that fails (an engine that refuses) fails the same way inside the
-    /// door
-    function _preFlush() internal {
-        if (address(feeRouter).balance != 0) _flushChecked();
+    /// gas the Core forwards to the router flush of its pull (`CoreLib.PULL_GAS`)
+    uint256 internal constant PULL_GAS = 1_000_000;
+
+    /// one door call with the router pull inside it. `*0` is the state before the pull (what a reverted door leaves),
+    /// the rest is what the pull does: eth booked by the Core, the tip to the caller, the router balance after
+    struct Pull {
+        uint256 snap;
+        uint256 bal0;
+        uint256 pot0;
+        uint256 rate0;
+        RS rs0;
+        uint256 held;
+        uint256 owed;
+        uint256 want;
+        address engine;
+        uint256 toCore;
+        uint256 tip;
+        uint256 routerAfter;
+        bool ok;
+    }
+
+    /// the eth pot doors (`sellForEth`, `buyListing`, `compose`, `composeExit`) start with the Core's pull of the
+    /// router, with `caller` as the tip recipient. this runs the same flush now, under a snapshot, so the state read
+    /// between `_beginPull` and `_endPull` is the state the door prices against. the handler writes no storage in
+    /// between. `_endPull` restores the state before the pull, and the door then runs the pull itself
+    function _beginPull(address caller) internal returns (Pull memory q) {
+        q.bal0 = address(core).balance;
+        q.pot0 = core.ethPot();
+        q.rate0 = core.ethRate();
+        q.rs0 = _rs();
+        q.held = address(feeRouter).balance;
+        q.owed = feeRouter.totalOwed();
+        q.engine = feeRouter.engine();
+        q.want = q.held > q.owed ? _routerEngine(q.held - q.owed) : 0;
+        q.snap = vm.snapshotState();
+        uint256 tip0 = caller.balance;
+        try feeRouter.flush{gas: PULL_GAS}(caller) {
+            q.ok = true;
+        } catch {}
+        q.toCore = address(core).balance - q.bal0;
+        q.tip = caller.balance - tip0;
+        q.routerAfter = address(feeRouter).balance;
+    }
+
+    function _endPull(Pull memory q) internal {
+        vm.revertToStateAndDelete(q.snap);
+    }
+
+    /// after a door succeeded: the pull inside it did what the flush rule gives. the router holds what is owed to
+    /// payees and nothing else after a flush that went through, the engine got its part, the caller got the tip
+    function _pullChecks(Pull memory q, Vm.Log[] memory logs) internal {
+        bool moved = q.ok && q.held > q.owed;
+        uint256 flushes;
+        uint256 tipSeen;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(feeRouter) || logs[i].topics[0] != IFeeRouter.Flushed.selector) continue;
+            flushes++;
+            (, tipSeen,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+        }
+        if (flushes != (moved ? 1 : 0)) _flag(V_ROUTER, "the door pulled other than the flush rule gives");
+        if (moved && tipSeen != q.tip) _flag(V_ROUTER, "the door pull paid a tip other than the one the flush paid");
+        if (q.engine != gEngine) _flag(V_ROUTER, "the router engine is not the one the owner set last");
+        if (moved && q.engine == address(core) && q.toCore != q.want) {
+            _flag(V_ROUTER, "the door pull booked other than the flush rule gives");
+        }
+        if (address(feeRouter).balance != q.routerAfter) _flag(V_ROUTER, "the router balance after the door differs");
+        if (q.ok && address(feeRouter).balance != feeRouter.totalOwed()) {
+            _flag(V_ROUTER, "a door pull left eth in the router");
+        }
+        if (q.ok) {
+            parked = 0;
+            if (moved) routerFlushes++;
+        } else if (q.held > q.owed) {
+            parked = q.held - q.owed;
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
