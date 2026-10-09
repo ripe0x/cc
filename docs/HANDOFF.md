@@ -7,7 +7,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | item | state |
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
-| engine | ported to the artcoins v2 stack and tested: 1,036 tests pass, 8 skipped, with the launch rehearsal on (full run on commit b645073, one rpc timeout passed on a rerun) |
+| engine | ported to the artcoins v2 stack and tested: 918 tests pass, 9 skipped, with the launch rehearsal on (full run on foundry 1.8.1, isolate on, commit 5f61f2c) |
 | contracts | `src/Core.sol` 24,501 bytes runtime (75 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 10,724 (linked library, lots of room), `src/ControllerV1.sol` 4,426, `src/FeeRouter.sol` 4,982 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |
@@ -39,7 +39,7 @@ docs/NEXT.md is the list: what the owner decided but is not built, what waits fo
 |---|---|
 | naming | the phase 2 contracts are referred to only as `exitModule` and `exitToken` in code, comments, tests, docs and commit messages. never name or describe them |
 | tests | mainnet fork tests pinned to a block, real contracts only (live ones, and v2 from its vendored build output). the only doubles are test/standins and attacker contracts |
-| toolchain | foundry 1.5.1, solc 0.8.30. the suite has known failures on foundry 1.8.1 that were never classified |
+| toolchain | foundry 1.8.1 (isolate on, the default since 1.8.0), solc 0.8.30. the suite is green on it: 918 pass, 0 fail, 9 skipped (the deep invariant suites) of 927 tests |
 | build | section 6. a clean build is about 4 minutes and 3 gb. the full suite is about 25 minutes: run it in the background and poll, or by path. after changing a production contract's external surface run `script/tools/gen-interfaces.sh` and repin test/BuildIdentity.t.sol |
 | small machines | never run two forge processes at once on 8 gb. a sandbox that reclaims idle sessions kills background work: keep a foreground loop alive while agents run |
 | rpc | public endpoints rate limit (429, 408). rerun a suite alone with `-j 1` before treating that as a failure |
