@@ -7,7 +7,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | item | state |
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
-| engine | ported to the artcoins v2 stack and tested: 1040 tests pass, 0 fail, 8 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on (commit ff36b57). deep run (64 runs, depth 200) of the 7 Deep suites on 6dd6805: all clean after the hourly window followed inflows |
+| engine | ported to the artcoins v2 stack and tested: 1039 tests pass, 0 fail, 8 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on (commit ff36b57). deep run (64 runs, depth 200) of the 7 Deep suites on 6dd6805: all clean after the hourly window followed inflows |
 | contracts | `src/Core.sol` 24,203 bytes runtime (373 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 18,487 (linked library, 6,089 bytes of room), `src/ControllerV1.sol` 4,464, `src/FeeRouter.sol` 5,043, `src/CoreLens.sol` 9,009 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |

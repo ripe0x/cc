@@ -403,7 +403,7 @@ library CoreLib {
         emit SuccessorLocked();
     }
 
-    /// @notice moves the eth and the credits the Core tracks to the successor, in batches. the Core forwards its call
+    /// @notice moves the eth, the exit token and the credits the Core tracks to the successor, in batches. the Core forwards its call
     /// here untouched, the owner check and the reentrancy guard are here.
     /// eth: `ethPot + ethToBuyback`, by one plain call, the trackers zeroed. eth above the trackers stays.
     /// exit token: `xPot + xToBuyback`, by `transfer`, the trackers zeroed. the coin stays.

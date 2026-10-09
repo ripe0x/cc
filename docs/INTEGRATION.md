@@ -153,7 +153,7 @@ a successor Core (section 9) receives credits without records and adopts them th
 | `rescueNft(token, id, to)` | sends an ERC721 the Core holds to `to`: a credit only while it is outside both piles, a statement only while the Core has no record of it, any other ERC721 freely | `OnlyOwner`, `ZeroAddress`, `InPile`, `Held`, `NotHolder` |
 | `rescueCoin(to, amount)` | sends coin the Core holds to `to` | `OnlyOwner`, `ZeroAddress` |
 
-what a successor has to implement: a `receive()` that accepts a plain eth call, and an exit token and Credits that it accepts by `transfer` and `transferFrom`, so the `onERC721Received` of the successor is skipped. the successor receives eth, exit token and credits only. the old Core keeps its statements and sells them out itself, so call `collectSales` and `syncStatement` there and call `migrate` again to move the proceeds, until it moves nothing. `maxCredits` applies to each pile, and 0 moves the pots only. the successor builds its pile with `adopt`.
+what a successor has to implement: a `receive()` that accepts a plain eth call, and an exit token and Credits that it accepts by `transfer` and `transferFrom`, so the `onERC721Received` of the successor is skipped. `migrate` transfers eth, exit token and credits. the old Core keeps its statements and sells them out itself, so call `collectSales` and `syncStatement` there and call `migrate` again to move the proceeds, until it moves nothing. `maxCredits` applies to each pile, and 0 moves the pots only. the successor builds its pile with `adopt`.
 
 ## 10. the lens
 

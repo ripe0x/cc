@@ -256,8 +256,15 @@ contract MigrateTest is Fixture {
         assertEq(_heldCount(), 2, "two statements left on the books");
         // a listing without a bid exits to the exit token
         vm.warp(block.timestamp + core.settings().exitAfter);
+        // the pots are empty after the migration: the exit reimbursement of the caller clamps at the pot
+        assertEq(core.ethPot(), 0, "setup: the eth pot is empty");
+        vm.fee(composeBasefee);
+        vm.txGasPrice(composeBasefee);
+        uint256 callerBalance = address(this).balance;
         core.exitStatement(w.listed);
         core.exitStatement(w.exitLane);
+        assertEq(core.ethPot(), 0, "the exit took eth from an empty pot");
+        assertEq(address(this).balance, callerBalance, "the caller was repaid from an empty pot");
         assertEq(_heldCount(), 0, "the exits left nothing on the books");
         assertGt(core.xPot() + core.xToBuyback(), 0, "the exit did not fill the exit pots");
         // the proceeds of the sales are booked by collectSales and move in the next call
@@ -278,6 +285,43 @@ contract MigrateTest is Fixture {
         _migrate(1000);
         assertEq(sink.sends(), sends, "an empty call sent eth");
         _solvent();
+    }
+
+    function test_OK_sellToAfterAMigrationBooksTheProceeds() public {
+        uint256 sid = _listedStatement();
+        _setSuccessor();
+        _migrate(1000);
+        assertEq(core.ethPot() + core.ethToBuyback(), 0, "setup: the pots are empty");
+        vm.prank(owner);
+        ctl.setBuyOnly(true);
+        uint256 price = ctl.priceOf(sid);
+        vm.deal(address(0xB1D), price);
+        vm.prank(address(0xB1D));
+        ctl.buy{value: price}(sid);
+        assertEq(STATEMENTS.ownerOf(sid), address(0xB1D), "the buyer does not hold the statement");
+        assertGt(core.ethPot(), 0, "the proceeds were not booked to the pot");
+        assertGt(core.ethToBuyback(), 0, "the proceeds were not booked to the buyback pot");
+        _solvent();
+    }
+
+    function test_OK_buybackAfterAMigrationCollectsWaitingSalesFirst() public {
+        _fundPot(1 ether);
+        _setSuccessor();
+        _migrate(1000);
+        assertEq(core.ethToBuyback(), 0, "setup: the buyback pot is empty");
+        assertEq(_owedByHouse(), 0, "setup: no sale proceeds wait in the house");
+        vm.roll(block.number + 200);
+        vm.expectRevert(ICore.NothingToBuy.selector);
+        core.buyback();
+        // a sale ends and its proceeds wait in the house: the buyback collects them and spends the buyback share
+        uint256 sid = _listedStatement();
+        _bid(address(0xB1D), sid, _live(sid).reserve);
+        _endAuction(sid);
+        assertGt(_owedByHouse(), 0, "setup: the sale proceeds are uncollected");
+        vm.roll(block.number + 200);
+        core.buyback();
+        assertEq(_owedByHouse(), 0, "the buyback left the proceeds in the house");
+        assertGt(core.ethPot(), 0, "the pot share of the sale was not booked");
     }
 
     function test_OK_aListingWithoutABidStaysListedAndSells() public {
