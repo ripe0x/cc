@@ -74,7 +74,8 @@ contract LensTest is Fixture {
             bool listed = l.status == ICore.StatementStatus.Listed || l.status == ICore.StatementStatus.Bid
                 || l.status == ICore.StatementStatus.Ended;
             assertEq(s.listed, listed, "listed");
-            assertEq(s.askingPrice, lane == Lane.Eth && clockStart != 0 ? ctl.priceOf(sid) : 0, "asking price");
+            bool open = l.status == ICore.StatementStatus.Listed;
+            assertEq(s.askingPrice, open && lane == Lane.Eth && clockStart != 0 ? ctl.priceOf(sid) : 0, "asking price");
         }
     }
 
@@ -135,7 +136,7 @@ contract LensTest is Fixture {
                 assertTrue(v.listed);
                 assertEq(v.status, uint8(ICore.StatementStatus.Bid));
                 assertGt(v.topBid, 0);
-                assertGt(v.askingPrice, 0);
+                assertEq(v.askingPrice, 0, "a statement with a bid cannot be bought at the asking price");
             } else {
                 assertEq(v.id, sidExit);
                 assertEq(uint8(v.lane), uint8(Lane.Exit));
@@ -252,6 +253,58 @@ contract LensTest is Fixture {
         emit log_named_uint("snapshot gas per statement", (two - empty) / 2);
         assertLt(empty, 300_000, "snapshot without statements");
         assertLt((two - empty) / 2, 80_000, "per statement");
+    }
+
+    /// the asking price is nonzero only while a buyer can buy at it: a live auction without a bid
+    function test_OK_askingPriceIsZeroUnlessABuyerCanBuyNow() public {
+        _fundPot(3 ether);
+        // the sale is settled first: ending its auction moves the clock to its end time
+        uint256 sold = _listedStatement();
+        _bid(address(0xB2D), sold, _live(sold).reserve);
+        _endAuction(sold);
+        uint256 open = _listedStatement();
+        uint256 withBid = _listedStatement();
+        _bid(address(0xB1D), withBid, _live(withBid).reserve);
+        ICoreLens.StatementView[] memory v = lens.snapshot().statements;
+        assertEq(v.length, 3);
+        for (uint256 i; i < 3; ++i) {
+            if (v[i].id == open) {
+                assertEq(v[i].status, uint8(ICore.StatementStatus.Listed));
+                assertEq(v[i].askingPrice, ctl.priceOf(open), "open: the controller price");
+                assertGt(v[i].askingPrice, 0);
+            } else if (v[i].id == withBid) {
+                assertEq(v[i].status, uint8(ICore.StatementStatus.Bid));
+                assertEq(v[i].askingPrice, 0, "with a bid");
+                assertGt(v[i].topBid, 0);
+                assertGt(v[i].endTime, 0);
+            } else {
+                assertEq(v[i].id, sold);
+                assertEq(v[i].status, uint8(ICore.StatementStatus.Sold), "sold, record not settled");
+                assertFalse(v[i].listed);
+                assertEq(v[i].askingPrice, 0, "sold and unsynced");
+                // the controller still answers for it: the lens decides
+                assertGt(ctl.priceOf(sold), 0);
+            }
+        }
+    }
+
+    /// the lens requires the answer size of `nextPage` that the Core requires, so both agree on a short answer
+    function test_OK_aShortNextPageAnswerIsNotReadyForTheLensAndForCompose() public {
+        _fillEthPile(80);
+        uint256[] memory page = core.pilePage(Lane.Eth, 0, 80);
+        assertTrue(lens.snapshot().ethPageReady, "the real controller answers ready");
+        vm.mockCall(address(ctl), abi.encodeWithSelector(ctl.nextPage.selector), abi.encode(uint256(1)));
+        assertFalse(lens.snapshot().ethPageReady, "one word is a short answer");
+        vm.expectRevert(ICore.NotReady.selector);
+        vm.prank(keeper);
+        core.compose();
+        uint256[80] memory ids;
+        for (uint256 i; i < 80; ++i) {
+            ids[i] = page[i];
+        }
+        vm.mockCall(address(ctl), abi.encodeWithSelector(ctl.nextPage.selector), abi.encode(uint256(1), ids, uint256(0)));
+        assertTrue(lens.snapshot().ethPageReady, "the full size answer is ready");
+        vm.clearMockedCalls();
     }
 
     function test_OK_thePointersAndTheControllerFollow() public {

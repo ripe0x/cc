@@ -5,7 +5,7 @@ import {Fixture} from "./utils/Fixture.sol";
 import {Prod} from "./utils/Prod.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IControllerV1} from "../src/interfaces/IControllerV1.sol";
-import {Lane, Mainnet} from "../src/interfaces/Interfaces.sol";
+import {Lane, Mainnet, Settings, ICreditScore} from "../src/interfaces/Interfaces.sol";
 
 /// a listing target that delivers the credit and then tries to adopt it inside the guarded call
 contract AdoptingTarget {
@@ -347,7 +347,120 @@ contract AdoptTest is Fixture {
         assertTrue(p);
     }
 
-    /// gas of `adopt` for one credit and for a page of 80, logged with a bound
+    /// the fee router is pulled before the price is read, like at every door that spends from the pot: pending fee eth is
+    /// booked, and the flush tip goes to the caller
+    function test_OK_adoptPullsTheFeeRouterFirst() public {
+        autoFlush = false;
+        _buyCoin(funder, 3 ether);
+        assertGt(address(feeRouter).balance, 0, "the router holds fees");
+        uint256 pot = core.ethPot();
+        uint256[] memory ids = _gift(1);
+        uint256 tipBefore = stranger.balance;
+        vm.expectEmit(false, false, false, false, address(core));
+        emit ICore.FeesAdded(0);
+        _adopt(ids);
+        assertEq(address(feeRouter).balance, 0, "the router was flushed");
+        assertGt(core.ethPot(), pot, "the fees are in the pot");
+        assertGt(stranger.balance, tipBefore, "the flush tip went to the caller of adopt");
+        (,, uint256 cost,) = core.creditInfo(ids[0]);
+        assertEq(cost, core.ethPrice() * core.scoreOf(ids[0]) / 1e4, "the basis is read after the pull");
+    }
+
+    /// a router that reverts does not block adopt
+    function test_OK_adoptWorksWithABrokenRouter() public {
+        vm.etch(address(feeRouter), hex"fe");
+        uint256[] memory ids = _gift(1);
+        _adopt(ids);
+        assertEq(core.pileSize(Lane.Eth), 1);
+    }
+
+    /// `ethPrice()` is the value a real checkpoint stores: skim with 1 wei above the pots checkpoints
+    function test_OK_ethPriceIsWhatARealCheckpointStores() public {
+        _fundPot(2 ether);
+        uint256[] memory sold = _credits(seller, 6);
+        vm.prank(seller);
+        core.sellForEth(sold);
+        _warp(20 minutes);
+        uint256 read = core.ethPrice();
+        assertGt(read, core.rateAtCheckpoint(), "the price state climbed since the last checkpoint");
+        vm.deal(address(core), address(core).balance + 1);
+        core.skim();
+        assertEq(core.rateAtCheckpoint(), read, "the checkpoint stored the value ethPrice read");
+        assertEq(core.ethPrice(), read);
+    }
+
+    /// a credit whose score is 0 (a mocked score contract) takes the floor of 1 wei
+    function test_OK_aCreditOfScoreZeroTakesTheFloorOfOneWei() public {
+        uint256[] memory ids = _gift(2);
+        vm.mockCall(Mainnet.CREDIT_SCORE, abi.encodeWithSelector(ICreditScore.scoreOf.selector), abi.encode(uint256(0)));
+        vm.expectEmit(true, false, false, true, address(core));
+        emit ICore.CreditAdopted(ids[0], 1);
+        _adopt(ids);
+        vm.clearMockedCalls();
+        for (uint256 i; i < 2; ++i) {
+            (bool p,, uint256 cost,) = core.creditInfo(ids[i]);
+            assertTrue(p);
+            assertEq(cost, 1, "1 wei");
+        }
+    }
+
+    /// a stored rate above `rateCap` gives the cap as the price state, so the basis is at the cap
+    function test_OK_aStoredRateAboveTheRateCapGivesTheCapAsTheBasis() public {
+        Settings memory st = core.settings();
+        uint256 stored = core.rateAtCheckpoint();
+        st.rateCap = uint64(stored / 4);
+        _setSettings(st);
+        assertEq(core.rateAtCheckpoint(), stored, "the stored rate is above the new cap");
+        assertEq(core.ethPrice(), st.rateCap, "the price state is the cap");
+        uint256[] memory ids = _gift(2);
+        _adopt(ids);
+        for (uint256 i; i < 2; ++i) {
+            (,, uint256 cost,) = core.creditInfo(ids[i]);
+            assertEq(cost, st.rateCap * core.scoreOf(ids[i]) / 1e4, "basis at the cap");
+        }
+    }
+
+    /// a stored rate above the ceiling (the ceiling was lowered after the price climbed) gives the ceiling as the basis
+    function test_OK_aStoredRateAboveTheCeilingGivesTheCeilingAsTheBasis() public {
+        _fundPot(2 ether);
+        _warp(1 hours);
+        vm.deal(address(core), address(core).balance + 1);
+        core.skim();
+        Settings memory st = core.settings();
+        st.ceilBps = 10_000;
+        _setSettings(st);
+        (uint256 lastFill,,) = _anchor();
+        uint256 loosened = 10_000 + uint256(st.idleLoosenBps) * ((block.timestamp - core.lastFillTime()) / 10 minutes);
+        uint256 bound = lastFill * loosened * st.ceilBps / 1e8;
+        assertGt(core.rateAtCheckpoint(), bound, "the stored rate is above the lowered ceiling");
+        assertEq(core.ethPrice(), bound, "the price state is the ceiling");
+        uint256[] memory ids = _gift(1);
+        _adopt(ids);
+        (,, uint256 cost,) = core.creditInfo(ids[0]);
+        assertEq(cost, bound * core.scoreOf(ids[0]) / 1e4, "basis at the ceiling");
+    }
+
+    /// after a fill the stored rate is stale once time passes: the basis uses the climbed price state, with the pot refilled
+    function test_OK_aStaleStoredRateAfterAFillIsClimbedForTheBasis() public {
+        _fundPot(1 ether);
+        uint256[] memory sold = _credits(seller, 5);
+        vm.prank(seller);
+        core.sellForEth(sold);
+        _fundPot(core.ethPot() + 2 ether);
+        _warp(10 minutes);
+        uint256 stored = core.rateAtCheckpoint();
+        uint256 price = core.ethPrice();
+        assertGt(price, stored, "the stored rate is stale");
+        uint256[] memory ids = _gift(1);
+        _adopt(ids);
+        (,, uint256 cost,) = core.creditInfo(ids[0]);
+        assertEq(cost, price * core.scoreOf(ids[0]) / 1e4, "the climbed state");
+        assertTrue(cost != stored * core.scoreOf(ids[0]) / 1e4);
+        assertEq(core.rateAtCheckpoint(), stored, "nothing was checkpointed by the adopt");
+    }
+
+    /// gas of `adopt` for one credit and for a page of 80, with an empty router. docs/INTEGRATION.md section 13 quotes
+    /// both figures: 242,489 and 10,552,467. the bound is 5 percent around each
     function test_GAS_adopt() public {
         uint256[] memory one = _gift(1);
         uint256 g = gasleft();
@@ -360,8 +473,8 @@ contract AdoptTest is Fixture {
         emit log_named_uint("adopt, 1 credit", gasOne);
         emit log_named_uint("adopt, 80 credits", gasPage);
         emit log_named_uint("adopt, per credit at 80", gasPage / 80);
-        assertLt(gasOne, 400_000, "one credit");
-        assertLt(gasPage / 80, 250_000, "per credit");
+        assertApproxEqRel(gasOne, 242_489, 0.05e18, "one credit");
+        assertApproxEqRel(gasPage, 10_552_467, 0.05e18, "80 credits");
     }
 
     function test_FUZZ_theBasisIsThePriceStateTimesTheScore(uint256 wait, uint8 count) public {

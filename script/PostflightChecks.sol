@@ -66,22 +66,30 @@ abstract contract PostflightChecks is PostflightPool {
         _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
     }
 
-    /// @notice the lens to check (CoreLens), zero when the run has none. `Deploy` sets it from the lens it created, the
-    /// Postflight and Resume scripts from LENS. a nonzero address adds the rows of `_postLens`
-    address internal lensAt;
+    /// @dev the deterministic deployer that `forge script` sends the library and the lens through (CREATE2)
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    /// @dev the CREATE2 salt of the lens
+    bytes32 internal constant LENS_SALT = keccak256("credits.core.lens.v1");
 
-    /// @dev the lens has code of the compiled size, points at this Core and at the router and house the Core names, uses
-    /// the Credits and Statements of mainnet, and answers `snapshot`. its controller is the Core's, read on every call
+    /// @notice the address of the lens of `core_`: CREATE2 through the deterministic deployer with `LENS_SALT` and the
+    /// creation code of `CoreLens` with the Core as constructor argument. a function of the Core address and the
+    /// compiled lens, so postflight and resume derive it without the deployer or its nonce
+    function lensAddress(address core_) internal view returns (address) {
+        bytes memory init = abi.encodePacked(vm.getCode("CoreLens.sol:CoreLens"), abi.encode(core_));
+        return vm.computeCreate2Address(LENS_SALT, keccak256(init), CREATE2_DEPLOYER);
+    }
+
+    /// @dev the lens at `lensAddress(core)` has code of the compiled size, points at this Core and at the router and house
+    /// the Core names, uses the Credits and Statements of mainnet, and answers `snapshot`. its controller is the Core's,
+    /// read on every call
     function _postLens(ICore core) private {
-        if (lensAt == address(0)) return;
+        address lensAt = lensAddress(address(core));
         _code("code: lens", lensAt);
         if (lensAt.code.length == 0) return;
         ICoreLens lens = ICoreLens(lensAt);
-        _check(
-            "lens: code size is the compiled CoreLens",
-            lensAt.code.length == vm.getDeployedCode("CoreLens.sol:CoreLens").length,
-            vm.toString(lensAt)
-        );
+        bool sized = lensAt.code.length == vm.getDeployedCode("CoreLens.sol:CoreLens").length;
+        _check("lens: code size is the compiled CoreLens", sized, vm.toString(lensAt));
+        if (!sized) return;
         _eq("lens: core", lens.CORE(), address(core));
         _eq("lens: router is the Core fee source", lens.ROUTER(), core.FEE_SOURCE());
         _eq("lens: house is the Core house", lens.HOUSE(), address(core.HOUSE()));
@@ -391,13 +399,16 @@ abstract contract PostflightChecks is PostflightPool {
     /// @notice the address of the compiled `CoreLib` inside a Core runtime code (a push20 whose target has the library
     /// runtime code, own address masked out), zero when there is none
     function findLibrary(bytes memory code) internal view returns (address found) {
+        bytes memory expected = vm.getDeployedCode("CoreLib.sol:CoreLib");
+        bytes32 want = _tailHash(expected);
         for (uint256 i; i + 21 <= code.length; ++i) {
             if (code[i] != 0x73) continue;
             address cand;
             assembly ("memory-safe") {
                 cand := shr(96, mload(add(add(code, 0x21), i)))
             }
-            if (isCompiledLibrary(cand.code)) return cand;
+            // the size is read without copying the code: only a candidate of the right size is copied and hashed
+            if (cand.code.length == expected.length && expected.length >= 39 && _tailHash(cand.code) == want) return cand;
         }
     }
 

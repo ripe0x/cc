@@ -75,6 +75,17 @@ abstract contract SystemResumer is SystemDeployer {
         _require();
     }
 
+    /// @dev creates the lens when `lensAddress(core)` has no code. the address is a function of the Core, so a run that
+    /// stopped between the Core and the lens (or later) sends it whatever the deployer nonce is
+    function _ensureLens(address core_) private returns (address lensAt) {
+        lensAt = lensAddress(core_);
+        if (lensAt.code.length != 0) return lensAt;
+        uint256 g = gasleft();
+        address made = _newLens(core_);
+        _step(8, g);
+        if (made != lensAt) revert AddressMismatch("lens");
+    }
+
     /// @notice sends the steps the chain is still missing (after `resumeChecks`), then runs postflight and reverts on any
     /// failed row. the caller must be the deployer of the original run, because the coin address and the router owner
     /// depend on it
@@ -89,6 +100,7 @@ abstract contract SystemResumer is SystemDeployer {
         d.core = core_;
         d.coin = core.COIN();
         d.controller = core.controller();
+        d.lens = _ensureLens(core_);
         d.launchKey = poolKeyOf(d.coin, c.stack);
         d.poolId = keccak256(abi.encode(d.launchKey));
 

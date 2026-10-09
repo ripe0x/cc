@@ -2039,18 +2039,26 @@ abstract contract HandlerBase is Test {
             want = ids.length == 0 ? ICore.Empty.selector : ICore.ZeroId.selector;
         }
 
+        // the Core pulls the router first, so the state the call prices against is the state after that flush
+        address caller = _actor(aSeed >> 32);
+        Pull memory pull = _beginPull(caller);
         AdoptPre memory p = _adoptPre(ids);
+        _endPull(pull);
+        vm.recordLogs();
         _att(a);
-        vm.prank(_actor(aSeed >> 32));
+        vm.prank(caller);
         try core.adopt(ids) {
             if (want != bytes4(0)) _flag(V_MODEL, "adopt took an id that must be refused");
             else _ok(a);
+            _pullChecks(pull, vm.getRecordedLogs());
+            _adoptPost(p, ids, want == bytes4(0));
+            _rsCheck(p.rs, 0);
         } catch (bytes memory why) {
             if (want == bytes4(0) || bytes4(why) != want) _unexpected(a, why);
-            _failed(p.b0, p.rs.pot, p.rs.rate, "adopt");
+            _failed(pull.bal0, pull.pot0, pull.rate0, "adopt");
+            _adoptPost(p, ids, false);
+            _rsCheck(pull.rs0, 0);
         }
-        _adoptPost(p, ids, want == bytes4(0));
-        _rsCheck(p.rs, 0);
     }
 
     struct AdoptPre {
@@ -2084,6 +2092,12 @@ abstract contract HandlerBase is Test {
     /// credit has the modelled record (and enters the ghost), and the rate state, the window, the pots and the balance
     /// are as before
     function _adoptPost(AdoptPre memory p, uint256[] memory ids, bool passes) internal {
+        // a refused call reverted whole, pull included: the state is the one before the pull, which `_failed` checks
+        if (!passes && p.size0 != core.pileSize(Lane.Eth)) {
+            _flag(V_MODEL, "a refused adopt changed the eth pile");
+            return;
+        }
+        if (!passes) return;
         uint256 grew = core.pileSize(Lane.Eth) - p.size0;
         if (grew != (passes ? ids.length : 0)) {
             _flag(V_MODEL, "adopt changed the eth pile by another number than its credits");

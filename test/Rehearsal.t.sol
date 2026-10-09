@@ -71,7 +71,6 @@ contract RehearsalTest is Test, ProdDeployer {
 
         _preflight();
         _deploy();
-        lensAt = d.lens;
         postflightAs(c, d.core, deployer);
         _print("postflight after the launch");
         assertEq(_failedNames(), "", "postflight");
@@ -148,7 +147,8 @@ contract RehearsalTest is Test, ProdDeployer {
             stepGas[0] + _createGas("ControllerV1.sol:ControllerV1") + 512,
             stepGas[1] + _createGas("FeeRouter.sol:FeeRouter") + 512,
             stepGas[2] + _createGas("Core.sol:Core") + 16_384,
-            stepGas[8] + _createGas("CoreLens.sol:CoreLens") + 512,
+            // sent through the deterministic deployer: the measured call includes the create and the code deposit
+            stepGas[8] + 21_000 + _calldataGas(abi.encodePacked(LENS_SALT, vm.getCode("CoreLens.sol:CoreLens"), abi.encode(d.core))) + 512,
             stepGas[3] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
@@ -179,6 +179,9 @@ contract RehearsalTest is Test, ProdDeployer {
             assertLt(txGas[i], TX_GAS_CAP, string.concat("over the per transaction gas cap: ", names[i]));
         }
         uint256 fee = IArtCoinsFactoryV2(c.stack.factory).deployFee();
+        // the preflight balance row prices the deploy at this many gas: the measured total must fit under it
+        assertLe(total, DEPLOY_GAS_ESTIMATE, "the measured deploy gas is above DEPLOY_GAS_ESTIMATE");
+        console.log("DEPLOY_GAS_ESTIMATE", DEPLOY_GAS_ESTIMATE);
         console.log("library at", lib);
         console.log("total deploy gas, ten transactions", total);
         console.log("per transaction gas cap", TX_GAS_CAP);
@@ -300,7 +303,8 @@ contract RehearsalTest is Test, ProdDeployer {
     /// finds a real credit held by an account without code and sells it into the bid
     function _sellRealCredit(ICore core) internal {
         assertGt(core.ethPot(), 0, "the pot holds the fees");
-        assertGe(core.ethRate(), c.rateStart, "the rate never starts below the config start");
+        // the price state starts at the config rate. the read is clamped by a thin pot
+        assertGe(core.ethPrice(), c.rateStart, "the price state never starts below the config start");
         ICredits credits = ICredits(Mainnet.CREDITS);
         uint256 cap = core.ethPot() * 2000 / 10_000;
         for (uint256 id = 1; id < 2000; ++id) {

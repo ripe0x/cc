@@ -60,6 +60,7 @@ abstract contract SystemDeployer is LaunchChecks {
 
     function _newController(address core, LaunchConfig memory c) internal virtual returns (address);
 
+    /// @notice creates the lens of `core` at `lensAddress(core)`: CREATE2 through the deterministic deployer with `LENS_SALT`
     function _newLens(address core) internal virtual returns (address);
 
     function _newCore(address owner, address coin, address controller, LaunchConfig memory c)
@@ -95,6 +96,7 @@ abstract contract SystemDeployer is LaunchChecks {
         g = gasleft();
         d.lens = _newLens(d.core);
         _step(8, g);
+        if (d.lens != lensAddress(d.core)) revert AddressMismatch("lens");
 
         d.coin = _launch(c, coinAt, d.router, coreAt);
         d.launchKey = poolKeyOf(d.coin, c.stack);

@@ -38,7 +38,6 @@ contract Deploy is Script, NewProd {
         // the same read back as the Postflight script, on the result of the run. a failure reverts the simulation, so
         // nothing is sent. the split start is still zero here (a warning): Resume sets it from the mined launch time
         splitStartPending = true;
-        lensAt = d.lens;
         postflightAs(c, d.core, deployer);
         _print("postflight of the simulated launch");
         _require();

@@ -89,6 +89,11 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
     /// @dev the first `n` of the transactions, by hand, as the deployer: 1 library, 2 controller, 3 router, 4 core,
     /// 5 launch, 6 router engine, 7 router payees, 8 router split start from the mined launch time (the tip is the router
     /// default, no transaction)
+    /// @dev the lens is sent between the core and the launch, as `deploySystem` does. `skipLens` leaves it out of a
+    /// deploy that went on to the launch, `lensEarly` sends it in a deploy that stopped right after it
+    bool internal skipLens;
+    bool internal lensEarly;
+
     function _steps(uint256 n) internal returns (address core, address coin, address router) {
         scriptMode = true;
         if (n >= 1) _sendLibrary();
@@ -102,6 +107,7 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         if (n >= 2) controller = address(Prod.newController(core, base.sale));
         if (n >= 3) address(Prod.newRouter(deployer));
         if (n >= 4) Prod.newCore(owner, coinAt, controller, base.stack, base.rateStart, base.settings);
+        if ((n >= 5 && !skipLens) || (n >= 4 && lensEarly)) Prod.newLens(core, LENS_SALT, CREATE2_DEPLOYER);
         if (n >= 5) coin = _launch(base, coinAt, router, core);
         IFeeRouter r = IFeeRouter(payable(router));
         if (n >= 6) r.setEngine(core);
@@ -210,6 +216,37 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         postflightAs(base, core, deployer);
         (list,) = _failed();
         assertEq(list, row, "early fails too");
+    }
+
+    /// a run that stopped right after the core: the lens is the next transaction, then the launch
+    function test_resumeCreatesAMissingLensBeforeTheLaunch() public {
+        (address core,,) = _steps(4);
+        address lensAt = lensAddress(core);
+        assertTrue(lensAt != address(0) && lensAt.code.length == 0, "no lens yet");
+        _assertDone(core, Stage.CoreOnly);
+        assertGt(lensAt.code.length, 0, "the lens sits at the derived address");
+    }
+
+    /// a run that stopped after the lens and before the launch finds the lens and leaves it as it is
+    function test_resumeKeepsTheLensItFinds() public {
+        lensEarly = true;
+        (address core,,) = _steps(4);
+        address lensAt = lensAddress(core);
+        assertGt(lensAt.code.length, 0);
+        bytes32 hash = lensAt.code.length == 0 ? bytes32(0) : keccak256(lensAt.code);
+        _assertDone(core, Stage.CoreOnly);
+        assertEq(keccak256(lensAt.code), hash, "the lens is the one that was there");
+    }
+
+    /// a system launched without a lens, with the deployer nonce moved on: the lens is created at the same address
+    /// because the address depends on the Core only
+    function test_resumeCreatesTheLensAfterTheLaunchAndTheNonceMovedOn() public {
+        skipLens = true;
+        (address core,,) = _steps(5);
+        address lensAt = lensAddress(core);
+        assertEq(lensAt.code.length, 0);
+        _assertDone(core, Stage.Launched);
+        assertGt(lensAt.code.length, 0);
     }
 
     function test_resumeAfterTheLaunch() public {

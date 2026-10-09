@@ -363,10 +363,13 @@ library CoreLib {
 
     /// @notice puts credits the Core holds without a record into the eth pile, anyone may call. The cost basis of a
     /// credit is the price state per whole point at `block.timestamp` (`climb`, before the clamp, no checkpoint is
-    /// written) times the score of the credit, at least 1 wei. Nothing is paid, and the rate state, the hourly window
-    /// and the pots are unchanged. `acquiredAt` is the current time. Reverts `Empty` for an empty list, `ZeroId` for id
-    /// zero, `InPile` for a credit that is in a pile (the same id twice included), and `NotHolder` for a credit
-    /// the Core does not hold. The Core forwards its call here untouched, under its own reentrancy guard
+    /// written) times the score of the credit, at least 1 wei. The price state is what the engine pays with a funded
+    /// pot, so statements built from adopted credits are priced at that level; the clamp of a thin pot would book a
+    /// basis of 1 wei. A donor who inflates the basis of a statement gives credits away. The basis is booked and the
+    /// eth pile grows: the rate state, the hourly window and the pots keep their values. `acquiredAt` is the current
+    /// time. Reverts `Empty` for an empty list, `ZeroId` for id zero, `InPile` for a credit that is in a pile (the same
+    /// id twice included), and `NotHolder` for a credit the Core does not hold. The Core pulls the fee router, then
+    /// forwards its call here untouched, under its own reentrancy guard
     function adopt(uint256[] calldata ids) external {
         if (ids.length == 0) revert Empty();
         CoreState storage c = state();

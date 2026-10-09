@@ -339,30 +339,35 @@ contract ConfigTest is Fixture {
     }
 
     function test_postflightChecksTheLens() public {
-        lensAt = address(lens);
+        address lensAt = lensAddress(address(core));
+        assertEq(lensAt, address(lens), "the lens sits at the CREATE2 address of the Core");
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "", "the lens of the deploy passes");
-        // an address without code fails the code row only
-        lensAt = address(0xBEEF);
-        postflightAs(lc, address(core), owner);
-        assertEq(_failedNames(), "code: lens");
         // a lens that points at another router, house or Core fails its row
-        lensAt = address(lens);
-        vm.mockCall(address(lens), abi.encodeWithSignature("ROUTER()"), abi.encode(address(0x1234)));
+        vm.mockCall(lensAt, abi.encodeWithSignature("ROUTER()"), abi.encode(address(0x1234)));
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "lens: router is the Core fee source");
         vm.clearMockedCalls();
-        vm.mockCall(address(lens), abi.encodeWithSignature("HOUSE()"), abi.encode(address(0x1234)));
+        vm.mockCall(lensAt, abi.encodeWithSignature("HOUSE()"), abi.encode(address(0x1234)));
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "lens: house is the Core house");
         vm.clearMockedCalls();
-        vm.mockCall(address(lens), abi.encodeWithSignature("CORE()"), abi.encode(address(0x1234)));
+        vm.mockCall(lensAt, abi.encodeWithSignature("CORE()"), abi.encode(address(0x1234)));
         postflightAs(lc, address(core), owner);
         assertEq(_failedNames(), "lens: core");
         vm.clearMockedCalls();
-        // no lens given: the rows are absent
-        lensAt = address(0);
+        // a missing lens fails the code row only
+        bytes memory code = lensAt.code;
+        vm.etch(lensAt, "");
         postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), "code: lens");
+        // another bytecode at the derived address fails the size row
+        vm.etch(lensAt, hex"6000");
+        postflightAs(lc, address(core), owner);
+        assertEq(_failedNames(), "lens: code size is the compiled CoreLens");
+        vm.etch(lensAt, code);
+        // the rows need no deployer
+        postflightAs(lc, address(core), address(0));
         assertEq(_failedNames(), "");
     }
 

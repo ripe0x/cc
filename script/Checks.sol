@@ -25,7 +25,9 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev the per transaction gas cap of the target chain (EIP 7825, 2^24). the launch is simulated with what is left of
     /// it, so a launch that does not fit fails the simulation row, and a collision cannot burn more than that
     uint256 internal constant TX_GAS_CAP = 16_777_216;
-    uint256 internal constant DEPLOY_GAS_ESTIMATE = 15_500_000;
+    /// @dev the gas of the ten deploy transactions as the launch rehearsal measures it (18,596,754) with 3 percent margin.
+    /// `test/Rehearsal.t.sol` asserts that the measured total stays under it
+    uint256 internal constant DEPLOY_GAS_ESTIMATE = 19_200_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
     uint256 internal constant CORE_SUPPLY = 1_000_000_000e18;
     /// @dev credit 1 exists and its score is a pure function of its seed and timestamp
@@ -57,8 +59,6 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev supplies at block 26127622. both only grow
     uint256 internal constant CREDITS_SUPPLY_MIN = 122_154;
     uint256 internal constant STATEMENTS_SUPPLY_MIN = 148;
-    /// @dev the deterministic deployer that `forge script` sends the library through (CREATE2, salt zero)
-    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     /// @notice true when running under `forge script`. a test overrides it to rehearse the script behaviour
     function _scriptContext() internal view virtual returns (bool) {

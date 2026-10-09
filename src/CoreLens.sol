@@ -19,7 +19,9 @@ contract CoreLens {
 
     /// the held statement `id` of the Core. `listed` is true while its auction is live on the house (no bid, a bid
     /// running, or ended and unsettled). `status` is `Core.StatementStatus`. `askingPrice` is the controller price now in
-    /// wei, zero for an exit lane statement, for one that is not listed and when the controller does not answer
+    /// wei while a buyer can buy at it: an eth lane statement with status Listed (live auction, no bid). it is 0 in
+    /// every other status, for an exit lane statement and when the controller does not answer. `topBid`, `endTime` and
+    /// `status` describe the other states
     struct StatementView {
         uint256 id;
         Lane lane;
@@ -71,6 +73,8 @@ contract CoreLens {
 
     uint256 private constant PPM = 1_000_000;
     uint256 private constant NEXT_PAGE_GAS = 500_000;
+    /// the answer size of `nextPage` that the Core requires: ready flag, 80 ids and the format
+    uint256 private constant NEXT_PAGE_BYTES = (80 + 2) * 32;
     uint256 private constant ASK_GAS = 200_000;
 
     ICore public immutable CORE;
@@ -153,11 +157,12 @@ contract CoreLens {
         toCore = amount - tip - toPayees;
     }
 
-    /// whether the controller answers `nextPage` for `lane` with ready set, read with the gas the Core allows it. a
-    /// controller without code, a revert and a short answer read as not ready
+    /// whether the controller answers `nextPage` for `lane` with ready set, read with the gas and the answer size the
+    /// Core requires of it in `compose`. a controller without code, a revert and an answer shorter than
+    /// `NEXT_PAGE_BYTES` read as not ready
     function _pageReady(address ctl, Lane lane) private view returns (bool ready) {
         (bool ok, bytes memory out) = ctl.staticcall{gas: NEXT_PAGE_GAS}(abi.encodeCall(IControllerV1.nextPage, (lane)));
-        ready = ok && out.length >= 32 && abi.decode(out, (uint256)) == 1;
+        ready = ok && out.length >= NEXT_PAGE_BYTES && abi.decode(out, (uint256)) == 1;
     }
 
     /// the asking price of statement `sid` from the controller, zero when it does not answer with one word
@@ -191,7 +196,7 @@ contract CoreLens {
             v.listed = status == ICore.StatementStatus.Listed || status == ICore.StatementStatus.Bid
                 || status == ICore.StatementStatus.Ended;
         } catch {}
-        if (v.lane == Lane.Eth && listedAt != 0) {
+        if (v.lane == Lane.Eth && listedAt != 0 && v.status == uint8(ICore.StatementStatus.Listed)) {
             v.askingPrice = _askingPrice(ctl, sid);
         }
     }

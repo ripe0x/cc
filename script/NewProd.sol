@@ -21,7 +21,7 @@ abstract contract NewProd is SystemDeployer {
     }
 
     function _newLens(address core) internal virtual override returns (address) {
-        return address(new CoreLens(core));
+        return address(new CoreLens{salt: LENS_SALT}(core));
     }
 
     function _newCore(address owner, address coin, address controller, LaunchConfig memory c)

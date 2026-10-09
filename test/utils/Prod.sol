@@ -5,7 +5,6 @@ import {Vm} from "forge-std/Vm.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
-import {ICoreLens} from "../../src/interfaces/ICoreLens.sol";
 import {Stack, Settings, Sale} from "../../src/interfaces/Interfaces.sol";
 
 /// @notice creates the production contracts from their via_ir artifacts. the tests never import the production sources
@@ -34,7 +33,11 @@ library Prod {
         return IFeeRouter(payable(vm.deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
     }
 
-    function newLens(address core) internal returns (ICoreLens) {
-        return ICoreLens(vm.deployCode("CoreLens.sol:CoreLens", abi.encode(core)));
+    /// @dev creates the lens through the deterministic deployer, as `forge script` does with `new CoreLens{salt}`
+    function newLens(address core, bytes32 salt, address create2Deployer) internal returns (address lens) {
+        bytes memory init = abi.encodePacked(vm.getCode("CoreLens.sol:CoreLens"), abi.encode(core));
+        (bool ok, bytes memory out) = create2Deployer.call(abi.encodePacked(salt, init));
+        require(ok && out.length == 20, "lens create2 failed");
+        lens = address(bytes20(out));
     }
 }

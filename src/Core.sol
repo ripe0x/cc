@@ -418,7 +418,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// wei per whole point of the price state now: `rateAtCheckpoint` climbed lazily and bounded by the ceiling and
-    /// `rateCap`, before the clamp that `ethRate` applies. the basis of an adopted credit is this price times its score
+    /// `rateCap`, before the clamp that `ethRate` applies. the climb also stops at the clamp, so with an empty pot the
+    /// price state does not climb. the basis of an adopted credit is this price times its score
     function ethPrice() external view returns (uint256 price) {
         (price,) = _climb();
     }
@@ -1158,12 +1159,16 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         }
     }
 
-    /// puts credits the core holds without a record into the eth pile, anyone may call. the cost basis of each is the
-    /// price state per point now (`ethPrice`) times the score of the credit, at least 1 wei. nothing is paid and the
-    /// rate state, the hourly room and the pots are unchanged. reverts for a credit that is in a pile (`InPile`), that
-    /// the core does not hold (`NotHolder`), for the zero id (`ZeroId`) and for an empty list (`Empty`). logs
-    /// `CreditAdopted`. the body is `CoreLib.adopt`, called with the calldata untouched
+    /// puts credits the core holds without a record into the eth pile, anyone may call. the fee router is pulled first,
+    /// like at every door that reads the pot, so pending fee eth is booked before the price is read. the cost basis of
+    /// each credit is the price state per point (`ethPrice`) times the score of the credit, at least 1 wei. the price
+    /// state is the figure the engine pays with a funded pot, so a statement built from adopted credits is priced at
+    /// that level; the clamp of a thin pot would book a basis of 1 wei. the basis is booked and the eth pile grows: eth,
+    /// the rate state, the hourly room and the pots keep their values. a donor who inflates the basis of a statement
+    /// gives credits away. reverts `InPile`, `NotHolder`, `ZeroId` and `Empty`. logs `CreditAdopted`. the body is
+    /// `CoreLib.adopt`, called with the calldata untouched
     function adopt(uint256[] calldata) external nonReentrant {
+        _pullFees();
         _toLib();
     }
 
