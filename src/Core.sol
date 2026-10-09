@@ -33,7 +33,8 @@ import {SettingsStore} from "./lib/SettingsStore.sol";
 import {RateStore} from "./lib/RateStore.sol";
 
 /// custody and every rule of the credits engine. the owner sets the controller, the exit module and the target list at
-/// once, and can lock each of the three for good (docs/ARCHITECTURE.md).
+/// once, can set a successor that receives the assets on `migrate`, and can close each of the controller, the exit
+/// module, the targets and the successor door with a one way lock (docs/ARCHITECTURE.md).
 /// credits and statements sent to the core outside its doors are not tracked and stay in the core.
 /// the pool's bounty recipient is the fee router, which flushes the fee eth here: `receive()` books eth from the fee
 /// source (the router) into the pot.
@@ -92,7 +93,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error NoExitModule();
     error ExitTokenChanged();
     error TooEarly();
-    /// the door `what` ("controller", "exitModule" or "targets") was locked for good by the owner
+    /// the door `what` ("controller", "exitModule" or "targets") was locked by the owner
     error Locked(bytes32 what);
     error OnlyController();
     error OnlyPendingOwner();
@@ -126,6 +127,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error NotHolder();
     /// `migrate` with no successor set
     error NoSuccessor();
+    /// `setSuccessor` with the core or a contract the core works with
+    error BadSuccessor(address who);
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -279,7 +282,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public xStartPrice;
     uint64 public xStartTime;
 
-    /// the contract `migrate` sends the assets to, and whether `setSuccessor` is closed for good
+    /// the contract `migrate` sends the assets to, and whether `setSuccessor` is closed
     address public successor;
     bool public successorLocked;
 
@@ -1066,7 +1069,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         emit TargetAdded(t);
     }
 
-    /// the three one way locks. each is irreversible. the settings and the controller's own sale settings stay open
+    /// the one way locks. each is irreversible. the settings and the controller's own sale settings stay open
     function lockController() external onlyOwner {
         controllerLocked = true;
         emit ControllerLocked();
@@ -1096,20 +1099,21 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// sends an ERC721 token the core holds to `to` with `transferFrom`: a credit only while it is not in a pile, a
     /// statement only while the core has no record of it, any other ERC721 freely. owner only and guarded, both checked
-    /// by the library, to which the call is handed untouched. `ownerOf` of the token must answer with the core, so
-    /// the call reaches no ERC20, no coin and no exit token. logs `NftRescued`
+    /// by the library, to which the call is handed untouched. a token whose `ownerOf(id)` does not answer with the
+    /// core is refused. logs `NftRescued`
     function rescueNft(address, uint256, address) external {
         _toLib();
     }
 
     /// sets the successor that `migrate` sends the assets to. the zero address means no migration. it must have code.
-    /// reverts `Locked("successor")` after `lockSuccessor`. owner only, checked by the library, to which the call is
-    /// handed untouched. logs `SuccessorSet`
+    /// reverts `Locked("successor")` after `lockSuccessor`, and `BadSuccessor` for the core, the exit module, the exit
+    /// token, the house, the fee source, the coin, Credits and Statements. owner only, checked by the library, to which
+    /// the call is handed untouched. logs `SuccessorSet`
     function setSuccessor(address) external {
         _toLib();
     }
 
-    /// closes `setSuccessor` for good, one way. allowed while the successor is zero, which disables `migrate` for good.
+    /// closes `setSuccessor`, one way. allowed while the successor is zero, which disables `migrate`.
     /// logs `SuccessorLocked`
     function lockSuccessor() external {
         _toLib();
@@ -1117,8 +1121,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// moves what the core tracks to the successor, in batches: the eth pots, the exit token pots, up to `maxCredits`
     /// credits from the head of each pile and up to `maxStatements` held statements. callable again until nothing is
-    /// left. a statement with a live bid on the house, or a sold one not yet settled by `syncStatement`, is skipped and
-    /// counted in `Migrated`. owner only and guarded, both checked by the library, to which the call is handed
+    /// left. the statement scan stops after `maxStatements` moved or `maxStatements` skipped. a statement with a bid on
+    /// the house, a sold one not yet settled by `syncStatement`, or one the house will not return is skipped and
+    /// counted in `Migrated`. the hourly spend window closes with the eth pot. owner only and guarded, both checked by the library, to which the call is handed
     /// untouched. reverts `NoSuccessor` while the successor is zero
     function migrate(uint256, uint256) external {
         _toLib();

@@ -949,14 +949,14 @@ abstract contract HandlerOwner is HandlerHouse {
     }
 
     /// the statements the scan moves and skips, from the ghost: the scan goes from the end of the held list, a move swaps
-    /// the last entry into its place, and stops after `max` moves
+    /// the last entry into its place, and stops after `max` moves or `max` skips
     function _migScan(MigPre memory q) internal view returns (uint256[] memory moved, uint256 skipped) {
         uint256[] memory h = q.statements;
         uint256 n = h.length;
         moved = new uint256[](q.maxStatements < n ? q.maxStatements : n);
         uint256 k;
         uint256 i = n;
-        while (i != 0 && k < q.maxStatements) {
+        while (i != 0 && k < q.maxStatements && skipped < q.maxStatements) {
             --i;
             SG storage g = _sg[h[i]];
             bool ok = g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
@@ -976,6 +976,12 @@ abstract contract HandlerOwner is HandlerHouse {
     function _migPost(MigPre memory q, address to) internal {
         (uint256[] memory moved, uint256 skipped) = _migScan(q);
         // eth and exit token: the trackers went to the successor whole and nothing else moved
+        // a migration that moved eth closed the hourly spend window, so the ghost window opens on the next spend
+        if (q.eth != 0) {
+            gWinStart = 0;
+            gWinPot = 0;
+            gWinSpent = 0;
+        }
         _eth(q.balance, q.eth, 0, "migrate");
         _x(q.xBalance, q.x, 0, "migrate");
         if (to.balance != q.sinkEth + q.eth) _flag(V_OWNER, "the successor did not get the eth pots");

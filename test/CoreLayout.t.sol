@@ -26,7 +26,26 @@ contract CoreLayoutTest is Fixture {
 
     function test_OK_scalarFieldsSitWhereTheMirrorSays() public {
         _enterPhase2();
-        _fillEthPile(3);
+        // the sale opens the hourly window on the pot it finds and spends the cost bases of the three credits in it
+        _fundPot(3 ether);
+        uint256[] memory sold = _credits(seller, 3);
+        uint256 potBefore = core.ethPot();
+        vm.prank(seller);
+        core.sellForEth(sold);
+        uint256 spent;
+        for (uint256 i; i < 3; ++i) {
+            (,, uint256 cost,) = core.creditInfo(sold[i]);
+            spent += cost;
+        }
+        // xFunded is true: a large exit token balance is booked into the exit pot, which funds the bid
+        xt.mint(address(core), 1_000_000_000e18);
+        core.skim();
+        vm.startPrank(owner);
+        core.addTarget(address(0xA110C));
+        vm.stopPrank();
+        assertTrue(core.allowedTarget(address(0xA110C)), "setup: the target is allowed");
+        assertEq(uint256(vm.load(address(core), keccak256(abi.encode(address(0xA110C), uint256(3))))), 1, "allowedTarget");
+        assertEq(uint256(vm.load(address(core), keccak256(abi.encode(address(0xA110D), uint256(3))))), 0, "unset target");
         vm.prank(owner);
         core.transferOwnership(address(0xBEEF));
         vm.startPrank(owner);
@@ -53,8 +72,9 @@ contract CoreLayoutTest is Fixture {
         assertEq(_field(11, 0, 8), core.checkpointTime(), "checkpointTime");
         assertEq(_field(11, 8, 8), core.lastFillTime(), "lastFillTime");
         assertEq(_field(11, 16, 8), block.timestamp, "windowStart");
-        assertGt(_field(12, 0, 32), 0, "windowPot");
-        assertGt(_field(13, 0, 32), 0, "windowSpent");
+        assertEq(_field(12, 0, 32), potBefore, "windowPot");
+        assertEq(_field(13, 0, 32), spent, "windowSpent");
+        assertEq(_field(15, 8, 1), 1, "xFunded is true");
         assertEq(_field(16, 0, 32), core.lastBuybackBlock(), "lastBuybackBlock");
         assertEq(_field(17, 0, 32), core.overprintDay(), "overprintDay");
         assertEq(_field(18, 0, 32), core.overprintCount(), "overprintCount");
@@ -90,6 +110,7 @@ contract CoreLayoutTest is Fixture {
             uint256 base = _mapSlot(ids[i], S_CREDITS);
             (bool inPile, Lane lane, uint256 cost, uint64 at) = core.creditInfo(ids[i]);
             assertEq(uint256(vm.load(address(core), bytes32(base))), cost, "credit cost");
+            assertEq(uint256(vm.load(address(core), bytes32(base + 1))), i == 0 ? 0 : ids[i - 1], "credit prev");
             assertEq(uint256(vm.load(address(core), bytes32(base + 2))), core.pileNext(ids[i]), "credit next");
             uint256 word = uint256(vm.load(address(core), bytes32(base + 3)));
             assertEq(word & type(uint64).max, at, "credit acquiredAt");
@@ -103,6 +124,12 @@ contract CoreLayoutTest is Fixture {
         assertEq(uint256(vm.load(address(core), bytes32(sbase))), cost, "statement cost");
         uint256 sword = uint256(vm.load(address(core), bytes32(sbase + 2)));
         assertEq(sword & type(uint64).max, listedAt, "statement listedAt");
+        uint256[] memory held_ = core.heldStatements();
+        uint256 at;
+        for (uint256 i; i < held_.length; ++i) {
+            if (held_[i] == c.sid) at = i;
+        }
+        assertEq((sword >> 64) & type(uint64).max, at, "statement slot");
         assertEq((sword >> 128) & 0xff, uint256(uint8(lane)), "statement lane");
         assertEq((sword >> 136) & 0xff, held ? 1 : 0, "statement held");
         assertEq((sword >> 144) & 0xff, 1, "statement listed");
@@ -114,5 +141,14 @@ contract CoreLayoutTest is Fixture {
             c.sid,
             "first held id"
         );
+        // a second statement sits at index 1 of the held list, so a wrong offset of `slot` cannot read as zero
+        _fillEthPile(80);
+        uint256 second = STATEMENTS.supply() + 1;
+        vm.fee(composeBasefee);
+        vm.prank(keeper);
+        core.compose();
+        uint256 sword2 = uint256(vm.load(address(core), bytes32(_mapSlot(second, S_STATEMENTS) + 2)));
+        assertEq(core.heldStatements()[1], second, "the second statement is second in the list");
+        assertEq((sword2 >> 64) & type(uint64).max, 1, "statement slot of the second statement");
     }
 }

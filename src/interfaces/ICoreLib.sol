@@ -7,6 +7,7 @@ import {Lane, Settings} from "./Interfaces.sol";
 interface ICoreLib {
 
     error BadSetting(bytes32 field);
+    error BadSuccessor(address who);
     error BadSwap();
     error CallFailed();
     error Empty();

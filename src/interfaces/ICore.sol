@@ -29,6 +29,7 @@ interface ICore {
     error BadSetting(bytes32 field);
     error BadStack();
     error BadStatement();
+    error BadSuccessor(address who);
     error BadSwap();
     error BelowFloor();
     error CallFailed();

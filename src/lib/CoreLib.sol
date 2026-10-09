@@ -127,6 +127,8 @@ library CoreLib {
     error Locked(bytes32 what);
     error NoCode(address who);
     error NoSuccessor();
+    /// the successor is the Core or a contract the Core works with
+    error BadSuccessor(address who);
     error CallFailed();
     event SuccessorSet(address successor);
     event SuccessorLocked();
@@ -325,7 +327,8 @@ library CoreLib {
 
     /// @notice sends coin the Core holds to `to`. the Core's `rescueCoin` forwards its call here untouched, so the owner
     /// check and the reentrancy guard are here: `msg.sender` is the caller of the Core and the guard is the Core's own
-    /// (solady's storage guard, the same slot and values: a nonzero value other than the address is "free")
+    /// (solady's storage guard, the same slot: the word holds the Core's address while a guarded call runs and the
+    /// library's `codesize()` after it, and any nonzero value other than the Core's address counts as free)
     function rescueCoin(address to, uint256 amount) external {
         _onlyOwner();
         if (to == address(0)) revert ZeroAddress();
@@ -358,17 +361,26 @@ library CoreLib {
     }
 
     /// @notice sets the successor to which `migrate` sends the assets. the zero address means no migration. reverts
-    /// after `lockSuccessor`. the Core forwards its call here untouched
+    /// after `lockSuccessor`, and for the Core itself, the exit module, the exit token, the house, the fee source, the
+    /// coin, Credits and Statements. the Core forwards its call here untouched
     function setSuccessor(address next) external {
         _onlyOwner();
         CoreState storage c = state();
         if (c.successorLocked) revert Locked("successor");
-        if (next != address(0) && next.code.length == 0) revert NoCode(next);
+        if (next != address(0)) {
+            if (next.code.length == 0) revert NoCode(next);
+            ICoinOf core = ICoinOf(address(this));
+            if (
+                next == address(this) || next == c.exitModule || next == c.exitToken || next == core.HOUSE()
+                    || next == core.FEE_SOURCE() || next == core.COIN() || next == address(CREDITS)
+                    || next == address(STATEMENTS)
+            ) revert BadSuccessor(next);
+        }
         c.successor = next;
         emit SuccessorSet(next);
     }
 
-    /// @notice closes `setSuccessor` for good. allowed while the successor is zero, which disables `migrate` for good
+    /// @notice closes `setSuccessor`. allowed while the successor is zero, which disables `migrate`
     function lockSuccessor() external {
         _onlyOwner();
         state().successorLocked = true;
@@ -380,11 +392,15 @@ library CoreLib {
     /// eth: `ethPot + ethToBuyback`, by one plain call, the trackers zeroed. eth above the trackers stays.
     /// credits: up to `maxCredits` from the head of each pile, by `transferFrom`, the pile membership cleared (the
     /// cost, lane and arrival time of the record stay).
-    /// statements: scanning the held list from its end, up to `maxStatements` are moved. a listed statement is taken
-    /// back from the house first. a statement with a live bid, or a sold one whose record is not settled yet, is
-    /// skipped and counted. the record of a moved statement is deleted.
+    /// statements: the held list is scanned from its end, and the scan stops after `maxStatements` moved or after
+    /// `maxStatements` skipped, whichever comes first, so a call makes at most 2 * `maxStatements` house reads. a listed
+    /// statement is taken back from the house first. a statement with a bid, a sold one whose record is not settled
+    /// yet, and one the house refuses to return are skipped and counted. the record of a moved statement is deleted.
+    /// when `maxStatements` or more statements at the end of the list are skipped, the scan never reaches the ones
+    /// before them, so `maxStatements` must exceed the number of skipped statements.
     /// exit token: `xPot + xToBuyback`, by `transfer`, the trackers zeroed. the coin stays.
-    /// the rates are checkpointed before a pot is zeroed. a call with nothing left to move logs zeros
+    /// the rates are checkpointed before a pot is zeroed. the hourly spend window is closed with the eth pot. a call with
+    /// nothing left to move logs zeros
     function migrate(uint256 maxCredits, uint256 maxStatements) external {
         _onlyOwner();
         CoreState storage c = state();
@@ -406,6 +422,10 @@ library CoreLib {
         c.checkpointTime = uint64(block.timestamp);
         c.ethPot = 0;
         c.ethToBuyback = 0;
+        // the hourly spend window of the old pot is closed: the next spend opens one on the pot it finds
+        c.windowStart = 0;
+        c.windowPot = 0;
+        c.windowSpent = 0;
         (bool ok,) = to.call{value: eth}("");
         if (!ok) revert CallFailed();
     }
@@ -455,7 +475,7 @@ library CoreLib {
     {
         address house = ICoinOf(address(this)).HOUSE();
         uint256 i = c.heldIds.length;
-        while (i != 0 && moved < max) {
+        while (i != 0 && moved < max && skipped < max) {
             --i;
             uint256 sid = c.heldIds[i];
             if (!_release(house, c.statements[sid], sid)) {
@@ -480,8 +500,10 @@ library CoreLib {
             if (!ok) return false;
             if (w[W_OWNER] != 0) {
                 if (w[W_FIRST] != 0) return false;
-                IAuctionHouse(house).cancelAuction(st.auctionId);
-                return true;
+                try IAuctionHouse(house).cancelAuction(st.auctionId) {}
+                catch {
+                    return false;
+                }
             }
         }
         return holderOf(sid) == address(this);
@@ -507,8 +529,8 @@ library CoreLib {
         if (msg.sender != state().owner) revert OnlyOwner();
     }
 
-    /// takes the reentrancy guard of the Core (solady's storage guard: the same slot and values, a nonzero value other
-    /// than the address is "free")
+    /// takes the reentrancy guard of the Core (solady's storage guard: the word holds the Core's address while a guarded
+    /// call runs and the library's `codesize()` after it; any nonzero value other than the Core's address counts as free)
     function _enter() private {
         assembly {
             if eq(sload(0x929eee149b4bd21268), address()) {
@@ -646,4 +668,5 @@ interface IRouterFlush {
 interface ICoinOf {
     function COIN() external view returns (address);
     function HOUSE() external view returns (address);
+    function FEE_SOURCE() external view returns (address);
 }

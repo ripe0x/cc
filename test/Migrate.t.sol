@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Fixture} from "./utils/Fixture.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane} from "../src/interfaces/Interfaces.sol";
+import {IAuctionHouse} from "../src/interfaces/AuctionHouse.sol";
 import {MigrationSink} from "./standins/MigrationSink.sol";
 
 /// `setSuccessor`, `lockSuccessor` and `migrate` of the Core on the fork: the real Core, Credits, Statements, house and
@@ -271,13 +272,16 @@ contract MigrateTest is Fixture {
         // the scan starts at the end of the held list: the exit lane statement is the last one composed
         assertEq(STATEMENTS.ownerOf(w.exitLane), address(sink), "one statement per call");
         assertEq(_heldCount(), 3, "one statement moved");
-        // the scan passes the two skipped statements and moves the listed one in the second call
+        // the scan stops after one skipped statement, so a batch of one never gets past the sold one at the end of the
+        // list. a batch larger than the skipped statements reaches the listed one
         _migrate(1, 1);
+        assertEq(_heldCount(), 3, "the scan stopped at the first skipped statement");
+        _migrate(1, 3);
         assertEq(STATEMENTS.ownerOf(w.listed), address(sink), "the second call moves the next movable statement");
         assertEq(_heldCount(), 2, "two statements stay");
-        assertEq(core.pileSize(Lane.Eth), eth0 - 2);
+        assertEq(core.pileSize(Lane.Eth), eth0 - 3);
         // a call drains the rest of the piles one by one
-        uint256 calls = 2;
+        uint256 calls = 3;
         while (core.pileSize(Lane.Eth) != 0 || core.pileSize(Lane.Exit) != 0) {
             _migrate(1, 1);
             ++calls;
@@ -416,6 +420,101 @@ contract MigrateTest is Fixture {
         _migrate(1000, 1000);
         assertEq(sink.ethReceived(), before + booked, "the new eth did not move");
         _solvent();
+    }
+
+    // ------------------------------------------------------------------ the successor address
+
+    function test_REVERT_theSuccessorIsNotPartOfTheEngine() public {
+        _enterPhase2();
+        address[8] memory bad = [
+            address(core),
+            address(house),
+            address(feeRouter),
+            address(coin),
+            address(CREDITS),
+            address(STATEMENTS),
+            address(mod),
+            address(xt)
+        ];
+        for (uint256 i; i < bad.length; ++i) {
+            vm.expectRevert(abi.encodeWithSelector(ICore.BadSuccessor.selector, bad[i]));
+            vm.prank(owner);
+            core.setSuccessor(bad[i]);
+        }
+        assertEq(core.successor(), address(0), "a refused address was stored");
+    }
+
+    // ------------------------------------------------------------------ the statement scan
+
+    function test_OK_aSoldStatementWithAnUnsettledRecordIsSkipped() public {
+        (uint256 sid,) = _sellStatement(address(0xB1D));
+        _setSuccessor();
+        vm.expectEmit(true, false, false, true, address(core));
+        emit ICore.Migrated(address(sink), core.ethPot() + core.ethToBuyback(), 0, 0, 0, 1);
+        _migrate(10, 10);
+        (bool held,,,) = core.statementInfo(sid);
+        assertTrue(held, "the record of the sale was cleared");
+        assertEq(STATEMENTS.ownerOf(sid), address(0xB1D), "the winner lost the statement");
+        assertEq(_heldCount(), 1);
+    }
+
+    /// the fork holds credits for about six statements, so six listed statements with bids stand for the many
+    function test_OK_theScanStopsAfterMaxStatementsSkipped() public {
+        uint256 n = 6;
+        for (uint256 i; i < n; ++i) {
+            uint256 sid = _listedStatement();
+            _bid(address(uint160(0xB000 + i)), sid, _live(sid).reserve);
+        }
+        assertEq(_heldCount(), n, "setup: six statements");
+        _setSuccessor();
+        // two skipped statements end the scan: two reads of the house, not six
+        vm.expectCall(address(house), abi.encodeWithSelector(IAuctionHouse.getAuction.selector), 2);
+        vm.expectEmit(true, false, false, true, address(core));
+        emit ICore.Migrated(address(sink), core.ethPot() + core.ethToBuyback(), 0, 0, 0, 2);
+        _migrate(0, 2);
+        assertEq(_heldCount(), n, "nothing moved");
+    }
+
+    function test_OK_aBatchLargerThanTheSkippedStatementsReachesTheOnesBehindThem() public {
+        uint256 movable = _listedStatement();
+        uint256 sid = _listedStatement();
+        _bid(address(0xB1D), sid, _live(sid).reserve);
+        _setSuccessor();
+        // one skipped statement at the end, then the movable one
+        vm.expectEmit(true, false, false, true, address(core));
+        emit ICore.Migrated(address(sink), core.ethPot() + core.ethToBuyback(), 0, 1, 0, 1);
+        _migrate(0, 2);
+        assertEq(STATEMENTS.ownerOf(movable), address(sink));
+    }
+
+    // ------------------------------------------------------------------ the hourly window
+
+    function _word(uint256 slot) internal view returns (uint256) {
+        return uint256(vm.load(address(core), bytes32(slot)));
+    }
+
+    function test_OK_aSellAfterAMigrationOpensANewWindow() public {
+        _fundPot(3 ether);
+        uint256[] memory first = _credits(seller, 2);
+        vm.prank(seller);
+        core.sellForEth(first);
+        assertGt(_word(12), 0, "setup: the window has a pot");
+        assertGt(_word(13), 0, "setup: the window has spending");
+        _setSuccessor();
+        _migrate(10, 10);
+        assertEq(_word(11) >> 128, 0, "windowStart");
+        assertEq(_word(12), 0, "windowPot");
+        assertEq(_word(13), 0, "windowSpent");
+        // fees refill the pot and a sale in the same hour spends against the pot it finds
+        _fundPot(1 ether);
+        uint256 pot = core.ethPot();
+        uint256[] memory second = _credits(seller, 1);
+        uint256 price = core.ceilingOf(second[0]);
+        vm.prank(seller);
+        core.sellForEth(second);
+        assertEq(_word(12), pot, "the new window opens on the new pot");
+        assertEq(_word(13), price, "the new window spent the sale");
+        assertEq(_word(11) >> 128, block.timestamp, "the new window starts now");
     }
 
     // ------------------------------------------------------------------ gas
