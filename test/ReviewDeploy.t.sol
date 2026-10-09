@@ -325,9 +325,9 @@ contract ReviewDeployTest is ReviewHarness {
         r.swap{value: 1 ether}(d.launchKey, true, -1 ether, buyer);
         IFeeRouter fr = IFeeRouter(payable(d.router));
         uint256 held = d.router.balance;
-        // 90 points of the buy, of which the part above the 6.9 point baseline goes whole to the bounty leg and 90 percent
-        // of the baseline part (the protocol keeps the rest of the baseline): 0.831 + 0.0621
-        assertApproxEqRel(held, 0.8931 ether, 0.001e18, "the router holds the bounty leg");
+        // 90 points of the buy, of which the part above the 6.9 point baseline goes whole to the bounty leg and 96.38 percent
+        // of the baseline part (the protocol keeps the rest of the baseline): 0.831 + 0.0665022
+        assertApproxEqRel(held, 0.8975022 ether, 0.001e18, "the router holds the bounty leg");
         address keeper2 = makeAddr("review.keeper");
         vm.prank(keeper2);
         fr.flush(keeper2);
@@ -405,10 +405,10 @@ contract ReviewDeployTest is ReviewHarness {
         vm.expectRevert(abi.encodeWithSelector(ConfigReader.ConfigOutOfRange.selector, ".stack.tickSpacing"));
         this.load("test/data/ReviewTruncated.json");
         string memory j = vm.readFile(DEFAULT_CONFIG_FILE);
-        assertEq(this.parse(j).bountyBps, 9000, "the untouched file parses");
+        assertEq(this.parse(j).bountyBps, 9638, "the untouched file parses");
         string[12] memory from = [
-            '"bountyBps": 9000',
-            '"payeePpm": 161031',
+            '"bountyBps": 9638',
+            '"payeePpm": 112778',
             '"tipPpm": 5000',
             '"baselineSkimBps": 6900',
             '"sniperSeconds": 1800',

@@ -51,14 +51,14 @@ contract ConfigTest is Fixture {
         assertEq(abi.encode(f.settings), abi.encode(Mainnet.defaultSettings()), "settings block is the launch values");
         // the launch values of docs/FLOW.md 10.1 and 10.6
         assertEq(f.baselineSkimBps, 6_900);
-        assertEq(f.bountyBps, 9_000);
+        assertEq(f.bountyBps, 9_638);
         assertEq(f.lpFee, 0);
         assertEq(f.maxReferralBps, 0);
         assertEq(f.sniperStartBps, 90_000);
         assertEq(f.sniperSeconds, 1800);
         assertTrue(f.restricted);
         assertEq(f.allowed.length, 0);
-        assertEq(f.payeePpm, 161_031);
+        assertEq(f.payeePpm, 112_778);
         assertEq(f.tipPpm, 5_000);
         assertEq(f.tipCap, 0.005 ether);
         // the v2 stack is not live: its addresses are placeholders the deploy refuses
@@ -274,9 +274,20 @@ contract ConfigTest is Fixture {
             _failedNames(),
             "factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)"
         );
-        // a smaller floor is fine for a 9000 bounty
+        assertEq(
+            _rowDetail("factory: min protocol skim share leaves room for the bounty"),
+            "factory minProtocolSkimShareBps is 1500, above the 362 the bounty 9638 leaves. the factory owner runs setMinProtocolSkimShareBps(362) first"
+        );
+        // the floor of the launch bounty 9638 is 362
         vm.prank(owner);
-        FACTORY.setMinProtocolSkimShareBps(500);
+        FACTORY.setMinProtocolSkimShareBps(363);
+        preflight(lc, d2);
+        assertEq(
+            _failedNames(),
+            "factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)"
+        );
+        vm.prank(owner);
+        FACTORY.setMinProtocolSkimShareBps(362);
         preflight(lc, d2);
         assertEq(_failedNames(), "");
     }

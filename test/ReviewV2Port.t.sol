@@ -143,7 +143,7 @@ contract ReviewSeaportFlushTest is SeaportBase {
 
         uint256 tip = held * feeRouter.tipPpm() / 1e6;
         if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
-        uint256 engine = held - tip - (feeRouter.splitOn() ? held * 161_031 / 1e6 : 0);
+        uint256 engine = held - tip - (feeRouter.splitOn() ? held * 112_778 / 1e6 : 0);
         uint256 pot0 = core.ethPot();
         vm.recordLogs();
         vm.prank(maker);
@@ -206,7 +206,7 @@ contract ReviewSeaportFlushTest is SeaportBase {
         uint256 pot0 = core.ethPot();
         uint256 tip = held * feeRouter.tipPpm() / 1e6;
         if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
-        uint256 shared = feeRouter.splitOn() ? held * 161_031 / 1e6 : 0;
+        uint256 shared = feeRouter.splitOn() ? held * 112_778 / 1e6 : 0;
         uint256 delivered = _flush();
         assertEq(delivered, held - tip - shared, "the engine part of the held fees arrived, exactly");
         uint256 toBuyback = delivered * 5_000 / 10_000;
@@ -354,7 +354,7 @@ contract ReviewRouterGasTest is FeeBase {
         address[] memory who = new address[](1);
         who[0] = address(heavy);
         uint32[] memory ppm = new uint32[](1);
-        ppm[0] = 161_031;
+        ppm[0] = 112_778;
         vm.prank(owner);
         feeRouter.setPayees(who, ppm);
     }

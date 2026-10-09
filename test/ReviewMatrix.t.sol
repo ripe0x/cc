@@ -261,8 +261,8 @@ contract ReviewMatrixConfigTest is ReviewHarness {
             m = _m("router payee ppm 100000 (valid, wrong)", Class.Hash);
             m.c.payeePpm = 100_000;
         } else if (i == 13) {
-            m = _m("router payee ppm 161030 (off by one)", Class.Hash);
-            m.c.payeePpm = 161_030;
+            m = _m("router payee ppm 112777 (off by one)", Class.Hash);
+            m.c.payeePpm = 112_777;
         } else if (i == 14) {
             m = _m("router payee ppm 200000 (the top edge)", Class.Hash);
             m.c.payeePpm = 200_000;
@@ -691,7 +691,7 @@ contract ReviewMatrixStateTest is ReviewHarness {
             (l, w) = ("factory min lp fee 1 (any floor above the config lp fee)", Class.Pre);
             FACTORY.setMinLpFee(1);
         } else if (i == 16) {
-            (l, w) = ("factory min protocol skim share 1500 (bounty 9000 no longer fits)", Class.Pre);
+            (l, w) = ("factory min protocol skim share 1500 (bounty 9638 no longer fits)", Class.Pre);
             FACTORY.setMinProtocolSkimShareBps(1500);
         } else if (i == 17) {
             (l, w) = ("hook disabled on the factory", Class.Pre);

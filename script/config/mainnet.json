@@ -62,7 +62,7 @@
     "positionLower": -175000,
     "positionUpper": 887200,
     "baselineSkimBps": 6900,
-    "bountyBps": 9000,
+    "bountyBps": 9638,
     "maxReferralBps": 0,
     "lpFee": 0,
     "sniperStartBps": 90000,
@@ -77,7 +77,7 @@
   },
   "router": {
     "creatorPayee": "0xCB43078C32423F5348Cab5885911C3B5faE217F9",
-    "payeePpm": 161031,
+    "payeePpm": 112778,
     "tipPpm": 5000,
     "tipCap": 5000000000000000
   }

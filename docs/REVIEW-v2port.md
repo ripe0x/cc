@@ -1,5 +1,7 @@
 # independent review: the v2 port of the credits engine
 
+this review quotes the launch split of its time (bountyBps 9_000, payeePpm 161_031). the current launch split is bountyBps 9_638 and payeePpm 112_778, FLOW 10.9.
+
 reviewer did not write the port. scope: `git diff 0a44fdf HEAD -- src/ script/` (Core, CoreLib, FeeRouter, the generated interfaces, the launch scripts), read against docs/FLOW.md section 10 and the v2 source at commit 87a7522. the owner has full instant control of settings, controller, exitModule, targets and the router engine (FLOW 9.4, 10.2): "the owner can do X" is not a finding here. proof tests are in `test/ReviewV2Port.t.sol` and the suites named in the table. the review first wrote `test_FINDING_*` (the defect as it behaved) and `test_OK_*` (a property that holds). after the director's decisions the findings that were fixed carry `test_FIXED_*` proofs, the accepted ones `test_ACCEPTED_*`. all fork tests, real contracts, the only added code is attacker contracts.
 
 status after the director's decisions: V2R-1, V2R-2, V2R-4, V2R-5, V2R-7 and V2R-8 fixed, V2R-3 and V2R-6 accepted. the table below is the review as written (findings, original proofs and suggested fixes); the status table after it says what was done and which test proves it.

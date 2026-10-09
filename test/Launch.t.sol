@@ -90,7 +90,7 @@ contract LaunchTest is Fixture {
     function test_skimConfigReadBack() public {
         IArtCoinsHookV2.SkimConfig memory k = HOOK.skimConfig(poolId);
         assertEq(k.baselineSkimBps, 6_900);
-        assertEq(k.bountyBps, 9_000);
+        assertEq(k.bountyBps, 9_638);
         assertEq(k.maxReferralBpsOfVolume, 0);
         assertEq(k.lpFee, 0);
         assertEq(k.bountyRecipient, address(feeRouter), "the bounty goes to the router");
@@ -239,9 +239,25 @@ contract LaunchTest is Fixture {
         assertTrue(c2.code.length != 0);
     }
 
+    /// the launch bountyBps 9_638 needs the owner command setMinProtocolSkimShareBps(362): at the v2 mainnet minimum of
+    /// 1_000 the factory refuses it
+    function test_launchBountyNeedsTheMinProtocolSkimShareAt362() public {
+        IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = _config(owner, bytes32(uint256(7)));
+        assertEq(cfg.fee.bountyBps, 9_638);
+        uint256 fee = FACTORY.deployFee();
+        vm.startPrank(owner);
+        FACTORY.setMinProtocolSkimShareBps(1_000);
+        vm.expectRevert();
+        FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps);
+        FACTORY.setMinProtocolSkimShareBps(362);
+        address c2 = FACTORY.deployTokenAsOwner{value: fee}(cfg, lc.protocolBps);
+        vm.stopPrank();
+        assertTrue(c2.code.length != 0);
+    }
+
     function test_bountyAboveTheProtocolFloorReverts() public {
         IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = _config(owner, bytes32(uint256(6)));
-        cfg.fee.bountyBps = 9_500;
+        cfg.fee.bountyBps = 9_639; // the factory minimum 362 leaves at most 9_638
         uint256 fee = FACTORY.deployFee();
         vm.prank(owner);
         vm.expectRevert();

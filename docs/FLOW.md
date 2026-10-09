@@ -72,7 +72,7 @@ accepted properties of the rule.
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (restates the eth rate and its ceiling anchor, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
-the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.21 to the router and 0.69 the protocol leg, fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
+the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.65022 to the router and 0.24978 the protocol leg (decision 31), fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
 
 ## 3. flat bid
 
@@ -203,7 +203,7 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 | 18 | the coin is launched `restricted` (v2 decision D73). there is no transfer tax any more: the tax config, the 44 venues and the exemption are deleted from the launch package. the Core, the fee router and the fee swapper are NOT put on the coin's allowlist (the hook grants the allowance each canonical swap needs, burns always pass) |
 | 19 | a `FeeRouter` contract is the bounty recipient of the pool. the Core books eth as fees when it arrives from the router, no longer from the hook |
 | 20 | the lp fee income of the project side goes through a v2 `FeeAutoSwapperV2` whose end recipient is the router, so it reaches the engine as eth |
-| 21 | launch values follow the v2 factory defaults: engine share `bountyBps` 9_000 (the protocol keeps 1_000), `lpFee` 3_000 pips, protocol locker slot at the factory default. skim stays 10 points of volume, anti sniper stays 90 points falling to 10 over 30 minutes if the v2 mev module allows it (else the nearest allowed values, reported) |
+| 21 | launch values follow the v2 factory defaults: engine share `bountyBps` and `lpFee` at the v2 factory defaults (replaced by decisions 23, 24 and 31), protocol locker slot at the factory default. skim stays 10 points of volume, anti sniper stays 90 points falling to 10 over 30 minutes if the v2 mev module allows it (else the nearest allowed values, reported) |
 | 22 | the launch is signed by the v2 factory owner key (`deployTokenAsOwner`), which is the engine owner. the fresh deployer path and the factory admin enable and revoke steps are removed |
 
 ### 10.2 FeeRouter (src/FeeRouter.sol)
@@ -235,8 +235,8 @@ real contracts on the fork as before. the v2 stack is not on mainnet, so the fix
 | # | decision |
 |---|---|
 | 23 | a trader pays 6.9 percent in total. skim `baselineSkimBps` 6_900 (6.9 points of volume), `lpFee` 0. v2's factory enforces a minimum lp fee, so the launch needs the factory owner to set that minimum to 0 first: an explicit owner command in docs/DEPLOY.md and a preflight check that the factory accepts the config. decision 20 is revoked: with no lp fee there is no lp income and no fee swapper anywhere in the launch package |
-| 24 | `bountyBps` stays 9_000. the protocol leg (the factory floor, 10 percent of the skim, 0.69 points of volume) belongs to the launcher protocol. it is a separate business from this engine and its owner's share: never describe it as the engine owner's income |
-| 25 | the router pays payees out of what it receives. the owner's intent is 0.5 points of volume to the creator and 0.5 points to the artist. at launch there is ONE payee: the creator address (the config owner address) with both shares, 1.0 point of volume. the router receives 6.21 points (9_000 of 6_900), so that is 161_031 parts per million of the gross router inflow. the owner replaces it later through `setPayees` (with a splitter contract or two entries), so no artist address is needed for launch and nothing about it is a placeholder. the rest goes to the engine (5.21 points, less the flush tip, which comes out of the engine's part) |
+| 24 | `bountyBps` is 9_638 (decision 31). the protocol leg (362 of 10_000 of the skim, 0.24978 points of volume) belongs to the launcher protocol. it is a separate business from this engine and its owner's share: never describe it as the engine owner's income |
+| 25 | the router pays payees out of what it receives. the owner's intent is 0.5 points of volume to the creator and 0.5 points to the artist. at launch there is ONE payee: the creator address (the config owner address) with both shares, 0.75 points of volume at launch (decision 31). the router receives 6.65022 points (9_638 of 6_900), so that is 112_778 parts per million of the gross router inflow. the owner replaces it later through `setPayees` (with a splitter contract or two entries), so no artist address is needed for launch and nothing about it is a placeholder. the rest goes to the engine (5.86697 points, less the flush tip, which comes out of the engine's part) |
 | 26 | everything the router receives during the anti sniper window goes to the engine, with no payee share. the anti sniper skim starts at 90 points and falls to the baseline 6.9 over 30 minutes if the v2 module allows it (else nearest allowed, reported) |
 | 27 | `flush` pays its caller a small tip out of what it forwards |
 | 28 | the Core gains `rescueCoin(address to, uint256 amount)`, owner only, guarded, with an event: it transfers coin the Core holds. the Core only holds coin in passing (the buyback burns what it buys in the same call), so this reaches only coin that arrived some other way. FLOW decision 8 is amended: this is an owner directed transfer of the coin only, never of eth, credits, statements or exitToken |
@@ -253,7 +253,27 @@ FeeRouter, replacing 10.2 where they differ:
 
 ### 10.7 amendment to decision 25 (owner, 2026-10-08)
 
-the router's payee list holds ONE entry at launch: the creator address (the config `creator`), with the combined share of 1.0 point of volume, which is 161_031 parts per million of router inflow (1.0 / 6.21). there is no separate artist payee and no placeholder for one: the owner will later point the payee at his own splitter contract with `setPayees`. the router keeps supporting up to 4 payees. because a payee may be a contract, the fixed gas cap on a payee payment is 100_000 and the `owed` and `claim` fallback stays.
+the router's payee list holds ONE entry at launch: the creator address (the config `creator`), with the combined share of 0.75 points of volume, which is 112_778 parts per million of router inflow (0.75 / 6.65022, see 10.9). there is no separate artist payee and no placeholder for one: the owner will later point the payee at his own splitter contract with `setPayees`. the router keeps supporting up to 4 payees. because a payee may be a contract, the fixed gas cap on a payee payment is 100_000 and the `owed` and `claim` fallback stays.
+
+### 10.9 protocol leg and payee share (owner, 2026-10-08). wins over 10.6 and 10.7
+
+| # | decision |
+|---|---|
+| 31 | the protocol keeps 362 of every 10_000 of the skim and the router receives the rest: `bountyBps` 9_638. the payee share is 0.75 points of volume. the factory owner lowers the factory `minProtocolSkimShareBps` to 362 before the launch (a global factory setting, frozen per pool at creation), and preflight fails with the command named when the factory minimum is above 362 |
+
+per 100 eth of volume at launch values (skim `baselineSkimBps` 6_900 is 6.9 points, 6.9 eth):
+
+| leg | calculation | eth |
+|---|---|---|
+| protocol recipient | 6.9 * 362 / 10_000 | 0.24978 |
+| router receives | 6.9 * 9_638 / 10_000 | 6.65022 |
+| flush tip | 5_000 ppm of the router inflow (0.0332511, cap 0.005 per flush) | 0.0332511 |
+| payee | 112_778 ppm of the router inflow: 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down | 0.7499985 |
+| engine | router inflow less tip less payee | 5.86697 |
+
+anti sniper window (skim above the baseline, up to 90 points at the start): the protocol keeps its 0.24978 points of the baseline, the whole router inflow (6.65022 points plus everything above the baseline) goes to the engine less the tip, and no payee is paid. on a 1 eth buy at the start of the window the router receives 0.8975022 eth.
+
+projection at comparable volume (1,961 eth in 90 days, the first 30 minutes of fees to the engine): the payee receives about 12 eth.
 
 ### 10.8 the Core pulls the fees
 

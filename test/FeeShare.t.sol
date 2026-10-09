@@ -55,11 +55,11 @@ contract FeeShareTest is FeeBase {
         for (uint256 i; i < 3; ++i) {
             _share(bps[i]);
             Books memory b = _swap(Kind.BuyExactIn, 1 ether);
-            assertEq(b.bounty, 0.0621 ether, "6.21 points of one eth reach the router");
+            assertEq(b.bounty, 0.0665022 ether, "6.65022 points of one eth reach the router");
             uint256 want = b.inflow * bps[i] / BASIS;
             assertEq(b.dBb, want, "exact buyback share");
             assertEq(b.dPot, b.inflow - want, "exact pot share");
-            assertApproxEqAbs(b.inflow, 0.0518 ether, 0.0003 ether, "5.2 points of the buy reach the engine");
+            assertApproxEqAbs(b.inflow, 0.0586697 ether, 0.00001 ether, "5.86697 points of the buy reach the engine (router 6.65022 less the payee 0.74999851 and the tip 0.0332511)");
             _check(b, bps[i]);
             _solvent();
         }
@@ -75,13 +75,13 @@ contract FeeShareTest is FeeBase {
         _solvent();
     }
 
-    /// inside the anti sniper window the router gets 89.31 points (the bounty share of the baseline plus the whole
+    /// inside the anti sniper window the router gets 89.75022 points (the bounty share of the baseline, 6.65022, plus the whole
     /// extra), none of it shared with the payees, and the engine share is split by the setting
     function test_split_insideTheSniperWindowTakesTheWholeBounty() public {
         _share(5_000);
         Books memory b = _swap(Kind.BuyExactIn, 1 ether);
-        assertEq(b.bounty, 0.8931 ether);
-        assertEq(b.inflow, 0.8931 ether - 0.8931 ether * 5_000 / 1_000_000);
+        assertEq(b.bounty, 0.8975022 ether);
+        assertEq(b.inflow, 0.8975022 ether - 0.8975022 ether * 5_000 / 1_000_000);
         assertEq(b.dBb, b.inflow / 2);
         assertEq(b.dPot, b.inflow - b.inflow / 2);
         _check(b, 5_000);

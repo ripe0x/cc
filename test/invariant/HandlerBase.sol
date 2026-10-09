@@ -873,7 +873,7 @@ abstract contract HandlerBase is Test {
     function _expectSkim(uint256 skim, uint256 bps) internal pure returns (uint256 bounty, uint256 protocol) {
         uint256 base = skim * 6_900 / bps;
         if (base > skim) base = skim;
-        uint256 share = base * 9000 / 10_000;
+        uint256 share = base * 9_638 / 10_000;
         protocol = base - share;
         bounty = share + (skim - base);
     }

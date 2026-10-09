@@ -275,7 +275,7 @@ contract CoreUnitTest is CoreBase {
         _skipSniperWindow();
         _buyCoin(funder, 1 ether);
         uint256 pot = core.ethPot();
-        assertEq(pot, 0.0621 ether - 0.0621 ether * 5_000 / 1e6, "6.21 points of a 1 eth buy less the flush tip");
+        assertEq(pot, 0.0665022 ether - 0.0665022 ether * 5_000 / 1e6, "6.65022 points of a 1 eth buy less the flush tip");
         assertEq(address(core).balance, pot);
 
         vm.deal(alice, 3 ether);

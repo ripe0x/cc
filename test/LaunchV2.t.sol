@@ -19,7 +19,7 @@ contract LaunchV2Test is Fixture {
     function test_skimIsSixPointNineWithNoLpFeeAndTheRouterIsTheBountyRecipient() public view {
         IArtCoinsHookV2.SkimConfig memory k = IArtCoinsHookV2(lc.stack.hook).skimConfig(poolId);
         assertEq(k.baselineSkimBps, 6_900);
-        assertEq(k.bountyBps, 9_000);
+        assertEq(k.bountyBps, 9_638);
         assertEq(k.lpFee, 0);
         assertEq(k.maxReferralBpsOfVolume, 0);
         assertEq(k.bountyRecipient, address(feeRouter));

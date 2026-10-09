@@ -102,18 +102,20 @@ contract RehearsalTest is Test, ProdDeployer {
         // before the factory owner sets the minimum lp fee to 0 the preflight names exactly that
         IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(c.stack.factory);
         preflight(c, deployer);
-        _print("preflight before the owner command setMinLpFee(0)");
+        _print("preflight before the owner commands setMinLpFee(0) and setMinProtocolSkimShareBps(362)");
         string memory before_ = _failedNames();
-        if (f.minLpFee() != 0) {
+        if (f.minLpFee() != 0 || f.minProtocolSkimShareBps() > 10_000 - c.bountyBps) {
             assertEq(
                 before_,
-                "factory: min lp fee is at most the config lp fee, factory: deployTokenAsOwner accepts the config (simulated)",
-                "preflight before the owner command"
+                "factory: min lp fee is at most the config lp fee, factory: min protocol skim share leaves room for the bounty, factory: deployTokenAsOwner accepts the config (simulated)",
+                "preflight before the owner commands"
             );
-            vm.prank(deployer);
+            vm.startPrank(deployer);
             f.setMinLpFee(0);
+            f.setMinProtocolSkimShareBps(uint16(10_000 - c.bountyBps));
+            vm.stopPrank();
         } else {
-            assertEq(before_, "", "the minimum lp fee is already 0");
+            assertEq(before_, "", "the factory minimums are already open");
         }
         preflight(c, deployer);
         _print("preflight after the owner command");

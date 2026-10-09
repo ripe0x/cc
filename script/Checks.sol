@@ -34,7 +34,7 @@ abstract contract LaunchChecks is PostflightChecks {
     // the pinned launch rules (docs/DEPLOY.md section 2). a value outside them fails preflight. the three overrides in
     // the config file open exactly the rules that say so, and are part of the config hash
     uint24 internal constant PIN_BASELINE_SKIM = 6_900;
-    uint16 internal constant PIN_BOUNTY_BPS = 9000;
+    uint16 internal constant PIN_BOUNTY_BPS = 9638;
     uint16 internal constant PIN_PROTOCOL_BPS = 2000;
     /// @dev the most the launch pays the factory. a fee above it is a factory state change the signed config never saw
     uint256 internal constant PIN_DEPLOY_FEE_MAX = 0.1 ether;
@@ -210,7 +210,7 @@ abstract contract LaunchChecks is PostflightChecks {
         _eq("rule: baseline skim bps is 6900", uint256(c.baselineSkimBps), PIN_BASELINE_SKIM);
         bool bountyOk = c.bountyBps == PIN_BOUNTY_BPS || (c.allowBounty && c.bountyBps <= 9999);
         _check(
-            "rule: bounty bps is 9000",
+            "rule: bounty bps is 9638",
             bountyOk,
             string.concat("bounty ", vm.toString(c.bountyBps), c.allowBounty ? " (override on)" : "")
         );
@@ -367,6 +367,7 @@ abstract contract LaunchChecks is PostflightChecks {
 
     /// @dev the fee knobs of the factory against the config: the deploy fee and the deployer balance, the lp fee floor
     /// (`setMinLpFee(0)` is the owner command that opens lpFee 0), the protocol skim share floor against the bounty
+    /// (`setMinProtocolSkimShareBps(362)` is the owner command that opens bountyBps 9_638)
     function _preFees(LaunchConfig memory c, address deployer) private {
         address fa = c.stack.factory;
         (bool ok, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
@@ -390,10 +391,11 @@ abstract contract LaunchChecks is PostflightChecks {
         );
         uint256 minShare;
         (ok, minShare) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.minProtocolSkimShareBps, ()));
+        bool shareOk = ok && uint256(c.bountyBps) + minShare <= 10_000 && c.bountyBps <= 9999;
         _check(
             "factory: min protocol skim share leaves room for the bounty",
-            ok && uint256(c.bountyBps) + minShare <= 10_000 && c.bountyBps <= 9999,
-            string.concat("bounty ", vm.toString(c.bountyBps), " min share ", vm.toString(minShare))
+            shareOk,
+            _shareDetail(shareOk, c.bountyBps, minShare)
         );
         uint256 room = uint256(c.bountyBps) + minShare <= 10_000 ? 10_000 - uint256(c.bountyBps) - minShare : 0;
         _check(
@@ -402,6 +404,22 @@ abstract contract LaunchChecks is PostflightChecks {
             string.concat("referral cap ", vm.toString(c.maxReferralBps))
         );
         _preRecipients(c);
+    }
+
+    function _shareDetail(bool shareOk, uint16 bounty, uint256 minShare) private view returns (string memory) {
+        if (shareOk) return string.concat("bounty ", vm.toString(bounty), " min share ", vm.toString(minShare));
+        string memory room = vm.toString(bounty <= 10_000 ? 10_000 - uint256(bounty) : 0);
+        return string.concat(
+            "factory minProtocolSkimShareBps is ",
+            vm.toString(minShare),
+            ", above the ",
+            room,
+            " the bounty ",
+            vm.toString(bounty),
+            " leaves. the factory owner runs setMinProtocolSkimShareBps(",
+            room,
+            ") first"
+        );
     }
 
     function _preRecipients(LaunchConfig memory c) private {
@@ -565,7 +583,7 @@ abstract contract LaunchChecks is PostflightChecks {
         );
         _info(
             "signoff: protocol leg",
-            "the factory floor (10 percent of the skim, 0.69 points of volume) and the protocol locker slot belong to the launcher protocol, a separate business from this engine and its owner"
+            "the protocol leg (362 of 10_000 of the skim, 0.24978 points of volume) and the protocol locker slot belong to the launcher protocol, a separate business from this engine and its owner"
         );
         _preSettingsRows(c);
         _info("signoff: CONFIG_HASH", vm.toString(configHash(c)));

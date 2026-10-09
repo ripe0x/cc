@@ -160,8 +160,10 @@ abstract contract Fixture is Test, ProdDeployer {
         v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         ESCROW = IArtCoinsFeeEscrowV2(v2.escrow);
-        vm.prank(owner);
+        vm.startPrank(owner);
         FACTORY.setMinLpFee(0);
+        FACTORY.setMinProtocolSkimShareBps(362);
+        vm.stopPrank();
         vm.deal(owner, 1 ether);
 
         lc = defaultConfig();
@@ -303,13 +305,13 @@ abstract contract Fixture is Test, ProdDeployer {
         if (block.timestamp < at) vm.warp(at);
     }
 
-    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.2 percent
-    /// of every buy reaches the pot (6.9 points of skim, 90 percent to the router, minus the payees and the tip), inside
+    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.87 percent
+    /// of every buy reaches the pot (6.9 points of skim, 96.38 percent to the router, minus the payee and the tip), inside
     /// the sniper window more
     function _fundPot(uint256 eth) internal {
         for (uint256 i; i < 8 && core.ethPot() < eth; ++i) {
             uint256 need = eth - core.ethPot();
-            _buyCoin(funder, need * 10_000 / 450 + 1000);
+            _buyCoin(funder, need * 10_000 / 510 + 1000);
         }
         assertGe(core.ethPot(), eth, "pot not funded");
     }
@@ -318,7 +320,7 @@ abstract contract Fixture is Test, ProdDeployer {
     /// so the pot lands just over `eth`. for tests that need a pot close to an exact figure
     function _fundPotNear(uint256 eth) internal {
         for (uint256 i; i < 12 && core.ethPot() < eth; ++i) {
-            _buyCoin(funder, (eth - core.ethPot()) * 10_000 / 620 + 1e12);
+            _buyCoin(funder, (eth - core.ethPot()) * 10_000 / 665 + 1e12);
         }
         assertGe(core.ethPot(), eth, "pot not funded");
     }

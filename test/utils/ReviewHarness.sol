@@ -39,8 +39,10 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         creator = makeAddr("review.creator");
         v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
-        vm.prank(owner);
+        vm.startPrank(owner);
         FACTORY.setMinLpFee(0);
+        FACTORY.setMinProtocolSkimShareBps(362);
+        vm.stopPrank();
         vm.deal(deployer, 5 ether);
         base = defaultConfig();
         base.owner = owner;

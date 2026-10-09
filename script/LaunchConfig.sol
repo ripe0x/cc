@@ -48,12 +48,13 @@ struct LaunchConfig {
     // the fee router (docs/FLOW.md 10.6): one payee at launch, by parts per million of a flush, the tip of the caller of
     // `flush`. later payees are set through `setPayees`
     address creatorPayee;
-    /// the payee's share of the gross flush, ppm. the router receives 6.21 points of 6.9, so 161_031 is 1.0 point of volume
+    /// the payee's share of the gross flush, ppm. the router receives 6.65022 points of volume (9_638 / 10_000 of the 6.9
+    /// point skim), so 112_778 ppm is 0.75 points of volume: 0.75 / 6.65022 * 1e6 = 112_778.2, rounded down
     uint32 payeePpm;
     uint32 tipPpm;
     uint96 tipCap;
     // explicit overrides of pinned preflight rules. all false by default. each one is part of the config hash
-    /// allow a bountyBps other than 9000
+    /// allow a bountyBps other than 9638
     bool allowBounty;
     /// allow launching while the factory is not deprecated (a future public factory)
     bool allowOpenFactory;
@@ -82,14 +83,14 @@ abstract contract ConfigReader is CommonBase {
         c.positionLower = -175_000;
         c.positionUpper = 887_200;
         c.baselineSkimBps = 6_900;
-        c.bountyBps = 9000;
+        c.bountyBps = 9638;
         c.maxReferralBps = 0;
         c.lpFee = 0;
         c.sniperStartBps = 90_000;
         c.sniperSeconds = 1800;
         c.protocolBps = 2000;
         c.restricted = true;
-        c.payeePpm = 161_031;
+        c.payeePpm = 112_778;
         c.tipPpm = 5_000;
         c.tipCap = 0.005 ether;
     }
