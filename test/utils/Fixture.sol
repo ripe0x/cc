@@ -359,10 +359,10 @@ abstract contract Fixture is Test, ProdDeployer {
     }
 
     /// @notice the smallest pot at which the clamp of the eth rate is not below the stored rate:
-    /// `rate * avgScore * clampCredits / spendCapBps`
+    /// `rate * avgScore / spendCapBps`
     function _unclampedPot() internal view returns (uint256) {
         Settings memory s = core.settings();
-        return core.rateAtCheckpoint() * s.avgScore * s.clampCredits / s.spendCapBps;
+        return core.rateAtCheckpoint() * s.avgScore / s.spendCapBps;
     }
 
     /// @notice sells `n` fresh credits into the eth bid, which puts them in the eth pile in the order returned.

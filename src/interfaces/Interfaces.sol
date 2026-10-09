@@ -101,7 +101,7 @@ uint256 constant RATE_START_MAX_WEI = 1e15;
 struct Settings {
     /// share of a bid priced flat per credit, bps. 10_000 is flat, 0 is per score point
     uint16 flatBps;
-    /// the score a flat credit is priced as and the "average credit" of the clamp, 1e4 scale
+    /// the score a flat credit is priced as and the average credit of the clamp, 1e4 scale
     uint32 avgScore;
     /// fall of the eth rate per credit bought, bps of the rate before that credit
     uint16 dropPerCreditBps;
@@ -113,9 +113,6 @@ struct Settings {
     uint16 ceilBps;
     /// growth of the ceiling anchor per full 10 minutes since the last fill, bps of the anchor
     uint16 idleLoosenBps;
-    /// the clamp of the rate: the current pot times `spendCapBps` over `avgScore` times this many credits. the read of
-    /// the rate is at most the clamp and the climb stops there
-    uint16 clampCredits;
     /// share of the pot that may be spent per hour window, bps
     uint16 spendCapBps;
     uint16 bonusCapBps;
@@ -225,8 +222,7 @@ library Mainnet {
             climbPerMinBps: 50,
             ceilBps: 12_500,
             idleLoosenBps: 200,
-            clampCredits: 20,
-            spendCapBps: 2_000,
+            spendCapBps: 10_000,
             bonusCapBps: 2_500,
             tipSavingsBps: 1_000,
             tipCapBps: 200,

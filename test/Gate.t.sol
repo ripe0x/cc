@@ -53,8 +53,8 @@ contract GateTest is Fixture {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 want =
             r0.mulWad(uint256(FixedPointMathLib.powWad(1.005e18, int256((block.timestamp - t0) * 1e18 / 1 minutes))));
-        // the read is the climb, lowered to the clamp of 20 credits of the room the pot has
-        uint256 clamp = core.ethPot() * 2000 / (4_330_000 * 20);
+        // the read is the climb, lowered to the clamp: the price of one average credit that the room of the pot affords
+        uint256 clamp = core.ethPot() * 10_000 / 4_330_000;
         if (want > clamp) want = clamp;
         assertApproxEqRel(core.ethRate(), want, 1e12, "0.5 percent a minute right after a fill, ten minutes");
         assertGt(core.ethRate(), 0, "the bid is open");
@@ -140,7 +140,7 @@ contract GateFuzzTest is Fixture {
             uint256 op = seed % 9;
             Settings memory st = core.settings();
             uint256 r0 = core.rateAtCheckpoint();
-            bool starved = core.ethPot() * st.spendCapBps / (uint256(st.avgScore) * st.clampCredits) < r0;
+            bool starved = core.ethPot() * st.spendCapBps / uint256(st.avgScore) < r0;
             if (op < 3) _warp(bound(seed >> 8, 1 minutes, 3 days));
             else _try(op, seed);
             if (starved) {

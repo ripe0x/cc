@@ -46,11 +46,11 @@ abstract contract CoreBase is Fixture {
         return BidModel.dropOnce(core.settings(), r, r);
     }
 
-    /// @dev the owner sets the credits of hourly room the funded clamp holds. 1 makes the clamp the funded threshold
-    function _clampCredits(uint256 n) internal {
+    /// @dev the owner sets the hourly spend cap, bps of the pot
+    function _spendCap(uint256 bps) internal {
         Settings memory s = core.settings();
         // forge-lint: disable-next-line(unsafe-typecast)
-        s.clampCredits = uint16(n);
+        s.spendCapBps = uint16(bps);
         _setSettings(s);
     }
 
@@ -302,15 +302,14 @@ contract CoreUnitTest is CoreBase {
         _warp(1000 hours);
         assertEq(core.ethRate(), 0);
 
-        // one avg credit costs 1.732e15 at the start rate and the hourly cap is 20 percent of the pot, so funded needs
-        // a pot of 5 average credits (8.66e15). below 20 average credits of hourly room the read is the clamp, which
-        // follows the pot, and the price state holds
+        // one avg credit costs 1.732e15 at the start rate and the hourly cap is 100 percent of the pot, so funded needs
+        // a pot of 1.732e15. below that the read is the clamp, which follows the pot, and the price state holds
         uint256 last;
-        uint256[4] memory steps = [uint256(1.7e15), 3e15, 3.9e15, 1.4e16];
+        uint256[4] memory steps = [uint256(1e14), 2e14, 4e14, 8e14];
         for (uint256 i; i < steps.length; ++i) {
             _fund(steps[i]);
             _warp(1000 hours);
-            assertEq(core.ethRate(), core.ethPot() * 2000 / (4_330_000 * 20), "the read is the clamp of 20 credits");
+            assertEq(core.ethRate(), core.ethPot() * 10_000 / 4_330_000, "the read is the clamp of one average credit");
             assertGe(core.ethRate(), last, "the read does not fall as the pot grows");
             last = core.ethRate();
             assertEq(core.rateAtCheckpoint(), 4e12, "the price state holds at the opening rate");
@@ -330,7 +329,7 @@ contract CoreUnitTest is CoreBase {
     function test_rate_clampFollowsTheAverageScore() public {
         Settings memory s = core.settings();
         s.avgScore = 6_000_000;
-        s.clampCredits = 1;
+        s.spendCapBps = 2_000;
         _setSettings(s);
         _fund(1.2e16 - 1);
         _warp(1000 hours);
@@ -393,7 +392,7 @@ contract CoreUnitTest is CoreBase {
     }
 
     function test_rate_climbStopsAtTheClamp() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         _fund(0.02 ether);
         _warp(10 minutes);
         assertApproxEqRel(core.ethRate(), 4_204_560_528_163, 1e9);
@@ -419,7 +418,6 @@ contract CoreUnitTest is CoreBase {
         Settings memory s = core.settings();
         s.spendCapBps = 1000;
         s.avgScore = 2_000_000;
-        s.clampCredits = 1;
         _setSettings(s);
         _fund(0.02 ether);
         _warp(10_000 hours);
@@ -437,13 +435,13 @@ contract CoreUnitTest is CoreBase {
     /// the same clamp when the pot is filled by real swaps: it is measured, not assumed
     function test_rate_climbStopsAtTheClampWithRealFees() public {
         _skipSniperWindow();
-        _fundPot(1 ether);
+        _fundPot(0.01 ether);
         uint256 pot = core.ethPot();
         _warp(2000 hours);
         assertEq(
             core.ethRate(),
-            pot * 2000 / (core.settings().avgScore * 20),
-            "clamp at what the hourly cap affords for 20 average credits"
+            pot * core.settings().spendCapBps / core.settings().avgScore,
+            "clamp at what the hourly cap affords for one average credit"
         );
     }
 
@@ -453,7 +451,7 @@ contract CoreUnitTest is CoreBase {
     /// in a fresh window and a credit that would cost more than the cap is refused by it
     function _atTheClamp(bool flat) internal {
         _mode(flat);
-        _clampCredits(1);
+        _spendCap(2_000);
         _fund(0.02 ether);
         _warp(3000 hours);
         uint256 avg = core.settings().avgScore;
@@ -515,7 +513,7 @@ contract CoreUnitTest is CoreBase {
     /// no climb under the smaller pot and the rate never rises again. no real path shrinks the pot without also
     /// dropping the rate, so the pot slot is written directly and the balance is set to match
     function test_rate_potDropHoldsThePriceState() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         _fund(0.02 ether);
         _warp(100 hours);
         uint256 cap = core.ethRate();
@@ -623,7 +621,7 @@ contract CoreUnitTest is CoreBase {
     /// sells one credit at a time until the next one would pass `capBps` of the pot, which is then refused, in the
     /// window and not after it
     function _hourlyCapWindow(uint256 capBps) internal {
-        _clampCredits(1);
+        _spendCap(capBps);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         uint256 cap = uint256(0.05 ether) * capBps / 10_000;
@@ -666,15 +664,12 @@ contract CoreUnitTest is CoreBase {
 
     /// the cap is a setting: at 10 percent of the pot the window admits less
     function test_hourlyCap_followsTheSetting() public {
-        Settings memory s = core.settings();
-        s.spendCapBps = 1000;
-        _setSettings(s);
         _hourlyCapWindow(1000);
     }
 
     /// and a change applies inside a running window
     function test_hourlyCap_widerCapAdmitsMoreInTheSameWindow() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         uint256 n;
@@ -695,7 +690,7 @@ contract CoreUnitTest is CoreBase {
     }
 
     function test_hourlyCap_countsAllIdsOfOneCall() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         _fund(0.05 ether);
         uint256[] memory ids = _credits(alice, 14);
         vm.prank(alice);
@@ -1071,7 +1066,7 @@ contract CoreUnitTest is CoreBase {
     /// clears its price at the clamp (ceiling 1.21 prices) while the hourly cap (0.8 prices) does not: a buy larger
     /// than a fifth of the pot hits the hourly cap, and one larger than the pot fails first with `PotTooSmall`
     function test_buyListing_hourlyCapAndPotChecks_perPoint() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         _flat(0);
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         _fund(price * 4);
@@ -1098,7 +1093,7 @@ contract CoreUnitTest is CoreBase {
     /// flat, the ceiling at the clamp is the hourly cap itself (an average credit), so the cap binds only through the
     /// controller bonus (a quarter above the cap) or through spend already in the window
     function test_buyListing_hourlyCapAndPotChecks_flat() public {
-        _clampCredits(1);
+        _spendCap(2_000);
         ScriptedController scripted = new ScriptedController();
         _setController(address(scripted));
         uint256 price = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
@@ -1756,7 +1751,7 @@ contract CoreUnitTest is CoreBase {
             _warp(bound(waits[i], 0, 120 hours));
             uint256 r1 = core.ethRate();
             assertGe(r1, r0, "the read does not fall with time");
-            assertLe(r1, r0.max(BidModel.clamp(st, core.ethPot())), "never above the clamp of 20 credits");
+            assertLe(r1, r0.max(BidModel.clamp(st, core.ethPot())), "never above the clamp");
 
             uint256 amount = bound(amounts[i], 0, 0.05 ether);
             if (amount != 0) _fund(amount);
@@ -2285,7 +2280,7 @@ contract CoreComposedTest is CoreBase {
         );
     }
 
-    /// a pot whose clamp is a twentieth of the opening rate leaves the exit lane repay cap at the value of 80 notional
+    /// a pot whose clamp is under the opening rate leaves the exit lane repay cap at the value of 80 notional
     /// credits at `RATE_START`
     function test_exitLane_composeReimbursementCapIgnoresTheClampOfASmallPot() public {
         Settings memory s = core.settings();
@@ -2297,9 +2292,9 @@ contract CoreComposedTest is CoreBase {
         uint256[] memory ids = _credits(alice, 80);
         vm.prank(alice);
         core.sellForExitToken(ids);
-        // the cap is 1_385_600_000_000_000 wei, so a pot of 2e15 pays it in full
-        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(2e15));
-        assertLt(core.ethRate(), core.RATE_START() / 20, "the read is under a twentieth of the opening rate");
+        // the cap is 1_385_600_000_000_000 wei, so a pot of 1.5e15 pays it in full
+        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(1.5e15));
+        assertLt(core.ethRate(), core.RATE_START(), "the read is under the opening rate");
         vm.fee(1000 gwei);
         uint256 before = keeper.balance;
         vm.prank(keeper);

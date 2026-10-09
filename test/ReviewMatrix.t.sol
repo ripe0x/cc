@@ -508,10 +508,10 @@ contract ReviewMatrixConfigTest is ReviewHarness {
 /// @notice the config mutation matrix, part two: every field of the settings, above the top, below the bottom, a plausible
 /// wrong value and both edges
 contract ReviewMatrixSettingsTest is ReviewHarness {
-    uint256 internal constant N_SETTINGS = 155;
+    uint256 internal constant N_SETTINGS = 150;
 
     /// @dev a plausible value that is not the launch value, inside the bounds, for each field
-    function _wrong() internal pure returns (uint256[31] memory) {
+    function _wrong() internal pure returns (uint256[30] memory) {
         return [
             uint256(5000),
             3_000_000,
@@ -520,7 +520,6 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             100,
             15_000,
             100,
-            10,
             3000,
             1000,
             500,
@@ -560,10 +559,10 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
     /// @dev kinds: 0 above the top, 1 below the bottom, 2 a plausible wrong value, 3 the top edge, 4 the bottom edge.
     /// an empty label means the field has no such case
     function _mutSettings(uint256 k) internal view returns (Mut memory m) {
-        uint256 f = k % 31;
-        uint256 kind = k / 31;
-        uint256[31] memory lo = SettingsFields.lo();
-        uint256[31] memory hi = SettingsFields.hi();
+        uint256 f = k % 30;
+        uint256 kind = k / 30;
+        uint256[30] memory lo = SettingsFields.lo();
+        uint256[30] memory hi = SettingsFields.hi();
         string memory nm = _trim(SettingsFields.names()[f]);
         m = _m("", kind <= 1 ? Class.Pre : Class.Hash);
         Settings memory s = m.c.settings;
@@ -571,22 +570,22 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
             SettingsFields.set(s, f, hi[f] + 1);
             m.label = string.concat("settings.", nm, " ", vm.toString(hi[f] + 1), " above the top");
         } else if (kind == 1) {
-            if (lo[f] == 0 && f != 23) return m;
-            if (f == 23) SettingsFields.set(s, 22, s.xRateFloor - 1);
+            if (lo[f] == 0 && f != 22) return m;
+            if (f == 22) SettingsFields.set(s, 21, s.xRateFloor - 1);
             else SettingsFields.set(s, f, lo[f] - 1);
             m.label = string.concat("settings.", nm, " one below the bottom");
         } else if (kind == 2) {
             SettingsFields.set(s, f, _wrong()[f]);
             m.label = string.concat("settings.", nm, " ", vm.toString(_wrong()[f]), " (valid, wrong)");
         } else if (kind == 3) {
-            if (f == 23) s.xRateFloor = s.xRateCap;
+            if (f == 22) s.xRateFloor = s.xRateCap;
             else SettingsFields.set(s, f, hi[f]);
             m.label = string.concat("settings.", nm, " ", vm.toString(hi[f]), " the top edge");
         } else {
-            if (lo[f] == 0 && f != 22) return m;
-            if (f == 22) s.xRateCap = s.xRateFloor;
+            if (lo[f] == 0 && f != 21) return m;
+            if (f == 21) s.xRateCap = s.xRateFloor;
             // the lowest rate cap that still holds the launch rate
-            else if (f == 28) s.rateCap = uint64(base.rateStart);
+            else if (f == 27) s.rateCap = uint64(base.rateStart);
             else SettingsFields.set(s, f, lo[f]);
             m.label = string.concat("settings.", nm, " the bottom edge");
         }

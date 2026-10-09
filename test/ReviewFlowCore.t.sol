@@ -32,7 +32,7 @@ contract ReviewFlowCoreTest is Fixture {
     /// the owner raises the rate cap and sets the hot (but in bounds) settings: spend cap, score and the rate drop at
     /// their loosest (a floor of 100 percent holds the rate through a batch). the rate is then set to the top of the rate bounds
     function _hotSettings() internal view returns (Settings memory h) {
-        h = _hot(5_000, 6_000_000);
+        h = _hot(10_000, 6_000_000);
         h.rateCap = uint64(RATE_START_MAX_WEI);
     }
 
@@ -54,15 +54,15 @@ contract ReviewFlowCoreTest is Fixture {
         core.setRate(RATE_START_MAX_WEI);
         vm.stopPrank();
         uint256 price = core.ceilingOf(_credits(seller, 1)[0]);
-        uint256 room = pot * 5_000 / 10_000;
-        assertApproxEqAbs(price, room / 20, 1e3, "a twentieth of the hourly room: the clamp lowers what is paid");
+        uint256 room = pot * 10_000 / 10_000;
+        assertEq(price, uint256(RATE_START_MAX_WEI) * 6_000_000 / 1e4, "the rate cap at its bound sets the price of a credit");
         // the clamp falls as the pot is spent: credit after credit until the next one would pass the room
         uint256 got;
         uint256 n;
         for (uint256 j; j < 300; ++j) {
             uint256[] memory one = _credits(seller, 1);
             uint256 p = core.ceilingOf(one[0]);
-            if (got + p > room) break;
+            if (p == 0 || got + p > room) break;
             uint256 b = seller.balance;
             vm.prank(seller);
             core.sellForEth(one);
@@ -77,9 +77,9 @@ contract ReviewFlowCoreTest is Fixture {
         emit log_named_uint("per tx: paid to the accomplice (wei)", got);
         emit log_named_uint("per tx: share of the pot, bps", got * 10_000 / pot);
         emit log_named_uint("per tx: market value of the credits (wei)", n * MARKET);
-        assertApproxEqAbs(got * 10_000 / pot, 4_951, 10, "49.5 percent of the pot in one block, the figure in docs/FLOW.md");
-        assertLe(got, pot / 2, "never above the spend cap of 50 percent");
-        assertGe(got, pot * 45 / 100, "at least 45 percent in one block");
+        assertApproxEqAbs(got * 10_000 / pot, 9_999, 10, "99.99 percent of the pot in one block, the figure in docs/FLOW.md");
+        assertLe(got, pot, "never above the spend cap of 100 percent");
+        assertGe(got, pot * 99 / 100, "at least 99 percent in one block");
         assertGt(got, n * MARKET * 25, "paid 25x market");
         _solvent();
     }
@@ -109,7 +109,7 @@ contract ReviewFlowCoreTest is Fixture {
                 if (r < RATE_START_MIN_WEI) break;
                 vm.prank(owner);
                 core.setRate(r);
-                // the read is bounded by the clamp: a credit costs a twentieth of the room and the clamp falls as the
+                // the read is bounded by the clamp: a credit costs the rate cap and the clamp falls as the
                 // pot is spent, so the seller sells credit after credit until the next one would pass the room
                 uint256 spent;
                 for (uint256 j; j < 300; ++j) {
@@ -139,9 +139,9 @@ contract ReviewFlowCoreTest is Fixture {
             emit log_named_uint("per day: market value of the credits (wei)", credits * MARKET);
             assertApproxEqAbs(
                 total * 10_000 / pot0,
-                mode == 0 ? 9_999 : 9_950,
+                9_999,
                 10,
-                "99.99 percent per day loosest, 99.5 percent at the launch settings, the figures in docs/FLOW.md"
+                "99.99 percent per day at the loosest and at the launch settings, the figures in docs/FLOW.md"
             );
             _solvent();
         }
@@ -235,7 +235,6 @@ contract ReviewFlowCoreTest is Fixture {
         m.dropFloorBps = 5_000;
         m.climbPerMinBps = 1;
         m.ceilBps = 10_000;
-        m.clampCredits = 1;
         m.spendCapBps = 100;
         m.saleFloorBps = 1_000;
         m.auctionDuration = 6 hours;
@@ -256,8 +255,7 @@ contract ReviewFlowCoreTest is Fixture {
             1_000,
             30_000,
             2_000,
-            1_000,
-            5_000,
+            10_000,
             5_000,
             2_500,
             500,
@@ -302,8 +300,9 @@ contract ReviewFlowCoreTest is Fixture {
             // the three raw words hold exactly the values and nothing else
             bytes32 slot = 0xb5805f89ef62cd999f965a45fb6f4c11141caa04e5c4acba9c2552ef76902804;
             uint256 w0 = uint256(vm.load(address(core), slot));
-            assertEq(uint16(w0 >> 240), two[i].saleFloorBps, "the sale floor sits at bits 240 to 255");
-            assertEq(uint16(w0 >> 128), two[i].clampCredits, "the clamp credits sit at bits 128 to 143");
+            assertEq(uint16(w0 >> 224), two[i].saleFloorBps, "the sale floor sits at bits 224 to 239");
+            assertEq(w0 >> 240, 0, "slot 0 top bits clear");
+            assertEq(uint16(w0 >> 128), two[i].spendCapBps, "the spend cap sits at bits 128 to 143");
             uint256 w2 = uint256(vm.load(address(core), bytes32(uint256(slot) + 2)));
             assertEq(w2 >> 208, 0, "slot 2 top bits clear");
             assertEq(uint16(w2 >> 192), two[i].feeToBuybackBps, "the fee share sits at bits 192 to 207");
@@ -393,7 +392,7 @@ contract ReviewFlowCoreTest is Fixture {
             emit log_named_uint("cap price of one average credit (wei)", capPrice);
             assertEq(core.ethRate() <= core.settings().rateCap, true, "the rate never passes the cap");
             assertLe(took, capPrice, "one credit never pays more than the cap price");
-            assertLe(took, pot * 2_000 / 10_000, "never above the hourly cap");
+            assertLe(took, pot * core.settings().spendCapBps / 10_000, "never above the hourly cap");
             vm.revertToState(snap);
         }
     }
@@ -486,8 +485,8 @@ contract ReviewFlowCoreTest is Fixture {
     function test_dirtyCalldataWordsAreRefused() public {
         Settings memory base = core.settings();
         bytes memory good = abi.encodeCall(ICore.setSettings, (base));
-        assertEq(good.length, 4 + 31 * 32);
-        for (uint256 i; i < 31; ++i) {
+        assertEq(good.length, 4 + 30 * 32);
+        for (uint256 i; i < 30; ++i) {
             bytes memory bad = bytes.concat(good);
             uint256 off = 32 + 4 + i * 32;
             uint256 w;
@@ -636,12 +635,12 @@ contract ReviewFlowCoreTest is Fixture {
     function test_bonusAtTheClampCannotPassTheHourlyCap() public {
         _skipSniperWindow();
         // the launch rate cap (about 6 times the opening rate) sits below the funded clamp: raise it to the bounds, with
-        // the clamp at one credit of hourly room and the ceiling at its loosest
+        // the clamp at one credit of hourly room, a spend cap of 20 percent and the ceiling at its loosest
         Settings memory cs = core.settings();
         cs.rateCap = uint64(RATE_START_MAX_WEI);
-        cs.clampCredits = 1;
         cs.ceilBps = 30_000;
         cs.idleLoosenBps = 2_000;
+        cs.spendCapBps = 2_000;
         _setSettings(cs);
         _fundPotNear(2 ether);
         ScriptedController sc = new ScriptedController();

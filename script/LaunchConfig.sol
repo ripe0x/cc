@@ -138,7 +138,6 @@ abstract contract ConfigReader is CommonBase {
         s.climbPerMinBps = _u16(j, ".settings.climbPerMinBps");
         s.ceilBps = _u16(j, ".settings.ceilBps");
         s.idleLoosenBps = _u16(j, ".settings.idleLoosenBps");
-        s.clampCredits = _u16(j, ".settings.clampCredits");
         s.spendCapBps = _u16(j, ".settings.spendCapBps");
         s.bonusCapBps = _u16(j, ".settings.bonusCapBps");
         s.tipSavingsBps = _u16(j, ".settings.tipSavingsBps");

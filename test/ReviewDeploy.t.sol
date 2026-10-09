@@ -581,10 +581,11 @@ contract ReviewFundedTest is Fixture {
         uint256 pot = c.ethPot();
         uint256 stored = c.rateAtCheckpoint();
         uint256 r = c.ethRate();
-        assertLe(AVG * r, pot * 2000, "the hourly cap affords an average credit at the live rate");
+        uint256 capBps = c.settings().spendCapBps;
+        assertLe(AVG * r, pot * capBps, "the hourly cap affords an average credit at the live rate");
         // the price state never climbs while the cap cannot afford an average credit, and the read is the clamp
-        if (pot * 2000 < AVG * stored) {
-            assertEq(r, pot * 2000 / (AVG * 20), "the read is the clamp while unaffordable");
+        if (pot * capBps < AVG * stored) {
+            assertEq(r, pot * capBps / AVG, "the read is the clamp while unaffordable");
         }
     }
 
@@ -604,7 +605,7 @@ contract ReviewFundedTest is Fixture {
                 vm.warp(block.timestamp + bound(arg, 1, 400 hours));
                 uint256 r1 = c.ethRate();
                 assertGe(r1, r0, "the read fell without a fill");
-                uint256 cap = pot * 2000 / AVG;
+                uint256 cap = pot * c.settings().spendCapBps / AVG;
                 assertLe(r1, r0 > cap ? r0 : cap, "climbed above the clamp");
             } else if (op == 2) {
                 uint256 id = CreditIds.at(cursor++);

@@ -24,9 +24,9 @@ library BidModel {
             FixedPointMathLib.max(fillState * (10_000 - s.dropPerCreditBps) / 10_000, minuteStart * s.dropFloorBps / 10_000);
     }
 
-    /// @dev the clamp: the hourly share of a pot over `clampCredits` average credits, at most `rateCap`
+    /// @dev the clamp: the price of one average credit that the hourly share of a pot affords, at most `rateCap`
     function clamp(Settings memory s, uint256 pot) internal pure returns (uint256) {
-        return FixedPointMathLib.min(pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits), s.rateCap);
+        return FixedPointMathLib.min(pot * s.spendCapBps / uint256(s.avgScore), s.rateCap);
     }
 
     /// @dev the ceiling: `ceilBps` of the anchor grown by `idleLoosenBps` per full 10 minutes idle

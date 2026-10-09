@@ -272,6 +272,8 @@ Other states searched for a bid that cannot reach the cheapest ask while the pot
 
 ## Contract semantics rerun (2026-10-08)
 
+2026-10-09: the launch configuration has no clamp divisor (`clampCredits` is removed) and a spend cap of 100 percent. the rows below keep the numbers of the 2026-10-08 configuration.
+
 The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (`climb`, `drop`, commit 6a5ba30) and the bid rule section of `docs/FLOW.md`. The stepped rule changed in the simulator as follows. The earlier sections of this document were produced before the change, which is why the "earlier sim" columns below differ from the new columns.
 
 1. Idle loosening is linear: the anchor is the last fill rate times `1 + idleLoosenPct x floor(idleSeconds / (idleLoosenMin x 60))`. The earlier sim compounded the percent per interval.

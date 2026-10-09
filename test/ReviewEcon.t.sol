@@ -125,11 +125,11 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
         // forty hours later the climb sits at the ceiling: 125 percent of the anchor loosened by 240 intervals of 2 percent
         _warp(40 hours);
         assertEq(core.ethRate(), r3 * (10_000 + 200 * 240) * 12_500 / 1e8);
-        // the funded clamp of the hourly cap is 20 percent of the pot over 20 credits of 4.33M, 2.3e14, above the rate
-        // cap of about 6 * rateStart, so after a long climb the rate sits at the rate cap
+        // the funded clamp of the hourly cap is the pot over one credit of 4.33M, above the rate cap, so after a
+        // long climb the rate sits at the rate cap
         _warp(10_000 hours);
         assertEq(core.ethRate(), 205_540_000_000_000);
-        assertGt(core.ethPot() * 2000 / (4_330_000 * 20), core.ethRate());
+        assertGt(core.ethPot() * core.settings().spendCapBps / 4_330_000, core.ethRate());
         _solvent();
     }
 }
@@ -290,7 +290,6 @@ contract RateModelFuzz is ReviewEconBase {
         s.climbPerMinBps = uint16(1 + seed % 1_000);
         s.ceilBps = uint16(10_000 + (seed >> 10) % 20_001);
         s.idleLoosenBps = uint16((seed >> 25) % 2_001);
-        s.clampCredits = uint16(1 + (seed >> 36) % 1_000);
         s.avgScore = uint32(800_000 + (seed >> 48) % 5_200_001);
         s.spendCapBps = uint16(100 + (seed >> 72) % 4_901);
         s.dropPerCreditBps = uint16(1 + (seed >> 96) % 1_000);

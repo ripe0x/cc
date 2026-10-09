@@ -49,20 +49,21 @@ contract LifecycleSwapsTest is Fixture {
         _buyCoin(trader, 0.01 ether);
         assertLt(core.ethPot(), 1.7e15);
         _warp(200 hours);
-        assertEq(core.ethRate(), core.ethPot() * 2000 / (core.settings().avgScore * 20), "a small pot reads the clamp");
+        assertEq(core.ethRate(), core.ethPot() * 10_000 / core.settings().avgScore, "a small pot reads the clamp");
 
         // the pot grows
         _buyCoin(trader, 0.2 ether);
         assertLe(core.ethRate(), core.RATE_START(), "no retroactive climb");
         assertEq(core.rateAtCheckpoint(), core.RATE_START(), "the price state waited at the opening rate");
-        // a pot with room for 20 average credits lets the climb start
+        // a pot that affords an average credit above the opening rate lets the climb start
         _buyCoin(trader, 10 ether);
         _warp(10 hours);
         assertGt(core.ethRate(), core.RATE_START());
 
-        // the climb stops where the hourly cap (20 percent of the pot) buys 20 average credits
+        // the climb stops at the clamp of the pot or at the rate cap, whichever is lower
         _warp(2000 hours);
-        assertEq(core.ethRate(), core.ethPot() * 2000 / (core.settings().avgScore * 20));
+        uint256 clamp = core.ethPot() * 10_000 / core.settings().avgScore;
+        assertEq(core.ethRate(), clamp < core.settings().rateCap ? clamp : core.settings().rateCap);
     }
 
     /// phase 2 doors are shut while the exit module slot is empty

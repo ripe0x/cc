@@ -287,7 +287,6 @@ contract SeaportTest is SeaportBase {
         // with the clamp at one credit of hourly room and the ceiling at its loosest so the bid reaches it in days
         Settings memory cs = core.settings();
         cs.rateCap = uint64(TARGET_RATE);
-        cs.clampCredits = 1;
         cs.ceilBps = 30_000;
         cs.idleLoosenBps = 2_000;
         _setSettings(cs);
@@ -587,7 +586,7 @@ contract SeaportTest is SeaportBase {
     function testFuzz_priceFromOneWeiToCeiling(uint256 price) public {
         uint256 id = _list();
         uint256 ceiling = core.ceilingOf(id);
-        assertLe(ceiling, core.ethPot() * 2000 / 10_000, "the hourly cap clears every ceiling here");
+        assertLe(ceiling, core.ethPot() * core.settings().spendCapBps / 10_000, "the hourly cap clears every ceiling here");
         price = bound(price, 1, ceiling);
         OrderComponents memory c = _open(id, price, 0);
 
@@ -636,7 +635,7 @@ contract SeaportTest is SeaportBase {
         _warp(bound(warpHours, 0, 12) * 1 hours);
         uint256 id = _list();
         uint256 ceiling = core.ceilingOf(id);
-        assertLe(ceiling, core.ethPot() * 2000 / 10_000, "the hourly cap clears every ceiling here");
+        assertLe(ceiling, core.ethPot() * core.settings().spendCapBps / 10_000, "the hourly cap clears every ceiling here");
         uint256 price = bound(priceSeed, 1, ceiling);
         uint256 side = bound(sideSeed, 0, price - 1) % (price / 2 + 1);
         uint256 snap = vm.snapshotState();
@@ -756,6 +755,8 @@ contract SeaportColdTest is SeaportBase {
         uint256 i;
         for (; i < 80 && core.hourlyRoom() >= core.ceilingOf(id); ++i) {
             uint256[] memory sold = _credits(seller, 1);
+            // a credit priced above the room left cannot sell in this hour
+            if (core.ceilingOf(sold[0]) > core.hourlyRoom()) continue;
             vm.prank(seller);
             core.sellForEth(sold);
         }

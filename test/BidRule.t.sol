@@ -7,8 +7,8 @@ import {ICore} from "../src/interfaces/ICore.sol";
 import {Settings, Mainnet, ICreditStrategy} from "../src/interfaces/Interfaces.sol";
 
 /// @notice the credit bid rule on the real stack: the drop per credit with its minute floor, the compounded climb per
-/// minute, the ceiling at a share of the last rate paid with its idle loosening, the funded clamp over 20 credits of
-/// hourly room, the settings bounds, and the recovery after a gap in the market price. exact numbers at the launch
+/// minute, the ceiling at a share of the last rate paid with its idle loosening, the funded clamp (the price of one average credit
+/// that the hourly share of the pot affords), the settings bounds, and the recovery after a gap in the market price. exact numbers at the launch
 /// settings, hand arithmetic throughout
 contract BidRuleTest is Fixture {
     using stdStorage for StdStorage;
@@ -138,7 +138,7 @@ contract BidRuleTest is Fixture {
     function test_climbTargetIsTheClamp() public {
         _potTo(1e15);
         _warp(2 hours);
-        assertEq(core.ethRate(), uint256(1e15) * 2_000 / (4_330_000 * 20), "the read is the clamp");
+        assertEq(core.ethRate(), uint256(1e15) * 10_000 / 4_330_000, "the read is the clamp");
         vm.deal(address(core), address(core).balance + 1);
         core.skim();
         assertEq(core.rateAtCheckpoint(), START, "the price state did not climb");
@@ -148,16 +148,16 @@ contract BidRuleTest is Fixture {
     function test_readIsMonotoneInThePot() public {
         uint256 last;
         for (uint256 i; i <= 40; ++i) {
-            _potTo(i * 0.05 ether);
+            _potTo(i * 0.05e15);
             uint256 read = core.ethRate();
             assertGe(read, last, "the read does not fall as the pot grows");
             assertLe(read, core.rateAtCheckpoint(), "the read is at most the price state");
             last = read;
         }
-        assertEq(last, START, "a pot of 2 eth reads the price state");
+        assertEq(last, START, "a pot of 2e15 wei reads the price state");
         // one wei of pot on either side of the pot that reads the price state
-        uint256 full = uint256(START) * 4_330_000 * 20 / 2_000;
-        assertEq(core.ethPot(), 2 ether);
+        uint256 full = uint256(START) * 4_330_000 / 10_000;
+        assertEq(core.ethPot(), 2e15);
         stdstore.target(address(core)).sig("ethPot()").checked_write(full - 1);
         vm.deal(address(core), full - 1);
         assertEq(core.ethRate(), START - 1, "one wei under the pot that reads the price state");
@@ -226,24 +226,24 @@ contract BidRuleTest is Fixture {
 
     // ------------------------------------------------------------------ clamp
 
-    /// the rate never exceeds the hourly room over 20 credits: pot * spendCapBps / (avgScore * 20)
-    function test_clampHoldsAtHourlyRoomOverTwentyCredits() public {
+    /// the rate never exceeds the price of one average credit that the hourly room affords: pot * spendCapBps / avgScore
+    function test_clampHoldsAtTheHourlyRoomOfOneAverageCredit() public {
         _with(_openCeiling);
-        _potTo(0.5 ether);
+        _potTo(0.005 ether);
         _warp(3 days);
         Settings memory s = core.settings();
-        uint256 clamp = uint256(0.5 ether) * s.spendCapBps / (uint256(s.avgScore) * 20);
+        uint256 clamp = uint256(0.005 ether) * s.spendCapBps / uint256(s.avgScore);
         assertEq(clamp, 11_547_344_110_854);
         assertEq(core.ethRate(), clamp, "held at the clamp");
-        // twenty average credits cost no more than the hourly room, and a rate one wei higher would exceed it
+        // an average credit costs no more than the hourly room, and a rate 20 wei higher would exceed it
         uint256 room = core.ethPot() * s.spendCapBps / 10_000;
-        assertLe(20 * (uint256(s.avgScore) * clamp / 1e4), room);
-        assertGt(20 * (uint256(s.avgScore) * (clamp + 20) / 1e4), room);
+        assertLe(uint256(s.avgScore) * clamp / 1e4, room);
+        assertGt(uint256(s.avgScore) * (clamp + 20) / 1e4, room);
         _warp(30 days);
         assertEq(core.ethRate(), clamp);
         // more fees lift the clamp, the climb resumes from the stored rate
-        _potTo(1 ether);
-        uint256 clamp2 = core.ethPot() * s.spendCapBps / (uint256(s.avgScore) * 20);
+        _potTo(0.01 ether);
+        uint256 clamp2 = core.ethPot() * s.spendCapBps / uint256(s.avgScore);
         assertGt(clamp2, clamp);
         _warp(1 days);
         assertEq(core.ethRate(), clamp2);
@@ -254,15 +254,15 @@ contract BidRuleTest is Fixture {
         s.climbPerMinBps = 1_000;
     }
 
-    /// the clamp divisor follows the setting
-    function test_clampCreditsChangesTheClamp() public {
+    /// the clamp is the price of one average credit that `spendCapBps` of the pot affords
+    function test_spendCapChangesTheClamp() public {
         _with(_openCeiling);
-        _potTo(0.5 ether);
+        _potTo(0.005 ether);
         Settings memory s = core.settings();
-        s.clampCredits = 5;
+        s.spendCapBps = 2_500;
         _setSettings(s);
         _warp(3 days);
-        assertEq(core.ethRate(), uint256(0.5 ether) * s.spendCapBps / (uint256(s.avgScore) * 5));
+        assertEq(core.ethRate(), uint256(0.005 ether) * s.spendCapBps / uint256(s.avgScore));
     }
 
     // ------------------------------------------------------------------ bounds
@@ -302,11 +302,11 @@ contract BidRuleTest is Fixture {
         s.idleLoosenBps = 2_001;
         _expectBad(s, "idleLoosenBps");
         s = Mainnet.defaultSettings();
-        s.clampCredits = 0;
-        _expectBad(s, "clampCredits");
+        s.spendCapBps = 99;
+        _expectBad(s, "spendCapBps");
         s = Mainnet.defaultSettings();
-        s.clampCredits = 1_001;
-        _expectBad(s, "clampCredits");
+        s.spendCapBps = 10_001;
+        _expectBad(s, "spendCapBps");
     }
 
     function test_boundEdgesAreAccepted() public {
@@ -316,7 +316,7 @@ contract BidRuleTest is Fixture {
         s.climbPerMinBps = 1;
         s.ceilBps = 10_000;
         s.idleLoosenBps = 0;
-        s.clampCredits = 1;
+        s.spendCapBps = 100;
         _setSettings(s);
         assertEq(abi.encode(core.settings()), abi.encode(s));
         s.dropPerCreditBps = 1_000;
@@ -324,7 +324,7 @@ contract BidRuleTest is Fixture {
         s.climbPerMinBps = 1_000;
         s.ceilBps = 30_000;
         s.idleLoosenBps = 2_000;
-        s.clampCredits = 1_000;
+        s.spendCapBps = 10_000;
         _setSettings(s);
         assertEq(abi.encode(core.settings()), abi.encode(s));
     }
@@ -335,13 +335,13 @@ contract BidRuleTest is Fixture {
     /// the dropped rate. a second fill pays the clamp, drops the price state as a fill at full price would, and the
     /// anchor is the price state at that fill
     function test_clampLowersTheReadAndNotThePriceState() public {
-        // 20 credits of hourly room at the opening rate: pot * 2000 / (4.33e6 * 20) = 4e12
-        _potTo(20 * uint256(4_330_000) * START / 2_000);
+        // a pot of 1.5 average credits at the opening rate: the clamp is 1.5 times the rate and the read is the price state
+        _potTo(15 * uint256(4_330_000) * START / 100_000);
         assertEq(core.ethRate(), START);
         _sellOne();
         uint256 price1 = START * 9_950 / 10_000;
         assertEq(core.rateAtCheckpoint(), price1, "the price state dropped 0.5 percent");
-        uint256 clamp = core.ethPot() * 2_000 / (4_330_000 * 20);
+        uint256 clamp = core.ethPot() * 10_000 / 4_330_000;
         assertLt(clamp, price1, "the clamp of the smaller pot is below the price state");
         assertEq(core.ethRate(), clamp, "and the read is the clamp");
         // the next fill pays the clamp
@@ -359,11 +359,11 @@ contract BidRuleTest is Fixture {
     /// a checkpoint at a small funded pot stores the price state, not the clamp: when the pot grows the read is back at
     /// the opening rate at once
     function test_launch_smallPotDoesNotDragThePriceState() public {
-        _potTo(0.05 ether);
+        _potTo(0.0005 ether);
         core.skim();
         vm.deal(address(core), address(core).balance + 1);
         core.skim();
-        uint256 clamp = core.ethPot() * 2_000 / (4_330_000 * 20);
+        uint256 clamp = core.ethPot() * 10_000 / 4_330_000;
         assertLt(clamp, START / 3, "the clamp is a fraction of the opening rate");
         assertEq(core.ethRate(), clamp);
         assertEq(core.rateAtCheckpoint(), START, "the checkpoint stored the price state");
@@ -388,7 +388,7 @@ contract BidRuleTest is Fixture {
         assertEq(core.ethPot(), 1e15 + 1);
         assertEq(core.rateAtCheckpoint(), price, "the price state is not lowered by the small pot");
         _warp(10 hours);
-        assertEq(core.ethRate(), core.ethPot() * 2_000 / (4_330_000 * 20), "the read is the clamp of the small pot");
+        assertEq(core.ethRate(), core.ethPot() * 10_000 / 4_330_000, "the read is the clamp of the small pot");
         vm.deal(address(core), address(core).balance + 1);
         core.skim();
         assertEq(core.rateAtCheckpoint(), price, "and a starved pot does not raise the price state");
@@ -400,15 +400,15 @@ contract BidRuleTest is Fixture {
         assertApproxEqRel(core.ethRate(), price * 1_051_140_132_040_790_000 / 1e18, 1e9, "and it climbs from there");
     }
 
-    /// starved to 0.01 eth for a day and refilled to 0.05 eth: the read is the clamp of 0.05 eth, the first fill pays it
+    /// starved to 0.0001 eth for a day and refilled to 0.0005 eth: the read is the clamp of 0.0005 eth, the first fill pays it
     /// and drops the price state from the opening rate. a refill to 1 eth reads the price state
     function test_partialRefillReadsTheClampAndTheFirstFillDropsFromTheOpeningRate() public {
-        _potTo(0.01 ether);
+        _potTo(0.0001 ether);
         _warp(24 hours);
-        _potTo(0.05 ether);
-        // 5e16 * 2000 / (4_330_000 * 20) = 1_154_734_411_085
+        _potTo(0.0005 ether);
+        // 5e14 * 10_000 / 4_330_000 = 1_154_734_411_085
         uint256 clamp = 1_154_734_411_085;
-        assertEq(core.ethRate(), clamp, "the clamp of 0.05 eth");
+        assertEq(core.ethRate(), clamp, "the clamp of 0.0005 eth");
         assertEq(core.rateAtCheckpoint(), START, "the price state waited at the opening rate");
         uint256 id = _credits(seller, 1)[0];
         uint256 before = seller.balance;
@@ -423,14 +423,14 @@ contract BidRuleTest is Fixture {
         assertEq(core.ethRate(), START * 9_950 / 10_000, "with 1 eth in the pot the read is the price state");
     }
 
-    /// at the end of an hour the room falls under 20 credits: the last fills pay the clamp and the anchor stays the price
-    /// state at each fill
+    /// a pot of 1.9 average credits: the first fill pays the price state, the second pays the clamp of the rest, and the
+    /// anchor stays the price state at each fill
     function test_hourEnd_clampedFillsKeepTheAnchor() public {
-        _potTo(20 * uint256(4_330_000) * START / 2_000);
+        _potTo(19 * uint256(4_330_000) * START / 100_000);
         uint256 price = START;
-        for (uint256 i; i < 10; ++i) {
+        for (uint256 i; i < 2; ++i) {
             uint256 pot = core.ethPot();
-            uint256 clamp = pot * 2_000 / (4_330_000 * 20);
+            uint256 clamp = pot * 10_000 / 4_330_000;
             uint256 read = price < clamp ? price : clamp;
             assertEq(core.ethRate(), read);
             uint256 id = _credits(seller, 1)[0];
@@ -446,23 +446,27 @@ contract BidRuleTest is Fixture {
         }
     }
 
-    /// a batch of three sold into a pot whose clamp is half the opening rate: each credit pays 433 times the clamp of the
-    /// pot it finds, and the anchor is the price state at the third fill
+    /// a batch of three sold into a pot of 2.5 average credits at the opening rate: the first two credits pay the price
+    /// state, the third pays the clamp of the pot it finds, and the anchor is the price state at the third fill
     function test_clampBoundBatchPaysTheClampedReadAndAnchorsAtThePrice() public {
-        // 86_600_000_000_000_000 * 2000 / 86_600_000 = 2e12, half of the opening rate
-        uint256 pot = 86_600_000_000_000_000;
+        uint256 pot = 25 * uint256(4_330_000) * START / 100_000;
         _potTo(pot);
-        assertEq(core.ethRate(), START / 2);
+        assertEq(core.ethRate(), START);
         uint256[] memory ids = _credits(seller, 3);
         uint256 expected;
+        uint256 price = START;
         for (uint256 i; i < 3; ++i) {
-            expected += 433 * (pot * 2_000 / 86_600_000);
-            pot -= 433 * (pot * 2_000 / 86_600_000);
+            uint256 clamp = pot * 10_000 / 4_330_000;
+            uint256 pay = 433 * (price < clamp ? price : clamp);
+            if (i == 2) assertLt(clamp, price, "the clamp binds at the third fill");
+            expected += pay;
+            pot -= pay;
+            price = price * 9_950 / 10_000;
         }
         uint256 before = seller.balance;
         vm.prank(seller);
         core.sellForEth(ids);
-        assertEq(seller.balance - before, expected, "the batch pays the clamped reads");
+        assertEq(seller.balance - before, expected, "the batch pays the price state twice and the clamp once");
         assertEq(core.ethPot(), pot);
         assertLt(expected, 3 * 433 * START, "the clamp binds");
         (uint256 anchor, uint256 start,) = _anchor();
@@ -471,24 +475,28 @@ contract BidRuleTest is Fixture {
         assertEq(core.rateAtCheckpoint(), 3_940_299_500_000, "and the price state dropped once per credit");
     }
 
-    /// the hourly room is 20 percent of the pot at the first spend of the hour. a pot of exactly 20 credits of room at an
-    /// opening rate of 20_554_000_000_001 holds the room of 177_997_640_000_008_660 wei, and the read follows the clamp of
-    /// the shrinking pot: 22 sells cost 176_546_434_551_209_582 wei, the 23rd costs 7_134_417_654_488_138 wei against
-    /// 1_451_205_448_799_078 wei left. a batch of 23 reverts whole, a batch of 22 leaves the anchor at the price state of
-    /// its last fill
+    /// the hourly room is 20 percent of the pot at the first spend of the hour, at a spend cap of 2_000. at a rate of
+    /// 1e14 a credit costs 4.33e16 wei, so 4 sells fit the room of 2e17 wei and the 5th does not. a batch of 5 reverts
+    /// whole, a batch of 4 leaves the anchor at the price state of its last fill
     function test_hourEnd_aBatchPastTheRoomRevertsWholeAndAFittingBatchKeepsTheAnchor() public {
-        uint256 rate = 20_554_000_000_001;
+        Settings memory cs = core.settings();
+        cs.spendCapBps = 2_000;
+        _setSettings(cs);
+        uint256 rate = 1e14;
         vm.prank(owner);
         core.setRate(rate);
-        // rate * 4_330_000 * 20 / 2_000: the clamp of this pot is the rate
-        uint256 pot = 889_988_200_000_043_300;
+        uint256 pot = 1 ether;
         _potTo(pot);
         assertEq(core.ethRate(), rate);
-        uint256[] memory all = _credits(seller, 23);
-        uint256[] memory fit = new uint256[](22);
-        for (uint256 i; i < 22; ++i) {
+        uint256[] memory all = _credits(seller, 5);
+        uint256[] memory fit = new uint256[](4);
+        uint256 cost;
+        for (uint256 i; i < 4; ++i) {
             fit[i] = all[i];
+            cost += 433 * _walk(rate, i, 50);
         }
+        assertLe(cost, 0.2 ether);
+        assertGt(cost + 433 * _walk(rate, 4, 50), 0.2 ether);
         (uint256 a0, uint256 s0, uint256 b0) = _anchor();
         vm.prank(seller);
         vm.expectRevert(ICore.HourlyCap.selector);
@@ -501,19 +509,19 @@ contract BidRuleTest is Fixture {
         uint256 before = seller.balance;
         vm.prank(seller);
         core.sellForEth(fit);
-        assertEq(seller.balance - before, 176_546_434_551_209_582, "22 sells cost the sum of the clamped reads");
-        assertEq(core.ethPot(), 713_441_765_448_833_718);
+        assertEq(seller.balance - before, cost, "4 sells cost the sum of the price states");
+        assertEq(core.ethPot(), pot - cost);
         (uint256 anchor,,) = _anchor();
-        assertEq(anchor, 18_500_396_992_499, "the anchor is the price state at the 22nd fill");
-        assertEq(core.rateAtCheckpoint(), 18_407_895_007_536, "and the price state dropped once more");
+        assertEq(anchor, _walk(rate, 3, 50), "the anchor is the price state at the 4th fill");
+        assertEq(core.rateAtCheckpoint(), _walk(rate, 4, 50), "and the price state dropped once more");
 
         vm.prank(seller);
         vm.expectRevert(ICore.HourlyCap.selector);
-        core.sellForEth(_one(all[22]));
+        core.sellForEth(_one(all[4]));
         // the next hour opens a new room
         _warp(1 hours);
         vm.prank(seller);
-        core.sellForEth(_one(all[22]));
+        core.sellForEth(_one(all[4]));
     }
 
     /// a fill in the minute of a `setRate` that lowered the rate below the floor of the minute still drops 0.5 percent
@@ -592,7 +600,7 @@ contract BidRuleTest is Fixture {
         vm.deal(address(core), address(core).balance + 1);
         core.skim();
         uint256 state = core.rateAtCheckpoint();
-        uint256 pot = state / 2 * 4_330_000 * 20 / 2_000;
+        uint256 pot = state / 2 * 4_330_000 / 10_000;
         stdstore.target(address(core)).sig("ethPot()").checked_write(pot);
         vm.deal(address(core), pot);
         assertEq(core.ethRate(), state / 2, "the clamp binds");

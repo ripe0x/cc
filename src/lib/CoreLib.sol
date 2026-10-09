@@ -155,7 +155,6 @@ library CoreLib {
         s.climbPerMinBps = ns.climbPerMinBps;
         s.ceilBps = ns.ceilBps;
         s.idleLoosenBps = ns.idleLoosenBps;
-        s.clampCredits = ns.clampCredits;
         s.spendCapBps = ns.spendCapBps;
         s.bonusCapBps = ns.bonusCapBps;
         s.tipSavingsBps = ns.tipSavingsBps;
@@ -194,14 +193,13 @@ library CoreLib {
         s.climbPerMinBps = uint16(a >> 80);
         s.ceilBps = uint16(a >> 96);
         s.idleLoosenBps = uint16(a >> 112);
-        s.clampCredits = uint16(a >> 128);
-        s.spendCapBps = uint16(a >> 144);
-        s.bonusCapBps = uint16(a >> 160);
-        s.tipSavingsBps = uint16(a >> 176);
-        s.tipCapBps = uint16(a >> 192);
-        s.reimburseBps = uint16(a >> 208);
-        s.reimburseCapBps = uint16(a >> 224);
-        s.saleFloorBps = uint16(a >> 240);
+        s.spendCapBps = uint16(a >> 128);
+        s.bonusCapBps = uint16(a >> 144);
+        s.tipSavingsBps = uint16(a >> 160);
+        s.tipCapBps = uint16(a >> 176);
+        s.reimburseBps = uint16(a >> 192);
+        s.reimburseCapBps = uint16(a >> 208);
+        s.saleFloorBps = uint16(a >> 224);
         s.auctionDuration = uint32(b);
         s.exitAfter = uint32(b >> 32);
         s.saleToBuybackBps = uint16(b >> 64);
@@ -224,8 +222,8 @@ library CoreLib {
     /// @notice the price state and the read of the eth rate (wei per whole point) at `nowTs`, from the stored rate `r` of
     /// checkpoint time `t`. The price state compounds `climbPerMinBps` per minute up to min(`rateCap`, ceiling, clamp)
     /// and holds a value above that bound. The ceiling is `ceilBps` of the last fill rate grown by `idleLoosenBps` per
-    /// full 10 minutes since `anchorTime`. The clamp is `pot * spendCapBps / (avgScore * clampCredits)`. The read is
-    /// min(price state, clamp). Never reverts: the Core calls it from `receive()`
+    /// full 10 minutes since `anchorTime`. The clamp is `pot * spendCapBps / avgScore`, the price of one average credit that
+    /// the pot affords. The read is min(price state, clamp). Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view
@@ -241,7 +239,7 @@ library CoreLib {
     {
         Settings storage s = SettingsStore.load();
         uint256 room = pot * s.spendCapBps;
-        uint256 clamp = room / (uint256(s.avgScore) * s.clampCredits);
+        uint256 clamp = room / s.avgScore;
         uint256 loosened = 10_000 + uint256(s.idleLoosenBps) * (nowTs.zeroFloorSub(anchorTime) / 10 minutes);
         uint256 cap = RateStore.load().lastFillRate * loosened * s.ceilBps / 1e8;
         cap = cap.min(s.rateCap);

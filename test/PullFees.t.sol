@@ -77,7 +77,7 @@ contract PullFeesTest is CoreBase {
     /// by the sale
     function test_sellPullsTheRouterBeforeThePriceIsRead() public {
         uint256[] memory ids = _credits(alice, 1);
-        _fund(0.01 ether);
+        _fund(0.001 ether);
         uint256 snap = vm.snapshotState();
 
         // control: nothing in the router

@@ -644,7 +644,6 @@ contract ReceiveSettingsTest is FeeBase {
         s.climbPerMinBps = uint16(_pick(seed, 4, 1, 1_000));
         s.ceilBps = uint16(_pick(seed, 5, 10_000, 30_000));
         s.idleLoosenBps = uint16(_pick(seed, 9, 0, 2_000));
-        s.clampCredits = uint16(_pick(seed, 10, 1, 1_000));
         s.spendCapBps = uint16(_pick(seed, 6, 100, 5_000));
         s.saleToBuybackBps = uint16(_pick(seed, 7, 0, 10_000));
         s.rateCap = uint64(_pick(seed, 8, 1e11, 1e15));
@@ -688,7 +687,6 @@ contract ReceiveSettingsTest is FeeBase {
         s.climbPerMinBps = 1_000;
         s.ceilBps = 30_000;
         s.idleLoosenBps = 2_000;
-        s.clampCredits = 1;
         s.spendCapBps = 5_000;
         s.avgScore = 800_000;
         _setSettings(s);

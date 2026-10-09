@@ -492,29 +492,29 @@ contract ConfigTest is Fixture {
 
     /// the bounds of the preflight rows and of the deploy guard are the Core's: every field, both edges
     function test_settingsBoundsEveryFieldBothEdges() public view {
-        uint256[31] memory lo = SettingsFields.lo();
-        uint256[31] memory hi = SettingsFields.hi();
-        bytes32[31] memory names = SettingsFields.names();
+        uint256[30] memory lo = SettingsFields.lo();
+        uint256[30] memory hi = SettingsFields.hi();
+        bytes32[30] memory names = SettingsFields.names();
         for (uint256 i; i < SettingsFields.N; ++i) {
             Settings memory s = Mainnet.defaultSettings();
             // above the top, and the top itself (the two bound by another field start from a free partner)
-            if (i == 23) s.xRateCap = 10_000;
+            if (i == 22) s.xRateCap = 10_000;
             SettingsFields.set(s, i, hi[i]);
             assertEq(SettingsBounds.firstViolation(s), bytes32(0), "the top edge is inside");
             s = Mainnet.defaultSettings();
             SettingsFields.set(s, i, hi[i] + 1);
             assertEq(SettingsBounds.firstViolation(s), names[i], "above the top");
             // below the bottom, for the fields that have one
-            if (lo[i] == 0 && i != 23) continue;
+            if (lo[i] == 0 && i != 22) continue;
             s = Mainnet.defaultSettings();
-            if (i == 23) {
-                SettingsFields.set(s, 22, s.xRateFloor - 1);
+            if (i == 22) {
+                SettingsFields.set(s, 21, s.xRateFloor - 1);
             } else {
                 SettingsFields.set(s, i, lo[i] - 1);
             }
             bytes32 got = SettingsBounds.firstViolation(s);
             // the cap below the floor names the floor, as the Core does
-            assertEq(got, i == 23 ? bytes32("xRateFloor") : names[i], "below the bottom");
+            assertEq(got, i == 22 ? bytes32("xRateFloor") : names[i], "below the bottom");
         }
     }
 

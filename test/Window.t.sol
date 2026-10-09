@@ -16,6 +16,7 @@ contract WindowTest is CoreBase {
 
     function setUp() public override {
         super.setUp();
+        _spendCap(2_000);
         _skipToSplitStart();
         vm.deal(address(feeRouter), 1 gwei);
         _flush();

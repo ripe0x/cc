@@ -600,8 +600,6 @@ abstract contract LaunchChecks is PostflightChecks {
                 vm.toString(c.settings.avgScore),
                 " spendCapBps ",
                 vm.toString(c.settings.spendCapBps),
-                " clampCredits ",
-                vm.toString(c.settings.clampCredits),
                 " rateCap ",
                 vm.toString(c.settings.rateCap)
             )

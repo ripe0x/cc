@@ -3,15 +3,15 @@ pragma solidity ^0.8.28;
 
 import {Settings, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 
-/// @notice the 31 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
+/// @notice the 30 fields of `Settings` by index (the order of the struct), their names and the documented bounds of
 /// docs/FLOW.md section 2, for the settings script and the config and deploy tests. the two fields bounded by another
 /// field (xRateCap, xRateFloor) have the bounds of the other field in the callers' hands
 library SettingsFields {
-    uint256 internal constant N = 31;
+    uint256 internal constant N = 30;
 
     /// @dev field i of the settings struct, in declaration order
     function get(Settings memory s, uint256 i) internal pure returns (uint256) {
-        uint256[31] memory f = [
+        uint256[30] memory f = [
             uint256(s.flatBps),
             s.avgScore,
             s.dropPerCreditBps,
@@ -19,7 +19,6 @@ library SettingsFields {
             s.climbPerMinBps,
             s.ceilBps,
             s.idleLoosenBps,
-            s.clampCredits,
             s.spendCapBps,
             s.bonusCapBps,
             s.tipSavingsBps,
@@ -57,36 +56,35 @@ library SettingsFields {
         else if (i == 4) s.climbPerMinBps = uint16(v);
         else if (i == 5) s.ceilBps = uint16(v);
         else if (i == 6) s.idleLoosenBps = uint16(v);
-        else if (i == 7) s.clampCredits = uint16(v);
-        else if (i == 8) s.spendCapBps = uint16(v);
-        else if (i == 9) s.bonusCapBps = uint16(v);
-        else if (i == 10) s.tipSavingsBps = uint16(v);
-        else if (i == 11) s.tipCapBps = uint16(v);
-        else if (i == 12) s.reimburseBps = uint16(v);
-        else if (i == 13) s.reimburseCapBps = uint16(v);
-        else if (i == 14) s.saleFloorBps = uint16(v);
-        else if (i == 15) s.auctionDuration = uint32(v);
-        else if (i == 16) s.exitAfter = uint32(v);
-        else if (i == 17) s.saleToBuybackBps = uint16(v);
-        else if (i == 18) s.exitToBuybackBps = uint16(v);
-        else if (i == 19) s.buybackSlice = uint128(v);
-        else if (i == 20) s.buybackDelay = uint16(v);
-        else if (i == 21) s.keeperTipBps = uint16(v);
-        else if (i == 22) s.xRateCap = uint16(v);
-        else if (i == 23) s.xRateFloor = uint16(v);
-        else if (i == 24) s.xRateClimbPerHour = uint16(v);
-        else if (i == 25) s.xRateDropPerCredit = uint16(v);
-        else if (i == 26) s.xAuctionHalfLife = uint32(v);
-        else if (i == 27) s.exitSliceCredits = uint16(v);
-        else if (i == 28) s.rateCap = uint64(v);
-        else if (i == 29) s.exitLaneToBuybackBps = uint16(v);
+        else if (i == 7) s.spendCapBps = uint16(v);
+        else if (i == 8) s.bonusCapBps = uint16(v);
+        else if (i == 9) s.tipSavingsBps = uint16(v);
+        else if (i == 10) s.tipCapBps = uint16(v);
+        else if (i == 11) s.reimburseBps = uint16(v);
+        else if (i == 12) s.reimburseCapBps = uint16(v);
+        else if (i == 13) s.saleFloorBps = uint16(v);
+        else if (i == 14) s.auctionDuration = uint32(v);
+        else if (i == 15) s.exitAfter = uint32(v);
+        else if (i == 16) s.saleToBuybackBps = uint16(v);
+        else if (i == 17) s.exitToBuybackBps = uint16(v);
+        else if (i == 18) s.buybackSlice = uint128(v);
+        else if (i == 19) s.buybackDelay = uint16(v);
+        else if (i == 20) s.keeperTipBps = uint16(v);
+        else if (i == 21) s.xRateCap = uint16(v);
+        else if (i == 22) s.xRateFloor = uint16(v);
+        else if (i == 23) s.xRateClimbPerHour = uint16(v);
+        else if (i == 24) s.xRateDropPerCredit = uint16(v);
+        else if (i == 25) s.xAuctionHalfLife = uint32(v);
+        else if (i == 26) s.exitSliceCredits = uint16(v);
+        else if (i == 27) s.rateCap = uint64(v);
+        else if (i == 28) s.exitLaneToBuybackBps = uint16(v);
         else s.feeToBuybackBps = uint16(v);
         // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// @dev the documented lower bound of every field. xRateFloor and xRateCap are bounded by each other, those two are
     /// handled by the callers
-    function lo() internal pure returns (uint256[31] memory) {
+    function lo() internal pure returns (uint256[30] memory) {
         return [
             uint256(0),
             800_000,
@@ -95,7 +93,6 @@ library SettingsFields {
             1,
             10_000,
             0,
-            1,
             100,
             0,
             0,
@@ -122,7 +119,7 @@ library SettingsFields {
         ];
     }
 
-    function hi() internal pure returns (uint256[31] memory) {
+    function hi() internal pure returns (uint256[30] memory) {
         return [
             uint256(10_000),
             6_000_000,
@@ -131,8 +128,7 @@ library SettingsFields {
             1_000,
             30_000,
             2_000,
-            1_000,
-            5_000,
+            10_000,
             5_000,
             2_500,
             500,
@@ -158,7 +154,7 @@ library SettingsFields {
         ];
     }
 
-    function names() internal pure returns (bytes32[31] memory) {
+    function names() internal pure returns (bytes32[30] memory) {
         return [
             bytes32("flatBps"),
             "avgScore",
@@ -167,7 +163,6 @@ library SettingsFields {
             "climbPerMinBps",
             "ceilBps",
             "idleLoosenBps",
-            "clampCredits",
             "spendCapBps",
             "bonusCapBps",
             "tipSavingsBps",

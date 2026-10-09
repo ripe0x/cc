@@ -52,8 +52,7 @@ abstract contract HandlerOwner is HandlerHouse {
         s.climbPerMinBps = uint16(_f(_r(seed, 4), 1, 1_000, c.climbPerMinBps));
         s.ceilBps = uint16(_f(_r(seed, 5), 10_000, 30_000, c.ceilBps));
         s.idleLoosenBps = uint16(_f(_r(seed, 29), 0, 2_000, c.idleLoosenBps));
-        s.clampCredits = uint16(_f(_r(seed, 30), 1, 1_000, c.clampCredits));
-        s.spendCapBps = uint16(_f(_r(seed, 6), 100, 5_000, c.spendCapBps));
+        s.spendCapBps = uint16(_f(_r(seed, 6), 100, 10_000, c.spendCapBps));
         s.bonusCapBps = uint16(_f(_r(seed, 7), 0, 5_000, c.bonusCapBps));
         s.tipSavingsBps = uint16(_f(_r(seed, 8), 0, 2_500, c.tipSavingsBps));
         s.tipCapBps = uint16(_f(_r(seed, 9), 0, 500, c.tipCapBps));
@@ -89,7 +88,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (k == 2) {
             s.flatBps = 10_000;
         } else if (k == 3) {
-            s.spendCapBps = 5_000;
+            s.spendCapBps = 10_000;
         } else if (k == 4) {
             s.saleFloorBps = 1_000;
         } else if (k == 5) {
@@ -132,7 +131,6 @@ abstract contract HandlerOwner is HandlerHouse {
             s.climbPerMinBps = 1_000;
             s.ceilBps = 30_000;
             s.idleLoosenBps = 2_000;
-            s.clampCredits = 1;
             s.auctionDuration = 6 hours;
             s.xAuctionHalfLife = 10 minutes;
         } else if (k == 17) {
@@ -265,8 +263,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (s.climbPerMinBps < 1 || s.climbPerMinBps > 1_000) return "climbPerMinBps";
         if (s.ceilBps < 10_000 || s.ceilBps > 30_000) return "ceilBps";
         if (s.idleLoosenBps > 2_000) return "idleLoosenBps";
-        if (s.clampCredits < 1 || s.clampCredits > 1_000) return "clampCredits";
-        if (s.spendCapBps < 100 || s.spendCapBps > 5_000) return "spendCapBps";
+        if (s.spendCapBps < 100 || s.spendCapBps > 10_000) return "spendCapBps";
         if (s.bonusCapBps > 5_000) return "bonusCapBps";
         if (s.tipSavingsBps > 2_500) return "tipSavingsBps";
         if (s.tipCapBps > 500) return "tipCapBps";
@@ -299,7 +296,7 @@ abstract contract HandlerOwner is HandlerHouse {
     /// breaks exactly one field of valid settings, `which` picks it. returns the name the library must report
     function _break(Settings memory s, uint256 which) internal pure returns (bytes32 name) {
         // forge-lint: disable-start(unsafe-typecast)
-        which = which % 46;
+        which = which % 44;
         if (which == 0) {
             (s.flatBps, name) = (10_001, "flatBps");
         } else if (which == 1) {
@@ -321,7 +318,7 @@ abstract contract HandlerOwner is HandlerHouse {
         } else if (which == 9) {
             (s.spendCapBps, name) = (99, "spendCapBps");
         } else if (which == 10) {
-            (s.spendCapBps, name) = (5_001, "spendCapBps");
+            (s.spendCapBps, name) = (10_001, "spendCapBps");
         } else if (which == 11) {
             (s.bonusCapBps, name) = (5_001, "bonusCapBps");
         } else if (which == 12) {
@@ -386,12 +383,8 @@ abstract contract HandlerOwner is HandlerHouse {
             (s.feeToBuybackBps, name) = (10_001, "feeToBuybackBps");
         } else if (which == 42) {
             (s.ceilBps, name) = (30_001, "ceilBps");
-        } else if (which == 43) {
-            (s.idleLoosenBps, name) = (2_001, "idleLoosenBps");
-        } else if (which == 44) {
-            (s.clampCredits, name) = (0, "clampCredits");
         } else {
-            (s.clampCredits, name) = (1_001, "clampCredits");
+            (s.idleLoosenBps, name) = (2_001, "idleLoosenBps");
         }
         // forge-lint: disable-end(unsafe-typecast)
     }

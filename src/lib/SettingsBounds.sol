@@ -16,8 +16,7 @@ library SettingsBounds {
         if (s.climbPerMinBps < 1 || s.climbPerMinBps > 1_000) return "climbPerMinBps";
         if (s.ceilBps < 10_000 || s.ceilBps > 30_000) return "ceilBps";
         if (s.idleLoosenBps > 2_000) return "idleLoosenBps";
-        if (s.clampCredits < 1 || s.clampCredits > 1_000) return "clampCredits";
-        if (s.spendCapBps < 100 || s.spendCapBps > 5_000) return "spendCapBps";
+        if (s.spendCapBps < 100 || s.spendCapBps > 10_000) return "spendCapBps";
         if (s.bonusCapBps > 5_000) return "bonusCapBps";
         if (s.tipSavingsBps > 2_500) return "tipSavingsBps";
         if (s.tipCapBps > 500) return "tipCapBps";

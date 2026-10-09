@@ -39,7 +39,7 @@ contract RateFuzzTest is Fixture {
 
     /// the price state after `mins` whole minutes from the stored rate `r`: at most `rateCap` and the loosened ceiling of
     /// the anchor (idle for `idle` seconds), and an integer walk of `climbPerMinBps` a minute up to the clamp
-    /// `pot * spendCapBps / (avgScore * clampCredits)`, which a price state above it holds
+    /// `pot * spendCapBps / avgScore`, which a price state above it holds
     function _priceAfter(Settings memory s, uint256 r, uint256 pot, uint256 anchor, uint256 idle, uint256 mins)
         internal
         pure
@@ -48,7 +48,7 @@ contract RateFuzzTest is Fixture {
         uint256 cap = BidModel.ceiling(s, anchor, idle);
         if (cap > s.rateCap) cap = s.rateCap;
         if (r >= cap) return cap;
-        uint256 target = pot * s.spendCapBps / (uint256(s.avgScore) * s.clampCredits);
+        uint256 target = pot * s.spendCapBps / uint256(s.avgScore);
         if (target > cap) target = cap;
         if (r >= target) return r;
         for (uint256 j; j < mins; ++j) {
@@ -94,7 +94,6 @@ contract RateFuzzTest is Fixture {
             s.climbPerMinBps = uint16(bound(_r(seed, 4), 1, 1_000));
             s.ceilBps = uint16(bound(_r(seed, 5), 10_000, 30_000));
             s.idleLoosenBps = uint16(bound(_r(seed, 6), 0, 2_000));
-            s.clampCredits = uint16(bound(_r(seed, 7), 1, 1_000));
         }
         // forge-lint: disable-end(unsafe-typecast)
     }
@@ -337,7 +336,6 @@ contract RateFuzzTest is Fixture {
     /// forge-config: default.fuzz.runs = 20
     function testFuzz_clampKeepsAnAverageCreditSellable(uint256 seed, uint256 potSeed, uint256 waitSeed) public {
         Settings memory s = _randomSettings(seed, true);
-        s.clampCredits = 1;
         _setSettings(s);
         uint256 min = _minPot(s, START);
         // the funded clamp must sit below the rate cap, or the cap is what pins the rate (tested on its own)
@@ -376,6 +374,9 @@ contract RateFuzzTest is Fixture {
     /// forge-config: default.fuzz.runs = 12
     function testFuzz_documented_windowBoundaryAllowsTwoCaps(uint256 potSeed) public {
         uint256 pot = bound(potSeed, 0.03 ether, 0.06 ether);
+        Settings memory cs = core.settings();
+        cs.spendCapBps = 2_000;
+        _setSettings(cs);
         _fund(pot);
         uint256[] memory ids = _credits(alice, 60);
         uint256 cap0 = pot * 2000 / 10_000;
