@@ -255,7 +255,7 @@ FeeRouter, replacing 10.2 where they differ:
 
 the router's payee list holds ONE entry at launch: the creator address (the config `creator`), with the combined share of 1.0 point of volume, which is 161_031 parts per million of router inflow (1.0 / 6.21). there is no separate artist payee and no placeholder for one: the owner will later point the payee at his own splitter contract with `setPayees`. the router keeps supporting up to 4 payees. because a payee may be a contract, the fixed gas cap on a payee payment is 100_000 and the `owed` and `claim` fallback stays.
 
-### 10.8 the Core pulls the fees (owner, 2026-10-08)
+### 10.8 the Core pulls the fees
 
 | # | decision |
 |---|---|
@@ -263,10 +263,10 @@ the router's payee list holds ONE entry at launch: the creator address (the conf
 
 mechanism:
 * `CoreLib.pullFees(router, tipTo)` calls `flush(tipTo)` on `FEE_SOURCE` with at most 1,000,000 gas and ignores the outcome. a router that reverts, burns its gas or has no code leaves the entry point unaffected and the fees in the router.
-* the pull is the first action of the entry point: before the checkpoint, before any pot or rate read and before the measuring flag is set. the flush sends eth into `Core.receive`, which checkpoints and books it, so the entry point prices against the enlarged pot at the rate checkpointed at that moment. every receipt of fee eth happens before the measured window starts (V2R-1).
+* the pull is the first action of the entry point: before the checkpoint, before any pot or rate read and before the measuring flag is set. the flush sends eth into `Core.receive`, which checkpoints and books it, so the entry point prices against the enlarged pot at the rate checkpointed at that moment. fee eth arriving in a measured window is refused by `Core.receive`, and the pull has finished before a window starts (V2R-1).
 * an empty router returns early inside `flush` (after the engine check), which costs the entry point one library call and one router call.
 * `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` do not pull: the exit token entry points do not read the eth pot, and the others book or spend on their own schedule.
-* gas of the pull, measured by `test/PullFees.t.sol` on one credit sale: 388,221 before the change, 394,433 with an empty router (+6,212) and 465,122 with 1 eth in the router (+76,901, the flush itself included). `test/GasCap.t.sol` measures the largest sell batch with the 1 eth pull.
-* the pull sits before `gasStart` in `compose`, so the gas repayment does not include the flush.
+* gas of one credit sale, measured by `test/PullFees.t.sol`: 394,433 with an empty router and 465,122 with 1 eth in the router (the flush adds about 70,700). the most expensive flush (four payees and a tip recipient that burn all their gas, the split on) costs 706,000 gas. `test/GasCap.t.sol` measures the largest sell batch with the 1 eth pull.
+* the pull sits before `gasStart` in `compose`, so the gas of the flush is covered by the flush tip only. a flush raises `ethPot`, which can lift the `ethPot` term of the `_repay` cap; the fees are booked fees and the lift is legitimate.
 * the router pointer is the immutable `FEE_SOURCE`, fixed at deploy and checked for code.
 

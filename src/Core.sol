@@ -710,6 +710,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// one body for both lanes, told apart by the selector of the call, so the code is not duplicated
     function _compose() private {
+        // the pull runs before `gasStart`, so the gas of the flush is covered by the flush tip only. the flush raises
+        // `ethPot`, which can lift the `ethPot` term of the `_repay` cap
         _pullFees();
         uint256 gasStart = gasleft();
         Lane lane = msg.sig == this.composeExit.selector ? Lane.Exit : Lane.Eth;

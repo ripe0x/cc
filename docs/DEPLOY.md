@@ -270,7 +270,7 @@ cast call $ROUTER "locked()(bool)" --rpc-url $MAINNET_RPC_URL; cast call $ROUTER
 | `cast send $ROUTER "setTip(uint32,uint96)" 5000 5000000000000000` | the tip of a flush, paid to `tipTo`: parts per million (at most 20,000) and a cap in wei (at most 0.05 eth) |
 | `cast send $ROUTER "setSplitStart(uint64)" $TS` | the time of the first flush that turns the split on. only while the split is off |
 | `cast send $ROUTER "setEngine(address)" $NEW_ENGINE` | points every future flush at another contract (it must have code). the old engine keeps what it already holds. this is the one owner switch that directs value to an address the owner picks: a stolen router owner key can redirect the fee stream until the router is locked |
-| `cast send $ROUTER "lock()"` | closes every setter above for good. needs an engine. do it only when the payees and the engine are final |
+| `cast send $ROUTER "lock()"` | closes every setter above for good. needs an engine. do it only when the payees and the engine are final, and after the engine address is verified on chain (`engine()` equals the Core): a wrong engine before the lock makes every eth pot door of the Core spend up to 1,000,000 gas on a failing pull |
 | `cast send $ROUTER "transferOwnership(address)" $MULTISIG`, then `acceptOwnership()` from it | two step handover, never locked. run postflight with `ROUTER_CHANGED=1` after a change |
 
 ### keeper duties

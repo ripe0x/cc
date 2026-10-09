@@ -228,8 +228,8 @@ library CoreLib {
         emit CoinRescued(to, amount);
     }
 
-    /// gas forwarded to the router flush of `pullFees`. a flush costs about 600,000 gas at most (the engine booking, the
-    /// tip send at 50,000 and four payee sends at 100,000)
+    /// gas forwarded to the router flush of `pullFees`. the most expensive flush (four payees and a tip recipient that
+    /// burn all their gas, the split on) measures 706,000 gas in test/PullFees.t.sol
     uint256 internal constant PULL_GAS = 1_000_000;
 
     /// @notice calls `flush(tipTo)` on the fee router with at most `PULL_GAS` and ignores the outcome. the router sends

@@ -8,6 +8,7 @@ import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {Lane, ICreditStrategy} from "../src/interfaces/Interfaces.sol";
 import {RefusingEngine, GasBurnerEngine} from "./attackers/FlushEngines.sol";
 import {RevertingRouter} from "./attackers/RevertingRouter.sol";
+import {GasBurningPayee, BurningTipCaller} from "./attackers/GasBurners.sol";
 
 /// the Core pulls the fee router's balance at the start of its eth pot entry points (`sellForEth`, `buyListing`,
 /// `compose`). real pool, real router, real credits. the router is loaded with `vm.deal`, which is the state a swap
@@ -149,7 +150,7 @@ contract PullFeesTest is CoreBase {
         }
     }
 
-    /// extra gas of one credit sale for an empty router and for 1 eth in it. printed, bounded
+    /// gas of one credit sale for an empty router and for 1 eth in it. printed, pinned within a tolerance
     function test_gasOfThePullOnOneCredit() public {
         uint256[] memory ids = _credits(alice, 2);
         _fund(2 ether);
@@ -170,6 +171,9 @@ contract PullFeesTest is CoreBase {
         uint256 loaded = g - gasleft();
         emit log_named_uint("gas sellForEth 1 credit, router empty", empty);
         emit log_named_uint("gas sellForEth 1 credit, router 1 eth", loaded);
+        // the figures of docs/FLOW.md 10.8
+        assertApproxEqAbs(empty, 394_433, 5_000, "gas, router empty");
+        assertApproxEqAbs(loaded - empty, 70_689, 5_000, "gas of the flush");
         assertEq(address(feeRouter).balance, 0);
     }
 
@@ -266,10 +270,14 @@ contract PullFeesTest is CoreBase {
         vm.etch(core.FEE_SOURCE(), "");
         uint256[] memory ids = _credits(alice, 1);
         _fund(1 ether);
+        uint256 pot = core.ethPot();
         uint256 before = alice.balance;
         vm.prank(alice);
         core.sellForEth(ids);
-        assertGt(alice.balance, before, "paid");
+        uint256 paid = alice.balance - before;
+        assertGt(paid, 0, "paid");
+        assertEq(core.ethPot(), pot - paid, "the pot paid exactly the price");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "balance equals the pots");
     }
 
     /// the real router with an engine that refuses the eth: the flush fails whole, the door still works and the fees
@@ -303,6 +311,40 @@ contract PullFeesTest is CoreBase {
         core.sellForEth{gas: 3_000_000}(ids);
         assertGt(alice.balance, before, "paid");
         assertEq(address(feeRouter).balance, LOAD, "fees wait in the router");
+    }
+
+    /// the most expensive flush: the split just turned on, four payees that burn all the gas they are given (each is
+    /// credited as owed after 100,000 gas) and a tip recipient that burns the 50,000 gas of the tip send. printed and
+    /// bounded, the door that pulls it still completes
+    function test_worstCaseFlushGasAndTheDoorCompletes() public {
+        address[] memory who = new address[](4);
+        uint32[] memory ppm = new uint32[](4);
+        for (uint256 i; i < 4; ++i) {
+            who[i] = address(new GasBurningPayee());
+            ppm[i] = 50_000;
+        }
+        vm.prank(feeRouter.owner());
+        feeRouter.setPayees(who, ppm);
+        BurningTipCaller caller = new BurningTipCaller(address(core));
+        uint256[] memory ids = _credits(address(caller), 1);
+        _fund(1 ether);
+        _load();
+        uint256 snap = vm.snapshotState();
+
+        uint256 g = gasleft();
+        feeRouter.flush(address(caller));
+        uint256 flushGas = g - gasleft();
+        emit log_named_uint("worst case flush gas", flushGas);
+        assertLe(flushGas, 800_000, "worst case flush gas");
+        assertGt(flushGas, 600_000, "the burning paths ran");
+        assertEq(address(feeRouter).balance, feeRouter.totalOwed(), "the burned shares are owed");
+        vm.revertToState(snap);
+
+        caller.sell(ids);
+        assertGt(address(caller).balance, 0, "the sale paid the caller");
+        assertEq(address(feeRouter).balance, feeRouter.totalOwed(), "pulled, burned shares owed");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "fees booked");
+        assertEq(CREDITS.ownerOf(ids[0]), address(core));
     }
 
     /// a keeper may still call `flush` directly: it delivers, and the door that follows finds an empty router

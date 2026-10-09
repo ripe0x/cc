@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {Vm} from "forge-std/Vm.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
@@ -96,8 +97,8 @@ contract ReviewSeaportFlushTest is SeaportBase {
         return _basicData(c);
     }
 
-    /// V2R-1 fixed: the Core refuses the fee source while it measures. the flush fails whole, the fees wait in the
-    /// router, the cost basis is the price and no tip is paid on a purchase at the ceiling
+    /// V2R-1 fixed: the Core refuses the fee source while it measures. the flush fails whole, the attacker's top up
+    /// waits in the router, the cost basis is the price and no tip is paid on a purchase at the ceiling
     function test_FIXED_strangerFlushInsideBuyListingRevertsAndTheCostIsExact() public {
         uint256 held = _queueFees(1.5 ether);
         uint256 id = _list();
@@ -116,7 +117,7 @@ contract ReviewSeaportFlushTest is SeaportBase {
 
         assertTrue(atk.tried(), "the attacker tried the flush");
         assertFalse(atk.flushOk(), "the flush inside the measured call reverted");
-        assertEq(address(feeRouter).balance, held, "the fees wait in the router, untouched");
+        assertEq(address(feeRouter).balance, held, "the attacker top up waits in the router, untouched");
         (,, uint256 booked,) = core.creditInfo(id);
         assertEq(maker.balance - maker0, price - 1, "no tip at the ceiling");
         assertEq(booked, price, "the cost basis is the price paid");
@@ -125,6 +126,47 @@ contract ReviewSeaportFlushTest is SeaportBase {
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "pots stay consistent");
         // the self dealing door never beats the sell door
         assertLe(maker.balance - maker0 + 1, price, "the door does not beat the sell door");
+    }
+
+    /// the router holds fees when the door starts and the attacker also tops it up and flushes mid call. the door pulls
+    /// the held fees first. the mid call flush fails whole, and the measured cost and the cost basis stay exact
+    function test_FIXED_aLoadedRouterIsPulledAndAMidCallFlushCannotMoveTheCost() public {
+        uint256 held = _queueFees(1.5 ether);
+        // the fees go back into the router: the door finds them there
+        vm.deal(address(feeRouter), held);
+        uint256 id = _list();
+        uint256 price = core.ceilingOf(id);
+        FlushingPayee atk = new FlushingPayee(address(feeRouter));
+        vm.deal(address(atk), held);
+        atk.arm(true, held);
+        bytes memory data = _order(id, price, atk);
+
+        uint256 tip = held * feeRouter.tipPpm() / 1e6;
+        if (tip > feeRouter.tipCap()) tip = feeRouter.tipCap();
+        uint256 engine = held - tip - (feeRouter.splitOn() ? held * 161_031 / 1e6 : 0);
+        uint256 pot0 = core.ethPot();
+        vm.recordLogs();
+        vm.prank(maker);
+        core.buyListing(price, data, id, Mainnet.SEAPORT);
+        (uint256 cost, uint256 buyTip) = _listingBought(vm.getRecordedLogs());
+
+        assertTrue(atk.tried(), "the attacker tried the flush");
+        assertFalse(atk.flushOk(), "the flush inside the measured call reverted");
+        assertEq(address(feeRouter).balance, held, "only the attacker top up waits in the router");
+        (,, uint256 booked,) = core.creditInfo(id);
+        assertEq(cost, price, "the measured cost is the price");
+        assertEq(booked, price + buyTip, "the cost basis is the price plus the buy tip");
+        uint256 toBuyback = engine * core.settings().feeToBuybackBps / 10_000;
+        assertEq(core.ethPot(), pot0 + engine - toBuyback - price - buyTip, "the pot took the held fees and paid the cost");
+        assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), "pots stay consistent");
+    }
+
+    function _listingBought(Vm.Log[] memory logs) internal pure returns (uint256 cost, uint256 tip) {
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == ICore.ListingBought.selector) {
+                (cost, tip,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            }
+        }
     }
 
     /// a flush that is not caught fails the payment, so the whole `buyListing` reverts
@@ -143,8 +185,8 @@ contract ReviewSeaportFlushTest is SeaportBase {
         assertEq(address(atk).balance, held, "the attacker kept its eth");
     }
 
-    /// the fees that waited are booked by a normal flush right after, with the owner's buyback split. the fees skip
-    /// nothing: the mid call attempt only delayed them
+    /// the top up that waited in the router is booked by a normal flush right after, with the owner's buyback split:
+    /// the mid call attempt only delayed it
     function test_FIXED_aFlushRightAfterTheMeasuredCallBooksTheFeesWithTheSplit() public {
         Settings memory cs = core.settings();
         cs.feeToBuybackBps = 5_000;
