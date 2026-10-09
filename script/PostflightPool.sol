@@ -84,7 +84,13 @@ abstract contract PostflightPool is PostflightV2 {
     /// @dev the skim config of the pool, frozen at init: the bounty goes to the router, the values are the config's
     function _postSkim(LaunchConfig memory c, bytes32 poolId) private {
         IArtCoinsHookV2.SkimConfig memory k = _hookSkim(c.stack.hook, poolId);
-        _eq("hook: bounty recipient is the fee router (the Core fee source)", address(k.bountyRecipient), c.stack.feeSource);
+        _soft(
+            _coinChanged(),
+            "hook: bounty recipient is the fee router (the Core fee source)",
+            address(k.bountyRecipient) == c.stack.feeSource,
+            string.concat("got ", vm.toString(address(k.bountyRecipient)), " want ", vm.toString(c.stack.feeSource)),
+            "COIN_CHANGED=1"
+        );
         _check(
             "hook: skim config equals the config",
             k.baselineSkimBps == c.baselineSkimBps && k.bountyBps == c.bountyBps

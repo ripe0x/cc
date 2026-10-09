@@ -7,7 +7,7 @@ import {LaunchConfig} from "./LaunchConfig.sol";
 import {LaunchChecks} from "./Checks.sol";
 
 /// @notice read only check of a launched system against the config. safe to run against mainnet at any time.
-/// `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL`. set DEPLOYER to print the verify inputs and to check the creation nonces of the router and the controller. the override flags SETTINGS_CHANGED, LOCKS_CHANGED, OWNER_CHANGED, COIN_CHANGED and ROUTER_CHANGED name a change the owner made after launch. set CONFIG_HASH to check the signed off hash.
+/// `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL`. set DEPLOYER to print the verify inputs and to check the creation nonces of the router and the controller. the override flags SETTINGS_CHANGED, LOCKS_CHANGED, OWNER_CHANGED, COIN_CHANGED and ROUTER_CHANGED name a change the owner made after launch. RECIPIENTS_LOCKED=1 says `coin.lockRecipients()` was sent (script/Lock.s.sol): the lock row is a failure while the recipients are unlocked. set CONFIG_HASH to check the signed off hash.
 /// prints a table and reverts on any mismatch. run it right after the launch: the supply and rate rows are exact only
 /// until the first trade or the first fill
 contract Postflight is Script, LaunchChecks {

@@ -95,8 +95,9 @@ the system launches on the artcoins v2 stack. everything a launch needs is in on
 | 3 | owner command, once: `setMinProtocolSkimShareBps(362)` on the v2 factory (the factory minimum protocol share of the baseline skim, 1,000 on the v2 mainnet environment, must leave room for `bountyBps` 9,638) |
 | 4 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
 | 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow --ledger` through a private relay, with `CONFIG_HASH` set. nine transactions, the library first, the router setup last. a half finished deploy is finished with `script/Resume.s.sol` |
-| 6 | verify CoreLib, ControllerV1, FeeRouter and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
-| 7 | after launch: the Core pulls the router fees at its doors (a keeper may call `flush()`), owner commands on the router (payees, split start, engine, lock) are in docs/DEPLOY.md section 4 |
+| 6 | once the launch is mined, `CORE=0x... forge script script/Resume.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow --ledger` sets the split start. verify CoreLib, ControllerV1, FeeRouter and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
+| 7 | right after the postflight passes: `CORE=0x... SEND=1 forge script script/Lock.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --ledger` sends `coin.lockRecipients()`. `coin.lockAllowlist()` and `router.lock()` are owner decisions |
+| 8 | after launch: the Core pulls the router fees at its doors (a keeper may call `flush()`), owner commands on the router (payees, split start, engine, lock) are in docs/DEPLOY.md section 4 |
 
 the full runbook is docs/DEPLOY.md.
 

@@ -173,6 +173,12 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         return vm.envOr("ROUTER_CHANGED", uint256(0)) == 1;
     }
 
+    /// @notice the operator says `coin.lockRecipients()` was sent (RECIPIENTS_LOCKED=1): the lock row is a failure while
+    /// the recipients are unlocked. a test overrides it
+    function _recipientsLockExpected() internal view virtual returns (bool) {
+        return vm.envOr("RECIPIENTS_LOCKED", uint256(0)) == 1;
+    }
+
     /// @dev a row that is a failure until the operator names the change, then a warning
     function _soft(bool changed, string memory name, bool ok, string memory detail, string memory flag) internal {
         if (changed) _warn(string.concat("warn: ", name), ok, string.concat(flag, " set: ", detail));
@@ -212,11 +218,17 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         _soft(ch, "coin: no metadata renderer", t.metadataRenderer() == address(0), vm.toString(t.metadataRenderer()), "COIN_CHANGED=1");
         _postAllowlist(c, core, t, ch);
         _warn("warn: coin allowlist is not locked", !t.allowlistLocked(), "allowlistLocked(): the admin can no longer change the allowlist");
-        _warn(
-            "warn: coin fee recipients are not locked",
-            !t.recipientsLocked(),
-            "recipientsLocked(): the admin can no longer repoint the hook bounty recipient or a locker reward recipient"
-        );
+        _postRecipientsLock(t);
+    }
+
+    /// @dev the hook bounty recipient and the locker reward recipients are frozen by `coin.lockRecipients()`, the step
+    /// after the postflight passes (script/Lock.s.sol). a warning until RECIPIENTS_LOCKED=1 names the step as sent,
+    /// a failure from then on
+    function _postRecipientsLock(IArtCoinsTokenV2 t) private {
+        bool locked = t.recipientsLocked();
+        string memory detail = locked ? "recipientsLocked()" : "recipientsLocked() is false: run script/Lock.s.sol";
+        if (_recipientsLockExpected()) _check("coin: fee recipients are locked", locked, detail);
+        else _warn("warn: coin fee recipients are not locked yet", locked, detail);
     }
 
     /// @dev the allowlist cannot be listed on chain. what is checked: the locker and the escrow are on it (pinned), every
