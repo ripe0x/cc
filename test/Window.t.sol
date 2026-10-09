@@ -5,6 +5,7 @@ import {Vm} from "forge-std/Vm.sol";
 import {CoreBase} from "./CoreUnit.t.sol";
 import {ICore} from "../src/interfaces/ICore.sol";
 import {Lane} from "../src/interfaces/Interfaces.sol";
+import {MigrationSink} from "./standins/MigrationSink.sol";
 
 /// @notice the hourly spend window on the real stack. the window pot is the pot at the first spend of the hour plus
 /// every eth amount booked into the pot since: fee pulls at the doors, `receive`, `skim` and sale proceeds. the room is
@@ -161,5 +162,73 @@ contract WindowTest is CoreBase {
         // the sales from the second on are not capped by the room of the thin pot at open
         assertGt(totalSpent, 0.01 ether * _cap() / BPS * 2, "bought past the room of the tiny pot");
         assertLe(totalSpent, potBase * _cap() / BPS, "and within the room of the grown pot");
+    }
+
+    /// @dev books `eth` through `skim`
+    function _skim(uint256 eth) internal {
+        vm.deal(address(core), address(core).balance + eth);
+        core.skim();
+    }
+
+    /// eth booked after the hour ended and before the next spend: the room is the cap of the live pot, and the sell
+    /// that opens the next window reads that pot once
+    function test_inflowAfterTheHourBeforeTheNextSpend() public {
+        _fund(1 ether - core.ethPot());
+        uint256[] memory ids = _credits(seller, 2);
+        _sell(_one(ids[0]));
+        _warp(1 hours + 5);
+        _skim(3 ether);
+        uint256 pot = core.ethPot();
+        assertEq(core.hourlyRoom(), pot * _cap() / BPS, "the live pot, no double count");
+        (, uint256 s) = _sell(_one(ids[1]));
+        assertEq(core.hourlyRoom(), pot * _cap() / BPS - s, "the window opened on the pot with the inflow once");
+    }
+
+    /// at windowStart + 1 hours the window is closed and an inflow is not added; one second earlier it is
+    function test_inflowAtTheHourBoundary() public {
+        _fund(1 ether - core.ethPot());
+        uint256[] memory ids = _credits(seller, 2);
+        uint256 t0 = block.timestamp;
+        (, uint256 s1) = _sell(_one(ids[0]));
+        vm.warp(t0 + 1 hours - 1);
+        _skim(3 ether);
+        assertEq(core.hourlyRoom(), (1 ether + 3 ether) * _cap() / BPS - s1, "one second before the end: counted");
+        vm.warp(t0 + 1 hours);
+        _skim(2 ether);
+        uint256 pot = core.ethPot();
+        assertEq(core.hourlyRoom(), pot * _cap() / BPS, "at the boundary the window is closed: the live pot");
+        (, uint256 s2) = _sell(_one(ids[1]));
+        assertEq(core.hourlyRoom(), pot * _cap() / BPS - s2, "the next window opened on the pot with both inflows once");
+    }
+
+    /// after `migrate` the window start is zero: an inflow is not added and the next spend opens on the pot it finds
+    function test_inflowAfterMigrate() public {
+        MigrationSink sink = new MigrationSink();
+        _fund(1 ether - core.ethPot());
+        uint256[] memory ids = _credits(seller, 1);
+        _sell(ids);
+        vm.prank(owner);
+        core.setSuccessor(address(sink));
+        vm.prank(owner);
+        core.migrate(10, 10);
+        assertEq(core.ethPot(), 0);
+        _skim(2 ether);
+        assertEq(core.hourlyRoom(), 2 ether * _cap() / BPS, "the live pot");
+        (, uint256 s) = _sell(_credits(seller, 1));
+        assertEq(core.hourlyRoom(), 2 ether * _cap() / BPS - s, "opened on the pot found");
+    }
+
+    /// an inflow before the opening spend of the same timestamp is read once in the window pot, and one after it is
+    /// added once
+    function test_inflowInTheBlockThatOpensTheWindow() public {
+        _fund(1 ether - core.ethPot());
+        uint256[] memory ids = _credits(seller, 2);
+        _warp(1 hours + 1);
+        _skim(2 ether);
+        uint256 pot = core.ethPot();
+        (, uint256 s1) = _sell(_one(ids[0]));
+        assertEq(core.hourlyRoom(), pot * _cap() / BPS - s1, "inflow before the opening spend: once");
+        _skim(1 ether);
+        assertEq(core.hourlyRoom(), (pot + 1 ether) * _cap() / BPS - s1, "inflow after it, same timestamp: once");
     }
 }

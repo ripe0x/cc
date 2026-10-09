@@ -472,7 +472,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// books eth into the pot. while a window is open its pot grows by the same amount, so the room of the hour follows
-    /// inflows. an expired window is replaced on the pot at the next spend
+    /// inflows, at about 5k gas per booking. outside a window the guard skips the `windowPot` write. an expired window
+    /// is replaced on the pot at the next spend
     function _addToPot(uint256 amount) private {
         ethPot += amount;
         if (block.timestamp < windowStart + SPEND_WINDOW) windowPot += amount;

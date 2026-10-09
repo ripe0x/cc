@@ -753,13 +753,17 @@ contract SeaportColdTest is SeaportBase {
         Settings memory st = core.settings();
         st.spendCapBps = 100;
         _setSettings(st);
-        for (uint256 i; i < 80 && core.hourlyRoom() >= core.ceilingOf(id); ++i) {
+        uint256 i;
+        for (; i < 80 && core.hourlyRoom() >= core.ceilingOf(id); ++i) {
             uint256[] memory sold = _credits(seller, 1);
             vm.prank(seller);
             core.sellForEth(sold);
         }
+        emit log_named_uint("loop sales", i);
+        assertLt(i, 80, "the loop ended on the room, not on its bound");
         uint256 price = core.ceilingOf(id);
         assertLt(core.hourlyRoom(), price, "the room is below the ceiling");
+        assertEq(address(feeRouter).balance, 0, "no fee eth is waiting for the pull of the buy");
         OrderComponents memory c = _open(id, price, 0);
         bytes memory data = _basicData(c);
         _expectFail(id, price, data, ICore.HourlyCap.selector);
