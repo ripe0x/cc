@@ -272,10 +272,13 @@ Other states searched for a bid that cannot reach the cheapest ask while the pot
 
 ## Contract semantics rerun (2026-10-08)
 
-The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (`climb`, `drop`) and the bid rule section of `docs/FLOW.md`. Two simulator rules changed for the stepped rule. The earlier sections of this document were produced before the change, which is why the "earlier sim" columns below differ from the new columns.
+The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (`climb`, `drop`, commit b16049e) and the bid rule section of `docs/FLOW.md`. The stepped rule changed in the simulator as follows. The earlier sections of this document were produced before the change, which is why the "earlier sim" columns below differ from the new columns.
 
 1. Idle loosening is linear: the anchor is the last fill rate times `1 + idleLoosenPct x floor(idleSeconds / (idleLoosenMin x 60))`. The earlier sim compounded the percent per interval.
-2. The clamp (hourly room divided by `clampCredits`) bounds the bid that is read and paid. The price state holds the stored rate (climb, drop, `rateCap`, ceiling) and the anchor. A fill pays the read bid, the drop applies to the price state rate and the anchor becomes the price state rate at the fill. The earlier sim stored the clamped read value at every checkpoint, climbed from it, and used it as the fill price and the anchor, so a small pot dragged the stored rate and the anchor down to the clamp. The earlier sim also froze the rate whenever the funded flag was false. The built rule is untouched (the credit counts of the built rows equal the earlier grid).
+2. The price state holds the stored rate and the anchor. It climbs per minute toward min(ceiling, rateCap, clamp), where the clamp is the hourly room divided by `clampCredits`. A stored rate above the ceiling or `rateCap` reads as that bound. A stored rate above the clamp holds its value: the clamp stops the climb and never lowers the price state.
+3. While funded (the hourly cap affords one average credit at the stored rate) the read bid is the price state lowered to the clamp. The read bid is what a seller is paid. A fill drops the price state rate and sets the anchor to the price state rate at the fill, the clamp is never stored.
+
+The earlier sim stored the clamped read value at every checkpoint, climbed from it, and used it as the fill price and the anchor, so a small pot dragged the stored rate and the anchor down to the clamp. It also froze the rate whenever the funded flag was false. The built rule is untouched (the credit counts of the built rows equal the earlier grid).
 
 Setting for all rows: stepped B (drop 0.5, climb 0.5, ceiling 125, drop floor 80), `idleLoosenPct` 2 per 10 minutes, `clampCredits` 20, comparable volume, minute steps, three seeds. Data: `sim/results/bid-rule-stalls-contract.csv`. The older `sim/results/bid-rule-stalls.csv` keeps the earlier semantics.
 
@@ -283,29 +286,29 @@ Setting for all rows: stepped B (drop 0.5, climb 0.5, ceiling 125, drop floor 80
 
 | market | stepped credits d1 / d7 / d30 / d90 | paid/mkt | max bid/mkt | stall h (longest) | earlier sim: credits d90 | paid/mkt | max bid/mkt | stall h (longest) | built open 100: credits d90 | paid/mkt | max bid/mkt |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| flat | 2214 / 10789 / 26314 / 29577 | 0.88 | 1.31 | 792 (13.2) | 30240 | 0.86 | 1.17 | 530 (16.9) | 24091 | 0.99 | 1.23 |
-| falling | 2468 / 11064 / 44018 / 52707 | 0.90 | 1.35 | 518 (10.4) | 53221 | 0.90 | 1.21 | 463 (22.1) | 29647 | 1.26 | 1.80 |
-| rising | 2178 / 10624 / 17416 / 20786 | 0.83 | 1.20 | 805 (13.7) | 21535 | 0.80 | 1.32 | 575 (15.1) | 21395 | 0.85 | 1.08 |
-| thin | 1498 / 10050 / 16306 / 18555 | 1.29 | 1.99 | 1030 (14.6) | 18749 | 1.27 | 1.98 | 765 (18.8) | 16819 | 1.40 | 1.91 |
-| whipsaw | 2214 / 10794 / 27364 / 31313 | 0.87 | 1.27 | 695 (14.0) | 31020 | 0.86 | 1.39 | 535 (14.8) | 26356 | 1.13 | 2.43 |
+| flat | 2189 / 10770 / 26492 / 29948 | 0.86 | 1.17 | 780 (11.6) | 30240 | 0.86 | 1.17 | 530 (16.9) | 24091 | 0.99 | 1.23 |
+| falling | 2449 / 11041 / 44000 / 53331 | 0.90 | 1.21 | 483 (8.8) | 53221 | 0.90 | 1.21 | 463 (22.1) | 29647 | 1.26 | 1.80 |
+| rising | 2156 / 10598 / 17345 / 21390 | 0.80 | 1.32 | 742 (14.2) | 21535 | 0.80 | 1.32 | 575 (15.1) | 21395 | 0.85 | 1.08 |
+| thin | 1489 / 10049 / 16451 / 18550 | 1.28 | 1.99 | 1005 (17.0) | 18749 | 1.27 | 1.98 | 765 (18.8) | 16819 | 1.40 | 1.91 |
+| whipsaw | 2189 / 10775 / 27423 / 31126 | 0.86 | 1.39 | 717 (16.3) | 31020 | 0.86 | 1.39 | 535 (14.8) | 26356 | 1.13 | 2.43 |
 
 Gap up (flat day, one jump at hour 6):
 
 | jump at hour 6 | first fill (min) | credits 24 h | paid/mkt 24 h | stall h | earlier sim: first fill | credits 24 h | stall h |
 |---|---|---|---|---|---|---|---|
 | +13% | 2 | 1394 | 0.90 | 0.0 | 2 | 1394 | 0.0 |
-| +30% | 4 | 1366 | 0.89 | 0.0 | 8 | 1369 | 0.0 |
-| +100% | 49 | 1281 | 0.86 | 0.0 | 54 | 1277 | 0.0 |
-| +300% | 103 | 1140 | 0.70 | 0.0 | 94 | 1157 | 0.0 |
+| +30% | 8 | 1369 | 0.89 | 0.0 | 8 | 1369 | 0.0 |
+| +100% | 54 | 1277 | 0.85 | 0.0 | 54 | 1277 | 0.0 |
+| +300% | 101 | 1151 | 0.70 | 0.0 | 94 | 1157 | 0.0 |
 
 Small pot, `clampCredits` 20, pot held for 20 days (480 hours), hours stalled and credits per day:
 
 | pot (eth) | 0.1 | 0.25 | 0.5 | 1 | 2 | 5 | 10 | 20 |
 |---|---|---|---|---|---|---|---|---|
-| contract semantics | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 0 h, 244/day | 0 h, 535/day | 0 h, 1014/day | 0 h, 1354/day |
+| contract semantics | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 0 h, 262/day | 0 h, 539/day | 0 h, 1012/day | 0 h, 1357/day |
 | earlier sim | 480 h, 0/day | 365 h, 11/day | 381 h, 16/day | 368 h, 19/day | 0 h, 270/day | 0 h, 518/day | 0 h, 1012/day | 0 h, 1357/day |
 
-What changed. Credits at day 90 differ from the earlier sim by 3.5 percent less (rising) to 0.9 percent more (whipsaw), the maximum bid over market is higher (1.20 to 1.35 against 1.17 to 1.39 on four markets, 1.99 on thin), and stall hours are higher (518 to 1,030 against 463 to 765), all of them `low_clamp`. The price state climbs to its ceiling while the clamp holds the read bid down, so the read bid steps up to the price state when the pot grows. Pots of 1 eth and below buy nothing at N 20, because the clamp stays under the cheapest ask and the price state is not pulled down to it. The earlier sim bought 11 to 19 credits a day at those pots through the stored clamp. The pot threshold for N 20 stays between 1 and 2 eth at a 0.03 market. Gap rows resolve as before: no stall hours, first fill in 49 minutes after +100 percent and 103 minutes after +300 percent. The recommended `idleLoosenPct` 2 per 10 minutes on setting B holds under the linear rule. Rows of the stall table that were not rerun (cheap fill, `rateCap`, bot, N 1, 5 and 80) follow the earlier semantics.
+What changed against the earlier sim. Credits at day 90 are within 1.1 percent on every market (flat 29,948 against 30,240, falling 53,331 against 53,221, rising 21,390 against 21,535, thin 18,550 against 18,749, whipsaw 31,126 against 31,020). The maximum bid over market is 1.17 to 1.39 on four markets and 1.99 on thin, as before. Stall hours on the five markets are 483 to 1,005 against 463 to 765, all `low_clamp`, because the clamp stays under the cheapest ask while the pot is small and the price state is not pulled down to it. Pots of 1 eth and below buy nothing at N 20; the earlier sim bought 11 to 19 credits a day at 0.25 to 1 eth through the stored clamp. The pot threshold for N 20 stays between 1 and 2 eth at a 0.03 market. Gap rows resolve with no stall hours: first fill in 54 minutes after +100 percent and 101 minutes after +300 percent. The recommended `idleLoosenPct` 2 per 10 minutes on setting B holds. Compared with the first contract rerun of this date (price state climbing past the clamp) the price state no longer runs ahead of the clamp: flat max bid 1.17 against 1.31, falling 1.21 against 1.35, and credits at day 90 within 3 percent on every market. Rows of the stall table that were not rerun (cheap fill, `rateCap`, bot, N 1, 5 and 80) follow the earlier semantics.
 
 ## Where the numbers may be untrustworthy
 

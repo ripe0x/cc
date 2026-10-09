@@ -284,17 +284,20 @@ export class Core {
     const loosen = p.idleLoosenPct > 0 ? 1 + (p.idleLoosenPct / 100) * Math.floor((now - this.lastFillTime) / (p.idleLoosenMin * 60)) : 1;
     return this.lastPaidRate * loosen * (1 + (p.ceilPct / 100 - 1) * decay);
   }
-  // stepped rule, price state: the stored rate climbed per minute, hard bounded by rateCap and the ceiling (a stored rate above a bound reads as the bound)
+  // stepped rule, price state: the stored rate climbed per minute toward min(ceiling, rateCap, clamp). A stored rate above the ceiling or rateCap reads as
+  // that bound; a stored rate above the clamp holds its value (the clamp stops the climb and never lowers the price state)
   priceRate(now) {
     const r = this.rateAtCheckpoint, cap = Math.min(this.s.rateCap, this.stepCeil(now));
     if (r >= cap) return cap;
-    return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), cap);
+    const target = Math.min(cap, this.clamp());
+    if (r >= target) return r;
+    return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), target);
   }
-  // the bid read by a seller. stepped: the price state bid, held at the funded clamp (hourly cap / clampCredits) when that is lower. the clamp bounds
+  // the bid read by a seller. stepped: the price state bid, lowered to the clamp (hourly cap / clampCredits) while funded. the clamp bounds
   // what is paid and is never stored: checkpoint, the drop and the anchor all use the price state rate
   ethRate(now) {
     const s = this.s;
-    if (this.p.bidRule === 'stepped') return Math.min(this.priceRate(now), this.clamp());
+    if (this.p.bidRule === 'stepped') { const pr = this.priceRate(now); return this.funded ? Math.min(pr, this.clamp()) : pr; }
     let r = this.rateAtCheckpoint;
     if (!this.funded) return r;
     let cap = this.clamp();
