@@ -11,7 +11,7 @@ import {
     IArtCoinsFeeEscrowV2,
     IArtCoinsMevSkimV2
 } from "../src/interfaces/ArtCoinsV2.sol";
-import {LaunchConfig} from "./LaunchConfig.sol";
+import {LaunchConfig, V2_CONSTANTS_HASH} from "./LaunchConfig.sol";
 import {PostflightChecks} from "./PostflightChecks.sol";
 
 interface ISupply {
@@ -21,11 +21,11 @@ interface ISupply {
 /// @notice the read only checks run before a launch (`preflight`) and after it (`postflight`). they only read state,
 /// so they are safe to run against mainnet at any time
 abstract contract LaunchChecks is PostflightChecks {
-    /// @dev gas units of the deploy transactions (the library, controller, router, core, launch, router setup) plus margin
+    /// @dev gas units of the deploy transactions (the library, controller, router, core, lens, launch, router setup) plus margin
     /// @dev the per transaction gas cap of the target chain (EIP 7825, 2^24). the launch is simulated with what is left of
     /// it, so a launch that does not fit fails the simulation row, and a collision cannot burn more than that
     uint256 internal constant TX_GAS_CAP = 16_777_216;
-    /// @dev the gas of the ten deploy transactions as the launch rehearsal measures it (18,596,754) with 3 percent margin.
+    /// @dev the gas of the nine deploy transactions as the launch rehearsal measures it (18,137,749), rounded up with margin.
     /// `test/Rehearsal.t.sol` asserts that the measured total stays under it
     uint256 internal constant DEPLOY_GAS_ESTIMATE = 19_200_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
@@ -319,6 +319,30 @@ abstract contract LaunchChecks is PostflightChecks {
         _check("escrow: the hook is a core depositor", ok && b, "isCoreDepositor(hook)");
         (ok, b) = _bool(s.escrow, abi.encodeCall(IArtCoinsFeeEscrowV2.isDepositor, (s.locker)));
         _check("escrow: the locker is a depositor", ok && b, "isDepositor(locker)");
+        _preStackVersion(c);
+    }
+
+    /// @dev the stack version of the factory and the constants hash of the stack against the vendored artifacts the
+    /// rehearsal ran: the hook reports `V2_CONSTANTS_HASH` and the hook, factory, locker, escrow and mev module report
+    /// the same hash
+    function _preStackVersion(LaunchConfig memory c) private {
+        Stack memory s = c.stack;
+        (bool ok, uint256 v) = _word(s.factory, abi.encodeCall(IArtCoinsFactoryV2.STACK_VERSION, ()));
+        _check("factory: STACK_VERSION is 2", ok && v == 2, string.concat("STACK_VERSION ", vm.toString(v)));
+        bytes memory q = abi.encodeCall(IArtCoinsHookV2.constantsHash, ());
+        (bool okh, uint256 h) = _word(s.hook, q);
+        _check(
+            "v2: hook constantsHash equals the vendored artifacts",
+            okh && bytes32(h) == V2_CONSTANTS_HASH,
+            string.concat("hook ", vm.toString(bytes32(h)), " vendored ", vm.toString(V2_CONSTANTS_HASH))
+        );
+        address[4] memory rest = [s.factory, s.locker, s.escrow, c.mevModule];
+        bool same = okh;
+        for (uint256 i; i < rest.length; ++i) {
+            (bool okr, uint256 r) = _word(rest[i], q);
+            same = same && okr && r == h;
+        }
+        _check("v2: constantsHash is equal across hook, factory, locker, escrow and mev module", same, "constantsHash()");
     }
 
     /// @dev the v2 factory: who may launch, what is enabled, the fees and floors the config meets, and a simulated launch
@@ -409,7 +433,15 @@ abstract contract LaunchChecks is PostflightChecks {
         (bool okf, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
         _info("factory: deploy fee paid by the launch", okf ? vm.toString(fee) : "unreadable");
         (ok, p) = _addr(fa, abi.encodeCall(IArtCoinsFactoryV2.teamFeeRecipient, ()));
-        _info("factory: the deploy fee goes to the team fee recipient", vm.toString(p));
+        if (okf && fee != 0) {
+            _check(
+                "factory: the deploy fee goes to the config owner (team fee recipient)",
+                ok && p == c.owner,
+                string.concat("team fee recipient ", vm.toString(p), " owner ", vm.toString(c.owner))
+            );
+        } else {
+            _info("factory: the deploy fee is zero, no team fee recipient check", vm.toString(p));
+        }
         (bool okp, uint256 fb) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.defaultProtocolFeeBps, ()));
         _warn(
             "warn: protocol bps differs from the factory default",

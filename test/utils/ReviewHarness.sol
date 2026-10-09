@@ -242,6 +242,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
             console.log(string.concat("STATE ", vm.toString(i), " ", label));
             k = _run(label, base, signed, deployer);
             vm.revertToState(snap);
+            vm.clearMockedCalls();
             return (k, label, want);
         }
         Mut memory m = _mut(g, i);

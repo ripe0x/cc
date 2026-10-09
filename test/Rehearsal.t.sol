@@ -39,6 +39,7 @@ contract RehearsalTest is Test, ProdDeployer {
     address internal deployer;
     address internal trader;
     bool internal stackIsRehearsal;
+    bool internal lockSent;
 
     function _user(string memory label) internal returns (address a) {
         a = makeAddr(string.concat("rehearsal.", label, ".7d3a"));
@@ -74,6 +75,7 @@ contract RehearsalTest is Test, ProdDeployer {
         postflightAs(c, d.core, deployer);
         _print("postflight after the launch");
         assertEq(_failedNames(), "", "postflight");
+        _lock();
         _smoke();
     }
 
@@ -92,6 +94,21 @@ contract RehearsalTest is Test, ProdDeployer {
         c.stack.locker = v2.locker;
         c.stack.escrow = v2.escrow;
         c.mevModule = v2.mev;
+    }
+
+    function _recipientsLockExpected() internal view override returns (bool) {
+        return lockSent;
+    }
+
+    /// @dev the lock step after the postflight passes: the coin admin freezes the fee recipients, and the postflight then
+    /// requires the lock
+    function _lock() internal {
+        vm.prank(deployer);
+        IArtCoinsTokenV2(d.coin).lockRecipients();
+        lockSent = true;
+        postflightAs(c, d.core, deployer);
+        _print("postflight after the lock step");
+        assertEq(_failedNames(), "", "postflight after the lock step");
     }
 
     function _failedNames() internal view returns (string memory list) {

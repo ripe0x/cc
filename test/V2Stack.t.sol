@@ -14,7 +14,8 @@ import {
     IArtCoinsFeeEscrowV2,
     IFeeAutoSwapperV2
 } from "../src/interfaces/ArtCoinsV2.sol";
-import {V2Stack} from "./utils/V2Stack.sol";
+import {V2Stack, IV2Reads} from "./utils/V2Stack.sol";
+import {V2_CONSTANTS_HASH} from "../script/LaunchConfig.sol";
 import {TestSwapRouter} from "./utils/TestSwapRouter.sol";
 
 /// bounty recipient with an empty receive: the hook's 2300 gas push succeeds
@@ -145,6 +146,12 @@ contract V2StackTest is Test {
         assertTrue(F(s.factory).deprecated());
         assertEq(F(s.factory).deployFee(), 0.069 ether);
         assertEq(uint160(s.hook) & 0x3FFF, 0x28CC);
+    }
+
+    /// the constants hash the vendored artifacts report, which preflight pins for the live stack (`V2_CONSTANTS_HASH`)
+    function test_vendoredArtifactsReportThePinnedConstantsHash() public view {
+        assertEq(IV2Reads(s.hook).constantsHash(), V2_CONSTANTS_HASH);
+        assertEq(F(s.factory).STACK_VERSION(), 2);
     }
 
     function test_launchRestrictedCoinWithEmptyRecipient() public {

@@ -212,7 +212,7 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 * `engine`, set by the owner with `setEngine(address)` (must have code), any number of times until `lock()`, a one way lock with an event. events on every change.
 * its own two step owner (`transferOwnership`, `acceptOwnership`), first owner from the constructor. it does not read the Core's owner: a later engine must be able to take over.
 * no other function. it never holds coin on purpose and has no token path.
-* trust note for the docs, in this strength: the router owner can point every future fee at any address with one call until the router is locked. it never touches what an engine already holds. this is the one owner switch in the system that directs value to an address the owner picks, the owner accepted it to keep a later engine migration possible. FLOW decision 8 is amended to say so.
+* trust note for the docs, in this strength: two owner switches direct value to an address the owner picks. the pool side switch is the hook bounty recipient (with the locker reward recipients), set by the coin admin with `setBountyRecipient` and `setRewardRecipient` until `coin.lockRecipients()` seals it. the router side switch is `router.setEngine`, which points every future flush at any contract until `router.lock()`. `lockRecipients` is a launch step (docs/DEPLOY.md): the pool then pays the router for good, and `router.setEngine` is the migration switch for a later engine. neither touches what an engine already holds. FLOW decision 8 is amended to say so.
 
 ### 10.3 Core change (the only one)
 

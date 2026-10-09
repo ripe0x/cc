@@ -601,7 +601,7 @@ contract ReviewMatrixSettingsTest is ReviewHarness {
 /// @notice the matrix, part three: the chain state differs from the one that was signed off (factory, owner commands,
 /// house, library, balances, predicted addresses)
 contract ReviewMatrixStateTest is ReviewHarness {
-    uint256 internal constant N_STATE = 32;
+    uint256 internal constant N_STATE = 35;
 
     /// @dev applies state mutation `i` on the current fork state and returns its label and expected class
     function _state(uint256 i) internal override returns (string memory l, Class w) {
@@ -719,9 +719,22 @@ contract ReviewMatrixStateTest is ReviewHarness {
         } else if (i == 30) {
             (l, w) = ("the Credits contract has no code", Class.Pre);
             vm.etch(Mainnet.CREDITS, "");
-        } else {
+        } else if (i == 31) {
             (l, w) = ("deploy fee raised to 0.5 eth (a factory value outside the signed config; the pinned fee rule)", Class.Pre);
             FACTORY.setDeployFee(0.5 ether);
+        } else if (i == 32) {
+            (l, w) = ("locker constantsHash differs from the hook's", Class.Pre);
+            vm.mockCall(v2.locker, abi.encodeWithSignature("constantsHash()"), abi.encode(keccak256("another constants hash")));
+        } else if (i == 33) {
+            (l, w) = ("hook and the stack report a constantsHash other than the vendored artifacts'", Class.Pre);
+            bytes memory other = abi.encode(keccak256("another constants hash"));
+            address[5] memory all = [v2.hook, v2.locker, v2.escrow, v2.mev, v2.factory];
+            for (uint256 k; k < all.length; ++k) {
+                vm.mockCall(all[k], abi.encodeWithSignature("constantsHash()"), other);
+            }
+        } else {
+            (l, w) = ("factory team fee recipient is not the config owner (deploy fee above zero)", Class.Pre);
+            FACTORY.setTeamFeeRecipient(creator);
         }
     }
 

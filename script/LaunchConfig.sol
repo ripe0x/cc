@@ -5,6 +5,10 @@ import {CommonBase} from "forge-std/Base.sol";
 import {Stack, Settings, Sale, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 
+// the `constantsHash()` the v2 stack reports (hook, factory, locker, escrow, mev module and the rest). the vendored
+// artifacts of test/v2-artifacts report this value, and preflight requires it of the live hook
+bytes32 constant V2_CONSTANTS_HASH = 0x69b6027a6426e4db8d91e06f74d3977b5d6e616067cf30c29f74d7c785ae4027;
+
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
 /// memory by the tests. nothing here is read by `src/`: the Core takes `stack`, `rateStart` and `settings` as constructor
 /// arguments
