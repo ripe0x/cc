@@ -10,7 +10,8 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {Lane, ICredits, ICreditScore, Settings, Mainnet} from "../interfaces/Interfaces.sol";
+import {Lane, ICredits, ICreditScore, IStatements, Settings, Mainnet} from "../interfaces/Interfaces.sol";
+import {IAuctionHouse} from "../interfaces/AuctionHouse.sol";
 import {SettingsBounds} from "./SettingsBounds.sol";
 import {SettingsStore} from "./SettingsStore.sol";
 import {RateStore} from "./RateStore.sol";
@@ -51,6 +52,8 @@ struct CoreState {
     uint256 unitPerPoint;
     uint256 xStartPrice;
     uint64 xStartTime;
+    address successor;
+    bool successorLocked;
 }
 
 /// the one linked library of the Core: the settings write (validation, storage, event), the eth rate (the climb with its
@@ -90,6 +93,13 @@ library CoreLib {
 
     uint256 internal constant BPS = 10_000;
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
+    IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
+    // word positions in the house's auction record
+    uint256 internal constant W_FIRST = 2;
+    uint256 internal constant W_AMOUNT = 3;
+    uint256 internal constant W_RESERVE = 4;
+    uint256 internal constant W_OWNER = 5;
+    uint256 internal constant W_END = 7;
 
     /// the same declarations as the Core, so the library's reverts and logs decode against the Core abi
     error Empty();
@@ -114,6 +124,20 @@ library CoreLib {
     /// the Core is not the holder of the token, or the token is not an ERC721
     error NotHolder();
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
+    error Locked(bytes32 what);
+    error NoCode(address who);
+    error NoSuccessor();
+    error CallFailed();
+    event SuccessorSet(address successor);
+    event SuccessorLocked();
+    event Migrated(
+        address indexed successor,
+        uint256 eth,
+        uint256 credits,
+        uint256 statements,
+        uint256 exitTokens,
+        uint256 skippedStatements
+    );
 
     /// @notice validates the settings, stores them and logs them. the Core forwards its own `setSettings` call here
     /// untouched (same selector), after it checkpointed both rates. the constructor calls it too
@@ -201,6 +225,14 @@ library CoreLib {
     /// min(price state, clamp). Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
+        view
+        returns (uint256 price, uint256 read)
+    {
+        return _climb(r, pot, anchorTime, t, nowTs);
+    }
+
+    function _climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
+        private
         view
         returns (uint256 price, uint256 read)
     {
@@ -323,6 +355,151 @@ library CoreLib {
         ICredits(token).transferFrom(address(this), to, id);
         _leave();
         emit NftRescued(token, id, to);
+    }
+
+    /// @notice sets the successor to which `migrate` sends the assets. the zero address means no migration. reverts
+    /// after `lockSuccessor`. the Core forwards its call here untouched
+    function setSuccessor(address next) external {
+        _onlyOwner();
+        CoreState storage c = state();
+        if (c.successorLocked) revert Locked("successor");
+        if (next != address(0) && next.code.length == 0) revert NoCode(next);
+        c.successor = next;
+        emit SuccessorSet(next);
+    }
+
+    /// @notice closes `setSuccessor` for good. allowed while the successor is zero, which disables `migrate` for good
+    function lockSuccessor() external {
+        _onlyOwner();
+        state().successorLocked = true;
+        emit SuccessorLocked();
+    }
+
+    /// @notice moves the assets the Core tracks to the successor, in batches. the Core forwards its call here untouched,
+    /// the owner check and the reentrancy guard are here.
+    /// eth: `ethPot + ethToBuyback`, by one plain call, the trackers zeroed. eth above the trackers stays.
+    /// credits: up to `maxCredits` from the head of each pile, by `transferFrom`, the pile membership cleared (the
+    /// cost, lane and arrival time of the record stay).
+    /// statements: scanning the held list from its end, up to `maxStatements` are moved. a listed statement is taken
+    /// back from the house first. a statement with a live bid, or a sold one whose record is not settled yet, is
+    /// skipped and counted. the record of a moved statement is deleted.
+    /// exit token: `xPot + xToBuyback`, by `transfer`, the trackers zeroed. the coin stays.
+    /// the rates are checkpointed before a pot is zeroed. a call with nothing left to move logs zeros
+    function migrate(uint256 maxCredits, uint256 maxStatements) external {
+        _onlyOwner();
+        CoreState storage c = state();
+        address to = c.successor;
+        if (to == address(0)) revert NoSuccessor();
+        _enter();
+        uint256 eth = _moveEth(c, to);
+        uint256 credits = _moveCredits(c, to, maxCredits);
+        (uint256 statements, uint256 skipped) = _moveStatements(c, to, maxStatements);
+        uint256 exitTokens = _moveExitToken(c, to);
+        _leave();
+        emit Migrated(to, eth, credits, statements, exitTokens, skipped);
+    }
+
+    function _moveEth(CoreState storage c, address to) private returns (uint256 eth) {
+        eth = c.ethPot + c.ethToBuyback;
+        if (eth == 0) return 0;
+        (c.rateAtCheckpoint,) = _climb(c.rateAtCheckpoint, c.ethPot, c.lastFillTime, c.checkpointTime, block.timestamp);
+        c.checkpointTime = uint64(block.timestamp);
+        c.ethPot = 0;
+        c.ethToBuyback = 0;
+        (bool ok,) = to.call{value: eth}("");
+        if (!ok) revert CallFailed();
+    }
+
+    function _moveExitToken(CoreState storage c, address to) private returns (uint256 amount) {
+        amount = c.xPot + c.xToBuyback;
+        if (amount == 0) return 0;
+        Settings storage s = SettingsStore.load();
+        uint256 unit = c.unitPerPoint;
+        c.xRateAtCheckpoint = xRateOf(c.xRateAtCheckpoint, c.xFunded, c.xPot, unit, c.xCheckpointTime, s);
+        c.xCheckpointTime = uint64(block.timestamp);
+        c.xPot = 0;
+        c.xToBuyback = 0;
+        c.xFunded = xFundedOf(0, c.xRateAtCheckpoint, unit, s);
+        SafeTransferLib.safeTransfer(c.exitToken, to, amount);
+    }
+
+    /// pops up to `max` credits from the head of each pile
+    function _moveCredits(CoreState storage c, address to, uint256 max) private returns (uint256 moved) {
+        for (uint256 l; l < 2; ++l) {
+            Pile storage p = c.piles[Lane(l)];
+            uint256 id = p.head;
+            uint256 k;
+            while (id != 0 && k < max) {
+                Credit storage cr = c.credits[id];
+                uint256 next = cr.next;
+                cr.next = 0;
+                cr.prev = 0;
+                cr.inPile = false;
+                CREDITS.transferFrom(address(this), to, id);
+                id = next;
+                ++k;
+            }
+            if (k != 0) {
+                p.head = id;
+                p.size -= k;
+                if (id == 0) p.tail = 0;
+                else c.credits[id].prev = 0;
+                moved += k;
+            }
+        }
+    }
+
+    function _moveStatements(CoreState storage c, address to, uint256 max)
+        private
+        returns (uint256 moved, uint256 skipped)
+    {
+        address house = ICoinOf(address(this)).HOUSE();
+        uint256 i = c.heldIds.length;
+        while (i != 0 && moved < max) {
+            --i;
+            uint256 sid = c.heldIds[i];
+            if (!_release(house, c.statements[sid], sid)) {
+                ++skipped;
+                continue;
+            }
+            uint256 last = c.heldIds[c.heldIds.length - 1];
+            c.heldIds[i] = last;
+            c.statements[last].slot = uint64(i);
+            c.heldIds.pop();
+            delete c.statements[sid];
+            STATEMENTS.transferFrom(address(this), to, sid);
+            ++moved;
+        }
+    }
+
+    /// makes sure the Core holds statement `sid` of its books, taking it back from the house when it is listed without a
+    /// bid. false when the statement has a bid on the house, or the listing is gone and a buyer holds it
+    function _release(address house, Statement storage st, uint256 sid) private returns (bool) {
+        if (st.listed) {
+            (bool ok, uint256[12] memory w) = auctionWords(house, st.auctionId);
+            if (!ok) return false;
+            if (w[W_OWNER] != 0) {
+                if (w[W_FIRST] != 0) return false;
+                IAuctionHouse(house).cancelAuction(st.auctionId);
+                return true;
+            }
+        }
+        return holderOf(sid) == address(this);
+    }
+
+    /// the twelve words of the house's auction record `id` (`IAuctionHouse.Auction`, static words), all zero when the
+    /// auction is gone. false when the house does not answer with them
+    function auctionWords(address house, uint256 id) internal view returns (bool ok, uint256[12] memory w) {
+        bytes memory out;
+        (ok, out) = house.staticcall(abi.encodeCall(IAuctionHouse.getAuction, (id)));
+        if (!ok || out.length != 384) return (false, w);
+        w = abi.decode(out, (uint256[12]));
+    }
+
+    /// the owner of a statement, or zero when it does not exist
+    function holderOf(uint256 sid) internal view returns (address who) {
+        (bool ok, bytes memory out) = address(STATEMENTS).staticcall(abi.encodeCall(IStatements.ownerOf, (sid)));
+        if (ok && out.length == 32) who = abi.decode(out, (address));
     }
 
     /// the caller of an owner function the Core forwarded here: `msg.sender` is the caller of the Core
@@ -468,4 +645,5 @@ interface IRouterFlush {
 
 interface ICoinOf {
     function COIN() external view returns (address);
+    function HOUSE() external view returns (address);
 }

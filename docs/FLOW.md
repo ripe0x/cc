@@ -186,7 +186,7 @@ the owner keeps full control for now (no extra hard limits were added, see 9.4).
 * `lockController()`: after it the controller can never be changed.
 * `lockExitModule()`: after it the exitModule (and so the unit) can never be changed. reverts while no exitModule is set, so phase 2 cannot be locked out by accident.
 * `lockTargets()`: after it no target can be added (removing, if it exists, still works).
-these replace the old `frozen` flag and the Freeze action. the setters revert with a clear error once locked. the Core settings and the controller's own sale settings stay adjustable after a lock.
+these replace the old `frozen` flag and the Freeze action. the setters revert with a clear error once locked. the Core settings and the controller's own sale settings stay adjustable after a lock. a fourth lock, `lockSuccessor()`, closes `setSuccessor` (10.10, decision 33).
 
 ### 9.7 transferable owner (owner confirmed)
 
@@ -290,3 +290,25 @@ mechanism:
 * the pull sits before `gasStart` in `compose`, so the gas of the flush is covered by the flush tip only. a flush raises `ethPot`, which can lift the `ethPot` term of the `_repay` cap; the fees are booked fees and the lift is legitimate.
 * the router pointer is the immutable `FEE_SOURCE`, fixed at deploy and checked for code.
 
+
+### 10.10 rescue and migration (owner, 2026-10-08)
+
+| # | decision |
+|---|---|
+| 32 | `rescueNft(token, id, to)`: the owner takes a stuck NFT out of the Core. a credit leaves only while it is not in a pile, a statement only while the Core has no record of it (`held` false), any other ERC721 leaves. the token's `ownerOf(id)` must answer with the Core, so the call reaches no ERC20 and no address without code. owner only, guarded, `transferFrom`, event `NftRescued`, reverts `InPile`, `Held`, `NotHolder` |
+| 33 | `setSuccessor(address)`, `lockSuccessor()` and `migrate(maxCredits, maxStatements)`: the owner moves everything the Core tracks to a successor contract, in batches. the successor is zero and unlocked at launch. `lockSuccessor()` is the fourth one way lock and is allowed while the successor is zero, which disables migration for good. the lock decision is taken after the successor is final, or at once if no migration is wanted |
+
+mechanism of 32:
+* credit membership is the `inPile` flag of the credit record, set by `_push` (`sellForEth`, `buyListing`, `sellForExitToken`) and cleared when `compose` pulls the credit. a credit sent straight to the Core has no record, so its flag is false.
+* statement membership is `Statement.held`, set at compose and cleared by `_unhold` (sale settled by `syncStatement`, `sellTo`, exit, overprint top). a sold statement whose record is not settled is still held, so it stays until `syncStatement` runs.
+* a token that is not an ERC721 fails the `ownerOf` probe (a WETH like token answers the probe with a revert, the coin and an exitToken have no `ownerOf`), so the coin, the exitToken and eth cannot leave this way.
+
+mechanism of 33:
+* `migrate` requires a nonzero successor. the order inside is eth, credits, statements, exit token.
+* eth: `ethPot + ethToBuyback` goes to the successor with one plain call carrying the amount, after both trackers are zeroed and the eth rate is checkpointed. a successor that rejects the eth reverts the whole call. eth above the trackers stays, `skim` books it and a later call moves it.
+* credits: up to `maxCredits` from the head of each pile (so up to twice that in all), `transferFrom`, then the pile head, tail and size are updated. each moved credit keeps its cost, lane and arrival time in its record, with `inPile` false and no links.
+* statements: the held list is scanned from its end and the scan stops after `maxStatements` moves. a listed statement without a bid is taken back from the house (`cancelAuction`) first. a statement with a bid (live or ended and not settled), a statement whose auction is gone while a buyer holds it, and a house that does not answer are skipped and counted in `Migrated`. a skipped statement keeps its record. the record of a moved statement is deleted as `_unhold` does.
+* exit token: `xPot + xToBuyback` by `transfer` after both are zero and the exit rate is checkpointed. the exit auction price and clock are left as they are, so the next injection re anchors at the stored start price.
+* the coin stays (`rescueCoin` covers it). the proceeds the house owes the Core are not in a pot until `collectSales`, so they move in a later call.
+* the state that changes is the moved assets, their trackers, the two rate checkpoints and the funded flag. the piles, the held list, the controller, the settings and the locks keep working, and fees booked after a call stay in the Core until the next call.
+* gas, measured by `test/Migrate.t.sol` (`test_GAS_migrateEightyCreditsAndFiveStatements`): 121,195 with only eth, 40,700 per credit, 94,600 per listed statement, 4,571,954 for 80 credits and 5 statements. `maxCredits` applies to each lane, so with both piles deeper than the cap a call moves twice that. the largest `maxCredits` under the 16,777,216 transaction cap is 409 when one lane holds that many credits and 204 when both lanes do (each statement takes 94,600 of the same budget). `maxCredits` 150 and `maxStatements` 20 fit with room to spare.

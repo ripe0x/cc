@@ -124,6 +124,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     error Held();
     /// `rescueNft`: the core is not the holder of the token, or the token is not an ERC721
     error NotHolder();
+    /// `migrate` with no successor set
+    error NoSuccessor();
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -168,6 +170,17 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event TargetRemoved(address target);
     event CoinRescued(address indexed to, uint256 amount);
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
+    event SuccessorSet(address successor);
+    event SuccessorLocked();
+    /// `migrate` moved assets to the successor: eth, credits, statements, exit token, and the statements it skipped
+    event Migrated(
+        address indexed successor,
+        uint256 eth,
+        uint256 credits,
+        uint256 statements,
+        uint256 exitTokens,
+        uint256 skippedStatements
+    );
 
     /*//////////////////////////////////////////////////////////////
                               PARAMETERS
@@ -194,12 +207,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// compose reimbursement past it
     uint256 private constant PAGE_GAS = 500_000;
     address private constant DEAD = Mainnet.DEAD;
-    // word positions in the house's auction record
-    uint256 private constant W_FIRST = 2;
-    uint256 private constant W_AMOUNT = 3;
-    uint256 private constant W_RESERVE = 4;
-    uint256 private constant W_OWNER = 5;
-    uint256 private constant W_END = 7;
     bytes32 private constant MEASURING_SLOT = keccak256("core.measuring");
 
     ICredits private constant CREDITS = ICredits(Mainnet.CREDITS);
@@ -271,6 +278,10 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// `xAuctionHalfLife`. the clock only runs while `xToBuyback` is not zero
     uint256 public xStartPrice;
     uint64 public xStartTime;
+
+    /// the contract `migrate` sends the assets to, and whether `setSuccessor` is closed for good
+    address public successor;
+    bool public successorLocked;
 
     modifier onlyOwner() {
         _onlyOwner();
@@ -803,7 +814,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function syncStatement(uint256 sid) external nonReentrant {
         CoreLib.Statement storage st = _statements[sid];
         if (!st.held || !st.listed) revert NotListed();
-        if (_auction(st.auctionId)[W_OWNER] != 0) revert AuctionLive();
+        if (_auction(st.auctionId)[CoreLib.W_OWNER] != 0) revert AuctionLive();
         address holder = _holderOf(sid);
         if (holder == address(this)) {
             _list(sid);
@@ -835,21 +846,20 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function _requireOpen(CoreLib.Statement storage st) private view {
         if (!st.held || !st.listed) revert NotListed();
         uint256[12] memory w = _auction(st.auctionId);
-        if (w[W_OWNER] == 0) revert NotListed();
-        if (w[W_FIRST] != 0) revert HasBid();
+        if (w[CoreLib.W_OWNER] == 0) revert NotListed();
+        if (w[CoreLib.W_FIRST] != 0) revert HasBid();
     }
 
     /// the words of the house's auction record (`IAuctionHouse.Auction`, twelve static words). all zero when it is gone
     function _auction(uint256 id) private view returns (uint256[12] memory w) {
-        (bool ok, bytes memory out) = address(HOUSE).staticcall(abi.encodeCall(IAuctionHouse.getAuction, (id)));
-        if (!ok || out.length != 384) revert BadAuction();
-        w = abi.decode(out, (uint256[12]));
+        bool ok;
+        (ok, w) = CoreLib.auctionWords(address(HOUSE), id);
+        if (!ok) revert BadAuction();
     }
 
     /// the owner of a statement, or zero when it does not exist (a winner may burn it in an overprint)
     function _holderOf(uint256 sid) private view returns (address who) {
-        (bool ok, bytes memory out) = address(STATEMENTS).staticcall(abi.encodeCall(IStatements.ownerOf, (sid)));
-        if (ok && out.length == 32) who = abi.decode(out, (address));
+        return CoreLib.holderOf(sid);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -1092,6 +1102,28 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         _toLib();
     }
 
+    /// sets the successor that `migrate` sends the assets to. the zero address means no migration. it must have code.
+    /// reverts `Locked("successor")` after `lockSuccessor`. owner only, checked by the library, to which the call is
+    /// handed untouched. logs `SuccessorSet`
+    function setSuccessor(address) external {
+        _toLib();
+    }
+
+    /// closes `setSuccessor` for good, one way. allowed while the successor is zero, which disables `migrate` for good.
+    /// logs `SuccessorLocked`
+    function lockSuccessor() external {
+        _toLib();
+    }
+
+    /// moves what the core tracks to the successor, in batches: the eth pots, the exit token pots, up to `maxCredits`
+    /// credits from the head of each pile and up to `maxStatements` held statements. callable again until nothing is
+    /// left. a statement with a live bid on the house, or a sold one not yet settled by `syncStatement`, is skipped and
+    /// counted in `Migrated`. owner only and guarded, both checked by the library, to which the call is handed
+    /// untouched. reverts `NoSuccessor` while the successor is zero
+    function migrate(uint256, uint256) external {
+        _toLib();
+    }
+
     /// delegatecalls the library with the calldata of this call, under the selector of this call, and reverts with
     /// whatever it reverts with
     function _toLib() private {
@@ -1277,14 +1309,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (!st.held) return (StatementStatus.None, 0, 0, 0, 0);
         if (!st.listed) return (StatementStatus.Held, 0, 0, 0, 0);
         uint256[12] memory a = _auction(st.auctionId);
-        if (a[W_OWNER] == 0) {
+        if (a[CoreLib.W_OWNER] == 0) {
             status = _holderOf(sid) == address(this) ? StatementStatus.Returned : StatementStatus.Sold;
             return (status, st.auctionId, 0, 0, 0);
         }
-        if (a[W_FIRST] == 0) status = StatementStatus.Listed;
-        else status = block.timestamp < a[W_END] ? StatementStatus.Bid : StatementStatus.Ended;
+        if (a[CoreLib.W_FIRST] == 0) status = StatementStatus.Listed;
+        else status = block.timestamp < a[CoreLib.W_END] ? StatementStatus.Bid : StatementStatus.Ended;
         // forge-lint: disable-next-line(unsafe-typecast)
-        return (status, st.auctionId, a[W_RESERVE], a[W_AMOUNT], uint64(a[W_END]));
+        return (status, st.auctionId, a[CoreLib.W_RESERVE], a[CoreLib.W_AMOUNT], uint64(a[CoreLib.W_END]));
     }
 
     /// every statement the core holds for sale or exit.

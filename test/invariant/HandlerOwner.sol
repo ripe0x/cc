@@ -8,6 +8,7 @@ import {HandlerHouse} from "./HandlerHouse.sol";
 import {BidModel} from "../utils/BidModel.sol";
 import {MockExitModule} from "../standins/MockExitModule.sol";
 import {MockExitToken} from "../standins/MockExitToken.sol";
+import {MigrationSink} from "../standins/MigrationSink.sol";
 import {CountingEngine, RefusingEngine} from "../attackers/FlushEngines.sol";
 
 /// @notice the owner as an adversarial actor. the owner calls `setSettings` with random valid settings across the
@@ -799,5 +800,233 @@ abstract contract HandlerOwner is HandlerHouse {
             r.ok = true;
             r.want = ICore.NotHolder.selector;
         }
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                         SUCCESSOR AND MIGRATION
+    //////////////////////////////////////////////////////////////*/
+
+    /// the stand in successor and the one way lock of `setSuccessor` as the handler has seen it
+    MigrationSink public sink;
+    bool public gLockedS;
+    address public gSuccessorAtLock;
+
+    struct MigPre {
+        uint256 eth;
+        uint256 balance;
+        uint256 x;
+        uint256 xBalance;
+        uint256 sinkEth;
+        uint256 sinkX;
+        uint256[] credits;
+        uint256[] statements;
+        uint256 maxCredits;
+        uint256 maxStatements;
+    }
+
+    /// the owner's successor doors and `migrate`. by mode: set the successor (refused after the lock), a stranger on the
+    /// three doors (refused), the lock (only with a successor set, rarely), and mostly `migrate` with random batch sizes.
+    /// a migration is modelled from the ghosts: the eth and exit token pots go to the sink whole, the first
+    /// `maxCredits` of each pile go to the sink, and the scan of the held list from its end moves, at most
+    /// `maxStatements` times, a statement the ghost says is listed without a bid or held on the exit lane, and skips the
+    /// others. eth, exit token, credits, statements, trackers and the event are compared with that model
+    function migrate(uint256 seed, uint256 mode) external checked {
+        uint8 a = A_MIGRATE;
+        uint256 m = mode % 10;
+        if (address(sink) == address(0)) sink = new MigrationSink();
+        _att(a);
+        if (m == 0) return _successorSet(a, seed);
+        if (m == 1) return _successorStranger(a, seed);
+        if (m == 2) return _successorLock(a, seed);
+        _migrate(a, seed);
+    }
+
+    function _successorSet(uint8 a, uint256 seed) internal {
+        OPre memory p = _opre();
+        bool locked = core.successorLocked();
+        address want = seed % 4 == 0 ? address(0) : address(sink);
+        vm.prank(owner);
+        try core.setSuccessor(want) {
+            if (locked) _flag(V_LOCK, "setSuccessor worked after the lock");
+            else if (core.successor() != want) _flag(V_OWNER, "setSuccessor did not set the successor");
+        } catch (bytes memory why) {
+            if (!locked || bytes4(why) != ICore.Locked.selector) _unexpected(a, why);
+        }
+        _opost(p, "setSuccessor");
+        _ok(a);
+    }
+
+    function _successorStranger(uint8 a, uint256 seed) internal {
+        OPre memory p = _opre();
+        address who = _actor(seed);
+        bytes[3] memory calls = [
+            abi.encodeCall(ICore.setSuccessor, (who)),
+            abi.encodeCall(ICore.lockSuccessor, ()),
+            abi.encodeCall(ICore.migrate, (100, 100))
+        ];
+        address was = core.successor();
+        bool wasLocked = core.successorLocked();
+        for (uint256 i; i < 3; ++i) {
+            vm.prank(who);
+            (bool ok, bytes memory out) = address(core).call(calls[i]);
+            if (ok || bytes4(out) != ICore.OnlyOwner.selector) _flag(V_OWNER, "a stranger used a successor door");
+        }
+        if (core.successor() != was || core.successorLocked() != wasLocked) _flag(V_OWNER, "a stranger moved the successor");
+        _opost(p, "successorStranger");
+        _ok(a);
+    }
+
+    /// the lock closes `setSuccessor` for good, so it is only taken while a successor is set and then rarely
+    function _successorLock(uint8 a, uint256 seed) internal {
+        if (core.successor() == address(0) || seed % 6 != 0) return _skip(a);
+        OPre memory p = _opre();
+        vm.prank(owner);
+        try core.lockSuccessor() {
+            gLockedS = true;
+            gSuccessorAtLock = core.successor();
+            if (!core.successorLocked()) _flag(V_LOCK, "lockSuccessor did not set its flag");
+        } catch (bytes memory why) {
+            _unexpected(a, why);
+        }
+        _successorShut();
+        _opost(p, "lockSuccessor");
+        _ok(a);
+    }
+
+    function _successorShut() internal {
+        vm.prank(owner);
+        (bool ok, bytes memory out) = address(core).call(abi.encodeCall(ICore.setSuccessor, (address(0))));
+        if (ok || bytes4(out) != ICore.Locked.selector) _flag(V_LOCK, "a locked successor door took a successor");
+    }
+
+    function _migrate(uint8 a, uint256 seed) internal {
+        if (core.successor() == address(0)) {
+            if (core.successorLocked()) {
+                vm.prank(owner);
+                try core.migrate(1, 1) {
+                    _flag(V_OWNER, "migrate worked with no successor");
+                } catch (bytes memory why) {
+                    if (bytes4(why) != ICore.NoSuccessor.selector) _unexpected(a, why);
+                }
+                return _ok(a);
+            }
+            vm.prank(owner);
+            core.setSuccessor(address(sink));
+        }
+        address to = core.successor();
+        MigPre memory q = _migPre(seed, to);
+        vm.recordLogs();
+        vm.prank(owner);
+        try core.migrate(q.maxCredits, q.maxStatements) {
+            _migPost(q, to);
+            _ok(a);
+        } catch (bytes memory why) {
+            _unexpected(a, why);
+        }
+    }
+
+    function _migPre(uint256 seed, address to) internal returns (MigPre memory q) {
+        q.eth = core.ethPot() + core.ethToBuyback();
+        q.balance = address(core).balance;
+        q.x = core.xPot() + core.xToBuyback();
+        q.xBalance = _xBal(address(core));
+        q.sinkEth = to.balance;
+        q.sinkX = _xBal(to);
+        q.maxCredits = seed % 7 == 0 ? 0 : _logBound(seed >> 8, 1, 120);
+        q.maxStatements = seed % 5 == 0 ? 0 : _logBound(seed >> 16, 1, 12);
+        uint256 e = core.pileSize(Lane.Eth);
+        uint256 x = core.pileSize(Lane.Exit);
+        uint256[] memory eth = core.pilePage(Lane.Eth, 0, q.maxCredits < e ? q.maxCredits : e);
+        uint256[] memory exit = core.pilePage(Lane.Exit, 0, q.maxCredits < x ? q.maxCredits : x);
+        q.credits = new uint256[](eth.length + exit.length);
+        for (uint256 i; i < eth.length; ++i) {
+            q.credits[i] = eth[i];
+        }
+        for (uint256 i; i < exit.length; ++i) {
+            q.credits[eth.length + i] = exit[i];
+        }
+        q.statements = core.heldStatements();
+    }
+
+    /// the statements the scan moves and skips, from the ghost: the scan goes from the end of the held list, a move swaps
+    /// the last entry into its place, and stops after `max` moves
+    function _migScan(MigPre memory q) internal view returns (uint256[] memory moved, uint256 skipped) {
+        uint256[] memory h = q.statements;
+        uint256 n = h.length;
+        moved = new uint256[](q.maxStatements < n ? q.maxStatements : n);
+        uint256 k;
+        uint256 i = n;
+        while (i != 0 && k < q.maxStatements) {
+            --i;
+            SG storage g = _sg[h[i]];
+            bool ok = g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
+            if (!ok) {
+                ++skipped;
+                continue;
+            }
+            moved[k++] = h[i];
+            h[i] = h[n - 1];
+            n -= 1;
+        }
+        assembly {
+            mstore(moved, k)
+        }
+    }
+
+    function _migPost(MigPre memory q, address to) internal {
+        (uint256[] memory moved, uint256 skipped) = _migScan(q);
+        // eth and exit token: the trackers went to the successor whole and nothing else moved
+        _eth(q.balance, q.eth, 0, "migrate");
+        _x(q.xBalance, q.x, 0, "migrate");
+        if (to.balance != q.sinkEth + q.eth) _flag(V_OWNER, "the successor did not get the eth pots");
+        if (_xBal(to) != q.sinkX + q.x) _flag(V_OWNER, "the successor did not get the exit token pots");
+        if (core.ethPot() != 0 || core.ethToBuyback() != 0 || core.xPot() != 0 || core.xToBuyback() != 0) {
+            _flag(V_OWNER, "a tracker is not zero after a migration");
+        }
+        // credits: the first of each pile
+        for (uint256 i; i < q.credits.length; ++i) {
+            uint256 id = q.credits[i];
+            if (CREDITS.ownerOf(id) != to) _flag(V_OWNER, "a credit of the batch did not reach the successor");
+            (bool inPile,,,) = core.creditInfo(id);
+            if (inPile) _flag(V_OWNER, "a migrated credit is still in a pile");
+            CG storage c = cg[id];
+            if (!c.inPile) {
+                _flag(V_MODEL, "the core moved a credit the ghost does not have in a pile");
+            } else {
+                c.inPile = false;
+                pileCount[c.lane]--;
+            }
+        }
+        // statements
+        for (uint256 i; i < moved.length; ++i) {
+            uint256 sid = moved[i];
+            (bool held,,,) = core.statementInfo(sid);
+            if (held || _ownerOf(sid) != to) _flag(V_OWNER, "a statement of the batch did not reach the successor");
+            (bool live,) = house.getAuctionFor(address(STATEMENTS), sid);
+            if (live) _flag(V_OWNER, "a migrated statement still has an auction");
+            _sg[sid].status = S_MIGRATED;
+            _sg[sid].winner = to;
+        }
+        if (core.heldStatements().length != q.statements.length - moved.length) {
+            _flag(V_OWNER, "the held list differs from the model after a migration");
+        }
+        _migEvent(q, to, moved.length, skipped);
+    }
+
+    function _migEvent(MigPre memory q, address to, uint256 movedStatements, uint256 skipped) internal {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool seen;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.Migrated.selector) continue;
+            seen = true;
+            if (address(uint160(uint256(logs[i].topics[1]))) != to) _flag(V_OWNER, "Migrated names another successor");
+            (uint256 eth, uint256 credits, uint256 statements, uint256 x, uint256 skippedLogged) =
+                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+            if (eth != q.eth || x != q.x || credits != q.credits.length) _flag(V_OWNER, "Migrated differs from the model");
+            if (statements != movedStatements || skippedLogged != skipped) {
+                _flag(V_OWNER, "Migrated statements or skipped differ from the model");
+            }
+        }
+        if (!seen) _flag(V_OWNER, "migrate emitted no Migrated");
     }
 }

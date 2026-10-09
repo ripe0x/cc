@@ -8,10 +8,14 @@ interface ICoreLib {
 
     error BadSetting(bytes32 field);
     error BadSwap();
+    error CallFailed();
     error Empty();
     error Held();
     error InPile();
+    error Locked(bytes32 what);
+    error NoCode(address who);
     error NoExitModule();
+    error NoSuccessor();
     error NotHolder();
     error NotOwner();
     error OnlyOwner();
@@ -24,8 +28,18 @@ interface ICoreLib {
     event CoinRescued(address indexed to, uint256 amount);
     event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
     event ExitRateFill(uint256 rate, uint256 pot);
+    event Migrated(
+        address indexed successor,
+        uint256 eth,
+        uint256 credits,
+        uint256 statements,
+        uint256 exitTokens,
+        uint256 skippedStatements
+    );
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event SettingsSet(Settings settings);
+    event SuccessorLocked();
+    event SuccessorSet(address successor);
 
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external

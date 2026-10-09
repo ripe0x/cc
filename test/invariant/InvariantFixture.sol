@@ -377,6 +377,7 @@ abstract contract InvariantFixture is Fixture {
             s[n++] = HandlerOwner.ownerMisc.selector;
             s[n++] = HandlerOwner.repoint.selector;
             s[n++] = HandlerOwner.rescueNft.selector;
+            s[n++] = HandlerOwner.migrate.selector;
             if (phase2) s[n++] = HandlerOwner.replaceModule.selector;
         }
         bytes4[] memory sel = new bytes4[](n);

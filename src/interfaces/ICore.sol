@@ -45,6 +45,7 @@ interface ICore {
     error NoCode(address who);
     error NoCredit();
     error NoExitModule();
+    error NoSuccessor();
     error NotHeld();
     error NotHolder();
     error NotInPile(uint256 id);
@@ -85,6 +86,14 @@ interface ICore {
     event ListingBought(
         uint256 indexed id, address indexed target, address indexed caller, uint256 cost, uint256 tip, uint256 rate
     );
+    event Migrated(
+        address indexed successor,
+        uint256 eth,
+        uint256 credits,
+        uint256 statements,
+        uint256 exitTokens,
+        uint256 skippedStatements
+    );
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event Overprinted(uint256 indexed baseId, uint256 indexed topId, uint256 cost);
     event OwnershipTransferStarted(address indexed owner, address indexed pending);
@@ -98,6 +107,8 @@ interface ICore {
     event StatementRepriced(uint256 indexed sid, uint256 reserve);
     event StatementSold(uint256 indexed sid, uint256 indexed auctionId, address indexed holder);
     event StatementSoldTo(uint256 indexed sid, address indexed buyer, uint256 price);
+    event SuccessorLocked();
+    event SuccessorSet(address successor);
     event TargetAdded(address target);
     event TargetRemoved(address target);
     event TargetsLocked();
@@ -148,7 +159,9 @@ interface ICore {
     function lastFillTime() external view returns (uint64);
     function lockController() external;
     function lockExitModule() external;
+    function lockSuccessor() external;
     function lockTargets() external;
+    function migrate(uint256, uint256) external;
     function onERC721Received(address, address, uint256, bytes memory) external view returns (bytes4);
     function overprint() external;
     function overprintCount() external view returns (uint256);
@@ -174,6 +187,7 @@ interface ICore {
     function setExitModule(address module) external;
     function setRate(uint256 rate) external;
     function setSettings(Settings memory) external;
+    function setSuccessor(address) external;
     function setXRate(uint256 rate) external;
     function settings() external view returns (Settings memory);
     function skim() external;
@@ -182,6 +196,8 @@ interface ICore {
         external
         view
         returns (StatementStatus status, uint256 auctionId, uint256 reserve, uint256 bid, uint64 endTime);
+    function successor() external view returns (address);
+    function successorLocked() external view returns (bool);
     function syncStatement(uint256 sid) external;
     function targetsLocked() external view returns (bool);
     function transferOwnership(address to) external;

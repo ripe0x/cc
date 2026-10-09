@@ -33,6 +33,8 @@ contract CoreLayoutTest is Fixture {
         core.lockController();
         core.lockExitModule();
         core.lockTargets();
+        core.setSuccessor(address(this));
+        core.lockSuccessor();
         vm.stopPrank();
 
         assertEq(_field(0, 0, 20), uint256(uint160(core.controller())), "controller");
@@ -59,6 +61,10 @@ contract CoreLayoutTest is Fixture {
         assertEq(_field(23, 0, 32), core.unitPerPoint(), "unitPerPoint");
         assertEq(_field(24, 0, 32), core.xStartPrice(), "xStartPrice");
         assertEq(_field(25, 0, 8), core.xStartTime(), "xStartTime");
+        assertEq(_field(25, 8, 20), uint256(uint160(core.successor())), "successor");
+        assertEq(_field(25, 28, 1), core.successorLocked() ? 1 : 0, "successorLocked");
+        assertEq(core.successor(), address(this), "successor value");
+        assertTrue(core.successorLocked(), "successorLocked value");
         assertTrue(core.controllerLocked() && core.exitModuleLocked() && core.targetsLocked(), "locks");
     }
 

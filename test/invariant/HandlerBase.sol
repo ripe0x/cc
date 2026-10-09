@@ -113,7 +113,9 @@ abstract contract HandlerBase is Test {
     uint8 internal constant A_REPOINT = 41;
     // the owner takes a stray NFT out of the core
     uint8 internal constant A_RESCUE_NFT = 42;
-    uint256 internal constant N_ACTIONS = 43;
+    // the successor doors and the migration of everything the core tracks
+    uint8 internal constant A_MIGRATE = 43;
+    uint256 internal constant N_ACTIONS = 44;
 
     // violation codes
     uint256 internal constant V_ETH_OUT = 1; // eth left the core beyond what the action explains
@@ -270,6 +272,7 @@ abstract contract HandlerBase is Test {
     uint8 public constant S_EXITED = 4; // handed to the exit module
     uint8 public constant S_TOP = 5; // burned as the top of an overprint
     uint8 public constant S_SOLD_TO = 6; // eth lane, sold at once by the controller through `sellTo`, the buyer holds it
+    uint8 public constant S_MIGRATED = 7; // moved to the successor by `migrate`, which holds it
 
     struct SG {
         uint8 status;
@@ -385,7 +388,8 @@ abstract contract HandlerBase is Test {
             "handover",
             "flush",
             "repoint",
-            "rescueNft"
+            "rescueNft",
+            "migrate"
         ];
         names = n;
         controllers.push(w.v1);
@@ -1198,7 +1202,8 @@ abstract contract HandlerBase is Test {
         for (uint256 k; k < len && k < want * 3 + 4 && n < want; ++k) {
             uint256 id = inventory[who][(pick % len + k) % len];
             uint256 c = core.ceilingOf(id);
-            if (sum + c <= budget || overshoot) {
+            // a credit priced at zero (an empty pot clamps the bid to zero) cannot be sold: the core refuses a zero spend
+            if (c != 0 && (sum + c <= budget || overshoot)) {
                 ids[n++] = id;
                 sum += c;
             }

@@ -146,6 +146,11 @@ abstract contract InvariantsBase is InvariantFixture {
                 assertTrue(!held, "exited but still held");
                 assertEq(o, address(s.module), "an exited statement is not with the module that took it");
                 assertGe(s.received, s.required, "exit returned less than rating * unitPerPoint");
+            } else if (s.status == handler.S_MIGRATED()) {
+                assertEq(o, s.winner, "a migrated statement is not with the successor");
+                assertTrue(!held, "a migrated statement is still recorded as held");
+                (bool exists,) = house.getAuctionFor(address(STATEMENTS), sid);
+                assertTrue(!exists, "the house has an auction for a migrated statement");
             } else if (s.status == handler.S_TOP()) {
                 assertTrue(!held, "overprint top still marked held");
                 assertEq(o, address(0), "overprint top still exists");
@@ -365,7 +370,7 @@ abstract contract InvariantsBase is InvariantFixture {
             uint8 st = s.status;
             assertTrue(
                 st == handler.S_LISTED() || st == handler.S_HELD() || st == handler.S_SOLD() || st == handler.S_SOLD_TO()
-                    || st == handler.S_EXITED() || st == handler.S_TOP(),
+                    || st == handler.S_EXITED() || st == handler.S_TOP() || st == handler.S_MIGRATED(),
                 "a statement left the core by a path that is not allowed"
             );
             if (st == handler.S_SOLD_TO()) assertGe(s.price, s.floorAtSet, "a sale at once below the hard floor");
@@ -469,7 +474,8 @@ abstract contract InvariantsBase is InvariantFixture {
 
     /// dispatches one handler action by number. the arguments mean what the action needs.
     function _act(uint256 a, uint256 w, uint256 x, uint256 y, uint256 z) internal virtual {
-        a = a % 43;
+        a = a % 44;
+        if (a == 43) return handler.migrate(w, x);
         if (a == 42) return handler.rescueNft(w, x);
         if (a == 40) return handler.flush(w, x);
         if (a == 41) return handler.repoint(w, x);
@@ -634,6 +640,7 @@ abstract contract InvariantsBase is InvariantFixture {
         assertTrue(_try(29, 20), "no setXRate");
         assertTrue(_try(30, 20), "no owner door");
         assertTrue(_try(42, 60), "no rescue of an NFT");
+        assertTrue(_try(43, 120), "no migration");
         // the books keep working under the new settings, whatever they are
         for (uint256 i; i < 6; ++i) {
             _try(26, 5);
