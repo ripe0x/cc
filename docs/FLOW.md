@@ -71,7 +71,7 @@ accepted properties of the rule.
 
 also owner settable at once, each with its own small function and event: `setRate(uint256)` (restates the eth rate and its ceiling anchor, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
-the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.65022 to the router and 0.24978 the protocol leg (decision 31), fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
+the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.65022 to the router and 0.24978 the protocol leg (decision 31), set inside the v2 pool at launch (the baseline skim and `bountyBps` cannot change afterwards). the coin admin can repoint the bounty recipient until `lockRecipients()`: see 10.12. say so in the docs.
 
 ## 3. flat bid
 
@@ -193,7 +193,7 @@ these replace the old `frozen` flag and the Freeze action. the setters revert wi
 
 ## 10. port to the artcoins v2 stack (owner confirmed 2026-10-07)
 
-the coin launches on the artcoins v2 factory, not the v1 stack the launch package was built on. reference: the public repo ripe0x/artcoins, branch v2, commit 87a7522 (a clone is at /home/claude/nmcl/v2). the analysis is docs/V2-PORT.md: it is the working reference for every detail below, this section is the binding decision list. where V2-PORT.md and this section differ, this section wins. v2 is not on mainnet yet and its audit is pending, so every v2 address stays a config input and the final run waits for the live stack.
+the coin launches on the artcoins v2 factory, not the v1 stack the launch package was built on. reference: the v2 repo, branch v2-legibility, commit d4aa46b (vendored as prebuilt artifacts, test/v2-artifacts/README.md). the analysis is docs/V2-PORT.md: it is the working reference for every detail below, this section is the binding decision list. where V2-PORT.md and this section differ, this section wins. v2 is not on mainnet yet and its audit is pending, so every v2 address stays a config input and the final run waits for the live stack.
 
 ### 10.1 decisions
 
@@ -233,10 +233,10 @@ real contracts on the fork as before. the v2 stack is not on mainnet, so the fix
 
 | # | decision |
 |---|---|
-| 23 | a trader pays 6.9 percent in total. skim `baselineSkimBps` 6_900 (6.9 points of volume), `lpFee` 0. v2's factory enforces a minimum lp fee, so the launch needs the factory owner to set that minimum to 0 first: an explicit owner command in docs/DEPLOY.md and a preflight check that the factory accepts the config. decision 20 is revoked: with no lp fee there is no lp income and no fee swapper anywhere in the launch package |
+| 23 | a trader pays 6.9 percent in total. skim `baselineSkimBps` 690 (bps of volume, 6.9 points), `lpFeePips` 0. the factory accepts an lp fee of 0 while the baseline skim is above 0, and a preflight check confirms the factory accepts the config. decision 20 is revoked: with no lp fee there is no lp income and no fee swapper anywhere in the launch package |
 | 24 | `bountyBps` is 9_638 (decision 31). the protocol leg (362 of 10_000 of the skim, 0.24978 points of volume) belongs to the launcher protocol. it is a separate business from this engine and its owner's share: never describe it as the engine owner's income |
 | 25 | the router pays payees out of what it receives. the owner's intent is 0.5 points of volume to the creator and 0.5 points to the artist. at launch there is ONE payee: the creator address (the config owner address) with both shares, 0.75 points of volume at launch (decision 31). the router receives 6.65022 points (9_638 of 6_900), so that is 112_778 parts per million of the gross router inflow. the owner replaces it later through `setPayees` (with a splitter contract or two entries), so no artist address is needed for launch and nothing about it is a placeholder. the rest goes to the engine (5.86697 points, less the flush tip, which comes out of the engine's part) |
-| 26 | everything the router receives during the anti sniper window goes to the engine, with no payee share. the anti sniper skim starts at 90 points and falls to the baseline 6.9 over 30 minutes if the v2 module allows it (else nearest allowed, reported) |
+| 26 | everything the router receives during the anti sniper window goes to the engine, with no payee share. the anti sniper skim starts at 90 points (`sniperStartBps` 9_000) and falls to the baseline 6.9 over 30 minutes if the v2 module allows it (else nearest allowed, reported) |
 | 27 | `flush` pays its caller a small tip out of what it forwards |
 | 28 | the Core gains `rescueCoin(address to, uint256 amount)`, owner only, guarded, with an event: it transfers coin the Core holds. the Core only holds coin in passing (the buyback burns what it buys in the same call), so this reaches only coin that arrived some other way. FLOW decision 8 is amended: this is an owner directed transfer of the coin only, never of eth, credits, statements or exitToken |
 | 29 | the Core is on the restricted coin's allowlist at launch (`restriction.allowed` holds the predicted Core). owner decision, it overrides decision 18 for the Core only (router: still not listed). accepted effects, to be written in ARCHITECTURE: anyone can send coin to the Core (it sits there until rescued), and after each buyback an allowance equal to the bought amount stays usable by anyone until the end of that transaction |
@@ -260,7 +260,7 @@ the router's payee list holds ONE entry at launch: the creator address (the conf
 |---|---|
 | 31 | the protocol keeps 362 of every 10_000 of the skim and the router receives the rest: `bountyBps` 9_638. the payee share is 0.75 points of volume. the factory owner lowers the factory `minProtocolSkimShareBps` to 362 before the launch (a global factory setting, frozen per pool at creation), and preflight fails with the command named when the factory minimum is above 362 |
 
-per 100 eth of volume at launch values (skim `baselineSkimBps` 6_900 is 6.9 points, 6.9 eth):
+per 100 eth of volume at launch values (skim `baselineSkimBps` 690 is 6.9 points, 6.9 eth):
 
 | leg | calculation | eth |
 |---|---|---|
@@ -347,3 +347,11 @@ mechanism of 36:
 * the clamp of the read follows the pot, and the room follows the pot at open plus inflows. the room before a fee pull is at most `spendCapBps` of (the pot plus the reimbursements paid this hour), because reimbursements lower `ethPot` and leave `windowPot` (each is at most `reimburseCapBps` of its statement cost). a batch priced before the pull has a total that rises by at most the pot growth ratio, which is `spendCapBps` of the pot share of the pull plus a slack of at most `spendCapBps` times the reimbursements of the hour times that ratio. the room rises by `spendCapBps` of the pot share of the pull.
 * the simulator (`sim/engine.js`) adds the pot share to `windowPot` in `addFees` and `bookSale`, as the Core does.
 * the Core runtime goes from 24,150 to 24,203 bytes. tests in `test/Window.t.sol`; the handler ghost of the window in `HandlerBase` adds the pot share of every booking (`_potIn`).
+
+### 10.12 v2 commit d4aa46b: units, fee rules and recipients (owner, 2026-10-09)
+
+| # | decision |
+|---|---|
+| 38 | the v2 reference is commit d4aa46b. the skim rates and the referral cap are in bps of volume: `baselineSkimBps` 690, `sniperStartBps` 9_000, referral cap 0. the lp fee is in uniswap pips and named `lpFeePips`. the economics of 10.1 to 10.9 hold in the new units: 6.9 points of skim, 90 points at the first block, `bountyBps` 9_638 (the protocol keeps 690 * 362 / 10_000 = 24.978 bps of volume, 0.24978 points), `payeePpm` 112_778 |
+| 39 | the factory has no minimum lp fee. a launch needs an lp fee or a baseline skim above 0 (`ZeroFeeLaunch`), and the launch has the baseline skim. the only factory owner command of the launch is `setMinProtocolSkimShareBps(362)` |
+| 40 | the coin admin, which is the owner, repoints the hook bounty recipient (`setBountyRecipient(poolId, recipient)` on the hook) and a locker reward recipient (`setRewardRecipient(coin, index, recipient)`, the protocol slot excluded) until it calls `lockRecipients()` on the coin. renouncing the admin freezes both. the router lock closes the router setters only, the hook recipient needs `lockRecipients()`. the baseline skim, `bountyBps`, the protocol recipient and the ticks of a pool cannot change after the launch. postflight warns while the recipients are not locked |

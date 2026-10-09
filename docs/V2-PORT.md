@@ -2,7 +2,19 @@
 
 ## status after the port (2026-10-08)
 
-the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the amendments win over the plan below). everything here was checked by building the engine and running the fork suites on the vendored v2 artifacts of commit 87a7522. where this file and section 10 differ, section 10 wins.
+the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the amendments win over the plan below). the engine was ported on v2 commit 87a7522 and runs on the vendored v2 artifacts of commit d4aa46b (test/v2-artifacts/README.md). the changes between the two are in the next section. where this file and section 10 differ, section 10 wins.
+
+### v2 changes from 87a7522 to d4aa46b that touch the engine
+
+| change | engine effect |
+|---|---|
+| skim rates and the referral cap are in bps of volume (6.9 points is 690, `MAX_BASELINE_SKIM_BPS` 1000, `DEFAULT_START_SKIM_BPS` 6869, `MAX_SKIM_BPS` 9000), the lp fee is `lpFeePips` | config `baselineSkimBps` 690, `sniperStartBps` 9000, `lpFeePips` 0. the fee split is unchanged: `bountyBps` 9_638, `payeePpm` 112_778, factory `minProtocolSkimShareBps` 362 (FLOW 10.12) |
+| factory: `setMinLpFee`, `minLpFee`, `setReferralPayout`, `referralPayout`, `setEscrow`, `enabledEscrows` removed. `ZeroFeeLaunch` when the lp fee and the baseline skim are both 0 | one factory owner command left. the preflight rows for the min lp fee, the referral payout and the enabled escrow are removed |
+| `isArtCoin` is `isCoin`. `DeploymentInfoV2` gains `escrow`, `configHash` and `restricted` | postflight reads `isCoin` and compares the recorded escrow and restricted flag with the config |
+| hook: `setBountyRecipient`, `minProtocolShareBps(poolId)`. `setDeliveryParams` and the delivery globals removed. `SkimConfig` loses `referralPayout` and `quoteToken`, `globals()` holds the fee escrow and the extension allowlist | the bounty recipient is repointable by the coin admin until `lockRecipients()` (FLOW 10.12) |
+| locker: `setRewardRecipient`, `protocolSlotIndex`. `placeLiquidity` takes `hasProtocolSlot` | the creator slot recipient is repointable by the coin admin until `lockRecipients()` |
+| token: `metadata` and `context` merged into `description`. `lock` split into `lockAllowlist` and `lockRecipients`. `verify`, `isVerified`, `originalAdmin` removed | postflight reads `description`, `allowlistLocked` and `recipientsLocked` |
+| fee swapper: `artCoin` is `coin` | `test/utils/V2Stack.sol` `deploySwapper` |
 
 ### claims that were wrong or are superseded
 
