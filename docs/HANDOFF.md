@@ -7,12 +7,12 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | item | state |
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
-| engine | ported to the artcoins v2 stack and tested: 1028 tests pass, 0 fail, 9 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on. deep run (64 runs, depth 200) of the 7 Deep suites: 6 clean, InvariantsPhase1Deep has one handler model gap in `invariant_11` (NEXT item 7) |
+| engine | ported to the artcoins v2 stack and tested: 1040 tests pass, 0 fail, 8 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on (commit ff36b57). deep run (64 runs, depth 200) of the 7 Deep suites on 6dd6805: all clean after the hourly window followed inflows |
 | contracts | `src/Core.sol` 24,203 bytes runtime (373 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 18,487 (linked library, 6,089 bytes of room), `src/ControllerV1.sol` 4,464, `src/FeeRouter.sol` 5,043, `src/CoreLens.sol` 9,009 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit 87a7522, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |
 | gas | every transaction fits the 16,777,216 mainnet cap (test/GasCap.t.sol). compose is the largest, 9.3 million. a keeper must send compose with a gas limit above 10 million |
-| launch package | 9 transactions, about 14.5 million gas, signed by the v2 factory owner key. 98 preflight rows, 87 postflight rows, a mutation matrix of 283 config changes with 0 slips |
+| launch package | 10 transactions (the lens is the tenth), 18.6 million gas measured by the rehearsal, signed by the v2 factory owner key. two factory owner commands first: `setMinLpFee(0)` and `setMinProtocolSkimShareBps(362)`. preflight refuses until both are done |
 | simulator | sim/ models the v2 fee path. the headline table of docs/SIMULATION.md is current, the detail sections are labelled as the older run. published page: the owner's artifact "Credits Engine Simulator" |
 
 ## 2. what is built (all decided by the owner)
