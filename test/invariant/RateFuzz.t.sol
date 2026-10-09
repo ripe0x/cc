@@ -69,9 +69,10 @@ contract RateFuzzTest is Fixture {
         return blend * rate * 10_000 / (10_000 * 10_000 * 1e4);
     }
 
-    /// the refusal of a sale at `price`: the pot is checked before the hourly cap, so a sale the pot cannot pay is
-    /// PotTooSmall even when the cap would refuse it too
+    /// the refusal of a sale at `price`, in the order of `Core._spend`: a price of zero (the rate floors it) is
+    /// ZeroAmount, a price above the pot is PotTooSmall, and only then does the hourly cap refuse
     function _refusal(uint256 price) internal view returns (bytes4) {
+        if (price == 0) return ICore.ZeroAmount.selector;
         return price > core.ethPot() ? ICore.PotTooSmall.selector : ICore.HourlyCap.selector;
     }
 
@@ -237,7 +238,8 @@ contract RateFuzzTest is Fixture {
     }
 
     /// the hourly cap, with a random spend cap: an exact prediction of which sells pass, and the window reopens an hour
-    /// after it opened. a cap of 100 percent is bounded by the pot instead (PotTooSmall comes first).
+    /// after it opened. a cap of 100 percent is bounded by the pot instead: the loop ends on PotTooSmall, or on
+    /// ZeroAmount when the pot is drained to a dust amount at which the credit price floors to zero.
     /// forge-config: default.fuzz.runs = 20
     function testFuzz_hourlyCap(uint256 capSeed, uint256 potSeed, uint256 gapSeed) public {
         Settings memory s = core.settings();
@@ -253,7 +255,7 @@ contract RateFuzzTest is Fixture {
         bool sawBlock;
         for (; i < ids.length; ++i) {
             uint256 price = core.ceilingOf(ids[i]);
-            bool fits = spent + price <= cap;
+            bool fits = price != 0 && spent + price <= cap;
             bytes4 refusal = _refusal(price);
             vm.prank(alice);
             try core.sellForEth(_one(ids[i])) {
@@ -279,7 +281,7 @@ contract RateFuzzTest is Fixture {
         _warp(1 hours - gap);
         // a new window opens against the smaller pot. the same credit now passes if it fits that pot's cap.
         uint256 price2 = core.ceilingOf(ids[i]);
-        bool fits2 = price2 <= core.ethPot() * s.spendCapBps / 10_000;
+        bool fits2 = price2 != 0 && price2 <= core.ethPot() * s.spendCapBps / 10_000;
         bytes4 refusal2 = _refusal(price2);
         vm.prank(alice);
         try core.sellForEth(_one(ids[i])) {
