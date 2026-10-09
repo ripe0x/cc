@@ -24,15 +24,22 @@ const R0 = 1.54e13;
   const cfg = JSON.parse(fs.readFileSync(new URL('../script/config/mainnet.json', import.meta.url), 'utf8'));
   const moved = cfg.settings.reserveBps !== undefined; // the config still on the old rules: the new fields are not there yet
   const newFields = ['saleFloorBps', 'feeToBuybackBps'];
+  // the stepped bid rule fields of the Core are sim parameters of the bidRule stepped (setting B of docs/BID-STUDY.md), under other names. the built rule fields are sim only
+  const STEPPED = { dropPerCreditBps: 50, dropFloorBps: 8000, climbPerMinBps: 50, ceilBps: 12500, idleLoosenBps: 200, clampCredits: 20 };
+  const BUILT_ONLY = ['climbBaseBps', 'climbDoubleEvery', 'climbMaxBps', 'dropBps'];
+  for (const [k, v] of Object.entries(STEPPED)) if (cfg.settings[k] !== undefined) near(cfg.settings[k], v, 1e-12, 'launch stepped bid rule ' + k);
   for (const [k, v] of Object.entries(cfg.settings)) {
+    if (k in STEPPED) continue;
+    if (k === 'reimburseBps' && v !== SETTINGS[k]) continue; // launch 8000 since commit 5f61f2c. the sim keeps 11000 so the study rows stay comparable
     if (k === 'reserveBps') { ok(SETTINGS.reserveBps === undefined, 'reserveBps is gone from the model'); continue; }
     if (moved && k === 'exitAfter') continue; // 72 hours in the old file, 105 hours in the new rules
     near(SETTINGS[k], k === 'buybackSlice' ? v / 1e18 : v, 1e-12, 'setting ' + k);
   }
   for (const k of newFields) if (cfg.settings[k] !== undefined) near(SETTINGS[k], cfg.settings[k], 1e-12, 'setting ' + k);
-  for (const k of Object.keys(SETTINGS)) ok(cfg.settings[k] !== undefined || (moved && (newFields.includes(k) || k === 'reserveBps')), 'the config carries ' + k);
+  for (const k of Object.keys(SETTINGS)) ok(BUILT_ONLY.includes(k) || cfg.settings[k] !== undefined || (moved && (newFields.includes(k) || k === 'reserveBps')), 'the config carries ' + k);
   if (cfg.controller) for (const k of Object.keys(CONTROLLER)) near(+CONTROLLER[k], +cfg.controller[k], 1e-12, 'controller ' + k);
-  near(DEFAULTS.rateStart, cfg.rateStart, 1e-12, 'rateStart');
+  // the launch rateStart is 100 percent of market (stepped rule). the sim default is the built rule's 75 percent, the study sets rateStart per run
+  near(cfg.rateStart, (0.0089 * W) / 433, 1e-3, 'launch rateStart is 100 percent of the 0.0089 market');
   // the pool and router values of the v2 launch
   for (const k of ['baselineSkimBps', 'bountyBps', 'sniperStartBps']) near(DEFAULTS[k], cfg.launch[k], 1e-12, 'launch ' + k);
   near(DEFAULTS.sniperSeconds, cfg.launch.sniperSeconds, 1e-12, 'launch sniperSeconds');
@@ -648,10 +655,10 @@ const R0 = 1.54e13;
   const R = 1e13, MIN = 60;
   const c = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 110, idleLoosenPct: 1, idleLoosenMin: 10 }, 1000);
   near(c.ethRate(5 * MIN), R * 1.1, 1e-12, 'before the first interval the ceiling is ceilPct of the anchor');
-  near(c.ethRate(25 * MIN), R * 1.1 * 1.01 * 1.01, 1e-12, 'two idle intervals raise the anchor 1 percent each');
+  near(c.ethRate(25 * MIN), R * 1.1 * (1 + 0.01 * 2), 1e-12, 'two idle intervals raise the anchor by 1 percent of itself each, linearly');
   ok(c.spend(0.001, 25 * MIN)); const lp = c.lastPaidRate;
   near(c.ethRate(25 * MIN + 9 * MIN), Math.min(c.rateAtCheckpoint * Math.pow(2, 9), lp * 1.1), 1e-12, 'a fill resets the idle clock');
-  near(c.ethRate(25 * MIN + 31 * MIN), lp * 1.1 * Math.pow(1.01, 3), 1e-12, 'three intervals after the fill');
+  near(c.ethRate(25 * MIN + 31 * MIN), lp * 1.1 * (1 + 0.01 * 3), 1e-12, 'three intervals after the fill');
   const o = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 110 }, 1000);
   near(o.ethRate(10000 * MIN), R * 1.1, 1e-12, 'idleLoosenPct 0 leaves the ceiling at ceilPct of the anchor');
   const q = (h, g) => pathPrice(Object.assign({}, DEFAULTS, { pricePath: 'gap', gapPct: g, gapHour: 6 }), h * 3600) / DEFAULTS.priceP0;
@@ -667,5 +674,20 @@ const R0 = 1.54e13;
   ok(st0.stats.stallHours > st1.stats.stallHours, 'idle loosening shortens the stall after a gap up'); ok(st0.stats.stallRuns.length >= 1 && st0.stats.stallHoursMax > 2, 'a stall run is recorded');
   const hp = simulate(Object.assign({ holdPot: 0.1, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
   ok(hp.stats.stallHours > 0, 'a pot of 0.1 eth at a 0.03 market with clampCredits 20 stalls');
+}
+// stepped: the clamp bounds the bid that is read and paid, and is never stored. the drop and the anchor use the price state rate
+{
+  const R = 1e13, MIN = 60;
+  const c = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000 }, 0.1);
+  const clamp = c.clamp(); ok(clamp < R / 3, 'the clamp of a 0.1 eth pot is far under the stored rate');
+  near(c.ethRate(0), clamp, 1e-12, 'the read bid is held at the clamp');
+  near(c.priceRate(0), R, 1e-12, 'the price state rate is the stored rate');
+  const paid = c.sellForEth(440, 0); near(paid, (433 * clamp) / W, 1e-12, 'a fill pays the read (clamped) bid');
+  near(c.lastPaidRate, R, 1e-12, 'the anchor is the price state rate at the fill, not the clamped bid');
+  near(c.rateAtCheckpoint, R * 0.995, 1e-12, 'the drop applies to the price state rate');
+  c.addFees(1000, 10 * MIN);
+  near(c.ethRate(10 * MIN), Math.min(R * 0.995 * Math.pow(1.01, 10), R * 1.25), 1e-9, 'when the pot grows the read bid is the price state bid, which kept climbing while clamped');
+  const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000, rateCap: R * 1.2 }, 1000);
+  near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'rateCap bounds the price state'); d.rateAtCheckpoint = R * 3; near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'a stored rate above a bound reads as the bound');
 }
 console.log(`ok, ${n} checks passed`);

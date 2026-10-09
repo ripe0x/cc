@@ -1,0 +1,23 @@
+scenario,setting,trigger,first_fill_min,recover_min,credits_24h_after,paid_vs_market_24h,credits_per_day,credits_day90,paid_vs_market,max_bid_over_market,stall_hours,stall_hours_max,gap_hours_max,rate_cap_hours,gate_closed_hours,first_stall_start_h,stall_low_clamp_h,stall_low_ceiling_h,stall_low_ratecap_h,stall_low_climbing_h,stall_room_h,stall_other_h,credits_day1,credits_day7,credits_day30
+a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 100% at hour 6,48.667,1135,1280.7,0.85899,1638.6,4915.7,0.88733,1.0805,0,0,0.98333,0,56.061,,0,0,0,0,0,0,2075.3,4915.7,4915.7
+a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 13% at hour 6,1.6667,576.33,1393.7,0.89635,1679.9,5039.7,0.9036,1.0805,0,0,0.98333,0,57.939,,0,0,0,0,0,0,2187.7,5039.7,5039.7
+a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 30% at hour 6,4.3333,669.67,1366.3,0.89049,1669.6,5008.7,0.90194,1.0805,0,0,0.98333,0,57.472,,0,0,0,0,0,0,2160.3,5008.7,5008.7
+a_gap_up,stepped B loosen 2/10min clamp 20,market jumps 300% at hour 6,103,,1139.7,0.70006,1598.1,4794.3,0.70279,1.0805,0,0,1.8333,0,53.622,,0,0,0,0,0,0,1928.7,4794.3,4794.3
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.1 eth, market 0.03",,,,,0,0,0,0.033333,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.25 eth, market 0.03",,,,,0,0,0,0.083333,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 0.5 eth, market 0.03",,,,,0,0,0,0.16667,480,480,480,0,0,0,480,0,0,0,0,0,0,0,0
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 1 eth, market 0.03",,,,,0.15,3,0.33333,0.33333,479.95,313.33,313.33,0,0,0,479.95,0,0,0,0,0,0,1,3
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 10 eth, market 0.03",,,,,1013.5,20271,1.0315,1.6844,0,0,0.98333,137.78,442.93,,0,0,0,0,0,0,1117,7121,20271
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 2 eth, market 0.03",,,,,244.05,4881,0.7052,1.2966,0,0,1.3167,0,0,,0,0,0,0,0,0,317.33,1823,4881
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 20 eth, market 0.03",,,,,1353.7,27074,0.92084,1.5952,0,0,0.98333,26.194,464.93,,0,0,0,0,0,0,2376,11127,27074
+c_small_pot,stepped B loosen 2/10min clamp 20,"pot held at 5 eth, market 0.03",,,,,535.18,10704,1.2195,1.6438,0,0,0.98333,3.4389,402.93,,0,0,0,0,0,0,554,3742.3,10704
+h_markets_90d,built open 100,falling market 90 days,,,,,329.41,29647,1.261,1.7966,225.84,9.6333,9.6333,0,2157.1,764.64,3.0889,0,0,222.75,0,0,7532.7,22717,27014
+h_markets_90d,stepped B loosen 2/10min clamp 20,falling market 90 days,,,,,585.63,52707,0.9014,1.3455,518.3,10.383,10.383,0,2149.3,816.25,518.3,0,0,0,0,0,2467.7,11064,44018
+h_markets_90d,built open 100,flat market 90 days,,,,,267.68,24091,0.99012,1.2319,176.63,11.833,11.833,0,2153.5,692.53,14.572,0,0,161.89,0.16667,0,3385.3,17240,20916
+h_markets_90d,stepped B loosen 2/10min clamp 20,flat market 90 days,,,,,328.64,29577,0.87848,1.3133,792.37,13.183,13.183,0,2146.3,434.76,792.37,0,0,0,0,0,2214,10789,26314
+h_markets_90d,built open 100,rising market 90 days,,,,,237.73,21395,0.85231,1.0757,140.82,16.167,16.167,0,2152.4,579.14,28.106,0,0,105.47,7.2444,0,2844,14292,17532
+h_markets_90d,stepped B loosen 2/10min clamp 20,rising market 90 days,,,,,230.95,20786,0.82814,1.2029,805.21,13.717,13.717,0,2145.9,302.06,805.21,0,0,0,0,0,2177.7,10624,17416
+h_markets_90d,built open 100,thin market 90 days,,,,,186.88,16819,1.3952,1.9056,336.89,16.083,16.083,0,2123.5,530.75,58.033,0,0,271.44,7.4222,0,1049,11895,14427
+h_markets_90d,stepped B loosen 2/10min clamp 20,thin market 90 days,,,,,206.17,18555,1.2902,1.9924,1029.6,14.583,14.583,0,2132.9,322.16,1029.6,0,0,0,0,0,1498.3,10050,16306
+h_markets_90d,built open 100,whipsaw market 90 days,,,,,292.84,26356,1.1283,2.4328,155.18,8.9167,8.9167,0,2153.5,593.86,9.1722,0,0,141.98,4.0222,0,3385.3,19273,22882
+h_markets_90d,stepped B loosen 2/10min clamp 20,whipsaw market 90 days,,,,,347.92,31313,0.87301,1.2703,694.6,14.017,14.017,0,2146.3,475.42,694.6,0,0,0,0,0,2214,10794,27364

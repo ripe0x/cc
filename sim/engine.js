@@ -280,12 +280,21 @@ export class Core {
     const p = this.p;
     // ceilDecayHours > 0: the headroom above the last rate paid halves every ceilDecayHours since the last fill
     const decay = p.ceilDecayHours > 0 ? Math.pow(0.5, (now - this.lastFillTime) / (p.ceilDecayHours * 3600)) : 1;
-    // idleLoosenPct: the anchor grows by that percent every idleLoosenMin minutes since the last fill
-    const loosen = p.idleLoosenPct > 0 ? Math.pow(1 + p.idleLoosenPct / 100, Math.floor((now - this.lastFillTime) / (p.idleLoosenMin * 60))) : 1;
+    // idleLoosenPct: the anchor grows linearly, by that percent of the anchor for every full idleLoosenMin minutes since the last fill (CoreLib.climb)
+    const loosen = p.idleLoosenPct > 0 ? 1 + (p.idleLoosenPct / 100) * Math.floor((now - this.lastFillTime) / (p.idleLoosenMin * 60)) : 1;
     return this.lastPaidRate * loosen * (1 + (p.ceilPct / 100 - 1) * decay);
   }
+  // stepped rule, price state: the stored rate climbed per minute, hard bounded by rateCap and the ceiling (a stored rate above a bound reads as the bound)
+  priceRate(now) {
+    const r = this.rateAtCheckpoint, cap = Math.min(this.s.rateCap, this.stepCeil(now));
+    if (r >= cap) return cap;
+    return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), cap);
+  }
+  // the bid read by a seller. stepped: the price state bid, held at the funded clamp (hourly cap / clampCredits) when that is lower. the clamp bounds
+  // what is paid and is never stored: checkpoint, the drop and the anchor all use the price state rate
   ethRate(now) {
     const s = this.s;
+    if (this.p.bidRule === 'stepped') return Math.min(this.priceRate(now), this.clamp());
     let r = this.rateAtCheckpoint;
     if (!this.funded) return r;
     let cap = this.clamp();
@@ -307,7 +316,7 @@ export class Core {
     }
     return Math.min(r, cap);
   }
-  checkpoint(now) { this.rateAtCheckpoint = this.ethRate(now); this.checkpointTime = now; }
+  checkpoint(now) { this.rateAtCheckpoint = this.p.bidRule === 'stepped' ? this.priceRate(now) : this.ethRate(now); this.checkpointTime = now; }
   syncFunded() {
     const s = this.s;
     if (this.p.fundedRule === 'old') this.funded = this.ethPot * W >= (s.avgScore * this.rateAtCheckpoint) / 1e4;
@@ -381,7 +390,7 @@ export class Core {
   buyListing(pts, ask, now) {
     const s = this.s;
     this.checkpoint(now);
-    const ceil = this.ceiling(pts, this.rateAtCheckpoint);
+    const ceil = this.ceiling(pts, this.ethRate(now));
     if (ask > this.ethPot || ask > ceil) return null;
     if (!this.room(ask, now).ok) { this.capHits++; return null; }
     const tip = Math.min((s.tipSavingsBps * (ceil - ask)) / BPS, (s.tipCapBps * ask) / BPS);

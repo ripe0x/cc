@@ -8,10 +8,11 @@ import { simulate, W } from './engine.js';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const cfg = isMainThread ? { seeds: arg('seeds', '1,2,3').split(',').map(Number), phase: +arg('phase', 1), base: arg('base', 'A'), loosen: +arg('loosen', 1) } : workerData.cfg;
-const OUT = new URL('./results/bid-rule-stalls.csv', import.meta.url).pathname;
+// phases 1 and 2 follow the first simulator semantics (clamp stored in the bid). phase 4 follows the contract: the clamp bounds the read bid only, linear idle loosening
+const OUT = new URL(isMainThread && +arg('phase', 1) === 4 ? './results/bid-rule-stalls-contract.csv' : './results/bid-rule-stalls.csv', import.meta.url).pathname;
 const COLS = ['scenario', 'setting', 'trigger', 'first_fill_min', 'recover_min', 'credits_24h_after', 'paid_vs_market_24h', 'credits_per_day', 'credits_day90', 'paid_vs_market',
   'max_bid_over_market', 'stall_hours', 'stall_hours_max', 'gap_hours_max', 'rate_cap_hours', 'gate_closed_hours', 'first_stall_start_h',
-  'stall_low_clamp_h', 'stall_low_ceiling_h', 'stall_low_ratecap_h', 'stall_low_climbing_h', 'stall_room_h', 'stall_other_h'];
+  'stall_low_clamp_h', 'stall_low_ceiling_h', 'stall_low_ratecap_h', 'stall_low_climbing_h', 'stall_room_h', 'stall_other_h', 'credits_day1', 'credits_day7', 'credits_day30'];
 
 const rateAt = (share, price = 0.0089) => (share * price * W) / 433;
 const BASES = { A: { dropPerCreditPct: 1, climbPerMin: 1, ceilPct: 110 }, B: { dropPerCreditPct: 0.5, climbPerMin: 0.5, ceilPct: 125 } };
@@ -39,6 +40,7 @@ function runSeed(job, seed) {
     first_stall_start_h: st.stallRuns.length ? st.stallRuns[0][0] / 3600 : NaN,
   };
   for (const k of ['low_clamp', 'low_ceiling', 'low_ratecap', 'low_climbing', 'room', 'other']) m['stall_' + k + '_h'] = st.stallCauseHours[k === 'low_ratecap' ? 'low_rateCap' : k] || 0;
+  m.credits_day1 = S.credits[Math.min(H, 24)]; m.credits_day7 = S.credits[Math.min(H, 168)]; m.credits_day30 = S.credits[Math.min(H, 720)];
   if (E != null) {
     const h0 = job.event, h1 = Math.min(H, h0 + 24);
     m.credits_24h_after = S.credits[h1] - S.credits[h0];
@@ -62,6 +64,21 @@ function jobsPhase1() {
   for (const base of ['A', 'B']) for (const L of [0, 0.5, 1, 2]) {
     for (const g of [13, 30, 100, 300]) jobs.push({ scenario: 'a_gap_up', setting: label(base, L), trigger: `market jumps ${g}% at hour 6`, days: 3, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6 }) });
     for (const m of ['flat', 'falling']) jobs.push({ scenario: 'runaway_90d', setting: label(base, L), trigger: m + ' market 90 days', days: 90, over: stepped(base, L, { pricePath: m }) });
+  }
+  return jobs;
+}
+// the headline rows under the contract semantics: stepped B (loosen 2, clamp 20) and built open 100 on the five markets, the gap rows, the small pot rows for N 20
+function jobsPhase4(base, L) {
+  const jobs = [];
+  const mk = (m) => (m === 'thin' ? { offersPerHour: 37.5 } : { pricePath: m });
+  for (const m of ['flat', 'falling', 'rising', 'thin', 'whipsaw']) {
+    jobs.push({ scenario: 'h_markets_90d', setting: label(base, L), trigger: m + ' market 90 days', days: 90, over: stepped(base, L, mk(m)) });
+    jobs.push({ scenario: 'h_markets_90d', setting: 'built open 100', trigger: m + ' market 90 days', days: 90, over: Object.assign({ bidRule: 'built', rateStart: rateAt(1) }, mk(m)) });
+  }
+  for (const g of [13, 30, 100, 300]) jobs.push({ scenario: 'a_gap_up', setting: label(base, L), trigger: `market jumps ${g}% at hour 6`, days: 3, event: 6, over: stepped(base, L, { pricePath: 'gap', gapPct: g, gapHour: 6 }) });
+  for (const pot of [0.1, 0.25, 0.5, 1, 2, 5, 10, 20]) {
+    jobs.push({ scenario: 'c_small_pot', setting: label(base, L, 20), trigger: `pot held at ${pot} eth, market 0.03`, days: 20,
+      over: stepped(base, L, { priceP0: 0.03, rateStart: rateAt(1, 0.03), volScale: 0, strategyOn: false, holdPot: pot, clampCredits: 20 }, 0.03) });
   }
   return jobs;
 }
@@ -96,9 +113,9 @@ if (!isMainThread) {
 } else {
   const fmt = (x) => (typeof x === 'number' ? (Number.isFinite(x) ? +x.toPrecision(5) : '') : x);
   const only = arg('only', '');
-  const jobs = (cfg.phase === 1 ? jobsPhase1() : jobsPhase2(cfg.base, cfg.loosen)).filter((j) => j.scenario.startsWith(only));
+  const jobs = (cfg.phase === 1 ? jobsPhase1() : cfg.phase === 4 ? jobsPhase4(cfg.base, cfg.loosen) : jobsPhase2(cfg.base, cfg.loosen)).filter((j) => j.scenario.startsWith(only));
   const rows = [];
-  if (cfg.phase >= 2) {
+  if (cfg.phase === 2) {
     const mine = new Set(jobs.map((j) => j.scenario));
     const [, ...lines] = fs.readFileSync(OUT, 'utf8').trim().split('\n');
     for (const l of lines) { const sc = l.split(',')[0]; if (!mine.has(sc) || (sc === 'a_gap_up' && !l.includes(label(cfg.base, cfg.loosen)))) rows.push(l); }

@@ -204,6 +204,8 @@ What it shows. Under `stepped` one sale moves the bid by at most the drop per cr
 
 ## Idle loosening of the ceiling anchor
 
+The tables in this section and in the next follow the earlier simulator semantics (compounded loosening, clamp stored in the bid). The section "Contract semantics rerun (2026-10-08)" has the rows for the contract rules.
+
 A ceiling of 110 percent of the last price paid parks the bid when the market gaps up by more than the ceiling between two fills and no seller accepts the parked bid. The anchor stays at the last fill, so the bid stops at the ceiling until the market comes back. The `rising` market of the grid (doubling over 7 days) moves 1 percent an hour and never triggered this.
 
 Fix: `idleLoosenPct` percent is added to the anchor every `idleLoosenMin` minutes while no fill happens. A fill resets the idle clock. The anchor is the last rate paid, so the ceiling at idle time `k` intervals is `ceilPct x anchor x (1 + idleLoosenPct)^k`. All rows below use `clampCredits` 20 (the runaway guard). Setting A is drop 1, climb 1, ceiling 110. Setting B is drop 0.5, climb 0.5, ceiling 125. Market path `gap`: one jump at hour 6 of a flat day, then flat. Three seeds, minute steps, from `sim/results/bid-rule-stalls.csv` (scenario `a_gap_up`). "First fill" is minutes from the jump to the next purchase, "credits 24 h" and "paid/mkt 24 h" cover the 24 hours after the jump, "stall h" is the stall metric defined in the next section.
@@ -267,6 +269,43 @@ Smallest pot without a stall, by clampCredits, market price 0.03 eth, pot held c
 From the grid: N 1 needs 0.5 eth, N 5 needs 0.5 eth (0.25 eth stalls 2 hours), N 20 needs 2 eth, N 80 needs 10 eth. The pot threshold scales with the market price: at the launch market of 0.0089 eth the thresholds are about 0.11 eth for N 5, 0.45 eth for N 20 and 1.8 eth for N 80.
 
 Other states searched for a bid that cannot reach the cheapest ask while the pot is funded. The hourly window opens with the pot at the first spend after the previous window ended, so a drained pot refilled by fees shortens the cap for at most one hour (pacing, longest gap 1.0 hour in the bot runs). After a large purchase burst the bid sits at 0.8 times the bid at the burst start and the anchor at the lowest fill, which recovers in minutes. Rate bounds apply to `setRate` and `rateStart` in `SettingsBounds`, and the climb path holds only the clamp and `rateCap`, so no run reached a rate floor.
+
+## Contract semantics rerun (2026-10-08)
+
+The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (`climb`, `drop`) and the bid rule section of `docs/FLOW.md`. Two simulator rules changed for the stepped rule. The earlier sections of this document were produced before the change, which is why the "earlier sim" columns below differ from the new columns.
+
+1. Idle loosening is linear: the anchor is the last fill rate times `1 + idleLoosenPct x floor(idleSeconds / (idleLoosenMin x 60))`. The earlier sim compounded the percent per interval.
+2. The clamp (hourly room divided by `clampCredits`) bounds the bid that is read and paid. The price state holds the stored rate (climb, drop, `rateCap`, ceiling) and the anchor. A fill pays the read bid, the drop applies to the price state rate and the anchor becomes the price state rate at the fill. The earlier sim stored the clamped read value at every checkpoint, climbed from it, and used it as the fill price and the anchor, so a small pot dragged the stored rate and the anchor down to the clamp. The earlier sim also froze the rate whenever the funded flag was false. The built rule is untouched (the credit counts of the built rows equal the earlier grid).
+
+Setting for all rows: stepped B (drop 0.5, climb 0.5, ceiling 125, drop floor 80), `idleLoosenPct` 2 per 10 minutes, `clampCredits` 20, comparable volume, minute steps, three seeds. Data: `sim/results/bid-rule-stalls-contract.csv`. The older `sim/results/bid-rule-stalls.csv` keeps the earlier semantics.
+
+90 days on the five markets:
+
+| market | stepped credits d1 / d7 / d30 / d90 | paid/mkt | max bid/mkt | stall h (longest) | earlier sim: credits d90 | paid/mkt | max bid/mkt | stall h (longest) | built open 100: credits d90 | paid/mkt | max bid/mkt |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| flat | 2214 / 10789 / 26314 / 29577 | 0.88 | 1.31 | 792 (13.2) | 30240 | 0.86 | 1.17 | 530 (16.9) | 24091 | 0.99 | 1.23 |
+| falling | 2468 / 11064 / 44018 / 52707 | 0.90 | 1.35 | 518 (10.4) | 53221 | 0.90 | 1.21 | 463 (22.1) | 29647 | 1.26 | 1.80 |
+| rising | 2178 / 10624 / 17416 / 20786 | 0.83 | 1.20 | 805 (13.7) | 21535 | 0.80 | 1.32 | 575 (15.1) | 21395 | 0.85 | 1.08 |
+| thin | 1498 / 10050 / 16306 / 18555 | 1.29 | 1.99 | 1030 (14.6) | 18749 | 1.27 | 1.98 | 765 (18.8) | 16819 | 1.40 | 1.91 |
+| whipsaw | 2214 / 10794 / 27364 / 31313 | 0.87 | 1.27 | 695 (14.0) | 31020 | 0.86 | 1.39 | 535 (14.8) | 26356 | 1.13 | 2.43 |
+
+Gap up (flat day, one jump at hour 6):
+
+| jump at hour 6 | first fill (min) | credits 24 h | paid/mkt 24 h | stall h | earlier sim: first fill | credits 24 h | stall h |
+|---|---|---|---|---|---|---|---|
+| +13% | 2 | 1394 | 0.90 | 0.0 | 2 | 1394 | 0.0 |
+| +30% | 4 | 1366 | 0.89 | 0.0 | 8 | 1369 | 0.0 |
+| +100% | 49 | 1281 | 0.86 | 0.0 | 54 | 1277 | 0.0 |
+| +300% | 103 | 1140 | 0.70 | 0.0 | 94 | 1157 | 0.0 |
+
+Small pot, `clampCredits` 20, pot held for 20 days (480 hours), hours stalled and credits per day:
+
+| pot (eth) | 0.1 | 0.25 | 0.5 | 1 | 2 | 5 | 10 | 20 |
+|---|---|---|---|---|---|---|---|---|
+| contract semantics | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 480 h, 0/day | 0 h, 244/day | 0 h, 535/day | 0 h, 1014/day | 0 h, 1354/day |
+| earlier sim | 480 h, 0/day | 365 h, 11/day | 381 h, 16/day | 368 h, 19/day | 0 h, 270/day | 0 h, 518/day | 0 h, 1012/day | 0 h, 1357/day |
+
+What changed. Credits at day 90 differ from the earlier sim by 3.5 percent less (rising) to 0.9 percent more (whipsaw), the maximum bid over market is higher (1.20 to 1.35 against 1.17 to 1.39 on four markets, 1.99 on thin), and stall hours are higher (518 to 1,030 against 463 to 765), all of them `low_clamp`. The price state climbs to its ceiling while the clamp holds the read bid down, so the read bid steps up to the price state when the pot grows. Pots of 1 eth and below buy nothing at N 20, because the clamp stays under the cheapest ask and the price state is not pulled down to it. The earlier sim bought 11 to 19 credits a day at those pots through the stored clamp. The pot threshold for N 20 stays between 1 and 2 eth at a 0.03 market. Gap rows resolve as before: no stall hours, first fill in 49 minutes after +100 percent and 103 minutes after +300 percent. The recommended `idleLoosenPct` 2 per 10 minutes on setting B holds under the linear rule. Rows of the stall table that were not rerun (cheap fill, `rateCap`, bot, N 1, 5 and 80) follow the earlier semantics.
 
 ## Where the numbers may be untrustworthy
 
