@@ -14,7 +14,7 @@ export const SETTINGS = {
   climbDoubleEvery: 24 * 3600,
   climbMaxBps: 800, // per hour
   dropBps: 2000,
-  spendCapBps: 2000, // per hour window
+  spendCapBps: 10000, // per hour window
   bonusCapBps: 2500, // the controller pays no bonus, so no effect
   tipSavingsBps: 1000,
   tipCapBps: 200,
@@ -34,7 +34,7 @@ export const SETTINGS = {
   xRateDropPerCredit: 20,
   xAuctionHalfLife: 6 * 3600,
   exitSliceCredits: 20,
-  rateCap: 123200000000000, // wei per whole point, about 6 times rateStart: the eth rate never passes it (climb clamp, setRate)
+  rateCap: 205540000000000, // wei per whole point, 10 times rateStart: the eth rate never passes it (climb clamp, setRate)
   exitLaneToBuybackBps: 0, // share of exitToken from exit lane exits to the coin buyback, rest to the exit bid pot
   feeToBuybackBps: 0, // share of swap fee eth booked in receive() that goes to the buyback instead of the pot
 };
@@ -69,7 +69,7 @@ export function firstViolation(s) {
   if (s.climbDoubleEvery < h || s.climbDoubleEvery > 30 * d) return 'climbDoubleEvery';
   if (s.climbMaxBps < s.climbBaseBps || s.climbMaxBps > 2000) return 'climbMaxBps';
   if (s.dropBps < 500 || s.dropBps > 5000) return 'dropBps';
-  if (s.spendCapBps < 100 || s.spendCapBps > 5000) return 'spendCapBps';
+  if (s.spendCapBps < 100 || s.spendCapBps > 10000) return 'spendCapBps';
   if (s.bonusCapBps > 5000) return 'bonusCapBps';
   if (s.tipSavingsBps > 2500) return 'tipSavingsBps';
   if (s.tipCapBps > 500) return 'tipCapBps';
@@ -127,7 +127,6 @@ export const SIM_DEFAULTS = {
   // seller model toggle: one seller with an unlimited supply sells one credit per step whenever the bid has reached throttleFrac of the market price
   throttler: false,
   throttleFrac: 0.95,
-  clampCredits: 20, // the climb stops where the hourly cap affords this many average credits (launch 20, the built rule had 1)
   idleLoosenPct: 2, // stepped: percent added to the ceiling anchor every idleLoosenMin minutes while no fill happens (launch 2, linear), 0 = none
   idleLoosenMin: 10,
   ceilDecayHours: 0, // stepped: half life of the ceiling headroom since the last fill, 0 = none
@@ -274,7 +273,7 @@ export class Core {
   clamp() {
     const s = this.s;
     if (this.p.fundedRule === 'old') return Infinity;
-    return Math.min((this.ethPot * W * s.spendCapBps) / (s.avgScore * (this.p.clampCredits || 1)), s.rateCap);
+    return Math.min((this.ethPot * W * s.spendCapBps) / s.avgScore, s.rateCap);
   }
   // stepped rule: the ceiling in rate terms, ceilPct of the anchor (the last rate paid), the anchor loosened while idle
   stepCeil(now) {
@@ -294,7 +293,7 @@ export class Core {
     if (r >= target) return r;
     return Math.min(r * Math.pow(1 + this.p.climbPerMin / 100, (now - this.checkpointTime) / 60), target);
   }
-  // the bid read by a seller. stepped: the price state bid, lowered to the clamp (hourly cap / clampCredits). the clamp bounds
+  // the bid read by a seller. stepped: the price state bid, lowered to the clamp (the hourly cap / avgScore). the clamp bounds
   // what is paid and is never stored: checkpoint, the drop and the anchor all use the price state rate
   ethRate(now) {
     const s = this.s;
@@ -1113,8 +1112,8 @@ export function simulate(userParams = {}) {
         let cause;
         if (bidPrice >= cheapest * (1 - 1e-9)) cause = bidPrice > afford ? 'room' : 'other';
         else {
-          // the lowest of the climb limits names the cause: the pot (clampCredits), the rateCap or the stepped ceiling
-          const pc = (core.epts(440) * (core.ethPot * W * core.s.spendCapBps) / (core.s.avgScore * (p.clampCredits || 1))) / W;
+          // the lowest of the climb limits names the cause: the pot (the clamp), the rateCap or the stepped ceiling
+          const pc = (core.epts(440) * (core.ethPot * W * core.s.spendCapBps) / core.s.avgScore) / W;
           const lim = { clamp: pc, rateCap: (core.epts(440) * core.s.rateCap) / W, ceiling: p.bidRule === 'stepped' ? (core.epts(440) * core.stepCeil(t1)) / W : Infinity };
           cause = 'low_climbing';
           let lo = cheapest * (1 - 1e-9);

@@ -12,7 +12,7 @@ const near = (a, b, tol, msg) => {
 const ok = (c, msg) => { n++; assert.ok(c, msg); };
 const H = 3600;
 // the sim defaults are the launch bid rule (stepped). the checks below that port the earlier rule and its hand computed values run on these earlier defaults
-const LEGACY = { stepSec: 3600, bidRule: 'built', rateStart: 1.54e13, climbPerMin: 1, clampCredits: 1, idleLoosenPct: 0, reimburseBps: 11000 };
+const LEGACY = { stepSec: 3600, bidRule: 'built', rateStart: 1.54e13, climbPerMin: 1, idleLoosenPct: 0, reimburseBps: 11000, spendCapBps: 2000, rateCap: 123200000000000 };
 const simL = (o = {}) => simulate(Object.assign({}, LEGACY, o));
 const fresh = (over = {}, pot = 1000) => {
   const c = new Core(Object.assign({}, DEFAULTS, LEGACY, over), 0);
@@ -28,7 +28,7 @@ const R0 = 1.54e13;
   const moved = cfg.settings.reserveBps !== undefined; // the config still on the old rules: the new fields are not there yet
   const newFields = ['saleFloorBps', 'feeToBuybackBps'];
   // the stepped bid rule fields of the Core are sim parameters of the bidRule stepped (setting B of docs/BID-STUDY.md), under other names. the built rule fields are sim only
-  const STEPPED = { dropPerCreditBps: 50, dropFloorBps: 8000, climbPerMinBps: 50, ceilBps: 12500, idleLoosenBps: 200, clampCredits: 20 };
+  const STEPPED = { dropPerCreditBps: 50, dropFloorBps: 8000, climbPerMinBps: 50, ceilBps: 12500, idleLoosenBps: 200 };
   const BUILT_ONLY = ['climbBaseBps', 'climbDoubleEvery', 'climbMaxBps', 'dropBps'];
   for (const [k, v] of Object.entries(STEPPED)) if (cfg.settings[k] !== undefined) near(cfg.settings[k], v, 1e-12, 'launch stepped bid rule ' + k);
   // the sim defaults are the launch bid rule: stepped, field for field with the config (bps to percent)
@@ -38,7 +38,7 @@ const R0 = 1.54e13;
   near(DEFAULTS.climbPerMin, cfg.settings.climbPerMinBps / 100, 1e-12, 'default climbPerMin');
   near(DEFAULTS.ceilPct, cfg.settings.ceilBps / 100, 1e-12, 'default ceilPct');
   near(DEFAULTS.idleLoosenPct, cfg.settings.idleLoosenBps / 100, 1e-12, 'default idleLoosenPct');
-  near(DEFAULTS.clampCredits, cfg.settings.clampCredits, 1e-12, 'default clampCredits');
+  ok(cfg.settings.clampCredits === undefined && DEFAULTS.clampCredits === undefined, 'the clamp divisor is gone from the config and the model');
   near(DEFAULTS.rateStart, cfg.rateStart, 1e-12, 'default rateStart');
   for (const [k, v] of Object.entries(cfg.settings)) {
     if (k in STEPPED) continue;
@@ -384,13 +384,13 @@ const R0 = 1.54e13;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { exitAfter: 366 * 86400 })), 'exitAfter'); n++;
   // the tightened bounds of the audit fixes (FC-1 accepted with bounds, FC-2, FC-3, FC-7) and the rate cap (FC-5)
   const bad = (patch, name) => { assert.equal(firstViolation(Object.assign({}, SETTINGS, patch)), name); n++; };
-  bad({ spendCapBps: 5001 }, 'spendCapBps'); bad({ dropBps: 499 }, 'dropBps'); bad({ avgScore: 6000001 }, 'avgScore');
+  bad({ spendCapBps: 10001 }, 'spendCapBps'); bad({ dropBps: 499 }, 'dropBps'); bad({ avgScore: 6000001 }, 'avgScore');
   bad({ saleFloorBps: 999 }, 'saleFloorBps'); bad({ saleFloorBps: 40001 }, 'saleFloorBps'); bad({ feeToBuybackBps: 10001 }, 'feeToBuybackBps'); bad({ auctionDuration: 6 * 3600 - 1 }, 'auctionDuration');
   bad({ buybackSlice: 2.01 }, 'buybackSlice'); bad({ exitAfter: 3599 }, 'exitAfter');
   bad({ rateCap: 1e11 - 1 }, 'rateCap'); bad({ rateCap: 1e15 + 1 }, 'rateCap');
   bad({ exitLaneToBuybackBps: 10001 }, 'exitLaneToBuybackBps');
-  assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 5000, dropBps: 500, avgScore: 6000000, saleFloorBps: 1000, feeToBuybackBps: 10000, auctionDuration: 6 * 3600, buybackSlice: 2, exitAfter: 3600, rateCap: 1e15 })), null); n++;
-  assert.equal(SETTINGS.rateCap, 123200000000000); n++;
+  assert.equal(firstViolation(Object.assign({}, SETTINGS, { spendCapBps: 10000, dropBps: 500, avgScore: 6000000, saleFloorBps: 1000, feeToBuybackBps: 10000, auctionDuration: 6 * 3600, buybackSlice: 2, exitAfter: 3600, rateCap: 1e15 })), null); n++;
+  assert.equal(SETTINGS.rateCap, 205540000000000); n++;
   assert.equal(firstViolation(Object.assign({}, SETTINGS, { xRateFloor: 9800 })), 'xRateFloor'); n++;
 }
 // rateCap: the climb clamps at it, setRate refuses above it, a lower cap pulls the rate down at the checkpoint
@@ -648,11 +648,11 @@ const R0 = 1.54e13;
   near(q('whipsaw', 48), 1, 1e-12, 'whipsaw before the fall'); near(q('whipsaw', 60), 0.4, 1e-12, 'whipsaw falls 60 percent in 12 hours');
   near(q('whipsaw', 108), 1, 1e-12, 'whipsaw recovers over 2 days'); near(q('whipsaw', 300), 1, 1e-12, 'whipsaw flat after');
 }
-// clampCredits, ceilDecayHours, askFloor
+// clamp, ceilDecayHours, askFloor
 {
   const R = 1e13, MIN = 60;
-  const c1 = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 50, ceilPct: 1000, spendCapBps: 2000 }, 0.1), c20 = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 50, ceilPct: 1000, spendCapBps: 2000, clampCredits: 20 }, 0.1);
-  near(c1.clamp(), 0.1 * W * 2000 / 4330000, 1e-12, 'clamp affords one average credit'); near(c20.clamp(), c1.clamp() / 20, 1e-12, 'clampCredits 20 divides the clamp by 20');
+  const c1 = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 50, ceilPct: 1000, spendCapBps: 2000 }, 0.1);
+  near(c1.clamp(), 0.1 * W * 2000 / 4330000, 1e-12, 'clamp affords one average credit');
   const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 100, ceilPct: 150, ceilDecayHours: 1 }, 1000);
   near(d.ethRate(10 * 3600), R * (1 + 0.5 * Math.pow(2, -10)), 1e-12, 'no fill yet: headroom halves every hour from time zero');
   d.spend(0.001, 0); const lp = d.lastPaidRate;
@@ -674,21 +674,21 @@ const R0 = 1.54e13;
   const q = (h, g) => pathPrice(Object.assign({}, DEFAULTS, { pricePath: 'gap', gapPct: g, gapHour: 6 }), h * 3600) / DEFAULTS.priceP0;
   near(q(5.9, 30), 1, 1e-12, 'gap path before the jump'); near(q(6, 30), 1.3, 1e-12, 'gap path after the jump'); near(q(80, 100), 2, 1e-12, 'gap path stays');
   const rs = (share) => (share * 0.0089e18) / 433;
-  const base = { days: 2, seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 };
+  const base = { days: 2, seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1) };
   const ff = simL(Object.assign({ forceFillHour: 6, forceFillFrac: 0.5 }, base));
   ok(Math.abs(ff.stats.potCheck) < 1e-6, 'accounting closes with a forced fill'); ok(ff.T.throttled === 0, 'a forced fill is not counted as a throttler credit');
   const bd = simL(Object.assign({ botDrain: true, holdPot: 5, volScale: 0, strategyOn: false }, base));
   ok(bd.S.credits[bd.H] > 0 && bd.stats.gapHoursMax <= 1.01, 'with a bot draining the hourly cap each hour the longest gap is about an hour (pacing)');
-  const st0 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 0, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
-  const st1 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 2, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1), clampCredits: 20 }));
+  const st0 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 0, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1) }));
+  const st1 = simL(Object.assign({ pricePath: 'gap', gapPct: 300, gapHour: 6, idleLoosenPct: 2, days: 3 }, { seed: 2, stepSec: 60, bidRule: 'stepped', rateStart: rs(1) }));
   ok(st0.stats.stallHours > st1.stats.stallHours, 'idle loosening shortens the stall after a gap up'); ok(st0.stats.stallRuns.length >= 1 && st0.stats.stallHoursMax > 2, 'a stall run is recorded');
-  const hp = simL(Object.assign({ holdPot: 0.1, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
-  ok(hp.stats.stallHours > 0, 'a pot of 0.1 eth at a 0.03 market with clampCredits 20 stalls');
+  const hp = simL(Object.assign({ holdPot: 0.1, spendCapBps: 100, volScale: 0, strategyOn: false, priceP0: 0.03, rateStart: rs(1) * 0.03 / 0.0089 }, base, { rateStart: (0.03e18) / 433, days: 4 }));
+  ok(hp.stats.stallHours > 0, 'a pot of 0.1 eth at a spend cap of 1 percent and a 0.03 market stalls');
 }
 // stepped: the clamp bounds the bid that is read and paid, and is never stored. the drop and the anchor use the price state rate
 {
   const R = 1e13, MIN = 60;
-  const c = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000 }, 0.1);
+  const c = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, spendCapBps: 2000 }, 0.005);
   const clamp = c.clamp(); ok(clamp < R / 3, 'the clamp of a 0.1 eth pot is far under the stored rate');
   near(c.ethRate(0), clamp, 1e-12, 'the read bid is held at the clamp');
   near(c.priceRate(0), R, 1e-12, 'the price state rate is the stored rate');
@@ -698,20 +698,20 @@ const R0 = 1.54e13;
   c.addFees(1000, 10 * MIN);
   near(c.ethRate(10 * MIN), R * 0.995, 1e-12, 'the price state held its value while above the clamp, it did not climb');
   near(c.ethRate(20 * MIN), Math.min(R * 0.995 * Math.pow(1.01, 10), R * 1.25), 1e-9, 'once the pot affords it the price state climbs again from the held value');
-  const z = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000, dropPerCreditPct: 1 }, 0);
+  const z = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, spendCapBps: 2000, dropPerCreditPct: 1 }, 0);
   near(z.ethRate(0) + 1e-30, 1e-30, 1e-6, 'an empty pot reads 0 whether funded or not'); ok(!z.funded);
   const w = fresh({ rateStart: R, bidRule: 'stepped', dropPerCreditPct: 1, dropToPct: 80 }, 1000);
   w.spend(0.001, 0); w.rateAtCheckpoint = R * 0.5; w.checkpointTime = 0; w.lastPaidRate = R * 0.5; w.spend(0.001, 0);
   near(w.rateAtCheckpoint, R * 0.5 * 0.99, 1e-9, 'the minute floor restarts at a price that is already under it');
-  const e = fresh({ rateStart: R / 10, bidRule: 'stepped', climbPerMin: 1, ceilPct: 1000, clampCredits: 20, spendCapBps: 2000 }, 0.1);
+  const e = fresh({ rateStart: R / 10, bidRule: 'stepped', climbPerMin: 1, ceilPct: 1000, spendCapBps: 2000 }, 0.005);
   near(e.priceRate(1000 * MIN), e.clamp(), 1e-12, 'the climb target is the clamp when it is under the ceiling'); near(e.ethRate(1000 * MIN), e.clamp(), 1e-12, 'read at the clamp');
-  const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, clampCredits: 20, spendCapBps: 2000, rateCap: R * 1.2 }, 1000);
+  const d = fresh({ rateStart: R, bidRule: 'stepped', climbPerMin: 1, ceilPct: 125, spendCapBps: 2000, rateCap: R * 1.2 }, 1000);
   near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'rateCap bounds the price state'); d.rateAtCheckpoint = R * 3; near(d.ethRate(100 * MIN), R * 1.2, 1e-12, 'a stored rate above a bound reads as the bound');
 }
 // the unmodified defaults are the launch run: stepped rule at 60 second steps, the launch router split, books close
 {
   const r = simulate({ days: 6, seed: 3 });
-  ok(r.params.bidRule === 'stepped' && r.params.stepSec === 60 && r.params.clampCredits === 20, 'the default run is the stepped launch rule at minute steps');
+  ok(r.params.bidRule === 'stepped' && r.params.stepSec === 60 && r.params.spendCapBps === 10000, 'the default run is the stepped launch rule at minute steps');
   ok(Math.abs(r.stats.potCheck) < 1e-6 && Math.abs(r.stats.houseCheck) < 1e-6, 'accounting closes on the default run');
   ok(r.stats.rateMaxBidRatio < 1.6, 'the default bid stays under 1.6x the market (rate cap and ceiling): ' + r.stats.rateMaxBidRatio);
   ok(summary(r, 6).credits > 5000, 'the default run buys credits in week one');
