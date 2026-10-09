@@ -10,20 +10,97 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {Settings} from "../interfaces/Interfaces.sol";
+import {Lane, ICredits, ICreditScore, Settings, Mainnet} from "../interfaces/Interfaces.sol";
 import {SettingsBounds} from "./SettingsBounds.sol";
 import {SettingsStore} from "./SettingsStore.sol";
 import {RateStore} from "./RateStore.sol";
 
+/// the Core's state variables in declaration order. read at slot 0 (`CoreLib.state`), it addresses the same storage as the
+/// Core's own variables, because a struct in storage is laid out by the same rules as the state variables of a contract.
+/// test/CoreLayout.t.sol compares both views
+struct CoreState {
+    address controller;
+    bool controllerLocked;
+    bool exitModuleLocked;
+    bool targetsLocked;
+    address exitModule;
+    address exitToken;
+    mapping(address => bool) allowedTarget;
+    address owner;
+    address pendingOwner;
+    uint256 ethPot;
+    uint256 ethToBuyback;
+    uint256 xPot;
+    uint256 xToBuyback;
+    uint256 rateAtCheckpoint;
+    uint64 checkpointTime;
+    uint64 lastFillTime;
+    uint64 windowStart;
+    uint256 windowPot;
+    uint256 windowSpent;
+    uint256 xRateAtCheckpoint;
+    uint64 xCheckpointTime;
+    bool xFunded;
+    uint256 lastBuybackBlock;
+    uint256 overprintDay;
+    uint256 overprintCount;
+    mapping(Lane => CoreLib.Pile) piles;
+    mapping(uint256 => CoreLib.Credit) credits;
+    mapping(uint256 => CoreLib.Statement) statements;
+    uint256[] heldIds;
+    uint256 unitPerPoint;
+    uint256 xStartPrice;
+    uint64 xStartTime;
+}
+
 /// the one linked library of the Core: the settings write (validation, storage, event), the eth rate (the climb with its
-/// clamp and ceiling, and the drop on a fill), the exit auction decay, the pool manager swap of the coin buyback and the
-/// pull of the fee router's balance.
+/// clamp and ceiling, and the drop on a fill), the exit auction decay, the pool manager swap of the coin buyback, the
+/// pull of the fee router's balance and the sale of credits into the exit token bid.
 /// it holds no state of its own and is called by delegatecall, so it works on the Core's storage and balance, and the
 /// Core keeps its runtime under the size limit. deployed once before the Core (docs/DEPLOY.md)
 library CoreLib {
     using FixedPointMathLib for uint256;
 
+    struct Pile {
+        uint256 head;
+        uint256 tail;
+        uint256 size;
+    }
+
+    struct Credit {
+        uint256 cost;
+        uint256 prev;
+        uint256 next;
+        uint64 acquiredAt;
+        Lane lane;
+        bool inPile;
+    }
+
+    /// `listed` means the record says the statement sits on the house under `auctionId`. the house is the truth, the
+    /// record is settled lazily by `syncStatement`. an exit lane statement is held and never listed
+    struct Statement {
+        uint256 cost;
+        uint256 auctionId;
+        uint64 listedAt;
+        uint64 slot;
+        Lane lane;
+        bool held;
+        bool listed;
+    }
+
+    uint256 internal constant BPS = 10_000;
+    ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
+
     /// the same declarations as the Core, so the library's reverts and logs decode against the Core abi
+    error Empty();
+    error NoExitModule();
+    error ZeroId();
+    error NotOwner();
+    error ZeroAmount();
+    error PotTooSmall();
+    error Slippage();
+    event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
+    event ExitRateFill(uint256 rate, uint256 pot);
     error BadSetting(bytes32 field);
     event SettingsSet(Settings settings);
     error BadSwap();
@@ -226,6 +303,105 @@ library CoreLib {
             sstore(0x929eee149b4bd21268, codesize())
         }
         emit CoinRescued(to, amount);
+    }
+
+    /// @notice the Core's state variables, by name
+    function state() internal pure returns (CoreState storage c) {
+        assembly ("memory-safe") {
+            c.slot := 0
+        }
+    }
+
+    /// appends credit `id` with cost basis `cost` to the pile `p` of `lane`
+    function push(Pile storage p, mapping(uint256 => Credit) storage credits, Lane lane, uint256 id, uint256 cost)
+        internal
+    {
+        uint256 tail = p.tail;
+        Credit storage c = credits[id];
+        c.cost = cost;
+        c.prev = tail;
+        c.next = 0;
+        c.acquiredAt = uint64(block.timestamp);
+        c.lane = lane;
+        c.inPile = true;
+        if (tail == 0) p.head = id;
+        else credits[tail].next = id;
+        p.tail = id;
+        p.size += 1;
+    }
+
+    /// the caller must own credit `id`, which is not the zero sentinel
+    function owned(uint256 id) internal view returns (uint256) {
+        if (id == 0) revert ZeroId();
+        if (CREDITS.ownerOf(id) != msg.sender) revert NotOwner();
+        return id;
+    }
+
+    /// score of a credit in 1e4 scale, read from the score contract
+    function scoreOf(uint256 id) internal view returns (uint256) {
+        return ICreditScore(Mainnet.CREDIT_SCORE).scoreOf(CREDITS.seedOf(id), CREDITS.timestampOf(id));
+    }
+
+    /// the exit token bid in bps of score: the stored rate `r` climbs `xRateClimbPerHour` per hour since `since`, up to
+    /// the cap `min(xRateCap, pot * BPS / (avgScore * unit))`, while the pot funds the bid (`funded`)
+    function xRateOf(uint256 r, bool funded, uint256 pot, uint256 unit, uint256 since, Settings storage s)
+        internal
+        view
+        returns (uint256)
+    {
+        if (!funded) return r;
+        uint256 cap = uint256(s.xRateCap).min(pot * BPS / (uint256(s.avgScore) * unit));
+        if (cap <= r) return r;
+        return (r + uint256(s.xRateClimbPerHour) * (block.timestamp - since) / 1 hours).min(cap);
+    }
+
+    /// whether the exit pot `pot` pays one average credit at the exit rate `r`
+    function xFundedOf(uint256 pot, uint256 r, uint256 unit, Settings storage s) internal view returns (bool) {
+        return pot * BPS >= uint256(s.avgScore) * r * unit;
+    }
+
+    /// @notice sells the credits `ids` of the caller into the exit token bid. the Core's `sellForExitToken` forwards its
+    /// call here untouched, under its own reentrancy guard
+    function sellForExitToken(uint256[] calldata ids) external {
+        _sellForExitToken(ids, 0);
+    }
+
+    /// @notice same as the one argument form with a floor on the total paid
+    function sellForExitToken(uint256[] calldata ids, uint256 minOut) external {
+        _sellForExitToken(ids, minOut);
+    }
+
+    function _sellForExitToken(uint256[] calldata ids, uint256 minOut) private {
+        CoreState storage c = state();
+        Settings storage s = SettingsStore.load();
+        if (ids.length == 0) revert Empty();
+        if (c.exitModule == address(0)) revert NoExitModule();
+        uint256 unit = c.unitPerPoint;
+        uint256 dropBps = s.xRateDropPerCredit;
+        uint256 floor = s.xRateFloor;
+        c.xRateAtCheckpoint = xRateOf(c.xRateAtCheckpoint, c.xFunded, c.xPot, unit, c.xCheckpointTime, s);
+        c.xCheckpointTime = uint64(block.timestamp);
+        uint256 r = c.xRateAtCheckpoint;
+        uint256 pot = c.xPot;
+        uint256 total;
+        for (uint256 i; i < ids.length; ++i) {
+            uint256 id = owned(ids[i]);
+            uint256 price = scoreOf(id) * r * unit / BPS;
+            if (price == 0) revert ZeroAmount();
+            if (price > pot) revert PotTooSmall();
+            pot -= price;
+            total += price;
+            r = r.zeroFloorSub(dropBps).max(floor);
+            push(c.piles[Lane.Exit], c.credits, Lane.Exit, id, price);
+            CREDITS.transferFrom(msg.sender, address(this), id);
+            emit CreditBought(id, msg.sender, Lane.Exit, price);
+        }
+        c.xPot = pot;
+        c.xRateAtCheckpoint = r;
+        c.xFunded = xFundedOf(pot, r, unit, s);
+        emit ExitRateFill(r, pot);
+        if (total < minOut) revert Slippage();
+        SafeTransferLib.safeTransfer(c.exitToken, msg.sender, total);
     }
 
     /// gas forwarded to the router flush of `pullFees`. the most expensive flush (four payees and a tip recipient that

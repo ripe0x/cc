@@ -57,33 +57,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         Returned
     }
 
-    struct Pile {
-        uint256 head;
-        uint256 tail;
-        uint256 size;
-    }
-
-    struct Credit {
-        uint256 cost;
-        uint256 prev;
-        uint256 next;
-        uint64 acquiredAt;
-        Lane lane;
-        bool inPile;
-    }
-
-    /// `listed` means the record says the statement sits on the house under `auctionId`. the house is the truth, the
-    /// record is settled lazily by `syncStatement`. an exit lane statement is held and never listed
-    struct Statement {
-        uint256 cost;
-        uint256 auctionId;
-        uint64 listedAt;
-        uint64 slot;
-        Lane lane;
-        bool held;
-        bool listed;
-    }
-
     /*//////////////////////////////////////////////////////////////
                                 ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -280,9 +253,9 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public overprintDay;
     uint256 public overprintCount;
 
-    mapping(Lane => Pile) private _piles;
-    mapping(uint256 => Credit) private _credits;
-    mapping(uint256 => Statement) private _statements;
+    mapping(Lane => CoreLib.Pile) private _piles;
+    mapping(uint256 => CoreLib.Credit) private _credits;
+    mapping(uint256 => CoreLib.Statement) private _statements;
     uint256[] private _heldIds;
 
     /// exit token base units per one unit of 1e4 scaled score, read once from the module when it is set
@@ -471,12 +444,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// exit token bid in bps of score right now.
     function xRate() public view returns (uint256 r) {
-        r = xRateAtCheckpoint;
-        if (!xFunded) return r;
-        Settings storage s = _st();
-        uint256 cap = uint256(s.xRateCap).min(xPot * BPS / (uint256(s.avgScore) * unitPerPoint));
-        if (cap <= r) return r;
-        return (r + uint256(s.xRateClimbPerHour) * (block.timestamp - xCheckpointTime) / 1 hours).min(cap);
+        return CoreLib.xRateOf(xRateAtCheckpoint, xFunded, xPot, unitPerPoint, xCheckpointTime, _st());
     }
 
     function _xCheckpoint() private {
@@ -485,7 +453,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     function _syncXFunded() private {
-        xFunded = xPot * BPS >= uint256(_st().avgScore) * xRateAtCheckpoint * unitPerPoint;
+        xFunded = CoreLib.xFundedOf(xPot, xRateAtCheckpoint, unitPerPoint, _st());
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -530,25 +498,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     function _push(Lane lane, uint256 id, uint256 cost) private {
-        Pile storage p = _piles[lane];
-        uint256 tail = p.tail;
-        Credit storage c = _credits[id];
-        c.cost = cost;
-        c.prev = tail;
-        c.next = 0;
-        c.acquiredAt = uint64(block.timestamp);
-        c.lane = lane;
-        c.inPile = true;
-        if (tail == 0) p.head = id;
-        else _credits[tail].next = id;
-        p.tail = id;
-        p.size += 1;
+        CoreLib.push(_piles[lane], _credits, lane, id, cost);
     }
 
     function _pull(Lane lane, uint256 id) private returns (uint256 cost) {
-        Credit storage c = _credits[id];
+        CoreLib.Credit storage c = _credits[id];
         if (!c.inPile || c.lane != lane) revert NotInPile(id);
-        Pile storage p = _piles[lane];
+        CoreLib.Pile storage p = _piles[lane];
         uint256 prev = c.prev;
         uint256 next = c.next;
         if (prev == 0) p.head = next;
@@ -631,44 +587,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (tip != 0) SafeTransferLib.safeTransferETH(msg.sender, tip);
     }
 
-    /// sell credits into the exit token bid. phase 2 only.
+    /// sell credits into the exit token bid. phase 2 only. the body is `CoreLib.sellForExitToken`, called with the
+    /// calldata untouched
     function sellForExitToken(uint256[] calldata ids) external nonReentrant {
-        _sellForExitToken(ids, 0);
+        _toLib();
     }
 
     /// same as sellForExitToken with a floor on the total paid.
     function sellForExitToken(uint256[] calldata ids, uint256 minOut) external nonReentrant {
-        _sellForExitToken(ids, minOut);
-    }
-
-    function _sellForExitToken(uint256[] calldata ids, uint256 minOut) private {
-        if (ids.length == 0) revert Empty();
-        if (exitModule == address(0)) revert NoExitModule();
-        uint256 unit = unitPerPoint;
-        uint256 drop = _st().xRateDropPerCredit;
-        uint256 floor = _st().xRateFloor;
-        _xCheckpoint();
-        uint256 r = xRateAtCheckpoint;
-        uint256 pot = xPot;
-        uint256 total;
-        for (uint256 i; i < ids.length; ++i) {
-            uint256 id = _owned(ids[i]);
-            uint256 price = scoreOf(id) * r * unit / BPS;
-            if (price == 0) revert ZeroAmount();
-            if (price > pot) revert PotTooSmall();
-            pot -= price;
-            total += price;
-            r = r.zeroFloorSub(drop).max(floor);
-            _push(Lane.Exit, id, price);
-            CREDITS.transferFrom(msg.sender, address(this), id);
-            emit CreditBought(id, msg.sender, Lane.Exit, price);
-        }
-        xPot = pot;
-        xRateAtCheckpoint = r;
-        _syncXFunded();
-        emit ExitRateFill(r, pot);
-        if (total < minOut) revert Slippage();
-        SafeTransferLib.safeTransfer(exitToken, msg.sender, total);
+        _toLib();
     }
 
     /// checks that the caller owns credit id, which must not be the zero sentinel.
@@ -737,7 +664,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         );
         if (lane == Lane.Eth) cost += reimbursement;
         _heldIds.push(sid);
-        _statements[sid] = Statement({
+        _statements[sid] = CoreLib.Statement({
             cost: cost,
             auctionId: 0,
             listedAt: 0,
@@ -778,7 +705,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// except on the relist of `syncStatement`, which falls back to the hard floor so redemption never depends on the
     /// controller. told apart by the selector of the call, like `_compose`, so no code is duplicated
     function _reserveFor(uint256 sid) private view returns (uint256) {
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         uint256 cost = st.cost;
         (bool ok, bytes memory out) =
             _ask(controller, abi.encodeCall(IController.statementPrice, (sid, cost, st.listedAt)), READ_GAS, 32);
@@ -792,7 +719,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// lists a held statement on the house at the controller's price at age zero (floored). the house takes the
     /// statement with transferFrom, so there is no callback. an auction id must come back and the house must own it
     function _list(uint256 sid) private {
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         st.listedAt = uint64(block.timestamp);
         uint256 reserve = _reserveFor(sid);
         uint256 id = HOUSE.createAuction(sid, address(STATEMENTS), _st().auctionDuration, reserve, 0);
@@ -803,7 +730,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// forgets a held statement and compacts the held list.
     function _unhold(uint256 sid) private {
-        Statement storage s = _statements[sid];
+        CoreLib.Statement storage s = _statements[sid];
         uint256 slot = s.slot;
         uint256 last = _heldIds[_heldIds.length - 1];
         _heldIds[slot] = last;
@@ -854,7 +781,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// proceeds and the statement goes to `buyer`. no refund logic here, the controller refunds its caller
     function sellTo(uint256 sid, address buyer) external payable nonReentrant {
         if (msg.sender != controller) revert OnlyController();
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         if (msg.value < _floor(st.cost)) revert BelowFloor();
         _cancel(st);
         STATEMENTS.transferFrom(address(this), buyer, sid);
@@ -867,7 +794,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// and the core does not hold the statement, it was sold: the record is cleared. if the core holds it (a sale
     /// that unwound, or a statement that came back), it is relisted at the reserve of the current settings
     function syncStatement(uint256 sid) external nonReentrant {
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         if (!st.held || !st.listed) revert NotListed();
         if (_auction(st.auctionId)[W_OWNER] != 0) revert AuctionLive();
         address holder = _holderOf(sid);
@@ -883,7 +810,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// the listing. permissionless: a first bidder calls it before bidding, and a change of the controller or of its
     /// settings or of `saleFloorBps` reaches old listings
     function repriceStatement(uint256 sid) external nonReentrant {
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         _requireOpen(st);
         uint256 reserve = _reserveFor(sid);
         HOUSE.setAuctionReservePrice(st.auctionId, reserve);
@@ -891,14 +818,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     /// takes a listed statement back from the house. reverts if the auction has a bid, or is gone
-    function _cancel(Statement storage st) private {
+    function _cancel(CoreLib.Statement storage st) private {
         _requireOpen(st);
         HOUSE.cancelAuction(st.auctionId);
         st.listed = false;
     }
 
     /// the record says listed, the house has the auction, and it has no bid
-    function _requireOpen(Statement storage st) private view {
+    function _requireOpen(CoreLib.Statement storage st) private view {
         if (!st.held || !st.listed) revert NotListed();
         uint256[12] memory w = _auction(st.auctionId);
         if (w[W_OWNER] == 0) revert NotListed();
@@ -929,7 +856,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 gasStart = gasleft();
         address module = exitModule;
         if (module == address(0)) revert NoExitModule();
-        Statement memory s = _statements[sid];
+        CoreLib.Statement memory s = _statements[sid];
         if (!s.held) revert NotHeld();
         if (s.lane == Lane.Eth) {
             if (block.timestamp < s.listedAt + _st().exitAfter) revert TooEarly();
@@ -974,8 +901,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (!ok) revert NotReady();
         (uint256 flag, uint256 baseId, uint256 topId) = abi.decode(out, (uint256, uint256, uint256));
         if (flag != 1) revert NotReady();
-        Statement storage base = _statements[baseId];
-        Statement storage top = _statements[topId];
+        CoreLib.Statement storage base = _statements[baseId];
+        CoreLib.Statement storage top = _statements[topId];
         if (baseId == topId || !base.held || !top.held || base.lane != top.lane) revert BadOverprint();
         uint256 day = block.timestamp / 1 days;
         if (day != overprintDay) {
@@ -1147,6 +1074,12 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     /// to which the call is handed untouched (the bytes saved keep the runtime under the size limit). it refuses the
     /// zero address, sends and logs `CoinRescued`
     function rescueCoin(address, uint256) external {
+        _toLib();
+    }
+
+    /// delegatecalls the library with the calldata of this call, under the selector of this call, and reverts with
+    /// whatever it reverts with
+    function _toLib() private {
         address lib = address(CoreLib);
         assembly ("memory-safe") {
             let p := mload(0x40)
@@ -1255,7 +1188,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// score of a credit in 1e4 scale, read from the score contract.
     function scoreOf(uint256 id) public view returns (uint256) {
-        return ICreditScore(Mainnet.CREDIT_SCORE).scoreOf(CREDITS.seedOf(id), CREDITS.timestampOf(id));
+        return CoreLib.scoreOf(id);
     }
 
     /// number of credits in a lane pile.
@@ -1289,14 +1222,14 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// pile membership, lane, cost basis and arrival time of a credit.
     function creditInfo(uint256 id) external view returns (bool inPile, Lane lane, uint256 cost, uint64 acquiredAt) {
-        Credit storage c = _credits[id];
+        CoreLib.Credit storage c = _credits[id];
         return (c.inPile, c.lane, c.cost, c.acquiredAt);
     }
 
     /// whether the core holds a statement for sale or exit, with its lane, cost basis and the time it was listed
     /// (zero for an exit lane statement, which is never listed).
     function statementInfo(uint256 sid) external view returns (bool held, Lane lane, uint256 cost, uint64 clockStart) {
-        Statement storage s = _statements[sid];
+        CoreLib.Statement storage s = _statements[sid];
         return (s.held, s.lane, s.cost, s.listedAt);
     }
 
@@ -1325,7 +1258,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         view
         returns (StatementStatus status, uint256 auctionId, uint256 reserve, uint256 bid, uint64 endTime)
     {
-        Statement storage st = _statements[sid];
+        CoreLib.Statement storage st = _statements[sid];
         if (!st.held) return (StatementStatus.None, 0, 0, 0, 0);
         if (!st.listed) return (StatementStatus.Held, 0, 0, 0, 0);
         uint256[12] memory a = _auction(st.auctionId);
