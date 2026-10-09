@@ -146,11 +146,6 @@ abstract contract InvariantsBase is InvariantFixture {
                 assertTrue(!held, "exited but still held");
                 assertEq(o, address(s.module), "an exited statement is not with the module that took it");
                 assertGe(s.received, s.required, "exit returned less than rating * unitPerPoint");
-            } else if (s.status == handler.S_MIGRATED()) {
-                assertEq(o, s.winner, "a migrated statement is not with the successor");
-                assertTrue(!held, "a migrated statement is still recorded as held");
-                (bool exists,) = house.getAuctionFor(address(STATEMENTS), sid);
-                assertTrue(!exists, "the house has an auction for a migrated statement");
             } else if (s.status == handler.S_TOP()) {
                 assertTrue(!held, "overprint top still marked held");
                 assertEq(o, address(0), "overprint top still exists");
@@ -370,7 +365,7 @@ abstract contract InvariantsBase is InvariantFixture {
             uint8 st = s.status;
             assertTrue(
                 st == handler.S_LISTED() || st == handler.S_HELD() || st == handler.S_SOLD() || st == handler.S_SOLD_TO()
-                    || st == handler.S_EXITED() || st == handler.S_TOP() || st == handler.S_MIGRATED(),
+                    || st == handler.S_EXITED() || st == handler.S_TOP(),
                 "a statement left the core by a path that is not allowed"
             );
             if (st == handler.S_SOLD_TO()) assertGe(s.price, s.floorAtSet, "a sale at once below the hard floor");

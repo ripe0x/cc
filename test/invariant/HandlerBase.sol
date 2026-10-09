@@ -274,7 +274,6 @@ abstract contract HandlerBase is Test {
     uint8 public constant S_EXITED = 4; // handed to the exit module
     uint8 public constant S_TOP = 5; // burned as the top of an overprint
     uint8 public constant S_SOLD_TO = 6; // eth lane, sold at once by the controller through `sellTo`, the buyer holds it
-    uint8 public constant S_MIGRATED = 7; // moved to the successor by `migrate`, which holds it
 
     struct SG {
         uint8 status;

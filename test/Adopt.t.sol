@@ -278,7 +278,7 @@ contract AdoptTest is Fixture {
 
         vm.startPrank(owner);
         core.setSuccessor(address(succ));
-        core.migrate(100, 10);
+        core.migrate(100);
         vm.stopPrank();
         assertEq(core.pileSize(Lane.Eth), 0, "the old pile is empty");
         for (uint256 i; i < 80; ++i) {
@@ -310,7 +310,7 @@ contract AdoptTest is Fixture {
         vm.etch(sink, hex"00");
         vm.startPrank(owner);
         core.setSuccessor(sink);
-        core.migrate(10, 10);
+        core.migrate(10);
         vm.stopPrank();
         (bool inPile,, uint256 stale,) = core.creditInfo(ids[0]);
         assertFalse(inPile);

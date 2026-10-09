@@ -177,15 +177,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event SuccessorLocked();
     /// `adopt` put a credit the core held without a record into the eth pile at cost basis `cost`
     event CreditAdopted(uint256 indexed id, uint256 cost);
-    /// `migrate` moved assets to the successor: eth, credits, statements, exit token, and the statements it skipped
-    event Migrated(
-        address indexed successor,
-        uint256 eth,
-        uint256 credits,
-        uint256 statements,
-        uint256 exitTokens,
-        uint256 skippedStatements
-    );
+    /// `migrate` moved eth, exit token and credits to the successor
+    event Migrated(address indexed successor, uint256 eth, uint256 exitTokens, uint256 credits);
 
     /*//////////////////////////////////////////////////////////////
                               PARAMETERS
@@ -1148,13 +1141,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         _toLib();
     }
 
-    /// moves what the core tracks to the successor, in batches: the eth pots, the exit token pots, up to `maxCredits`
-    /// credits from the head of each pile and up to `maxStatements` held statements. callable again until nothing is
-    /// left. the statement scan stops after `maxStatements` moved or `maxStatements` skipped. a statement with a bid on
-    /// the house, a sold one not yet settled by `syncStatement`, or one the house will not return is skipped and
-    /// counted in `Migrated`. the hourly spend window closes with the eth pot. owner only and guarded, both checked by the library, to which the call is handed
-    /// untouched. reverts `NoSuccessor` while the successor is zero
-    function migrate(uint256, uint256) external {
+    /// moves the eth pots, the exit token pots and up to `maxCredits` credits from the head of each pile to the
+    /// successor, in batches. callable again until nothing is left. the held statements, their listings and their
+    /// records stay with the core. the hourly spend window closes with the eth pot. owner only and guarded, both checked
+    /// by the library, to which the call is handed untouched. reverts `NoSuccessor` while the successor is zero
+    function migrate(uint256) external {
         _toLib();
     }
 

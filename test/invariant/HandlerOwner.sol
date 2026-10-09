@@ -814,15 +814,13 @@ abstract contract HandlerOwner is HandlerHouse {
         uint256[] credits;
         uint256[] statements;
         uint256 maxCredits;
-        uint256 maxStatements;
     }
 
     /// the owner's successor doors and `migrate`. by mode: set the successor (refused after the lock), a stranger on the
     /// three doors (refused), the lock (only with a successor set, rarely), and mostly `migrate` with random batch sizes.
     /// a migration is modelled from the ghosts: the eth and exit token pots go to the sink whole, the first
-    /// `maxCredits` of each pile go to the sink, and the scan of the held list from its end moves, at most
-    /// `maxStatements` times, a statement the ghost says is listed without a bid or held on the exit lane, and skips the
-    /// others. eth, exit token, credits, statements, trackers and the event are compared with that model
+    /// `maxCredits` of each pile go to the sink, and the held statements stay as they are. eth, exit token, credits,
+    /// the held list, trackers and the event are compared with that model
     function migrate(uint256 seed, uint256 mode) external checked {
         uint8 a = A_MIGRATE;
         uint256 m = mode % 10;
@@ -855,7 +853,7 @@ abstract contract HandlerOwner is HandlerHouse {
         bytes[3] memory calls = [
             abi.encodeCall(ICore.setSuccessor, (who)),
             abi.encodeCall(ICore.lockSuccessor, ()),
-            abi.encodeCall(ICore.migrate, (100, 100))
+            abi.encodeCall(ICore.migrate, (100))
         ];
         address was = core.successor();
         bool wasLocked = core.successorLocked();
@@ -896,7 +894,7 @@ abstract contract HandlerOwner is HandlerHouse {
         if (core.successor() == address(0)) {
             if (core.successorLocked()) {
                 vm.prank(owner);
-                try core.migrate(1, 1) {
+                try core.migrate(1) {
                     _flag(V_OWNER, "migrate worked with no successor");
                 } catch (bytes memory why) {
                     if (bytes4(why) != ICore.NoSuccessor.selector) _unexpected(a, why);
@@ -910,7 +908,7 @@ abstract contract HandlerOwner is HandlerHouse {
         MigPre memory q = _migPre(seed, to);
         vm.recordLogs();
         vm.prank(owner);
-        try core.migrate(q.maxCredits, q.maxStatements) {
+        try core.migrate(q.maxCredits) {
             _migPost(q, to);
             _ok(a);
         } catch (bytes memory why) {
@@ -926,7 +924,6 @@ abstract contract HandlerOwner is HandlerHouse {
         q.sinkEth = to.balance;
         q.sinkX = _xBal(to);
         q.maxCredits = seed % 7 == 0 ? 0 : _logBound(seed >> 8, 1, 120);
-        q.maxStatements = seed % 5 == 0 ? 0 : _logBound(seed >> 16, 1, 12);
         uint256 e = core.pileSize(Lane.Eth);
         uint256 x = core.pileSize(Lane.Exit);
         uint256[] memory eth = core.pilePage(Lane.Eth, 0, q.maxCredits < e ? q.maxCredits : e);
@@ -941,34 +938,8 @@ abstract contract HandlerOwner is HandlerHouse {
         q.statements = core.heldStatements();
     }
 
-    /// the statements the scan moves and skips, from the ghost: the scan goes from the end of the held list, a move swaps
-    /// the last entry into its place, and stops after `max` moves or `max` skips
-    function _migScan(MigPre memory q) internal view returns (uint256[] memory moved, uint256 skipped) {
-        uint256[] memory h = q.statements;
-        uint256 n = h.length;
-        moved = new uint256[](q.maxStatements < n ? q.maxStatements : n);
-        uint256 k;
-        uint256 i = n;
-        while (i != 0 && k < q.maxStatements && skipped < q.maxStatements) {
-            --i;
-            SG storage g = _sg[h[i]];
-            bool ok = g.status == S_HELD || (g.status == S_LISTED && g.bid == 0);
-            if (!ok) {
-                ++skipped;
-                continue;
-            }
-            moved[k++] = h[i];
-            h[i] = h[n - 1];
-            n -= 1;
-        }
-        assembly {
-            mstore(moved, k)
-        }
-    }
-
     function _migPost(MigPre memory q, address to) internal {
-        (uint256[] memory moved, uint256 skipped) = _migScan(q);
-        // eth and exit token: the trackers went to the successor whole and nothing else moved
+        // eth and exit token: the trackers went to the successor whole
         // a migration that moved eth closed the hourly spend window, so the ghost window opens on the next spend
         if (q.eth != 0) {
             gWinStart = 0;
@@ -996,35 +967,26 @@ abstract contract HandlerOwner is HandlerHouse {
                 pileCount[c.lane]--;
             }
         }
-        // statements
-        for (uint256 i; i < moved.length; ++i) {
-            uint256 sid = moved[i];
-            (bool held,,,) = core.statementInfo(sid);
-            if (held || _ownerOf(sid) != to) _flag(V_OWNER, "a statement of the batch did not reach the successor");
-            (bool live,) = house.getAuctionFor(address(STATEMENTS), sid);
-            if (live) _flag(V_OWNER, "a migrated statement still has an auction");
-            _sg[sid].status = S_MIGRATED;
-            _sg[sid].winner = to;
+        // statements: the held list is as it was
+        uint256[] memory held = core.heldStatements();
+        if (held.length != q.statements.length) _flag(V_OWNER, "the held list differs from the model after a migration");
+        else {
+            for (uint256 i; i < held.length; ++i) {
+                if (held[i] != q.statements[i]) _flag(V_OWNER, "the held list changed order after a migration");
+            }
         }
-        if (core.heldStatements().length != q.statements.length - moved.length) {
-            _flag(V_OWNER, "the held list differs from the model after a migration");
-        }
-        _migEvent(q, to, moved.length, skipped);
+        _migEvent(q, to);
     }
 
-    function _migEvent(MigPre memory q, address to, uint256 movedStatements, uint256 skipped) internal {
+    function _migEvent(MigPre memory q, address to) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool seen;
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.Migrated.selector) continue;
             seen = true;
             if (address(uint160(uint256(logs[i].topics[1]))) != to) _flag(V_OWNER, "Migrated names another successor");
-            (uint256 eth, uint256 credits, uint256 statements, uint256 x, uint256 skippedLogged) =
-                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+            (uint256 eth, uint256 x, uint256 credits) = abi.decode(logs[i].data, (uint256, uint256, uint256));
             if (eth != q.eth || x != q.x || credits != q.credits.length) _flag(V_OWNER, "Migrated differs from the model");
-            if (statements != movedStatements || skippedLogged != skipped) {
-                _flag(V_OWNER, "Migrated statements or skipped differ from the model");
-            }
         }
         if (!seen) _flag(V_OWNER, "migrate emitted no Migrated");
     }

@@ -133,14 +133,7 @@ library CoreLib {
     event SuccessorSet(address successor);
     event SuccessorLocked();
     event CreditAdopted(uint256 indexed id, uint256 cost);
-    event Migrated(
-        address indexed successor,
-        uint256 eth,
-        uint256 credits,
-        uint256 statements,
-        uint256 exitTokens,
-        uint256 skippedStatements
-    );
+    event Migrated(address indexed successor, uint256 eth, uint256 exitTokens, uint256 credits);
 
     /// @notice validates the settings, stores them and logs them. the Core forwards its own `setSettings` call here
     /// untouched (same selector), after it checkpointed both rates. the constructor calls it too
@@ -410,21 +403,16 @@ library CoreLib {
         emit SuccessorLocked();
     }
 
-    /// @notice moves the assets the Core tracks to the successor, in batches. the Core forwards its call here untouched,
-    /// the owner check and the reentrancy guard are here.
+    /// @notice moves the eth and the credits the Core tracks to the successor, in batches. the Core forwards its call
+    /// here untouched, the owner check and the reentrancy guard are here.
     /// eth: `ethPot + ethToBuyback`, by one plain call, the trackers zeroed. eth above the trackers stays.
-    /// credits: up to `maxCredits` from the head of each pile, by `transferFrom`, the pile membership cleared (the
-    /// cost, lane and arrival time of the record stay).
-    /// statements: the held list is scanned from its end, and the scan stops after `maxStatements` moved or after
-    /// `maxStatements` skipped, whichever comes first, so a call makes at most 2 * `maxStatements` house reads. a listed
-    /// statement is taken back from the house first. a statement with a bid, a sold one whose record is not settled
-    /// yet, and one the house refuses to return are skipped and counted. the record of a moved statement is deleted.
-    /// when `maxStatements` or more statements at the end of the list are skipped, the scan never reaches the ones
-    /// before them, so `maxStatements` must exceed the number of skipped statements.
     /// exit token: `xPot + xToBuyback`, by `transfer`, the trackers zeroed. the coin stays.
+    /// credits: up to `maxCredits` from the head of each pile, by `transferFrom`, the pile membership cleared (the
+    /// cost, lane and arrival time of the record stay). zero moves the pots only.
+    /// the held statements, their listings and their records stay with the Core, which sells them out itself.
     /// the rates are checkpointed before a pot is zeroed. the hourly spend window is closed with the eth pot. a call with
     /// nothing left to move logs zeros
-    function migrate(uint256 maxCredits, uint256 maxStatements) external {
+    function migrate(uint256 maxCredits) external {
         _onlyOwner();
         CoreState storage c = state();
         address to = c.successor;
@@ -432,10 +420,9 @@ library CoreLib {
         _enter();
         uint256 eth = _moveEth(c, to);
         uint256 credits = _moveCredits(c, to, maxCredits);
-        (uint256 statements, uint256 skipped) = _moveStatements(c, to, maxStatements);
         uint256 exitTokens = _moveExitToken(c, to);
         _leave();
-        emit Migrated(to, eth, credits, statements, exitTokens, skipped);
+        emit Migrated(to, eth, exitTokens, credits);
     }
 
     function _moveEth(CoreState storage c, address to) private returns (uint256 eth) {
@@ -490,46 +477,6 @@ library CoreLib {
                 moved += k;
             }
         }
-    }
-
-    function _moveStatements(CoreState storage c, address to, uint256 max)
-        private
-        returns (uint256 moved, uint256 skipped)
-    {
-        address house = ICoinOf(address(this)).HOUSE();
-        uint256 i = c.heldIds.length;
-        while (i != 0 && moved < max && skipped < max) {
-            --i;
-            uint256 sid = c.heldIds[i];
-            if (!_release(house, c.statements[sid], sid)) {
-                ++skipped;
-                continue;
-            }
-            uint256 last = c.heldIds[c.heldIds.length - 1];
-            c.heldIds[i] = last;
-            c.statements[last].slot = uint64(i);
-            c.heldIds.pop();
-            delete c.statements[sid];
-            STATEMENTS.transferFrom(address(this), to, sid);
-            ++moved;
-        }
-    }
-
-    /// makes sure the Core holds statement `sid` of its books, taking it back from the house when it is listed without a
-    /// bid. false when the statement has a bid on the house, or the listing is gone and a buyer holds it
-    function _release(address house, Statement storage st, uint256 sid) private returns (bool) {
-        if (st.listed) {
-            (bool ok, uint256[12] memory w) = auctionWords(house, st.auctionId);
-            if (!ok) return false;
-            if (w[W_OWNER] != 0) {
-                if (w[W_FIRST] != 0) return false;
-                try IAuctionHouse(house).cancelAuction(st.auctionId) {}
-                catch {
-                    return false;
-                }
-            }
-        }
-        return holderOf(sid) == address(this);
     }
 
     /// the twelve words of the house's auction record `id` (`IAuctionHouse.Auction`, static words), all zero when the

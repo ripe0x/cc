@@ -20,7 +20,7 @@ import {ICore} from "../src/interfaces/ICore.sol";
 contract BuildIdentityTest is Fixture {
     uint256 internal constant CORE_RUNTIME = 24_163;
     uint256 internal constant CONTROLLER_RUNTIME = 4_445;
-    uint256 internal constant LIB_RUNTIME = 18_248;
+    uint256 internal constant LIB_RUNTIME = 16_992;
     uint256 internal constant LENS_RUNTIME = 8_990;
 
     function _json(string memory name) internal view returns (string memory) {

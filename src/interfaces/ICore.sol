@@ -88,14 +88,7 @@ interface ICore {
     event ListingBought(
         uint256 indexed id, address indexed target, address indexed caller, uint256 cost, uint256 tip, uint256 rate
     );
-    event Migrated(
-        address indexed successor,
-        uint256 eth,
-        uint256 credits,
-        uint256 statements,
-        uint256 exitTokens,
-        uint256 skippedStatements
-    );
+    event Migrated(address indexed successor, uint256 eth, uint256 exitTokens, uint256 credits);
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event Overprinted(uint256 indexed baseId, uint256 indexed topId, uint256 cost);
     event OwnershipTransferStarted(address indexed owner, address indexed pending);
@@ -166,7 +159,7 @@ interface ICore {
     function lockExitModule() external;
     function lockSuccessor() external;
     function lockTargets() external;
-    function migrate(uint256, uint256) external;
+    function migrate(uint256) external;
     function onERC721Received(address, address, uint256, bytes memory) external view returns (bytes4);
     function overprint() external;
     function overprintCount() external view returns (uint256);

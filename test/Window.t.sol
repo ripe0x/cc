@@ -211,7 +211,7 @@ contract WindowTest is CoreBase {
         vm.prank(owner);
         core.setSuccessor(address(sink));
         vm.prank(owner);
-        core.migrate(10, 10);
+        core.migrate(10);
         assertEq(core.ethPot(), 0);
         _skim(2 ether);
         assertEq(core.hourlyRoom(), 2 ether * _cap() / BPS, "the live pot");
