@@ -149,11 +149,11 @@ a successor Core (section 9) receives credits without records and adopts them th
 |---|---|---|
 | `setSuccessor(address)` | names the contract that `migrate` sends to. zero or an address with code other than the Core, the exit module, the exit token, the house, the fee source, the coin, Credits or Statements | `OnlyOwner`, `Locked("successor")`, `NoCode`, `BadSuccessor` |
 | `lockSuccessor()` | closes `setSuccessor` permanently. allowed while the successor is zero, which disables `migrate` | `OnlyOwner` |
-| `migrate(maxCredits, maxStatements)` | moves in batches: `ethPot + ethToBuyback` by one plain call, up to `maxCredits` from the head of each pile by `transferFrom`, held statements scanned from the end of the held list (a listed one is taken back from the house first), `xPot + xToBuyback` by `transfer` | `OnlyOwner`, `NoSuccessor`, `Reentrancy`, `CallFailed` |
+| `migrate(maxCredits)` | moves in batches: `ethPot + ethToBuyback` by one plain call, `xPot + xToBuyback` by `transfer`, up to `maxCredits` from the head of each pile by `transferFrom`. the held statements, their listings and their records stay in the Core | `OnlyOwner`, `NoSuccessor`, `Reentrancy`, `CallFailed` |
 | `rescueNft(token, id, to)` | sends an ERC721 the Core holds to `to`: a credit only while it is outside both piles, a statement only while the Core has no record of it, any other ERC721 freely | `OnlyOwner`, `ZeroAddress`, `InPile`, `Held`, `NotHolder` |
 | `rescueCoin(to, amount)` | sends coin the Core holds to `to` | `OnlyOwner`, `ZeroAddress` |
 
-what a successor has to implement: a `receive()` that accepts a plain eth call. credits and statements arrive by `transferFrom`, so the `onERC721Received` of the successor is skipped. a statement with a live bid, a sold statement whose record is not settled and a statement the house will not return stay in the Core and are counted in `Migrated`. call `migrate` again until it moves nothing. `maxCredits` applies to each pile and `maxStatements` must exceed the number of skipped statements at the end of the held list. the successor builds its pile with `adopt`.
+what a successor has to implement: a `receive()` that accepts a plain eth call, and an exit token and Credits that it accepts by `transfer` and `transferFrom`, so the `onERC721Received` of the successor is skipped. the successor receives eth, exit token and credits only. the old Core keeps its statements and sells them out itself, so call `collectSales` and `syncStatement` there and call `migrate` again to move the proceeds, until it moves nothing. `maxCredits` applies to each pile, and 0 moves the pots only. the successor builds its pile with `adopt`.
 
 ## 10. the lens
 
@@ -214,7 +214,7 @@ the Core (`src/interfaces/ICore.sol`):
 | `ExitRateFill` | `uint256 rate, uint256 pot` | phase 2 spend of the exit pot by `sellForExitToken`: the exit rate and the pot after |
 | `FeesAdded` | `uint256 amount` | `receive()` booked a flush of the fee router: `feeToBuybackBps` of it to the coin buyback pot, the rest to `ethPot` |
 | `ListingBought` | `uint256 indexed id, address indexed target, address indexed caller, uint256 cost, uint256 tip, uint256 rate` | `buyListing`. `cost` is the eth the target took, `tip` the caller tip, `rate` the price state after the fill. the cost basis of the credit is `cost + tip` |
-| `Migrated` | `address indexed successor, uint256 eth, uint256 credits, uint256 statements, uint256 exitTokens, uint256 skippedStatements` | `migrate`: eth moved (pots and buyback pot), credits and statements moved, exitToken moved, statements skipped |
+| `Migrated` | `address indexed successor, uint256 eth, uint256 exitTokens, uint256 credits` | `migrate`: eth moved (pots and buyback pot), exit token moved, credits moved |
 | `NftRescued` | `address indexed token, uint256 indexed id, address indexed to` | `rescueNft` |
 | `Overprinted` | `uint256 indexed baseId, uint256 indexed topId, uint256 cost` | `overprint` merged `topId` into `baseId`. `cost` is the summed cost basis |
 | `OwnershipTransferStarted` | `address indexed owner, address indexed pending` | the owner named `pending` |
@@ -389,8 +389,8 @@ measured on the pinned fork with foundry 1.8.1. `tx` includes the intrinsic 21,0
 | `buyback` with proceeds waiting in the house | tx 270,582 | the same test |
 | `adopt`, 1 credit, router empty | call gas 242,489 | `test/Adopt.t.sol` `test_GAS_adopt` (asserted within 5 percent) |
 | `adopt`, 80 credits, router empty | call gas 10,552,467 (131,905 per credit) | the same test |
-| `migrate`, eth only | call gas 124,469 | `test/Migrate.t.sol` `test_GAS_migrateEightyCreditsAndFiveStatements` |
-| `migrate`, 80 credits and 5 statements | call gas 4,589,530 (40,697 per credit, 96,073 per statement) | the same test |
+| `migrate`, pots only | call gas 158,999 | `test/Migrate.t.sol` `test_GAS_migrateEightyCreditsPerPile` |
+| `migrate`, 80 credits per pile | call gas 8,030,991 (44,781 per credit) | the same test |
 | `lens.snapshot()` | 145,864 with no statements, 55,766 more per statement | `test/Lens.t.sol` `test_GAS_snapshotPerStatement` |
 
 ## 14. interface files
