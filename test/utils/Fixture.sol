@@ -26,9 +26,9 @@ import {CreditIds} from "./CreditIds.sol";
 import {TestSwapRouter} from "./TestSwapRouter.sol";
 import {RateStore} from "../../src/lib/RateStore.sol";
 
-/// @notice the full system on a mainnet fork, built only from real contracts. the artcoins v2 stack is deployed onto the
-/// fork from the vendored v2 artifacts (`V2Stack`, test/v2-artifacts), the factory owner (`owner`, who is also the engine
-/// owner) sets the factory minimum lp fee to 0 as the launch needs, then Core, ControllerV1 and the fee router are
+/// @notice the full system on a mainnet fork, built only from real contracts. the artcoins v2 stack is the live one
+/// (`V2Stack`, script/config/v2-mainnet.json), the factory owner (`owner`, who is also the engine owner) sets the
+/// factory minimum protocol skim share to 362 as the launch needs, then Core, ControllerV1 and the fee router are
 /// deployed through `SystemDeployer.deploySystem` and the coin is launched with `deployTokenAsOwner`. the pool lives in
 /// the live pool manager under the v2 hook. fees reach the Core through the fee router: `_buyCoin` and `_sellCoin`
 /// flush it right after the swap (set `autoFlush` false to hold the eth in the router), `_flush` does it on demand.
@@ -150,8 +150,10 @@ abstract contract Fixture is Test, ProdDeployer {
 
     function setUp() public virtual {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
+        // the live v2 stack. its factory owner is the owner of the engine in every test
+        v2 = V2Stack.attach();
+        owner = v2.owner;
         deployer = _user("deployer");
-        owner = _user("owner");
         creator = _user("creator");
         keeper = _user("keeper");
         seller = _user("seller");
@@ -159,8 +161,7 @@ abstract contract Fixture is Test, ProdDeployer {
         flusher = _user("flusher");
         router = new TestSwapRouter();
 
-        // the v2 stack, deployed by `owner`, who is its owner. the launch bounty needs the factory minimum protocol skim share at 362
-        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
+        // the launch bounty needs the factory minimum protocol skim share at 362: the owner command of docs/DEPLOY.md step 3
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         ESCROW = IArtCoinsFeeEscrowV2(v2.escrow);
         vm.startPrank(owner);

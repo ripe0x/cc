@@ -32,8 +32,8 @@ contract WritingRecipient {
     }
 }
 
-/// @notice the real artcoins v2 stack, deployed from the vendored artifacts onto the pinned fork, with a restricted
-/// coin launched, traded and drained through the real hook, locker and escrow. gas is logged, run with -vv
+/// @notice the live artcoins v2 stack on the pinned fork, with a restricted coin launched, traded and drained through
+/// the real hook, locker and escrow. gas is logged, run with -vv
 contract V2StackTest is Test {
     error TransferRestricted(address from, address to, uint256 amount);
 
@@ -43,20 +43,17 @@ contract V2StackTest is Test {
     address internal creator;
     address internal buyer;
     TestSwapRouter internal swapper;
-    uint256 internal stackGas;
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
-        owner = makeAddr("v2 owner");
+        s = V2Stack.attach();
+        owner = s.owner;
         creator = makeAddr("creator");
         buyer = makeAddr("buyer");
         vm.deal(owner, 10 ether);
         vm.deal(buyer, 100 ether);
         swapper = new TestSwapRouter();
         p = V2Stack.mainnetParams(owner);
-        uint256 g = gasleft();
-        s = V2Stack.deploy(p);
-        stackGas = g - gasleft();
     }
 
     /// a launch on the v2 factory at the mainnet factory minimums: bounty 9000 (the 1000 minimum protocol skim share
@@ -140,16 +137,15 @@ contract V2StackTest is Test {
     }
 
     function test_stackDeploysAndChecks() public view {
-        V2Stack.check(s, p); // the DeployV2Lib post deploy requires, again on the stored stack
-        console.log("v2 stack deploy gas (incl. hook salt mining and checks)", stackGas);
+        V2Stack.check(s, p); // the DeployV2Lib post deploy requires, on the live stack
         assertEq(F(s.factory).owner(), owner);
         assertTrue(F(s.factory).deprecated());
         assertEq(F(s.factory).deployFee(), 0.069 ether);
         assertEq(uint160(s.hook) & 0x3FFF, 0x28CC);
     }
 
-    /// the constants hash the vendored artifacts report, which preflight pins for the live stack (`V2_CONSTANTS_HASH`)
-    function test_vendoredArtifactsReportThePinnedConstantsHash() public view {
+    /// the constants hash of the live stack, which preflight pins (`V2_CONSTANTS_HASH`)
+    function test_liveStackReportsThePinnedConstantsHash() public view {
         assertEq(IV2Reads(s.hook).constantsHash(), V2_CONSTANTS_HASH);
         assertEq(F(s.factory).STACK_VERSION(), 2);
     }

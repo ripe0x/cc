@@ -28,9 +28,8 @@ interface IPermit2R {
 /// preflight, the real deploy path as the factory owner, the postflight, and a short smoke: a buy and a sell through the
 /// universal router, a flush of the router and a real credit sold into the bid. it skips cleanly unless the env var
 /// REHEARSAL is set, so the default suite stays pinned and fast. it reads the config file named by LAUNCH_CONFIG, like the
-/// scripts do, so the operator rehearses the exact file they will launch with. while the v2 stack addresses of the file
-/// are still zero (v2 is not on mainnet) the vendored v2 artifacts are deployed onto the fork with the config owner as
-/// the factory owner, and the rehearsal says so. it measures the gas of every transaction of the deploy and asserts each
+/// scripts do, so the operator rehearses the exact file they will launch with. the launch goes through the live v2
+/// factory (the config owner is its owner, impersonated on the fork). it measures the gas of every transaction of the deploy and asserts each
 /// one fits under the per transaction gas cap
 /// `set -a; . ./.env; set +a; REHEARSAL=1 LAUNCH_CONFIG=script/config/local.json forge test --match-path test/Rehearsal.t.sol -vv`
 contract RehearsalTest is Test, ProdDeployer {
@@ -38,7 +37,6 @@ contract RehearsalTest is Test, ProdDeployer {
     Deployed internal d;
     address internal deployer;
     address internal trader;
-    bool internal stackIsRehearsal;
     bool internal lockSent;
 
     function _user(string memory label) internal returns (address a) {
@@ -79,16 +77,15 @@ contract RehearsalTest is Test, ProdDeployer {
         _smoke();
     }
 
-    /// @dev the v2 stack of the config. zero addresses mean v2 is not live: deploy the artifacts onto the fork, owned by
-    /// the config owner, who is the factory owner and the deployer
+    /// @dev the v2 stack of the config. a file that leaves the stack at zero gets the live stack of
+    /// script/config/v2-mainnet.json. the config owner is the factory owner and the deployer
     function _stack() internal {
         if (c.stack.factory != address(0)) {
             console.log("v2 stack from the config file, factory", c.stack.factory);
             return;
         }
-        console.log("v2 is not live: the vendored v2 artifacts are deployed onto the fork for the rehearsal");
-        stackIsRehearsal = true;
-        V2Stack.Stack memory v2 = V2Stack.deploy(V2Stack.mainnetParams(deployer));
+        console.log("the config leaves the v2 stack at zero: the live stack of script/config/v2-mainnet.json");
+        V2Stack.Stack memory v2 = V2Stack.live();
         c.stack.hook = v2.hook;
         c.stack.factory = v2.factory;
         c.stack.locker = v2.locker;

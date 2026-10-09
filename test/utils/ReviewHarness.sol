@@ -16,7 +16,7 @@ import {Report} from "../../script/Report.sol";
 
 /// @notice independent review of the deploy package (docs/REVIEW-deploy.md), ported to the v2 stack: the config mutation
 /// matrix, the state mutations (factory, house, library, deployer), proofs of the readbacks and a fuzz of the funded
-/// rule. forks mainnet at FORK_BLOCK and deploys the v2 stack onto it. the deployer is the factory owner and the
+/// rule. forks mainnet at FORK_BLOCK and attaches to the live v2 stack. the deployer is the factory owner and the
 /// config owner (the only path into a deprecated v2 factory)
 abstract contract ReviewHarness is Test, ProdDeployer {
     V2Stack.Stack internal v2;
@@ -34,10 +34,10 @@ abstract contract ReviewHarness is Test, ProdDeployer {
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
-        deployer = makeAddr("review.deployer");
+        v2 = V2Stack.attach();
+        deployer = v2.owner;
         owner = deployer;
         creator = makeAddr("review.creator");
-        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         vm.startPrank(owner);
         FACTORY.setMinProtocolSkimShareBps(362);

@@ -29,20 +29,17 @@ interface IV2Reads {
     function coin() external view returns (address);
 }
 
-/// @notice deploys the real artcoins v2 stack onto the pinned fork from the vendored artifacts (test/v2-artifacts)
-/// and wires it as script/v2/DeployV2Lib.sol does (v2 commit d4aa46b), with the mainnet values of
-/// script/v2/env/mainnet.env. nothing here imitates a v2 contract: all code comes from the artifacts.
-/// the caller is the owner for the whole deploy (the broadcaster equals the owner, so no ownership handover).
-/// `deprecated` stays true, as DeployV2Lib leaves it: only the owner can launch, through `deployTokenAsOwner`
+/// @notice the live artcoins v2 stack on the pinned fork. addresses come from script/config/v2-mainnet.json, the record
+/// the scripts read as well. nothing here imitates a v2 contract. the factory owner of the record is the owner of the
+/// whole stack and stays a deprecated factory (only the owner launches, through `deployTokenAsOwner`)
 library V2Stack {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    string internal constant RECORD = "script/config/v2-mainnet.json";
     uint160 internal constant HOOK_LOW_BITS = 0x28CC;
-    uint256 internal constant MAX_MINE = 400_000;
     uint256 internal constant EIP170 = 24_576;
 
-    /// values of script/v2/env/mainnet.env
+    /// values of the live stack (script/v2/env/mainnet.env of the launcher)
     address internal constant MAINNET_TREASURY = 0x41c3BD8A36f8fE9Bb77900ca02400b32BB35A6A4;
     uint16 internal constant MAINNET_TREASURY_BPS = 8667;
     uint256 internal constant MAINNET_DEPLOY_FEE = 0.069 ether;
@@ -59,10 +56,10 @@ library V2Stack {
     }
 
     struct Stack {
+        address owner;
         address escrow;
         address allowlist;
         address hook;
-        bytes32 hookSalt;
         address locker;
         address mev;
         address factory;
@@ -82,101 +79,32 @@ library V2Stack {
         p.minProtocolSkimShareBps = MAINNET_MIN_PROTOCOL_SKIM_SHARE_BPS;
     }
 
-    /// @notice deploys, wires and checks the stack. gas of the whole run is the caller's to measure
-    function deploy(Params memory p) internal returns (Stack memory s) {
-        require(p.owner != address(0) && p.treasury != address(0), "v2: zero owner or treasury");
-        require(CREATE2_DEPLOYER.code.length != 0, "v2: no CREATE2 deployer");
-        vm.startPrank(p.owner);
-        s.escrow = _create("ArtCoinsFeeEscrowV2", abi.encode(p.owner));
-        s.allowlist = _create("ArtCoinsPoolExtensionAllowlist", abi.encode(p.owner));
-        (s.hook, s.hookSalt) = _deployHook(p.owner, s.escrow, s.allowlist);
-        s.locker = _create(
-            "ArtCoinsLpLockerV2", abi.encode(p.owner, Mainnet.POSITION_MANAGER, Mainnet.PERMIT2, s.escrow)
-        );
-        s.mev = _create("ArtCoinsMevLinearSkimV2", abi.encode(s.hook));
-        s.factory = _create(
-            "ArtCoinsFactoryV2", abi.encode(p.owner, Mainnet.POOL_MANAGER, p.protocolBps, p.deployFee)
-        );
-        s.tokenDeployer = _create("ArtCoinsDeployerV2", abi.encode(s.factory));
-        IArtCoinsFactoryV2(s.factory).setTokenDeployer(s.tokenDeployer);
-        s.burnRouter = _create("BurnRouterV2", abi.encode(p.owner, Mainnet.POOL_MANAGER, s.escrow));
-        s.controller = _create(
-            "ProtocolFeeControllerV2", abi.encode(p.owner, s.escrow, p.treasury, s.burnRouter, p.treasuryBps)
-        );
-        s.keeper = _create("ArtCoinsKeeperV2", abi.encode(s.factory));
-        _wire(s, p);
-        vm.stopPrank();
-        check(s, p);
+    /// @notice the stack of the record, read from script/config/v2-mainnet.json
+    function live() internal view returns (Stack memory s) {
+        string memory j = vm.readFile(RECORD);
+        s.owner = vm.parseJsonAddress(j, ".owner");
+        s.escrow = vm.parseJsonAddress(j, ".escrow");
+        s.allowlist = vm.parseJsonAddress(j, ".allowlist");
+        s.hook = vm.parseJsonAddress(j, ".hook");
+        s.locker = vm.parseJsonAddress(j, ".locker");
+        s.mev = vm.parseJsonAddress(j, ".mevModule");
+        s.factory = vm.parseJsonAddress(j, ".factory");
+        s.tokenDeployer = vm.parseJsonAddress(j, ".tokenDeployer");
+        s.burnRouter = vm.parseJsonAddress(j, ".burnRouter");
+        s.controller = vm.parseJsonAddress(j, ".feeController");
+        s.keeper = vm.parseJsonAddress(j, ".keeper");
     }
 
-    function _create(string memory name, bytes memory args) private returns (address a) {
-        bytes memory code = abi.encodePacked(vm.getCode(string.concat("test/v2-artifacts/", name, ".json")), args);
-        assembly {
-            a := create(0, add(code, 0x20), mload(code))
-        }
-        require(a != address(0), string.concat("v2: create failed ", name));
+    /// @notice the live stack after `check` against the values of the record. run before any owner command changes a
+    /// factory knob (`setMinProtocolSkimShareBps` moves the minimum share off the value `check` expects)
+    function attach() internal view returns (Stack memory s) {
+        s = live();
+        check(s, mainnetParams(s.owner));
     }
 
-    function _deployHook(address owner, address escrow, address allowlist) private returns (address hook, bytes32 salt) {
-        bytes memory initCode = abi.encodePacked(
-            vm.getCode("test/v2-artifacts/ArtCoinsHookV2.json"),
-            abi.encode(Mainnet.POOL_MANAGER, owner, escrow, allowlist)
-        );
-        bytes32 h = keccak256(initCode);
-        uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
-                | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
-        );
-        bool found;
-        for (uint256 i; i < MAX_MINE; ++i) {
-            hook = address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xFF), CREATE2_DEPLOYER, i, h)))));
-            if (uint160(hook) & Hooks.ALL_HOOK_MASK == flags && hook.code.length == 0) {
-                salt = bytes32(i);
-                found = true;
-                break;
-            }
-        }
-        require(found, "v2: no hook salt");
-        (bool ok, bytes memory ret) = CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
-        require(ok && ret.length == 20 && address(bytes20(ret)) == hook, "v2: hook CREATE2");
-    }
-
-    /// @dev DeployV2Lib step 11: escrow depositors first, then hook, locker, factory
-    function _wire(Stack memory s, Params memory p) private {
-        IArtCoinsFeeEscrowV2 e = IArtCoinsFeeEscrowV2(s.escrow);
-        e.addDepositor(s.hook, true);
-        e.addDepositor(s.locker, true);
-        e.addDepositor(s.controller, false);
-
-        IArtCoinsHookV2 h = IArtCoinsHookV2(s.hook);
-        h.setFeeEscrow(s.escrow);
-        h.setExtensionAllowlist(s.allowlist);
-        h.setLauncher(s.factory, true);
-
-        // the locker setters are not in the engine interface
-        _call(s.locker, abi.encodeWithSignature("setFeeEscrow(address)", s.escrow));
-        _call(s.locker, abi.encodeWithSignature("setLauncher(address,bool)", s.factory, true));
-        _call(s.locker, abi.encodeWithSignature("setKeeperRewardBps(uint256)", 0));
-
-        IArtCoinsFactoryV2 f = IArtCoinsFactoryV2(s.factory);
-        f.setHook(s.hook, true);
-        f.setLocker(s.locker, true);
-        f.setMevModule(s.mev, true);
-        f.setProtocolRecipient(payable(s.controller));
-        f.setTeamFeeRecipient(p.owner);
-        f.setDeployFee(p.deployFee);
-        f.setDefaultProtocolFeeBps(p.protocolBps);
-        f.setMinProtocolSkimShareBps(p.minProtocolSkimShareBps);
-        // defaultAllowed ships empty, the factory stays deprecated, as DeployV2Lib leaves them
-    }
-
-    function _call(address to, bytes memory data) private {
-        (bool ok,) = to.call(data);
-        require(ok, "v2: wiring call");
-    }
-
-    /// @notice the post deploy requires of DeployV2Lib.check. constantsHash is compared across the stack and to the
-    /// hook (the engine does not carry v2's Constants library). owners are checked as direct (no handover)
+    /// @notice the post deploy requires of DeployV2Lib.check against the live stack. constantsHash is compared across
+    /// the stack and to the hook (the engine does not carry v2's Constants library). owners are checked as direct (no
+    /// handover)
     function check(Stack memory s, Params memory p) internal view {
         bytes32 ch = IV2Reads(s.hook).constantsHash();
         require(ch != bytes32(0), "v2: constantsHash zero");
@@ -256,8 +184,9 @@ library V2Stack {
         require(f.STACK_VERSION() == 2, "v2: stack version");
     }
 
-    /// @notice the vendored FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`,
-    /// owner `owner`, the coin bound later by `setup`. the caller still registers it as an escrow depositor
+    /// @notice the FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`, owner `owner`,
+    /// the coin bound later by `setup`. it is deployed per coin and is not part of the live stack, so its build output
+    /// is vendored (test/v2-artifacts). the caller still registers it as an escrow depositor
     /// (`escrow.addDepositor(swapper, false)`, owner only) and calls `setup(coin)` as the deployer
     function deploySwapper(Stack memory s, address owner, address endRecipient, address coin_)
         internal
@@ -276,6 +205,10 @@ library V2Stack {
             minBlocksBetweenConverts: 5,
             maxStepIn: 1000 ether
         });
-        swapper = _create("FeeAutoSwapperV2", abi.encode(c));
+        bytes memory code = abi.encodePacked(vm.getCode("test/v2-artifacts/FeeAutoSwapperV2.json"), abi.encode(c));
+        assembly {
+            swapper := create(0, add(code, 0x20), mload(code))
+        }
+        require(swapper != address(0), "v2: swapper create failed");
     }
 }

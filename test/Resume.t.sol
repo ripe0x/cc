@@ -19,7 +19,7 @@ interface IHouseFactoryR {
     function houseOf(address owner) external view returns (address);
 }
 
-/// @notice `script/SystemResumer.sol` on the pinned fork with the v2 stack deployed onto it: a deploy stopped after each of
+/// @notice `script/SystemResumer.sol` on the pinned fork with the live v2 stack: a deploy stopped after each of
 /// the transactions (the library, the controller, the router, the core with its house, the launch, the router engine,
 /// the router payees, the split start) is finished by sending only the missing steps, as the original deployer, who is
 /// the factory owner and the config owner. the library goes through the deterministic deployer in a broadcast and takes
@@ -62,10 +62,10 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
         // code there, so the account is reset to the state the script sees
         vm.etch(libraryAddress(), "");
         vm.resetNonce(libraryAddress());
-        deployer = makeAddr("resume.deployer");
+        v2 = V2Stack.attach();
+        deployer = v2.owner;
         owner = deployer;
         creator = makeAddr("resume.creator");
-        v2 = V2Stack.deploy(V2Stack.mainnetParams(owner));
         FACTORY = IArtCoinsFactoryV2(v2.factory);
         vm.startPrank(owner);
         FACTORY.setMinProtocolSkimShareBps(362);
