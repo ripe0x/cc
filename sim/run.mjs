@@ -153,11 +153,10 @@ batches.q6 = () => {
   S.climbPerMin = sweep('climbPerMin', [0.25, 0.5, 1, 2], {}, SEEDS5);
   S.ceilPct = sweep('ceilPct', [110, 125, 150, 200], {}, SEEDS5);
   S.idleLoosenPct = sweep('idleLoosenPct', [0, 1, 2, 5], {}, SEEDS5);
-  S.clampCredits = sweep('clampCredits', [1, 5, 20, 50], {}, SEEDS5);
-  S.spendCapBps = sweep('spendCapBps', [500, 1000, 2000, 4000], {}, SEEDS5);
+  S.spendCapBps = sweep('spendCapBps', [500, 1000, 2000, 4000, 10000], {}, SEEDS5);
   // hard cases: a low opening limit in a recovering market and a declining market
   const hard = { rateStart: rateAt(0.4), pricePath: 'recovery' }, dec = { pricePath: 'decline' };
-  const pick = { dropPerCreditPct: [0.25, 0.5, 2], climbPerMin: [0.25, 0.5, 2], ceilPct: [110, 125, 200], clampCredits: [1, 20] };
+  const pick = { dropPerCreditPct: [0.25, 0.5, 2], climbPerMin: [0.25, 0.5, 2], ceilPct: [110, 125, 200] };
   out.hardRecovery = {}; out.decline = {};
   for (const [k, vals] of Object.entries(pick)) { out.hardRecovery[k] = sweep(k, vals, hard); out.decline[k] = sweep(k, vals, dec); }
   return out;
@@ -209,7 +208,7 @@ batches.q9 = () => {
     ['offersPerHour', 60, 400], ['supplyElast', 0.5, 3], ['bookChurn', 0.02, 0.15], ['stmtPerDay', 3, 20], ['wtpMult', 0.7, 1.3],
     ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.25)], ['flatBps', 0, 10000], ['startBps', 9000, 13000], ['stepEvery', 3600, 6 * 3600], ['floor, both floors', { floorBps: 5000, saleFloorBps: 5000 }, { floorBps: 7500, saleFloorBps: 7500 }],
     ['buyOnly', false, true], ['feeToBuybackBps', 0, 2500], ['buyerWaits', 'no', 'floor'], ['auctionDuration', 6 * 3600, 72 * 3600],
-    ['saleToBuybackBps', 0, 10000], ['dropPerCreditPct', 0.25, 2], ['climbPerMin', 0.25, 2], ['ceilPct', 110, 200], ['clampCredits', 1, 50], ['idleLoosenPct', 0, 5], ['spendCapBps', 1000, 4000], ['gasGwei', 0.5, 10],
+    ['saleToBuybackBps', 0, 10000], ['dropPerCreditPct', 0.25, 2], ['climbPerMin', 0.25, 2], ['ceilPct', 110, 200], ['idleLoosenPct', 0, 5], ['spendCapBps', 1000, 10000], ['gasGwei', 0.5, 10],
     ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7], ['exitAfter', 24 * 3600, 7 * 86400], ['stmtPick', 'cheapest', 'random'],
   ];
   const out = { base, rows: [] };

@@ -16,13 +16,13 @@ const CHG = {
   feeToBuybackBps: { label: 'feeToBuybackBps (fee share to burn $CC)', unit: 'bps, 0 to 10000', to: 2500 },
   auctionDuration: { label: 'auctionDuration', unit: 'hours, 6 to 720', to: 6, hours: true },
   saleToBuybackBps: { label: 'saleToBuybackBps (sale proceeds to burn $CC)', unit: 'bps, 0 to 10000', to: 2500 },
-  spendCapBps: { label: 'spendCapBps', unit: 'bps an hour, 100 to 5000', to: 4000 },
+  spendCapBps: { label: 'spendCapBps', unit: 'bps an hour, 100 to 10000', to: 4000 },
   exitAfter: { label: 'exitAfter', unit: 'hours, 1 to 8760', to: 24, hours: true },
   rateCap: { label: 'rateCap (most the eth rate can be)', unit: 'wei per point, 1e11 to 1e15', to: 50000000000000 },
 };
 // every control: key in the state object, how to show it. launch values are the Core's (script/config/mainnet.json)
 const BASE_STATE = { volPreset: 'comparable', volScale: 1, volTail: 17, volHalfLifeDays: 3, buyShareLate: 'auto', pricePath: 'flat', priceP0: 0.0089, wtpMult: 1, stmtPerDay: 8, buyerWaits: 'no', impactElast: 0.12,
-  openPct: 100, flatBps: 10000, saleMode: 'auction', startBps: 11000, stepBps: 100, stepEveryH: 3, floorBps: 7500, saleFloorBps: 7500, auctionHours: 24, saleToBuybackBps: 5000, feeToBuybackBps: 0, exitAfterH: 105, dropPerCreditPct: 0.5, dropToPct: 80, climbPerMin: 0.5, ceilPct: 125, idleLoosenPct: 2, clampCredits: 20, spendCapBps: 2000, rateCap: 123200000000000, fundedRule: 'built',
+  openPct: 100, flatBps: 10000, saleMode: 'auction', startBps: 11000, stepBps: 100, stepEveryH: 3, floorBps: 7500, saleFloorBps: 7500, auctionHours: 24, saleToBuybackBps: 5000, feeToBuybackBps: 0, exitAfterH: 105, dropPerCreditPct: 0.5, dropToPct: 80, climbPerMin: 0.5, ceilPct: 125, idleLoosenPct: 2, spendCapBps: 10000, rateCap: 205540000000000, fundedRule: 'built',
   chgOn: false, chgDay: 30, chgKey: 'flatBps', chgValue: 5000,
   phase2On: false, phase2Day: 14, xp: 2.5e-5, takerThreshold: 0.15, days: 90, seed: 7 };
 const GROUPS = [
@@ -61,10 +61,9 @@ const GROUPS = [
     { k: 'climbPerMin', t: 'range', label: 'climbPerMinBps', min: 0.1, max: 3, log: true, fmt: (v) => Math.round(v * 100), hint: 'bps the bid climbs each minute. launch 50' },
     { k: 'ceilPct', t: 'range', label: 'ceilBps', min: 101, max: 300, step: 1, fmt: (v) => v * 100, hint: 'the bid never climbs above this share of the last fill rate. launch 12500' },
     { k: 'idleLoosenPct', t: 'range', label: 'idleLoosenBps', min: 0, max: 20, step: 0.5, fmt: (v) => Math.round(v * 100), hint: 'bps added to the ceiling anchor every 10 idle minutes. launch 200' },
-    { k: 'clampCredits', t: 'range', label: 'clampCredits', min: 1, max: 200, log: true, fmt: (v) => v, hint: 'the bid is lowered to where the hourly cap affords this many average credits. launch 20' },
-    { k: 'spendCapBps', t: 'range', label: 'spendCapBps', min: 100, max: 5000, log: true, fmt: (v) => v },
-    { k: 'rateCap', t: 'range', label: 'rateCap, wei per point', min: 3e13, max: 1e15, log: true, fmt: fmtSci, hint: 'the eth rate never passes it. launch 1.23e14, about 6 times rateStart. the page keeps it at or above rateStart' },
-    { k: 'fundedRule', t: 'select', label: 'funded rule', opts: [['built', 'as built: the hourly cap affords clampCredits average credits'], ['old', 'counterfactual: the pot affords one average credit']] },
+    { k: 'spendCapBps', t: 'range', label: 'spendCapBps', min: 100, max: 10000, log: true, fmt: (v) => v, hint: 'bps of the pot an hour window can spend. launch 10000' },
+    { k: 'rateCap', t: 'range', label: 'rateCap, wei per point', min: 3e13, max: 1e15, log: true, fmt: fmtSci, hint: 'the eth rate never passes it. launch 2.06e14, 10 times rateStart. the page keeps it at or above rateStart' },
+    { k: 'fundedRule', t: 'select', label: 'funded rule', opts: [['built', 'as built: the climb stops where the hourly cap affords one average credit'], ['old', 'counterfactual: the pot affords one average credit']] },
   ] },
   { title: 'change a setting on day N', open: true, ctl: [
     { k: 'chgOn', t: 'check', label: 'the owner changes one setting' },
@@ -154,7 +153,7 @@ function toParams(s) {
     pricePath: s.pricePath, priceP0: s.priceP0, wtpMult: s.wtpMult, stmtPerDay: s.stmtPerDay, impactElast: s.impactElast, rateStart: rateOf(s),
     flatBps: s.flatBps, buyOnly: s.saleMode === 'buyOnly', startBps: s.startBps, stepBps: s.stepBps, stepEvery: Math.round(s.stepEveryH * 3600), floorBps: Math.min(s.floorBps, s.startBps), saleFloorBps: s.saleFloorBps,
     buyerWaits: s.buyerWaits, feeToBuybackBps: s.feeToBuybackBps, auctionDuration: Math.round(s.auctionHours * 3600), saleToBuybackBps: s.saleToBuybackBps, exitAfter: s.exitAfterH * 3600,
-    bidRule: 'stepped', dropPerCreditPct: s.dropPerCreditPct, dropToPct: s.dropToPct, climbPerMin: s.climbPerMin, ceilPct: s.ceilPct, idleLoosenPct: s.idleLoosenPct, clampCredits: s.clampCredits,
+    bidRule: 'stepped', dropPerCreditPct: s.dropPerCreditPct, dropToPct: s.dropToPct, climbPerMin: s.climbPerMin, ceilPct: s.ceilPct, idleLoosenPct: s.idleLoosenPct,
     spendCapBps: s.spendCapBps, fundedRule: s.fundedRule, stepSec: 300, // 5 minute steps keep a live page responsive, credits within 1 percent of the 60 second steps of the batches
     rateCap: Math.max(s.rateCap, rateOf(s)), // the Core refuses a deploy with rateStart above rateCap
     phase2Day: s.phase2On ? s.phase2Day : null, xp: s.xp, takerThreshold: s.takerThreshold, days: +s.days, seed: s.seed,
