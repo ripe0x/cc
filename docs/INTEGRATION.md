@@ -20,10 +20,10 @@ units. a rate is wei per whole point. a score is on a 1e4 scale, so the price of
 | controller | `core.controller()` | ControllerV1 at launch. the owner can replace it until `lockController` |
 | fee router | `core.FEE_SOURCE()` | the bounty recipient of the pool |
 | house | `core.HOUSE()` | the auction house of the Core, where statements are listed |
-| lens | the `lens` line of the `Deploy` output | `CoreLens`. `lens.CORE()` names the Core it reads |
+| lens | the `lens` line of the `Deploy` output, or the CREATE2 address derived from the Core | `CoreLens`. `lens.CORE()` names the Core it reads |
 | exitModule, exitToken | `core.exitModule()`, `core.exitToken()` | zero until the owner sets them |
 
-the record of a launch is the output of `script/Deploy.s.sol` (core, coin, controller, router, lens), the broadcast file `broadcast/Deploy.s.sol/1/run-latest.json`, and the table that `script/Postflight.s.sol` prints after reading every address back (docs/DEPLOY.md steps 6 and 8). the five v2 addresses of the launch config are placeholders until the v2 stack is on mainnet. a keeper needs the Core address and reads the rest from it.
+the record of a launch is the output of `script/Deploy.s.sol` (core, coin, controller, router, lens), the broadcast file `broadcast/Deploy.s.sol/1/run-latest.json`, and the table that `script/Postflight.s.sol` prints after reading every address back (docs/DEPLOY.md steps 6 and 8). a keeper needs the Core address and reads the rest from it. the lens address is a function of the Core (CREATE2 through the deterministic deployer, salt `keccak256("credits.core.lens.v1")`, the Core as constructor argument), which `Postflight` derives from `CORE`.
 
 ## 2. quoting a credit
 
@@ -124,7 +124,7 @@ the pool sends fee eth to the fee router. the router holds it until `flush(addre
 * while the split is on (`splitOn`, from `splitStart`), each payee receives `amount * ppm / 1_000_000` with 100,000 gas. a share that fails is recorded in `owed` and paid by `claim(payee)`.
 * the rest goes to the engine, the Core, whose `receive()` books it: `feeToBuybackBps` to the coin buyback pot, the rest to `ethPot`. `FlushFailed` when the engine refuses it, and the fees stay in the router. `NoEngine` while no engine is set. an empty balance returns early.
 
-the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose` and `composeExit` call `flush(msg.sender)` first, so the flush tip goes to whoever triggers the door. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim`, `buyback` and `adopt` do not pull. `lens.snapshot()` reports what a flush would send now: `flushToCore`, `flushTip` and `flushToPayees`.
+the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush(msg.sender)` first, so the flush tip goes to whoever triggers the door. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore`, `flushTip` and `flushToPayees`.
 
 ## 8. adopt
 
@@ -135,9 +135,11 @@ sequence:
 1. transfer the credits to the Core. a transferred credit has no record and sits in no pile. compose pages draw from the piles, so the credit joins a page once it is adopted. the owner can send it out with `rescueNft`.
 2. call `core.adopt(ids)`.
 
-the call, in order: `Empty` for an empty list. for each id: `ZeroId`, `InPile` when the credit is in a pile (the same id twice in a call included), `NotHolder` when another address holds it (an id that does not exist reverts inside Credits). the credit enters the eth pile with the arrival time of the block. the cost basis is `core.ethPrice() * score / 1e4`, the price state per whole point at that moment before the clamp times the score of the credit, at least 1 wei. event `CreditAdopted(id, cost)`.
+the call, in order: the fee pull of section 7, so pending router eth is booked before the price is read (the flush tip goes to the caller). `Empty` for an empty list. for each id: `ZeroId`, `InPile` when the credit is in a pile (the same id twice in a call included), `NotHolder` when another address holds it (an id that does not exist reverts inside Credits). the credit enters the eth pile with the arrival time of the block. event `CreditAdopted(id, cost)`.
 
-the call pays nothing. the rate state, the hourly room and the pots keep their values. the order of the pile is the order of the ids. a statement composed from adopted credits costs the sum of their bases plus the compose reimbursement.
+the cost basis is `core.ethPrice() * score / 1e4`, at least 1 wei: the price state per whole point at that moment before the clamp, times the score of the credit. the price state is what the engine pays with a funded pot, so a statement built from adopted credits is priced at that level. the read after the clamp of a thin pot would book a basis of 1 wei and the statement price would collapse with it. a donor who inflates the basis of a statement only loses the credits.
+
+the basis is booked and the eth pile grows. eth, the rate state, the hourly room and the pots keep their values apart from the fee pull. the order of the pile is the order of the ids. a statement composed from adopted credits costs the sum of their bases plus the compose reimbursement.
 
 a successor Core (section 9) receives credits without records and adopts them the same way. a credit that left through `migrate` and returned can be adopted again.
 
@@ -146,7 +148,7 @@ a successor Core (section 9) receives credits without records and adopts them th
 | call | what it does | reverts |
 |---|---|---|
 | `setSuccessor(address)` | names the contract that `migrate` sends to. zero or an address with code other than the Core, the exit module, the exit token, the house, the fee source, the coin, Credits or Statements | `OnlyOwner`, `Locked("successor")`, `NoCode`, `BadSuccessor` |
-| `lockSuccessor()` | closes `setSuccessor` for good. allowed while the successor is zero, which disables `migrate` | `OnlyOwner` |
+| `lockSuccessor()` | closes `setSuccessor` permanently. allowed while the successor is zero, which disables `migrate` | `OnlyOwner` |
 | `migrate(maxCredits, maxStatements)` | moves in batches: `ethPot + ethToBuyback` by one plain call, up to `maxCredits` from the head of each pile by `transferFrom`, held statements scanned from the end of the held list (a listed one is taken back from the house first), `xPot + xToBuyback` by `transfer` | `OnlyOwner`, `NoSuccessor`, `Reentrancy`, `CallFailed` |
 | `rescueNft(token, id, to)` | sends an ERC721 the Core holds to `to`: a credit only while it is outside both piles, a statement only while the Core has no record of it, any other ERC721 freely | `OnlyOwner`, `ZeroAddress`, `InPile`, `Held`, `NotHolder` |
 | `rescueCoin(to, amount)` | sends coin the Core holds to `to` | `OnlyOwner`, `ZeroAddress` |
@@ -172,7 +174,7 @@ what a successor has to implement: a `receive()` that accepts a plain eth call. 
 | `averageBid` | the payout for one credit of average score, `avgScore * ethRate / 1e4` |
 | `hourlyRoom` | eth the hourly spend cap still allows |
 | `ethPileSize`, `ethPileHead`, `exitPileSize`, `exitPileHead` | size and oldest credit of each pile |
-| `ethPageReady`, `exitPageReady` | the controller reports a full page for the lane |
+| `ethPageReady`, `exitPageReady` | the controller answers `nextPage` for the lane with a ready flag and the full answer size (82 words) that `compose` requires |
 | `ethPot`, `ethToBuyback`, `xPot`, `xToBuyback` | the four pots |
 | `unbookedEth` | Core balance above the booked pots. `skim()` books it |
 | `salesOwed` | sale proceeds waiting in the house. `collectSales()` books them |
@@ -188,7 +190,7 @@ what a successor has to implement: a `receive()` that accepts a plain eth call. 
 | `listed` | the auction is live on the house: no bid, a bid running, or ended and not settled |
 | `status` | `Core.StatementStatus`: 0 None, 1 Held, 2 Listed, 3 Bid, 4 Ended, 5 Sold, 6 Returned |
 | `auctionId`, `topBid`, `endTime` | from the house. `topBid` and `endTime` are 0 before the first bid |
-| `askingPrice` | the controller's `priceOf(id)` in wei, 0 for an exit lane statement, an unlisted one and a controller that does not answer |
+| `askingPrice` | the controller's `priceOf(id)` in wei while a buyer can buy at it: an eth lane statement with status Listed (live auction, no bid). 0 in every other status, for an exit lane statement and for a controller that does not answer. `status`, `topBid` and `endTime` describe the other states |
 
 `snapshot()` costs about 146,000 gas plus 56,000 per held statement. a list of several hundred statements exceeds the gas that a public node allows for one `eth_call`, so a keeper reads them with `statementsPage` in pages of a few hundred.
 
@@ -385,8 +387,8 @@ measured on the pinned fork with foundry 1.8.1. `tx` includes the intrinsic 21,0
 | `controller.buy` (the `sellTo` path) | tx 243,504 | `test_gas_sellTo_throughControllerBuy` |
 | `collectSales` | tx 118,746 | `test_gas_collectSales_andBuyback` |
 | `buyback` with proceeds waiting in the house | tx 270,582 | the same test |
-| `adopt`, 1 credit | call gas 236,238 | `test/Adopt.t.sol` `test_GAS_adopt` |
-| `adopt`, 80 credits | call gas 10,546,216 (131,827 per credit) | the same test |
+| `adopt`, 1 credit, router empty | call gas 242,489 | `test/Adopt.t.sol` `test_GAS_adopt` (asserted within 5 percent) |
+| `adopt`, 80 credits, router empty | call gas 10,552,467 (131,905 per credit) | the same test |
 | `migrate`, eth only | call gas 124,469 | `test/Migrate.t.sol` `test_GAS_migrateEightyCreditsAndFiveStatements` |
 | `migrate`, 80 credits and 5 statements | call gas 4,589,530 (40,697 per credit, 96,073 per statement) | the same test |
 | `lens.snapshot()` | 145,864 with no statements, 55,766 more per statement | `test/Lens.t.sol` `test_GAS_snapshotPerStatement` |
