@@ -369,8 +369,7 @@ abstract contract Fixture is Test, ProdDeployer {
     /// funds the pot first when it cannot carry the sale, and moves past the hourly cap window if it must
     function _fillEthPile(uint256 n) internal returns (uint256[] memory ids) {
         ids = _credits(seller, n);
-        // a price state that idle time loosened above the opening rate is restated: at the clamp of 20 credits of
-        // hourly room a batch of 80 credits does not fit the window
+        // a price state that idle time loosened above the opening rate is restated to the opening rate
         uint256 opening = core.RATE_START();
         if (core.rateAtCheckpoint() > opening) {
             vm.prank(owner);

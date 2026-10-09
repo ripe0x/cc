@@ -85,7 +85,7 @@ contract RateFuzzTest is Fixture {
         s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
         s.avgScore = uint32(bound(_r(seed, 0), 800_000, 6_000_000));
-        s.spendCapBps = uint16(bound(_r(seed, 1), 100, 5_000));
+        s.spendCapBps = uint16(bound(_r(seed, 1), 100, 10_000));
         s.flatBps = uint16(bound(_r(seed, 2), 0, 10_000));
         s.dropPerCreditBps = uint16(bound(_r(seed, 3), 1, 1_000));
         s.dropFloorBps = uint16(bound(_r(seed, 11), 5_000, 10_000));
@@ -182,7 +182,7 @@ contract RateFuzzTest is Fixture {
         public
     {
         Settings memory s = _randomSettings(seed, true);
-        s.spendCapBps = uint16(bound(_r(seed, 9), 2_000, 5_000));
+        s.spendCapBps = uint16(bound(_r(seed, 9), 2_000, 10_000));
         _setSettings(s);
         uint256 pot = bound(potSeed, 20 ether, 1000 ether);
         uint256 mins = bound(waitSeed, 0, 240);
@@ -242,7 +242,7 @@ contract RateFuzzTest is Fixture {
     function testFuzz_hourlyCap(uint256 capSeed, uint256 potSeed, uint256 gapSeed) public {
         Settings memory s = core.settings();
         // forge-lint: disable-next-line(unsafe-typecast)
-        s.spendCapBps = uint16(bound(capSeed, 100, 5_000));
+        s.spendCapBps = uint16(bound(capSeed, 100, 10_000));
         _setSettings(s);
         uint256 pot = bound(potSeed, 0.03 ether, 0.05 ether);
         _fund(pot);
@@ -297,7 +297,7 @@ contract RateFuzzTest is Fixture {
     function testFuzz_capChangeInsideAWindow(uint256 capA, uint256 capB, uint256 potSeed) public {
         Settings memory s = core.settings();
         // forge-lint: disable-start(unsafe-typecast)
-        s.spendCapBps = uint16(bound(capA, 500, 5_000));
+        s.spendCapBps = uint16(bound(capA, 500, 10_000));
         _setSettings(s);
         uint256 pot = bound(potSeed, 0.5 ether, 2 ether);
         _fund(pot);
@@ -308,7 +308,7 @@ contract RateFuzzTest is Fixture {
         uint256 windowPot = pot;
         uint256 spent = pot - core.ethPot();
         uint256 spent0 = spent;
-        s.spendCapBps = uint16(bound(capB, 500, 5_000));
+        s.spendCapBps = uint16(bound(capB, 500, 10_000));
         // forge-lint: disable-end(unsafe-typecast)
         _setSettings(s);
         uint256 capNow = windowPot * s.spendCapBps / 10_000;

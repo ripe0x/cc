@@ -283,7 +283,7 @@ contract SeaportTest is SeaportBase {
 
     function setUp() public override {
         super.setUp();
-        // the launch rate cap (about 6 times the opening rate) is far below the rate the cases need: raise it to the bounds,
+        // the launch rate cap (10 times the opening rate) is far below the rate the cases need: raise it to the bounds,
         // with the clamp at one credit of hourly room and the ceiling at its loosest so the bid reaches it in days
         Settings memory cs = core.settings();
         cs.rateCap = uint64(TARGET_RATE);

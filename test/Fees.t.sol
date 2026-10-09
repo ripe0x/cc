@@ -472,7 +472,7 @@ contract ReceiveTest is FeeBase {
         assertTrue(ok);
         emit log_named_uint("receive gas, 20 years, rate 1, pot 1e8 eth", g);
         assertLt(g, 400_000);
-        uint256 clamp = (core.ethPot() - 1 ether) * 2000 / uint256(core.settings().avgScore);
+        uint256 clamp = (core.ethPot() - 1 ether) * core.settings().spendCapBps / uint256(core.settings().avgScore);
         assertEq(core.rateAtCheckpoint(), clamp < core.settings().rateCap ? clamp : core.settings().rateCap, "cap");
     }
 
@@ -644,7 +644,7 @@ contract ReceiveSettingsTest is FeeBase {
         s.climbPerMinBps = uint16(_pick(seed, 4, 1, 1_000));
         s.ceilBps = uint16(_pick(seed, 5, 10_000, 30_000));
         s.idleLoosenBps = uint16(_pick(seed, 9, 0, 2_000));
-        s.spendCapBps = uint16(_pick(seed, 6, 100, 5_000));
+        s.spendCapBps = uint16(_pick(seed, 6, 100, 10_000));
         s.saleToBuybackBps = uint16(_pick(seed, 7, 0, 10_000));
         s.rateCap = uint64(_pick(seed, 8, 1e11, 1e15));
         // forge-lint: disable-end(unsafe-typecast)
@@ -687,14 +687,14 @@ contract ReceiveSettingsTest is FeeBase {
         s.climbPerMinBps = 1_000;
         s.ceilBps = 30_000;
         s.idleLoosenBps = 2_000;
-        s.spendCapBps = 5_000;
+        s.spendCapBps = 10_000;
         s.avgScore = 800_000;
         _setSettings(s);
         _warp(100 * 365 days);
         uint256 g = gasleft();
         assertTrue(_hookSend(1 ether));
         assertLt(g - gasleft(), 400_000, "bounded work");
-        assertLe(core.rateAtCheckpoint(), (core.ethPot() - 1 ether) * 10_000 / 800_000, "clamped at the cap");
+        assertLe(core.rateAtCheckpoint(), (core.ethPot() - 1 ether) * core.settings().spendCapBps / 800_000, "clamped at the cap");
     }
 
     /// the hook pushes its skim into the core in the middle of `buyback`, under changed settings. the push is booked

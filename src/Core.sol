@@ -409,8 +409,8 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// wei per whole point right now: the price state (`rateAtCheckpoint` climbed lazily, bounded by the ceiling and
-    /// `rateCap`) lowered to the clamp `ethPot * spendCapBps / avgScore`, the price of one average credit that the pot affords. the clamp follows the current
-    /// pot and is not stored. the hourly room, `windowPot * spendCapBps / BPS - windowSpent`, is a separate check in
+    /// `rateCap`) lowered to the clamp `ethPot * spendCapBps / avgScore`, the price of one average credit that the pot
+    /// affords. the clamp follows the current pot and is not stored. the hourly room, `windowPot * spendCapBps / BPS - windowSpent`, is a separate check in
     /// `_requireRoom` (`windowPot` is the pot at the first spend of the hour plus the eth booked into the pot since),
     /// and a sell batch that crosses it reverts whole with `HourlyCap`. the math is in `CoreLib.climb`
     function ethRate() public view returns (uint256 read) {

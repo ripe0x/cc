@@ -108,6 +108,9 @@ contract EconDialsTest is Fixture {
         assertLt(core.ethRate(), launchRate, "a bigger drop at a bigger dial");
     }
 
+    /// the selector of the refusal that ended the last `_window`
+    bytes4 internal refusedWith;
+
     /// sells at the clamp of the hourly cap and counts what one window admits
     function _window(uint256 capBps, uint256 pot) internal returns (uint256 sold, uint256 spent) {
         Settings memory s = core.settings();
@@ -128,6 +131,7 @@ contract EconDialsTest is Fixture {
             } catch (bytes memory why) {
                 bytes4 sel = bytes4(why);
                 assertTrue(sel == ICore.HourlyCap.selector || sel == ICore.PotTooSmall.selector, "only the caps refuse");
+                refusedWith = sel;
                 break;
             }
         }
@@ -140,12 +144,14 @@ contract EconDialsTest is Fixture {
         assertLe(spent, 0.2 ether / 100);
     }
 
-    /// at the largest cap (half of the pot) the window can spend nearly half of it, and no more than half
+    /// at the largest cap (the whole pot) the window spends nearly all of it. the room is the pot, so `HourlyCap`
+    /// cannot refuse and the only refusal is `PotTooSmall`
     function test_spendCap_atTheLargestBound() public {
-        (uint256 sold, uint256 spent) = _window(5_000, 0.02 ether);
-        assertGe(sold, 4);
-        assertGt(spent, 0.02 ether * 4 / 10, "most of the half pot in one window");
-        assertLe(spent, 0.02 ether / 2);
+        (uint256 sold, uint256 spent) = _window(10_000, 0.02 ether);
+        assertGe(sold, 1);
+        assertGt(spent, 0.02 ether * 9 / 10, "most of the pot in one window");
+        assertLe(spent, 0.02 ether);
+        assertTrue(refusedWith != ICore.HourlyCap.selector, "the room is the pot: only PotTooSmall can refuse");
         _solvent();
     }
 }

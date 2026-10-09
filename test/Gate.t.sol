@@ -87,7 +87,7 @@ contract GateFuzzTest is Fixture {
         uint256 pick = seed >> 8;
         // forge-lint: disable-start(unsafe-typecast)
         if (pick % 4 == 0) s.avgScore = uint32(800_000 + (seed >> 16) % 5_200_001);
-        if (pick % 4 == 1) s.spendCapBps = uint16(100 + (seed >> 16) % 4_901);
+        if (pick % 4 == 1) s.spendCapBps = uint16(100 + (seed >> 16) % 9_901);
         if (pick % 4 == 2) s.flatBps = uint16((seed >> 16) % 10_001);
         if (pick % 4 == 3) {
             s.climbPerMinBps = uint16(1 + (seed >> 16) % 1_000);

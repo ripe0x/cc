@@ -222,8 +222,8 @@ library CoreLib {
     /// @notice the price state and the read of the eth rate (wei per whole point) at `nowTs`, from the stored rate `r` of
     /// checkpoint time `t`. The price state compounds `climbPerMinBps` per minute up to min(`rateCap`, ceiling, clamp)
     /// and holds a value above that bound. The ceiling is `ceilBps` of the last fill rate grown by `idleLoosenBps` per
-    /// full 10 minutes since `anchorTime`. The clamp is `pot * spendCapBps / avgScore`, the price of one average credit that
-    /// the pot affords. The read is min(price state, clamp). Never reverts: the Core calls it from `receive()`
+    /// full 10 minutes since `anchorTime`. The clamp is `pot * spendCapBps / avgScore`, the price of one average credit
+    /// that the pot affords. The read is min(price state, clamp). Never reverts: the Core calls it from `receive()`
     function climb(uint256 r, uint256 pot, uint256 anchorTime, uint256 t, uint256 nowTs)
         external
         view

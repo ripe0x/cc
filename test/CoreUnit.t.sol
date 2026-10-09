@@ -445,8 +445,8 @@ contract CoreUnitTest is CoreBase {
         );
     }
 
-    /// at the clamp an average credit can actually be sold in the same block. 20 percent of the pot buys one average
-    /// credit there. flat, every credit is an average credit: one sells, the rate drops with the fill and a second one
+    /// at the clamp an average credit can actually be sold in the same block. at a spend cap of 20 percent the hourly
+    /// room buys one average credit there. flat, every credit is an average credit: one sells, the rate drops with the fill and a second one
     /// in the window is refused by the cap. per point, every credit scoring at most the average passes the hourly cap
     /// in a fresh window and a credit that would cost more than the cap is refused by it
     function _atTheClamp(bool flat) internal {

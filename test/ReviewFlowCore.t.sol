@@ -84,6 +84,38 @@ contract ReviewFlowCoreTest is Fixture {
         _solvent();
     }
 
+    /// FC-1 per transaction at the launch settings: no `setSettings`, only `setRate` to the launch `rateCap`. the owner
+    /// sells credits it controls into the bid in one block until the hourly room is spent
+    function test_ACCEPTED_ownerPerTransactionAtLaunchSettings() public {
+        _skipSniperWindow();
+        _fundPot(10 ether);
+        uint256 pot = core.ethPot();
+        vm.warp(block.timestamp + 2 hours);
+        uint256 room = pot * core.settings().spendCapBps / 10_000;
+        uint256 launchCap = core.settings().rateCap;
+        vm.prank(owner);
+        core.setRate(launchCap);
+        uint256 got;
+        uint256 n;
+        for (uint256 j; j < 300; ++j) {
+            uint256[] memory one = _credits(seller, 1);
+            uint256 p = core.ceilingOf(one[0]);
+            if (p == 0 || got + p > room) break;
+            uint256 b = seller.balance;
+            vm.prank(seller);
+            core.sellForEth(one);
+            got += seller.balance - b;
+            ++n;
+        }
+        emit log_named_uint("per tx at launch settings: pot before (wei)", pot);
+        emit log_named_uint("per tx at launch settings: paid (wei)", got);
+        emit log_named_uint("per tx at launch settings: share of the pot, bps", got * 10_000 / pot);
+        emit log_named_uint("per tx at launch settings: market value of the credits (wei)", n * MARKET);
+        assertApproxEqAbs(got * 10_000 / pot, 9_999, 10, "99.99 percent of the pot in one block at the launch settings");
+        assertLe(got, room, "never above the hourly room");
+        _solvent();
+    }
+
     /// FC-1 per day: the owner acts every hour for 24 hours, at the loosest settings and at the launch settings
     function test_ACCEPTED_ownerPerDayWorstCase() public {
         _skipSniperWindow();
@@ -634,7 +666,7 @@ contract ReviewFlowCoreTest is Fixture {
     /// (HourlyCap). the cap is never passed
     function test_bonusAtTheClampCannotPassTheHourlyCap() public {
         _skipSniperWindow();
-        // the launch rate cap (about 6 times the opening rate) sits below the funded clamp: raise it to the bounds, with
+        // the launch rate cap (10 times the opening rate) sits below the funded clamp: raise it to the bounds, with
         // the clamp at one credit of hourly room, a spend cap of 20 percent and the ceiling at its loosest
         Settings memory cs = core.settings();
         cs.rateCap = uint64(RATE_START_MAX_WEI);

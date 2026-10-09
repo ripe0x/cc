@@ -89,9 +89,9 @@ contract PilePageEquivalence is ReviewEconBase {
     }
 }
 
-/// @notice exact numbers at the launch settings (flat bid, 20 percent hourly cap, drop 0.5 percent per credit with an 80
-/// percent minute floor, climb 0.5 percent a minute, ceiling 125 percent of the rate paid plus 2 percent per 10 idle
-/// minutes, clamp over 20 credits, average credit 4.33M). the pot is booked by donation so every number is a closed form
+/// @notice exact numbers at the launch settings (flat bid, hourly cap 100 percent of the pot, drop 0.5 percent per credit with an
+/// 80 percent minute floor, climb 0.5 percent a minute, ceiling 125 percent of the rate paid plus 2 percent per 10 idle
+/// minutes, clamp at one average credit, average credit 4.33M). the pot is booked by donation so every number is a closed form
 contract LaunchSettingsExactNumbers is ReviewEconBase {
     function test_scenarioAtTheLaunchSettings() public {
         vm.deal(address(core), 10 ether);
