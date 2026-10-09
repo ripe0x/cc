@@ -5,6 +5,7 @@ import {Vm} from "forge-std/Vm.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
+import {ICoreLens} from "../../src/interfaces/ICoreLens.sol";
 import {Stack, Settings, Sale} from "../../src/interfaces/Interfaces.sol";
 
 /// @notice creates the production contracts from their via_ir artifacts. the tests never import the production sources
@@ -31,5 +32,9 @@ library Prod {
 
     function newRouter(address owner) internal returns (IFeeRouter) {
         return IFeeRouter(payable(vm.deployCode("FeeRouter.sol:FeeRouter", abi.encode(owner))));
+    }
+
+    function newLens(address core) internal returns (ICoreLens) {
+        return ICoreLens(vm.deployCode("CoreLens.sol:CoreLens", abi.encode(core)));
     }
 }

@@ -24,6 +24,8 @@ contract Resume is Script, SystemResumer, NewProd {
         // the checks simulate the launch on a snapshot, so they run outside the broadcast
         Stage from = resumeChecks(deployer, c, core);
         vm.startBroadcast();
+        // optional: the lens of the original run, checked by postflight
+        lensAt = vm.envOr("LENS", address(0));
         Deployed memory d = resumeSend(deployer, c, core, from);
         vm.stopBroadcast();
         console.log("stage found", uint256(from));

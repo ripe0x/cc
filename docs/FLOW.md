@@ -312,3 +312,18 @@ mechanism of 33:
 * the coin stays (`rescueCoin` covers it). the proceeds the house owes the Core are not in a pot until `collectSales`, so they move in a later call.
 * the state that changes is the moved assets, their trackers, the two rate checkpoints, the hourly spend window and the funded flag. the piles, the held list, the controller, the settings and the locks keep working, and fees booked after a call stay in the Core until the next call.
 * gas, measured by `test/Migrate.t.sol` (`test_GAS_migrateEightyCreditsAndFiveStatements`): 121,195 with only eth, 40,700 per credit, 94,600 per listed statement, 4,571,954 for 80 credits and 5 statements. `maxCredits` applies to each lane, so with both piles deeper than the cap a call moves twice that. the largest `maxCredits` under the 16,777,216 transaction cap is 409 when one lane holds that many credits and 204 when both lanes do (each statement takes 94,600 of the same budget). `maxCredits` 150 and `maxStatements` 20 fit with room to spare.
+
+### 10.11 composability (owner, 2026-10-08)
+
+| # | decision |
+|---|---|
+| 34 | a read only lens contract, `CoreLens`, answers the whole state a seller, a buyer or a keeper decides on in one `eth_call`. it has no storage and no state changing function, and the Core does not call it. the deploy creates it right after the Core and postflight verifies its pointers |
+
+mechanism of 34:
+* pointers: the Core is the constructor argument. the router is `Core.FEE_SOURCE()` and the house is `Core.HOUSE()`, both read once in the constructor and held as immutables. Credits and Statements are the mainnet constants. the controller is read from `Core.controller()` on every call, so a controller replaced by the owner is followed.
+* the Core has two new views. `ethPrice()` returns the first value of `_climb`: the price state (`rateAtCheckpoint` climbed to now, bounded by the ceiling and `rateCap`). `ethRate()` returns the second value, the price state lowered to the clamp. the price state cannot be computed outside the Core, because the ceiling anchor `lastFillRate` sits in Core storage. `hourlyRoom()` is `windowPot * spendCapBps / 10_000 - windowSpent` while the window is open and `ethPot * spendCapBps / 10_000` once an hour has passed since `windowStart`, which is the cap the next spend opens a window with. the Core runtime goes from 23,837 to 24,043 bytes (`ethPrice` 47, `hourlyRoom` 159).
+* the average bid is `avgScore * ethRate / 1e4`, the payout for one credit of average score with no controller bonus. `bidFor(id)` is `ceilingOf(id)`.
+* the flush fields repeat the arithmetic of `FeeRouter.flush` with a tip recipient: `amount = balance - totalOwed`, `tip = min(amount * tipPpm / 1_000_000, tipCap)`, the payee shares `amount * ppm / 1_000_000` while `splitOn`, and the rest goes to the Core. all three are zero while the router has no engine or no balance above its debts. `test/Lens.t.sol` compares them with the balances after an actual flush.
+* the reads of the controller (`nextPage` ready flag, `priceOf`) are bounded staticcalls. a controller without code, a revert or a short answer reads as not ready and as asking price zero. `priceOf` is asked for eth lane statements that have a listing time.
+* a statement is `listed` while its auction is live on the house (status Listed, Bid or Ended). the status values are those of `Core.statementStatus`.
+* `snapshot()` costs about 146,000 gas with no statements and 56,000 more per held statement (`test_GAS_snapshotPerStatement`). `statementsPage(start, n)` reads a slice of `heldStatements`.

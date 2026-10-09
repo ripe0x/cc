@@ -71,6 +71,7 @@ contract RehearsalTest is Test, ProdDeployer {
 
         _preflight();
         _deploy();
+        lensAt = d.lens;
         postflightAs(c, d.core, deployer);
         _print("postflight after the launch");
         assertEq(_failedNames(), "", "postflight");
@@ -142,11 +143,12 @@ contract RehearsalTest is Test, ProdDeployer {
         );
         // each transaction costs its execution gas, 21000 intrinsic and its calldata (4 gas per zero byte, 16 per other byte)
         bytes memory libCode = vm.getCode("CoreLib.sol:CoreLib");
-        uint256[9] memory txGas = [
+        uint256[10] memory txGas = [
             libGas + 21_000 + _calldataGas(libCode) + 512,
             stepGas[0] + _createGas("ControllerV1.sol:ControllerV1") + 512,
             stepGas[1] + _createGas("FeeRouter.sol:FeeRouter") + 512,
             stepGas[2] + _createGas("Core.sol:Core") + 16_384,
+            stepGas[8] + _createGas("CoreLens.sol:CoreLens") + 512,
             stepGas[3] + 21_000
                 + _calldataGas(
                     abi.encodeCall(
@@ -158,28 +160,29 @@ contract RehearsalTest is Test, ProdDeployer {
             stepGas[6] + 21_000 + 1_024,
             stepGas[7] + 21_000 + 1_024
         ];
-        string[9] memory names = [
+        string[10] memory names = [
             "1 library CoreLib (create2 deployer)",
             "2 controller",
             "3 router",
             "4 core (house creation inside)",
-            "5 launch through the factory (deployTokenAsOwner)",
-            "6 router setEngine",
-            "7 router setPayees",
-            "8 router setTip (skipped when the router already holds the config tip)",
-            "9 router setSplitStart (the Resume run, after the launch is mined)"
+            "5 lens (read only)",
+            "6 launch through the factory (deployTokenAsOwner)",
+            "7 router setEngine",
+            "8 router setPayees",
+            "9 router setTip (skipped when the router already holds the config tip)",
+            "10 router setSplitStart (the Resume run, after the launch is mined)"
         ];
         uint256 total;
-        for (uint256 i; i < 9; ++i) {
+        for (uint256 i; i < 10; ++i) {
             total += txGas[i];
             console.log(string.concat("deploy gas, tx ", names[i]), txGas[i]);
             assertLt(txGas[i], TX_GAS_CAP, string.concat("over the per transaction gas cap: ", names[i]));
         }
         uint256 fee = IArtCoinsFactoryV2(c.stack.factory).deployFee();
         console.log("library at", lib);
-        console.log("total deploy gas, nine transactions", total);
+        console.log("total deploy gas, ten transactions", total);
         console.log("per transaction gas cap", TX_GAS_CAP);
-        console.log("factory deploy fee (wei, sent as value of tx 5)", fee);
+        console.log("factory deploy fee (wei, sent as value of tx 6)", fee);
         uint256[3] memory gwei_ = [uint256(1), 5, 20];
         for (uint256 i; i < 3; ++i) {
             uint256 cost = total * gwei_[i] * 1 gwei;

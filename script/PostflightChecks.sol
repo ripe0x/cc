@@ -14,6 +14,7 @@ import {IAuctionHouse, IAuctionFactory} from "../src/interfaces/AuctionHouse.sol
 import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
+import {ICoreLens} from "../src/interfaces/ICoreLens.sol";
 import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {PostflightPool} from "./PostflightPool.sol";
@@ -48,6 +49,7 @@ abstract contract PostflightChecks is PostflightPool {
         bytes32 poolId = _postPool(c, coin);
         _postCoin(c, core_, coin, poolId);
         _postRouter(c, core, deployer, coin);
+        _postLens(core);
         _postPrediction(c, coin, deployer, core_);
         _postUnreadable(c);
     }
@@ -62,6 +64,32 @@ abstract contract PostflightChecks is PostflightPool {
         address routerAt = vm.computeCreateAddress(deployer, n - 1);
         (bool okp, address want) = _predict(c, deployer, routerAt, core_);
         _warn("warn: coin equals the factory prediction for the deployer", okp && want == coin, vm.toString(want));
+    }
+
+    /// @notice the lens to check (CoreLens), zero when the run has none. `Deploy` sets it from the lens it created, the
+    /// Postflight and Resume scripts from LENS. a nonzero address adds the rows of `_postLens`
+    address internal lensAt;
+
+    /// @dev the lens has code of the compiled size, points at this Core and at the router and house the Core names, uses
+    /// the Credits and Statements of mainnet, and answers `snapshot`. its controller is the Core's, read on every call
+    function _postLens(ICore core) private {
+        if (lensAt == address(0)) return;
+        _code("code: lens", lensAt);
+        if (lensAt.code.length == 0) return;
+        ICoreLens lens = ICoreLens(lensAt);
+        _check(
+            "lens: code size is the compiled CoreLens",
+            lensAt.code.length == vm.getDeployedCode("CoreLens.sol:CoreLens").length,
+            vm.toString(lensAt)
+        );
+        _eq("lens: core", lens.CORE(), address(core));
+        _eq("lens: router is the Core fee source", lens.ROUTER(), core.FEE_SOURCE());
+        _eq("lens: house is the Core house", lens.HOUSE(), address(core.HOUSE()));
+        _eq("lens: credits", lens.CREDITS(), Mainnet.CREDITS);
+        _eq("lens: statements", lens.STATEMENTS(), Mainnet.STATEMENTS);
+        _eq("lens: controller is the Core controller", lens.controller(), core.controller());
+        (bool ok,) = lensAt.staticcall(abi.encodeCall(ICoreLens.snapshot, ()));
+        _check("lens: snapshot answers", ok, vm.toString(lensAt));
     }
 
     /// @notice the postflight of a run that has not set the split start yet (the Deploy script, a Resume that launches)

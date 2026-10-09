@@ -25,7 +25,7 @@ abstract contract LaunchChecks is PostflightChecks {
     /// @dev the per transaction gas cap of the target chain (EIP 7825, 2^24). the launch is simulated with what is left of
     /// it, so a launch that does not fit fails the simulation row, and a collision cannot burn more than that
     uint256 internal constant TX_GAS_CAP = 16_777_216;
-    uint256 internal constant DEPLOY_GAS_ESTIMATE = 13_500_000;
+    uint256 internal constant DEPLOY_GAS_ESTIMATE = 15_500_000;
     /// @dev the Core SUPPLY constant, the coin supply its exit auction is priced against. test/Config.t.sol checks it
     uint256 internal constant CORE_SUPPLY = 1_000_000_000e18;
     /// @dev credit 1 exists and its score is a pure function of its seed and timestamp

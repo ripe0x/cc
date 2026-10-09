@@ -16,6 +16,10 @@ abstract contract ProdDeployer is SystemDeployer {
         return address(Prod.newController(core_, c.sale));
     }
 
+    function _newLens(address core_) internal virtual override returns (address) {
+        return address(Prod.newLens(core_));
+    }
+
     function _newCore(address owner_, address coin_, address controller_, LaunchConfig memory c)
         internal
         virtual

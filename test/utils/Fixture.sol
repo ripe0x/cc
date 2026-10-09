@@ -9,6 +9,7 @@ import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
 import {Lane, ICredits, IStatements, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
 import {IAuctionHouse, IAuctionFactory} from "../../src/interfaces/AuctionHouse.sol";
 import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
+import {ICoreLens} from "../../src/interfaces/ICoreLens.sol";
 import {
     IArtCoinsFactoryV2,
     IArtCoinsTokenV2,
@@ -90,6 +91,8 @@ abstract contract Fixture is Test, ProdDeployer {
     /// @dev when true the swap helpers flush the router right after the swap, so the Core books the fees at once
     bool internal autoFlush = true;
     IControllerV1 internal ctl;
+    /// @dev the read only lens `deploySystem` created for the Core
+    ICoreLens internal lens;
     /// @dev the pnd auction house the core created in its constructor, through the real live factory
     IAuctionHouse internal house;
     PoolKey internal launchKey;
@@ -192,6 +195,7 @@ abstract contract Fixture is Test, ProdDeployer {
         core = ICore(payable(d.core));
         coin = IArtCoinsTokenV2(d.coin);
         ctl = IControllerV1(d.controller);
+        lens = ICoreLens(d.lens);
         feeRouter = IFeeRouter(payable(d.router));
         house = IAuctionHouse(core.HOUSE());
         launchKey = d.launchKey;

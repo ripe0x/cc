@@ -147,6 +147,7 @@ interface ICore {
     function controllerLocked() external view returns (bool);
     function creditInfo(uint256 id) external view returns (bool inPile, Lane lane, uint256 cost, uint64 acquiredAt);
     function ethPot() external view returns (uint256);
+    function ethPrice() external view returns (uint256 price);
     function ethRate() external view returns (uint256 read);
     function ethToBuyback() external view returns (uint256);
     function exitAuctionPrice() external view returns (uint256);
@@ -156,6 +157,7 @@ interface ICore {
     function exitStatement(uint256 sid) external;
     function exitToken() external view returns (address);
     function heldStatements() external view returns (uint256[] memory sids);
+    function hourlyRoom() external view returns (uint256);
     function lastBuybackBlock() external view returns (uint256);
     function lastFillTime() external view returns (uint64);
     function lockController() external;

@@ -6,7 +6,7 @@ import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 
 /// @notice proof that the suite exercises the production build. tests and scripts compile on the default profile (no
 /// via_ir), the production contracts on the via_ir profile (foundry.toml). this test fails unless
-///  1. the runtime code the fixture deployed for the Core, the ControllerV1 and the linked CoreLib equals, byte for byte,
+///  1. the runtime code the fixture deployed for the Core, the ControllerV1, the CoreLens and the linked CoreLib equals, byte for byte,
 ///     the runtime code of the artifact in `out/` (the immutable slots and the library address slots are masked in both:
 ///     they are the constructor arguments and the link, not compiler output),
 ///  2. every one of those artifacts records, in its own solc metadata, viaIR true, optimizer 200 runs, cancun, no
@@ -17,9 +17,10 @@ import {ICoreLib} from "../src/interfaces/ICoreLib.sol";
 /// the generated interfaces are not part of the proof: `script/tools/gen-interfaces.sh --check` covers them, and the
 /// two library functions the abi does not list are pinned to the artifact selectors below.
 contract BuildIdentityTest is Fixture {
-    uint256 internal constant CORE_RUNTIME = 23_837;
+    uint256 internal constant CORE_RUNTIME = 24_043;
     uint256 internal constant CONTROLLER_RUNTIME = 4_464;
     uint256 internal constant LIB_RUNTIME = 18_002;
+    uint256 internal constant LENS_RUNTIME = 8_961;
 
     function _json(string memory name) internal view returns (string memory) {
         return vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));
@@ -92,6 +93,7 @@ contract BuildIdentityTest is Fixture {
     function test_theFixtureDeploysTheViaIrArtifacts() public view {
         _identical(address(core), "Core", CORE_RUNTIME);
         _identical(address(ctl), "ControllerV1", CONTROLLER_RUNTIME);
+        _identical(address(lens), "CoreLens", LENS_RUNTIME);
         address lib = findLibrary(address(core).code);
         assertTrue(lib != address(0), "the core is linked to a compiled CoreLib");
         _identical(lib, "CoreLib", LIB_RUNTIME);

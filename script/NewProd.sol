@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Core} from "../src/Core.sol";
 import {FeeRouter} from "../src/FeeRouter.sol";
 import {ControllerV1} from "../src/ControllerV1.sol";
+import {CoreLens} from "../src/CoreLens.sol";
 import {LaunchConfig} from "./LaunchConfig.sol";
 import {SystemDeployer} from "./SystemDeployer.sol";
 
@@ -17,6 +18,10 @@ abstract contract NewProd is SystemDeployer {
 
     function _newController(address core, LaunchConfig memory c) internal virtual override returns (address) {
         return address(new ControllerV1(core, c.sale));
+    }
+
+    function _newLens(address core) internal virtual override returns (address) {
+        return address(new CoreLens(core));
     }
 
     function _newCore(address owner, address coin, address controller, LaunchConfig memory c)

@@ -13,6 +13,7 @@ struct Deployed {
     address coin;
     address controller;
     address router;
+    address lens;
     PoolKey launchKey;
     bytes32 poolId;
 }
@@ -20,8 +21,8 @@ struct Deployed {
 /// @notice the deploy routine, shared by the script and by tests. call it from a broadcast or from a prank of
 /// `owner`, who must be the v2 factory owner and the config owner (a deprecated v2 factory takes only its owner, through
 /// `deployTokenAsOwner`). order (docs/FLOW.md 10.4): the library `CoreLib` (linked by `forge script` before `run`), the
-/// controller, the router (engine unset), the Core (fee source the router, coin predicted by the factory), the launch,
-/// then the router is set up in three transactions: engine, payees, tip. the fourth, the split start, is a separate step
+/// controller, the router (engine unset), the Core (fee source the router, coin predicted by the factory), the lens
+/// `CoreLens` (read only, pointing at the Core), the launch, then the router is set up in three transactions: engine, payees, tip. the fourth, the split start, is a separate step
 /// that runs after the launch is mined (`startSplitAfterLaunch`, the Resume script): it reads the launch time from the chain.
 /// the router is NOT locked here, the owner closes it as a separate step. the controller, router, Core and coin addresses are predicted and every
 /// prediction is checked after creation
@@ -46,18 +47,20 @@ abstract contract SystemDeployer is LaunchChecks {
     error LaunchNotMined();
 
     /// @dev the steps of `stepGas`, in the order they are sent
-    uint256 internal constant STEPS = 8;
+    uint256 internal constant STEPS = 9;
 
     /// @notice execution gas of the transactions of the last `deploySystem`: controller, router, core, launch, setEngine,
-    /// setPayees, setTip, setSplitStart (the last one is measured by `startSplitAfterLaunch`, not by `deploySystem`). the library
-    /// goes first and is measured by the rehearsal
-    uint256[8] internal stepGas;
+    /// setPayees, setTip, setSplitStart (measured by `startSplitAfterLaunch`, not by `deploySystem`), lens (sent right after
+    /// the core). the library goes first and is measured by the rehearsal
+    uint256[9] internal stepGas;
 
     /// @notice creates the router, the controller and the core. the script (`NewProd`) uses `new`, a test base uses
     /// `deployCode` on the artifacts, so the test contracts neither import the production sources nor embed their code
     function _newRouter(address owner) internal virtual returns (address);
 
     function _newController(address core, LaunchConfig memory c) internal virtual returns (address);
+
+    function _newLens(address core) internal virtual returns (address);
 
     function _newCore(address owner, address coin, address controller, LaunchConfig memory c)
         internal
@@ -89,6 +92,9 @@ abstract contract SystemDeployer is LaunchChecks {
         if (d.controller != controllerAt) revert AddressMismatch("controller");
         if (d.router != routerAt) revert AddressMismatch("router");
         if (d.core != coreAt) revert AddressMismatch("core");
+        g = gasleft();
+        d.lens = _newLens(d.core);
+        _step(8, g);
 
         d.coin = _launch(c, coinAt, d.router, coreAt);
         d.launchKey = poolKeyOf(d.coin, c.stack);

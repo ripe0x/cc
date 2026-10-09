@@ -415,6 +415,19 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         return CoreLib.climb(rateAtCheckpoint, ethPot, lastFillTime, checkpointTime, block.timestamp);
     }
 
+    /// wei per whole point of the price state now: `rateAtCheckpoint` climbed lazily and bounded by the ceiling and
+    /// `rateCap`, before the clamp that `ethRate` applies. the basis of an adopted credit is this price times its score
+    function ethPrice() external view returns (uint256 price) {
+        (price,) = _climb();
+    }
+
+    /// wei the hourly spend cap still allows in the current hour. a new hour opens at the next spend with the cap on the
+    /// pot of that moment, which this returns once the hour has passed
+    function hourlyRoom() external view returns (uint256) {
+        if (block.timestamp >= windowStart + SPEND_WINDOW) return ethPot * _st().spendCapBps / BPS;
+        return (windowPot * _st().spendCapBps / BPS).zeroFloorSub(windowSpent);
+    }
+
     /// the most wei the core pays for credit id right now, bonus included.
     function ceilingOf(uint256 id) external view returns (uint256) {
         return _ceiling(id, ethRate());

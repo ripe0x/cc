@@ -3,7 +3,13 @@
 import re, sys
 src = open(sys.argv[1]).read()
 name = sys.argv[2]
+lib = re.search(r"library (\w+) \{(.*?)\n\}\n\n", src, flags=re.S)
 src = re.sub(r"library \w+ \{.*?\n\}\n\n", "", src, flags=re.S)
+if name == "ICoreLens" and lib:
+    # the structs of the lens are declared once inside its interface
+    src = src.replace(lib.group(1) + ".", "")
+    structs = lib.group(2).strip("\n")
+    src = src.replace("interface ICoreLens {\n", "interface ICoreLens {\n" + structs + "\n\n", 1)
 src = re.sub(r"\n    type Lane is uint8;\n", "\n", src)
 for t in ("Settings", "Stack", "Sale"):
     src = re.sub(r"\n    struct %s \{.*?\n    \}\n" % t, "\n", src, flags=re.S)
