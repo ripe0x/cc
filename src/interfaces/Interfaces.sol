@@ -229,7 +229,9 @@ library Mainnet {
             bonusCapBps: 2_500,
             tipSavingsBps: 1_000,
             tipCapBps: 200,
-            reimburseBps: 11_000,
+            // the Core meters gross gas. the EIP-3529 refund cap returns up to 20 percent of it to the caller, and compose
+            // and exit clear enough storage to reach the cap, so 80 percent of the metered gas is the net cost
+            reimburseBps: 8_000,
             reimburseCapBps: 500,
             saleFloorBps: 7_500,
             auctionDuration: 24 hours,

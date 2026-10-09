@@ -58,6 +58,10 @@ contract ResumeTest is Test, SystemResumer, ProdDeployer {
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envUint("FORK_BLOCK"));
+        // forge test predeploys the linked CoreLib at libraryAddress() and keeps it across fork selection. mainnet has no
+        // code there, so the account is reset to the state the script sees
+        vm.etch(libraryAddress(), "");
+        vm.resetNonce(libraryAddress());
         deployer = makeAddr("resume.deployer");
         owner = deployer;
         creator = makeAddr("resume.creator");

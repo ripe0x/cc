@@ -428,14 +428,15 @@ contract LifecycleComposeTest is Fixture {
         }
 
         // reimbursement: positive, never above 5 percent of the credits' cost, never above the pot, and at a low
-        // basefee it tracks the gas of the call (the listing on the house included) at 110 percent of the basefee
+        // basefee it tracks the net gas of the call (the listing on the house included): the core repays 80 percent of the
+        // metered gross gas and the refund cap returns up to 20 percent of the gross to the caller
         assertGt(c.reimb, 0);
         assertLe(c.reimb, c.cost * 500 / 10_000);
         assertLe(c.reimb, c.potBefore);
         assertEq(keeper.balance, c.reimb);
         assertEq(core.ethPot(), c.potBefore - c.reimb);
-        assertGe(c.reimb, (c.gasUsed - 30_000) * composeBasefee * 11 / 10, "at least the gas of the call");
-        assertLe(c.reimb, (c.gasUsed + 450_000) * composeBasefee * 11 / 10, "and not more than the fixed allowance");
+        assertGe(c.reimb, (c.gasUsed - 100_000) * composeBasefee, "at least the net gas of the call");
+        assertLe(c.reimb, (c.gasUsed + 450_000) * composeBasefee, "and not more than the fixed allowance");
         _solvent();
 
         // the same page at a basefee far above the cap is paid exactly 5 percent of the credits' cost

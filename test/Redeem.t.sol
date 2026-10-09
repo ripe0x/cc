@@ -276,7 +276,7 @@ contract RedeemRepayTest is RedeemBase {
         hm.setBurn(4_000_000);
         uint256 cap = _ethCap(sid);
         uint256 want = _gasPart(EXIT_GAS, LOW);
-        assertEq(want, 330_000_000_000_000, "1.5M gas at 0.2 gwei and 110 percent");
+        assertEq(want, 240_000_000_000_000, "1.5M gas at 0.2 gwei and 80 percent");
         assertLt(want, cap, "the cost cap does not bind here");
         (uint256 repaid, uint256 potLost) = _exit(sid, LOW);
         assertEq(repaid, want);
@@ -370,7 +370,9 @@ contract RedeemRepayTest is RedeemBase {
         uint256 counted = repaid / basefee;
         assertGt(counted, 50_000, "the overhead and the work");
         assertLe(counted, EXIT_GAS);
-        assertLe(counted, used + 50_000, "never more than the caller's own gas plus the overhead");
+        // the meter is gross gas and the caller pays net of the EIP-3529 refund (up to 20 percent of the gross), so at
+        // the launch share of 80 percent the repayment is at most the net gas of the call plus the 50_000 overhead
+        assertLe(counted * 8_000 / 10_000, used + 50_000, "never more than the caller's own net gas plus the overhead");
         assertGe(counted + 150_000, used, "and not far below it: the caller's gas is what is repaid");
     }
 

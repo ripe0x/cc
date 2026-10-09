@@ -37,7 +37,7 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | bonusCapBps | 2_500 | 0 to 5_000 | |
 | tipSavingsBps | 1_000 | 0 to 2_500 | |
 | tipCapBps | 200 | 0 to 500 | |
-| reimburseBps | 11_000 | 0 to 15_000 | of gas cost |
+| reimburseBps | 8_000 | 0 to 15_000 | of the metered gas cost. the Core meters gross gas and the EIP-3529 refund cap returns up to 20 percent of it to the caller |
 | reimburseCapBps | 500 | 0 to 1_000 | of statement cost |
 | saleFloorBps | 7_500 | 1_000 to 40_000 | the hard floor of a statement sale, bps of statement cost. replaces reserveBps (section 9) |
 | auctionDuration | 24 hours | 6 hours to 30 days | runs from the first bid |

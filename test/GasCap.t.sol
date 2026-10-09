@@ -783,8 +783,15 @@ contract GasCapTest is SeaportBase {
         xt.mint(address(core), 1_000_000e18);
         core.skim();
         uint256[] memory ids = _credits(seller, 400);
-        vm.prank(seller);
-        core.sellForExitToken(ids);
+        // in batches of 100: a cold sale of 400 credits in one call exceeds the gas of one call
+        for (uint256 from; from < 400; from += 100) {
+            uint256[] memory batch = new uint256[](100);
+            for (uint256 j; j < 100; ++j) {
+                batch[j] = ids[from + j];
+            }
+            vm.prank(seller);
+            core.sellForExitToken(batch);
+        }
         assertEq(core.pileSize(Lane.Exit), 400);
         _cool(address(ctl));
         uint256 g = gasleft();

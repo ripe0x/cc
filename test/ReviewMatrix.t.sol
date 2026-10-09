@@ -672,10 +672,10 @@ contract ReviewMatrixStateTest is ReviewHarness {
             vm.etch(_linked(), "");
         } else if (i == 12) {
             (l, w) = ("different code at the linked library (a STOP)", Class.Revert);
-            vm.etch(_linked(), hex"00");
+            (lateEtchAt, lateEtchCode) = (_linked(), hex"00");
         } else if (i == 13) {
             (l, w) = ("the linked library plus one trailing byte", Class.Post);
-            vm.etch(_linked(), bytes.concat(_linked().code, hex"00"));
+            (lateEtchAt, lateEtchCode) = (_linked(), bytes.concat(_linked().code, hex"00"));
         } else {
             (l, w) = _state2(i);
         }

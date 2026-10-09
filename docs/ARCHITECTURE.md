@@ -48,7 +48,7 @@ one `Settings` struct in Core storage (a fixed slot shared with `CoreLib`, three
 | `bonusCapBps` | 2_500 | 0 to 5_000 | cap of the controller bonus on a credit's price |
 | `tipSavingsBps` | 1_000 | 0 to 2_500 | keeper tip as a share of the savings on a listing |
 | `tipCapBps` | 200 | 0 to 500 | cap of that tip as a share of the cost |
-| `reimburseBps` | 11_000 | 0 to 15_000 | compose reimbursement as a share of gas cost |
+| `reimburseBps` | 8_000 | 0 to 15_000 | compose and exit reimbursement as a share of the metered gas cost. the Core meters gross gas, the EIP-3529 refund cap returns up to 20 percent of it to the caller, so 80 percent of gross is the net cost |
 | `reimburseCapBps` | 500 | 0 to 1_000 | cap of the reimbursement as a share of statement cost |
 | `saleFloorBps` | 7_500 | 1_000 to 40_000 | the hard floor of a statement sale, bps of statement cost. no sale leaves the Core below it. the controller prices above it, the house reserve and `sellTo` are floored at it |
 | `auctionDuration` | 24 hours | 6 hours to 30 days | runs from the first bid |

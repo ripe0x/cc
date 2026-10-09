@@ -12,6 +12,9 @@ import {Lane, ICoreViews, Mainnet} from "../../src/interfaces/Interfaces.sol";
 contract FuzzController {
     uint256 internal constant PAGE = 80;
     uint256 internal constant ATTACKS = 20;
+    /// the most pile entries the page walk passes before the 80 it returns. each `pileNext` call reads a cold slot
+    /// (about 4,100 gas), so 100 calls stay under the 500,000 gas the core gives the read of a page
+    uint256 internal constant MAX_SKIP = 20;
 
     address public immutable core;
     uint256 public seed;
@@ -120,7 +123,8 @@ contract FuzzController {
     function _honestPage(Lane lane, uint256 r) internal view returns (bool ok, uint256[80] memory ids) {
         uint256 size = ICoreViews(core).pileSize(lane);
         if (size < PAGE) return (false, ids);
-        uint256 skip = (r >> 100) % (size - PAGE + 1);
+        uint256 span = size - PAGE < MAX_SKIP ? size - PAGE : MAX_SKIP;
+        uint256 skip = (r >> 100) % (span + 1);
         uint256 id = ICoreViews(core).pileHead(lane);
         for (uint256 i; i < skip; ++i) {
             id = ICoreViews(core).pileNext(id);

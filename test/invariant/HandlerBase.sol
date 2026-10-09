@@ -134,6 +134,8 @@ abstract contract HandlerBase is Test {
     uint256 internal constant V_REVERT_CHANGED = 18; // a reverted action changed core state
     uint256 internal constant V_OVERPRINT = 19; // an overprint outside the rules
     uint256 internal constant V_BUYBACK = 20; // a buyback slice or tip outside the rules
+    /// share of the metered gross gas the caller pays net of the EIP-3529 refund (the refund is at most 20 percent)
+    uint256 internal constant REFUND_FLOOR_BPS = 8_000;
     uint256 internal constant V_COMPOSE = 21; // a compose outside the rules or a reimbursement above its cap
     uint256 internal constant V_POT = 22; // pot bookkeeping off from the action's flows
     uint256 internal constant V_REFUND = 23; // a house refund or payout that is not what the house rules give
@@ -709,10 +711,14 @@ abstract contract HandlerBase is Test {
         return bucket == block.timestamp / 60 ? start : rate;
     }
 
-    /// minutes as a wad exponent, for the growth factor of the rate
-    function _growth(uint256 bps, uint256 dt) internal pure returns (uint256) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint256(FixedPointMathLib.powWad(int256(1e18 + bps * 1e14), int256(dt * 1e18 / 60)));
+    /// `rate` compounded at `bps` a minute for `dt` seconds. an exponent above 100 (a factor of about 2.7e43) returns
+    /// the largest uint128, which is above any rate the core can store, because `expWad` reverts from 135.3
+    function _grownRate(uint256 rate, uint256 bps, uint256 dt) internal pure returns (uint256) {
+        // forge-lint: disable-start(unsafe-typecast)
+        int256 x = FixedPointMathLib.lnWad(int256(1e18 + bps * 1e14)) * int256(dt * 1e18 / 60) / 1e18;
+        if (x > 100e18) return type(uint128).max;
+        return rate * uint256(FixedPointMathLib.expWad(x)) / 1e18;
+        // forge-lint: disable-end(unsafe-typecast)
     }
 
     /// invariant 6 and its companions, against the settings in force over the interval (they cannot change inside
@@ -729,7 +735,7 @@ abstract contract HandlerBase is Test {
         if (dt == 0) {
             if (rate1 > s.rate) _flag(V_RATE_BOUND, "rate rose with no time passing");
         } else if (s.funded) {
-            uint256 grown = s.rate * _growth(s.st.climbPerMinBps, dt) / 1e18;
+            uint256 grown = _grownRate(s.rate, s.st.climbPerMinBps, dt);
             uint256 limit = BidModel.clamp(s.st, s.pot).min(BidModel.ceiling(s.st, s.anchor, block.timestamp - s.lastFill));
             uint256 maxR = grown.max(limit);
             if (rate1 > maxR + maxR / 1e9 + 4) _flag(V_RATE_BOUND, "rate climbed above the climb or the limit");
@@ -1537,11 +1543,13 @@ abstract contract HandlerBase is Test {
     /// `_afterCompose` fit the stack)
     function _composeReimbursement(Lane lane, CPre memory p) internal returns (uint256 reimb) {
         reimb = keeper.balance - p.callerBal;
-        // gas reimbursement: min(gas * basefee * reimburseBps, reimburseCapBps of the cost). the exit lane caps against
-        // 80 average credits at the opening rate RATE_START. the gas used is what the handler saw, which is at least what the core
-        // measured, plus its fixed overhead and, on the eth lane, the gas the core counts for the listing
+        // gas reimbursement: min(net gas * basefee * reimburseBps / REFUND_FLOOR_BPS, reimburseCapBps of the cost). the exit
+        // lane caps against 80 average credits at the opening rate RATE_START. the gas used is the net gas the caller paid
+        // (isolation: the transaction gas after the EIP-3529 refund), plus the fixed overhead and, on the eth lane, the
+        // gas the core counts for the listing. the core meters gross gas and the refund is at most 20 percent of it, so
+        // at 8000 bps the repayment is at most the net gas plus the overhead
         uint256 extra = 50_000 + (lane == Lane.Eth ? 350_000 : 0);
-        uint256 gasCap = (p.gasUsed + extra) * p.basefee * p.st.reimburseBps / 10_000;
+        uint256 gasCap = (p.gasUsed + extra) * p.basefee * p.st.reimburseBps / REFUND_FLOOR_BPS;
         uint256 base = lane == Lane.Eth ? p.sum : 80 * uint256(p.st.avgScore) * core.RATE_START() / 1e4;
         uint256 costCap = base * p.st.reimburseCapBps / 10_000;
         uint256 cap = gasCap < costCap ? gasCap : costCap;
@@ -2199,8 +2207,10 @@ abstract contract HandlerBase is Test {
         // and cut at 1.5m gas), reimburseCapBps of the cost (the exit lane: 80 average credits at the opening rate), and
         // the pot. nothing else moves
         uint256 reimb = keeper.balance - p.callerBal;
-        uint256 gasCap = ((p.gasUsed + 50_000) < 1_500_000 ? (p.gasUsed + 50_000) : 1_500_000) * block.basefee
-            * p.st.reimburseBps / 10_000;
+        // net gas paid plus the overhead, scaled to the metered gross gas by the refund floor, cut at 1.5m metered gas
+        uint256 netCap = (p.gasUsed + 50_000) * p.st.reimburseBps / REFUND_FLOOR_BPS;
+        uint256 meterCap = 1_500_000 * uint256(p.st.reimburseBps) / 10_000;
+        uint256 gasCap = (netCap < meterCap ? netCap : meterCap) * block.basefee;
         uint256 base = p.lane == uint8(Lane.Eth) ? p.cost : 80 * uint256(p.st.avgScore) * core.RATE_START() / 1e4;
         uint256 costCap = base * p.st.reimburseCapBps / 10_000;
         if (reimb > gasCap || reimb > costCap) _flag(V_EXIT_SHORT, "the redeem reimbursement is above its caps");

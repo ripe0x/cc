@@ -29,7 +29,7 @@
     "bonusCapBps": 2500,
     "tipSavingsBps": 1000,
     "tipCapBps": 200,
-    "reimburseBps": 11000,
+    "reimburseBps": 8000,
     "reimburseCapBps": 500,
     "saleFloorBps": 7500,
     "auctionDuration": 86400,

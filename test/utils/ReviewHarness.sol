@@ -137,6 +137,11 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         return _failedNames();
     }
 
+    /// code applied after preflight and before the deploy. the Core links to the library at the address preflight
+    /// reads (libraryAddress()), so a change to that code that preflight must not see is applied between the two
+    address internal lateEtchAt;
+    bytes internal lateEtchCode;
+
     /// @dev runs preflight, then the deploy, on a snapshot, as `Deploy.run` does: the hash gate first (a stale hash
     /// stops everything), then preflight, then the deploy. logs one matrix row. `signed` is the hash of the base config
     function _run(string memory label, LaunchConfig memory c, bytes32 signed, address who) internal returns (Class k) {
@@ -148,6 +153,7 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         if (bytes(detail).length != 0) {
             k = Class.Pre;
         } else {
+            if (lateEtchAt != address(0)) vm.etch(lateEtchAt, lateEtchCode);
             try this.tryDeploy(c, who) returns (Deployed memory) {
                 (k, detail) = (hashSame ? Class.Slip : Class.Hash, "DEPLOYED, every check passed");
             } catch (bytes memory why) {

@@ -1834,9 +1834,14 @@ contract CoreComposedTest is CoreBase {
         assertGt(c.reimb, 0);
         assertLt(c.reimb, c.cost * 500 / 10_000, "far below the 5 percent cap at this basefee");
         // the gas the Core counted: the call up to the reimbursement plus 50k overhead plus 350k for the listing
-        uint256 counted = c.reimb * 10_000 / (composeBasefee * 11_000);
+        uint256 counted = c.reimb * 10_000 / (composeBasefee * 8_000);
         assertGe(counted, 400_000);
-        assertApproxEqAbs(counted, c.gasUsed, 100_000, "the meter plus the fixed overhead is the gas of the whole call");
+        // the Core meters gross gas. the EIP-3529 refund cap returns 20 percent of it to the caller (the compose clears
+        // enough storage to reach the cap), so 80 percent of the metered gas is the gas the caller paid
+        assertApproxEqAbs(
+            counted * 8_000 / 10_000, c.gasUsed, 100_000, "80 percent of the meter plus the overhead is the net gas of the call"
+        );
+        assertLe(c.reimb, (c.gasUsed + 400_000) * composeBasefee, "the repayment never exceeds the net gas plus the overhead");
         assertEq(keeper.balance, c.reimb, "the caller was repaid and nobody else");
     }
 
@@ -1882,7 +1887,7 @@ contract CoreComposedTest is CoreBase {
         Composed memory c = _composeOnce();
         uint256 snap = preComposeSnap;
         uint256 supply = c.supplyBefore;
-        uint256 reimb11 = c.reimb;
+        uint256 reimb8 = c.reimb;
         Settings memory s = core.settings();
 
         vm.revertToState(snap);
@@ -1909,7 +1914,7 @@ contract CoreComposedTest is CoreBase {
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.compose();
-        assertApproxEqAbs(keeper.balance, reimb11 * 15 / 11, 2, "15000 over 11000 of the same gas");
+        assertApproxEqAbs(keeper.balance, reimb8 * 15 / 8, 2, "15000 over 8000 of the same gas");
         (,, cost,) = core.statementInfo(supply + 1);
         assertEq(cost, c.cost + keeper.balance);
     }

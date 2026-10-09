@@ -280,7 +280,8 @@ contract LaunchWiringTest is Fixture {
         assertTrue(lib != address(0), "no library in the core code");
         assertTrue(isCompiledLibrary(lib.code));
         assertEq(abi.encode(core.settings()), abi.encode(lc.settings), "the settings through the library");
-        // the library address is the one forge test linked, never the address of a CREATE2 deployer deployment here
-        assertTrue(lib != libraryAddress());
+        // forge test deploys the linked library at the CREATE2 address of libraryAddress(), the address a mainnet
+        // broadcast uses, so the Core links to it here (mainnet has no code at that address before the broadcast)
+        assertEq(lib, libraryAddress());
     }
 }

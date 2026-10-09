@@ -960,18 +960,21 @@ contract ReviewSaleTest is Fixture {
         assertEq(got, notional * s.reimburseCapBps / 10_000);
     }
 
-    /// S-8 accepted. the caller is repaid 110 percent of (gas used + a fixed 50_000), but a real call carries about 23_000 of
-    /// intrinsic cost: at a zero priority fee every exit nets a small profit. bounded by the cap and one per statement
-    function test_ACCEPTED_exitRepayExceedsTheRealGasCost() public {
+    /// S-8. the core meters gross gas plus a fixed 50_000 and repays 80 percent of it (`reimburseBps` 8_000). the
+    /// transaction costs the caller its gas net of the EIP-3529 refund, up to 20 percent of the gross, with the 21_000
+    /// intrinsic cost included in the measured gas. so the repayment never exceeds the real cost and stays within 10
+    /// percent of it. bounded by the cap and one per statement
+    function test_exitRepayIsTheNetGasCostAtTheLaunchShare() public {
         _enterPhase2();
         uint256 sid = _composeOnce().sid;
         _warp(105 hours);
         vm.fee(composeBasefee);
         (uint256 got, uint256 gasUsed,) = _exitAndMeasure(sid);
-        uint256 realCost = (gasUsed + 23_000) * composeBasefee;
+        uint256 realCost = gasUsed * composeBasefee;
         emit log_named_uint("repaid", got);
         emit log_named_uint("real cost", realCost);
-        assertGt(got, realCost);
+        assertLe(got, realCost, "never more than the net gas the caller paid");
+        assertGe(got * 10, realCost * 9, "within 10 percent of the net gas the caller paid");
     }
 
     // ------------------------------------------------------------------ settings, config, scripts

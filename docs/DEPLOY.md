@@ -112,7 +112,7 @@ settings. one struct, `Settings`, in Core storage, in the config file under `set
 | `spendCapBps` | 2000 | 100 to 5000 | hourly spend cap, share of the pot at the window open. also the funded threshold and, over `clampCredits`, the climb clamp | yes |
 | `bonusCapBps` | 2500 | 0 to 5000 | largest controller bonus on a ceiling | yes |
 | `tipSavingsBps`, `tipCapBps` | 1000, 200 | 0 to 2500, 0 to 500 | `buyListing` keeper tip, share of savings capped at a share of cost | yes |
-| `reimburseBps`, `reimburseCapBps` | 11000, 500 | 0 to 15000, 0 to 1000 | gas reimbursement for compose, share of gas cost capped at a share of statement cost | yes |
+| `reimburseBps`, `reimburseCapBps` | 8000, 500 | 0 to 15000, 0 to 1000 | gas reimbursement for compose and exit, 80 percent of the metered gas cost (the Core meters gross gas and the EIP-3529 refund cap returns up to 20 percent of it to the caller) capped at a share of statement cost | yes |
 | `saleFloorBps` | 7500 | 1000 to 40000 | the hard floor of a statement sale, bps of the statement cost. no sale clears below it: the house reserve and `sellTo` are floored at it. the controller prices above it (see the sale controller). a low value lets a bad setting sell a statement cheap, which is why the settings are owner only and public in `SettingsSet`. a changed floor does not reach listings that have no bid yet until `repriceStatement` runs on each (see changing settings after launch) | yes |
 | `auctionDuration` | 86400 | 21600 to 2592000 s | statement auction length, runs from the first bid | yes |
 | `exitAfter` | 378000 | 3600 to 31536000 s | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 (105 hours, the hour the asking price reaches its floor) | yes |

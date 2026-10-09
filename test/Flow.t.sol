@@ -91,7 +91,7 @@ contract FlowTest is Fixture {
         assertEq(s.bonusCapBps, 2_500);
         assertEq(s.tipSavingsBps, 1_000);
         assertEq(s.tipCapBps, 200);
-        assertEq(s.reimburseBps, 11_000);
+        assertEq(s.reimburseBps, 8_000);
         assertEq(s.reimburseCapBps, 500);
         assertEq(s.saleFloorBps, 7_500);
         assertEq(s.auctionDuration, 24 hours);

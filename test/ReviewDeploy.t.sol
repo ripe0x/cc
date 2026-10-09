@@ -66,6 +66,9 @@ contract ReviewDeployTest is ReviewHarness {
     /// the script rehearsal of the library: it goes through the deterministic deployer from the deployer, so it takes one
     /// deployer nonce when it is not on chain yet and none when it is. the preflight predictions follow
     function test_libraryAndTheNonce() public {
+        // forge test predeploys the linked CoreLib at libraryAddress(); mainnet has no code there
+        vm.etch(libraryAddress(), "");
+        vm.resetNonce(libraryAddress());
         scriptMode = true;
         uint64 n = vm.getNonce(deployer);
         address lib = libraryAddress();
