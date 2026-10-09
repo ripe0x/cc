@@ -598,9 +598,13 @@ abstract contract InvariantsBase is InvariantFixture {
             handler.warp(uint256(keccak256(abi.encode("w", i))) / 10 * 10 + 1);
         }
         assertTrue(handler.successes(3) > 0, "no real listing was bought");
-        // the hostile controller suite answers only a fraction of the composes (it burns the read gas on purpose), so the
-        // smoke gives it more tries; the fee flows of the v2 port moved the seeds off the lucky ones
-        assertTrue(_try(7, 300), "compose never succeeded");
+        // each try draws a controller seed. under the hostile controller a try ends in a compose when the page the
+        // controller answers is ready and valid (2 of 14 page modes, 1/7) and the handler gate passes (1/2); the
+        // compose then succeeds when the in frame attacks and the statement price answers leave it alone (0.43 of
+        // those). measured over 2,800 seeds: 6.8 percent of tries reach a valid compose and 2.96 percent succeed,
+        // so the success count is geometric with p = 0.0296. 400 tries fail with probability (1 - p)^400 = 6e-6
+        // (5e-5 at the lower end of the measured p).
+        assertTrue(_try(7, 400), "compose never succeeded");
         // listed eth statements are now at least three, so an overprint can pair two of them
         _overprintSmoke();
         // the statement sales on the house: bids around the reserve, a settlement, the collection, the lazy sync

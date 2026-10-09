@@ -50,7 +50,6 @@ docs/NEXT.md is the list: what the owner decided but is not built, what waits fo
 
 | item | detail |
 |---|---|
-| loosened test | `test_everyActionSucceeds` under the hostile controller needed its compose tries raised from 80 to 300 after the review fixes. the cause was not proven |
 | exitModule gas | `exitStatement` forwards gas to a contract that does not exist yet. measure against the gas cap when it does |
 | v2 not live | five v2 addresses in script/config/mainnet.json are placeholders. the real preflight, the signoff hash and a comparison of the live v2 bytecode against test/v2-artifacts wait for the v2 deployment |
 | owner steps on the v2 factory before launch | set the minimum lp fee to 0 (`setMinLpFee(0)`) and lower the minimum protocol skim share to 362 (`setMinProtocolSkimShareBps(362)`). preflight names both |
