@@ -920,7 +920,7 @@ abstract contract HandlerBase is Test {
         uint256 e0 = eng.balance;
         uint256 w0 = parked;
         vm.prank(flusher);
-        try feeRouter.flush() {
+        try feeRouter.flush(flusher) {
             routerFlushes++;
             if (held != owed && eng.balance - e0 != want) {
                 _flag(V_ROUTER, "the engine got other than the flush rule gives");
@@ -1205,6 +1205,7 @@ abstract contract HandlerBase is Test {
     /// and now and then the call is made oversized or with a duplicate id to prove the core refuses it.
     function sellForEth(uint256 aSeed, uint256 nSeed, uint256 pick, uint256 mode) external checked {
         uint8 a = A_SELL_FOR_ETH;
+        _preFlush();
         address who = _actor(aSeed);
         uint256 len = inventory[who].length;
         if (len == 0) return _skip(a);
@@ -1295,6 +1296,7 @@ abstract contract HandlerBase is Test {
     /// with a wrong value or wrong calldata or above the ceiling, and must revert without moving eth.
     function listingStrategy(uint256 pick, uint256 mode) external checked {
         uint8 a = A_LISTING_STRATEGY;
+        _preFlush();
         uint256 id;
         uint256 price;
         bool allowed;
@@ -1328,6 +1330,7 @@ abstract contract HandlerBase is Test {
     /// the core's eth where it was.
     function listingHostile(uint256 pick, uint256 modeSeed) external checked {
         uint8 a = A_LISTING_HOSTILE;
+        _preFlush();
         uint256 n = probeIds.length;
         if (n < 2 || !core.allowedTarget(address(probe))) return _skip(a);
         uint256 id = probeIds[pick % n];
@@ -1512,6 +1515,7 @@ abstract contract HandlerBase is Test {
 
     function _compose(uint8 a, Lane lane, uint256 gate, uint256 feeSeed) internal {
         if (lane == Lane.Exit && !phase2()) return _skip(a);
+        _preFlush();
         (bool ready, uint256[] memory ids, uint256 format) = _peekPage(lane);
         // a pile of 80 is composed on one gate in two. a short pile only now and then, to see NotReady
         if (ready ? gate % 2 != 0 : gate % 13 != 0) return _skip(a);
@@ -1965,10 +1969,6 @@ abstract contract HandlerBase is Test {
     function flush(uint256 aSeed, uint256 amtSeed) external checked {
         uint8 a = A_FLUSH;
         address who = _actor(aSeed);
-        uint256 b0 = address(core).balance;
-        uint256 pot0 = core.ethPot();
-        uint256 tb0 = core.ethToBuyback();
-        RS memory rs = _rs();
         _att(a);
         if (amtSeed % 3 == 0) {
             uint256 amt = _logBound(amtSeed >> 4, 1, 3 ether);
@@ -1977,14 +1977,31 @@ abstract contract HandlerBase is Test {
             (bool ok,) = address(feeRouter).call{value: amt}("");
             if (!ok) _flag(V_ROUTER, "the router refused plain eth");
         }
+        _flushChecked();
+        _ok(a);
+    }
+
+    /// flushes the router as the flusher and checks the Core booked the fees with the buyback split
+    function _flushChecked() internal {
+        uint256 b0 = address(core).balance;
+        uint256 pot0 = core.ethPot();
+        uint256 tb0 = core.ethToBuyback();
+        RS memory rs = _rs();
         (, uint256 toCore) = _flushRouter();
         uint256 fee = toCore * core.settings().feeToBuybackBps / 10_000;
         _eth(b0, 0, toCore, "flush");
         if (core.ethPot() != pot0 + toCore - fee || core.ethToBuyback() != tb0 + fee) {
             _flag(V_POT, "a flush was booked wrongly");
         }
-        _ok(a);
         _rsCheck(rs, 0);
+    }
+
+    /// the Core pulls the router at the start of the eth pot doors (`sellForEth`, `buyListing`, `compose`). the handler
+    /// flushes first, as the flusher, so the state it records before the door already holds the booked fees and the pull
+    /// inside the door finds an empty router. a flush that fails (an engine that refuses) fails the same way inside the
+    /// door
+    function _preFlush() internal {
+        if (address(feeRouter).balance != 0) _flushChecked();
     }
 
     /*//////////////////////////////////////////////////////////////

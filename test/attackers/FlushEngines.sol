@@ -42,7 +42,7 @@ contract ReenteringEngine {
         if (nestedDone) return;
         nestedDone = true;
         // a donation lands in the router mid flush: a broken guard would send it out in the nested call
-        (bool ok,) = address(ROUTER).call{value: 0}(abi.encodeCall(IFeeRouter.flush, ()));
+        (bool ok,) = address(ROUTER).call{value: 0}(abi.encodeCall(IFeeRouter.flush, (address(this))));
         nestedReverted = !ok;
     }
 }
@@ -65,7 +65,7 @@ contract RefusingCaller {
     }
 
     function go(IFeeRouter r) external {
-        r.flush();
+        r.flush(address(this));
     }
 }
 

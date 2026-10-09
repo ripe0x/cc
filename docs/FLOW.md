@@ -209,7 +209,7 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 ### 10.2 FeeRouter (src/FeeRouter.sol)
 
 * `receive() external payable {}` and nothing else in it: no storage write, no cold read, no call. the hook pushes with the 2,300 gas stipend.
-* `flush()`, permissionless, guarded against reentry: sends the whole balance to `engine` with a plain call and all gas, reverts if the call fails or while `engine` is unset. eth waits safely in the router until then.
+* `flush(tipTo)`, permissionless, guarded against reentry (the tip goes to `tipTo`, section 10.8): sends the whole balance to `engine` with a plain call and all gas, reverts if the call fails or while `engine` is unset. eth waits safely in the router until then.
 * `engine`, set by the owner with `setEngine(address)` (must have code), any number of times until `lock()`, a one way lock with an event. events on every change.
 * its own two step owner (`transferOwnership`, `acceptOwnership`), first owner from the constructor. it does not read the Core's owner: a later engine must be able to take over.
 * no other function. it never holds coin on purpose and has no token path.
@@ -245,7 +245,7 @@ real contracts on the fork as before. the v2 stack is not on mainnet, so the fix
 FeeRouter, replacing 10.2 where they differ:
 * `receive() external payable {}` stays empty.
 * modes. until the split starts every flush sends everything (less the tip) to the engine. `splitStart` is a timestamp the owner sets (the Resume run after the launch is mined sets it to the launch time read from the factory record plus the anti sniper window, no margin). the first `flush` at or after `splitStart` still sends everything to the engine and then turns the split on, so eth that arrived during the window is never shared. from then on each flush pays the payees their parts per million of the gross amount flushed, the caller the tip, and the engine the rest (so the tip comes out of the engine's part and a payee gets exactly its share of the inflow).
-* tip: `min(amount * tipPpm / 1e6, tipCap)` to `msg.sender`, taken off the top. launch 5_000 ppm (0.5 percent) capped at 0.005 ether. a failed tip send is skipped, never a revert.
+* tip: `min(amount * tipPpm / 1e6, tipCap)` to `tipTo`, taken off the top. no tip is paid when `tipTo` is the zero address. launch 5_000 ppm (0.5 percent) capped at 0.005 ether. a failed tip send is skipped, never a revert.
 * payees: up to 4 `(address, ppm)` entries, total at most 200_000 ppm (the engine always keeps at least 80 percent of a flush). a payee is paid by a plain call with a fixed gas cap; if that fails the amount is credited to `owed[payee]` and `claim()` lets the payee (or anyone, sending to the payee) pull it. a payee can never block a flush.
 * the engine gets the rest by a plain call with all gas. if that call fails the whole flush reverts and the eth waits.
 * owner setters, each with an event, all frozen by the one way `lock()`: `setEngine`, `setPayees`, `setTip` (ppm at most 20_000, cap at most 0.05 ether), `setSplitStart` (only while the split is not on).
@@ -254,3 +254,19 @@ FeeRouter, replacing 10.2 where they differ:
 ### 10.7 amendment to decision 25 (owner, 2026-10-08)
 
 the router's payee list holds ONE entry at launch: the creator address (the config `creator`), with the combined share of 1.0 point of volume, which is 161_031 parts per million of router inflow (1.0 / 6.21). there is no separate artist payee and no placeholder for one: the owner will later point the payee at his own splitter contract with `setPayees`. the router keeps supporting up to 4 payees. because a payee may be a contract, the fixed gas cap on a payee payment is 100_000 and the `owed` and `claim` fallback stays.
+
+### 10.8 the Core pulls the fees (owner, 2026-10-08)
+
+| # | decision |
+|---|---|
+| 30 | the Core flushes the fee router at the start of `sellForEth` (both overloads), `buyListing`, `compose` and `composeExit`, so fees reach the pot without a keeper. `flush` takes the tip recipient as an argument, `flush(address tipTo)`, and the Core passes the caller of the entry point: the flush tip rewards whoever triggers the door. a keeper may still call `flush(tipTo)` directly |
+
+mechanism:
+* `CoreLib.pullFees(router, tipTo)` calls `flush(tipTo)` on `FEE_SOURCE` with at most 1,000,000 gas and ignores the outcome. a router that reverts, burns its gas or has no code leaves the entry point unaffected and the fees in the router.
+* the pull is the first action of the entry point: before the checkpoint, before any pot or rate read and before the measuring flag is set. the flush sends eth into `Core.receive`, which checkpoints and books it, so the entry point prices against the enlarged pot at the rate checkpointed at that moment. every receipt of fee eth happens before the measured window starts (V2R-1).
+* an empty router returns early inside `flush` (after the engine check), which costs the entry point one library call and one router call.
+* `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` do not pull: the exit token entry points do not read the eth pot, and the others book or spend on their own schedule.
+* gas of the pull, measured by `test/PullFees.t.sol` on one credit sale: 388,221 before the change, 394,433 with an empty router (+6,212) and 465,122 with 1 eth in the router (+76,901, the flush itself included). `test/GasCap.t.sol` measures the largest sell batch with the 1 eth pull.
+* the pull sits before `gasStart` in `compose`, so the gas repayment does not include the flush.
+* the router pointer is the immutable `FEE_SOURCE`, fixed at deploy and checked for code.
+

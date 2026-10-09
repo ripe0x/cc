@@ -184,7 +184,7 @@ contract ReviewDeployTest is ReviewHarness {
         vm.expectRevert(IFeeRouter.OnlyOwner.selector);
         r.lock();
         vm.expectRevert(IFeeRouter.NoEngine.selector);
-        r.flush();
+        r.flush(address(this));
         vm.stopPrank();
         vm.revertToState(snap);
     }
@@ -330,7 +330,7 @@ contract ReviewDeployTest is ReviewHarness {
         assertApproxEqRel(held, 0.8931 ether, 0.001e18, "the router holds the bounty leg");
         address keeper2 = makeAddr("review.keeper");
         vm.prank(keeper2);
-        fr.flush();
+        fr.flush(keeper2);
         uint256 tip = held * base.tipPpm / 1e6;
         if (tip > base.tipCap) tip = base.tipCap;
         assertEq(keeper2.balance, tip);

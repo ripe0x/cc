@@ -560,6 +560,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         delete _credits[id];
     }
 
+    /// the first action of the eth pot entry points (`sellForEth`, `buyListing`, `compose`, `composeExit`): the fee
+    /// router flushes its balance into `receive`, which books it, before any rate read, checkpoint or measurement of the
+    /// entry point. the flush tip goes to the caller. a failing router does not fail the entry point (docs/FLOW.md 10.8)
+    function _pullFees() private {
+        CoreLib.pullFees(FEE_SOURCE, msg.sender);
+    }
+
     /*//////////////////////////////////////////////////////////////
                                  DOORS
     //////////////////////////////////////////////////////////////*/
@@ -575,6 +582,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     }
 
     function _sellForEth(uint256[] calldata ids, uint256 minOut) private {
+        _pullFees();
         if (ids.length == 0) revert Empty();
         uint256 total;
         for (uint256 i; i < ids.length; ++i) {
@@ -592,6 +600,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// buy credit id through an allowed target. the caller supplies the complete calldata and earns a tip from the savings.
     function buyListing(uint256 value, bytes calldata data, uint256 id, address target) external nonReentrant {
+        _pullFees();
         if (!allowedTarget[target] || _forbidden(target)) revert TargetNotAllowed();
         if (id == 0) revert ZeroId();
         if (CREDITS.ownerOf(id) == address(this)) revert AlreadyOwned();
@@ -701,6 +710,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// one body for both lanes, told apart by the selector of the call, so the code is not duplicated
     function _compose() private {
+        _pullFees();
         uint256 gasStart = gasleft();
         Lane lane = msg.sig == this.composeExit.selector ? Lane.Exit : Lane.Eth;
         (bool ready, uint256[80] memory ids, uint256 format) = _nextPage(lane);

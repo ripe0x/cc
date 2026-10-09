@@ -52,7 +52,7 @@ contract V2PortMigrationTest is FeeBase {
         _buyCoin(trader, 1 ether);
         (,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         vm.prank(flusher);
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         assertEq(core2.ethPot(), toEngine, "the new Core booked the fees");
         assertEq(address(core2).balance, toEngine);
         assertEq(core.ethPot(), pot1, "the old Core books nothing more");
@@ -84,7 +84,7 @@ contract V2PortMigrationTest is FeeBase {
         autoFlush = false;
         _buyCoin(trader, 5 ether);
         vm.prank(flusher);
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         assertGt(core2.ethToBuyback(), 0);
         vm.prank(trader);
         vm.expectRevert();
@@ -116,7 +116,7 @@ contract V2PortMigrationTest is FeeBase {
         (,, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         uint256 pot1 = core.ethPot();
         vm.prank(flusher);
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         assertEq(core2.ethPot(), toEngine);
         assertEq(core.ethPot(), pot1);
         assertEq(feeRouter.engine(), address(core2));
@@ -139,7 +139,7 @@ contract V2PortMigrationTest is FeeBase {
         assertGt(held, held0 + 0.18 ether, "three buys of 1 eth left their router share waiting");
         vm.prank(flusher);
         vm.expectRevert(abi.encodeWithSignature("FlushFailed()"));
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         assertEq(address(feeRouter).balance, held, "nothing left the router");
 
         uint256 pot0 = core.ethPot();
@@ -147,7 +147,7 @@ contract V2PortMigrationTest is FeeBase {
         feeRouter.setEngine(address(core));
         (,, uint256 toEngine) = _routerSplit(held);
         vm.prank(flusher);
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         assertEq(address(feeRouter).balance, 0);
         assertEq(core.ethPot() - pot0, toEngine, "everything that waited reached the right engine");
         _solvent();
@@ -166,7 +166,7 @@ contract V2PortMigrationTest is FeeBase {
         assertGt(held, 0);
         vm.prank(flusher);
         vm.expectRevert();
-        feeRouter.flush{gas: 3_000_000}();
+        feeRouter.flush{gas: 3_000_000}(flusher);
         assertEq(address(feeRouter).balance, held);
     }
 }

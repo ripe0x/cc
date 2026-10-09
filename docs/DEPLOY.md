@@ -158,7 +158,7 @@ config values (`script/config/mainnet.json`). the owner signs off each row.
 | `launch.protocolBps` | 2000 | the `protocolBps` argument of `deployTokenAsOwner`, pinned to 2000. the protocol leg belongs to the launcher protocol, a separate business from this engine: it is never the engine owner's income. preflight warns when the factory default differs |
 | `launch.restricted`, `launch.allowed` | true, empty | the coin launches restricted. the allowlist holds only what the factory and this launch add: the Core (decision 29), the locker and the escrow. no config entries, the factory default allowlist must be empty |
 | `router.creatorPayee`, `payeePpm` | 0xCB43...17F9, 161031 | the one payee of the router at launch: 161,031 parts per million of the gross amount of each flush, which is 1.0 point of volume out of the 6.21 the router receives (the tip is taken from the engine's part, not from the payee). the owner repoints it later with `setPayees` |
-| `router.tipPpm`, `tipCap` | 5000, 0.005 eth | the `flush` caller's tip: 0.5 percent of the flush, capped. the router default, so no `setTip` is sent |
+| `router.tipPpm`, `tipCap` | 5000, 0.005 eth | the tip of a flush, paid to its `tipTo` (the caller of the Core when the Core pulls): 0.5 percent of the flush, capped. the router default, so no `setTip` is sent |
 | `overrides.bounty`, `overrides.openFactory` | false, false | `bounty` allows any bounty bps below 10000, `openFactory` allows a non deprecated factory. both inside the hash |
 
 pinned rules. preflight fails (and `Deploy` stops) on any value outside them. each row is a check in `script/Checks.sol`.
@@ -196,7 +196,7 @@ mainnet caps one transaction at 16,777,216 gas (EIP-7825). every transaction of 
 | `overprint()`, scripted controller, 160 to 640 credits | about 1,371,000 | 8.2 percent |
 | every other call (doors, buybacks, flush, owner calls, the house) | under 500,000 | under 3 percent |
 
-`compose` and `composeExit` sit at about half the cap because the live Statements contract needs about 8 million gas for 80 credits (7.90 to 8.07 million across pages of real credits). a keeper must not hardcode a gas limit under 10 million for them. `sellForEth` and `sellForExitToken` take any number of credits: the cap stops a batch at about 116 credits (flat bid), 93 (score bid, `flatBps` 0) or 98 (exit bid), and a larger call simply reverts for its sender. the gas capped reads inside the Core use under half of their caps. `exitModule` is a stand in in these tests: what a real one spends inside `exit` is added to `exitStatement`, and the Core forwards it all the remaining gas.
+`compose` and `composeExit` sit at about half the cap because the live Statements contract needs about 8 million gas for 80 credits (7.90 to 8.07 million across pages of real credits). a keeper must not hardcode a gas limit under 10 million for them. `sellForEth` and `sellForExitToken` take any number of credits: the cap stops a batch at about 112 credits (flat bid), 90 (score bid, `flatBps` 0) or 98 (exit bid); the eth figures include the pull of a router holding 1 eth, and a larger call simply reverts for its sender. the gas capped reads inside the Core use under half of their caps. `exitModule` is a stand in in these tests: what a real one spends inside `exit` is added to `exitStatement`, and the Core forwards it all the remaining gas.
 
 ## 3. verify on etherscan
 
@@ -253,7 +253,7 @@ all times are from the launch block. the anti sniper window is `launch.sniperSec
 
 ### the router, owner commands
 
-the router is the bounty recipient of the pool: the v2 hook pushes the bounty to it with a 2,300 gas stipend, so its `receive` does nothing and the eth sits there until someone calls `flush()`. the router owner (the config owner) can change everything below until `lock()`. read first:
+the router is the bounty recipient of the pool: the v2 hook pushes the bounty to it with a 2,300 gas stipend, so its `receive` does nothing and the eth sits there until `flush(tipTo)` is called. the Core calls it at the start of its eth pot entry points (`sellForEth`, `buyListing`, `compose`, `composeExit`), so no keeper is needed. the router owner (the config owner) can change everything below until `lock()`. read first:
 
 ```sh
 export ROUTER=0x...   # printed by Deploy
@@ -267,7 +267,7 @@ cast call $ROUTER "locked()(bool)" --rpc-url $MAINNET_RPC_URL; cast call $ROUTER
 | command (as the router owner, `--ledger` or `--account`) | effect |
 |---|---|
 | `cast send $ROUTER "setPayees(address[],uint32[])" "[$SPLITTER]" "[161031]"` | replaces the payee list. up to four entries, each nonzero, total at most 200,000 ppm of the gross amount flushed. this is how the launch payee (the creator address) is pointed at a splitter contract later, or split in two: `"[$A,$B]" "[80515,80515]"`. a payee contract is called with 100,000 gas and a plain call; a payee that reverts or runs out is credited in `owed` and pulls it with `claim(payee)`, it can never block a flush |
-| `cast send $ROUTER "setTip(uint32,uint96)" 5000 5000000000000000` | the flush caller's tip: parts per million (at most 20,000) and a cap in wei (at most 0.05 eth) |
+| `cast send $ROUTER "setTip(uint32,uint96)" 5000 5000000000000000` | the tip of a flush, paid to `tipTo`: parts per million (at most 20,000) and a cap in wei (at most 0.05 eth) |
 | `cast send $ROUTER "setSplitStart(uint64)" $TS` | the time of the first flush that turns the split on. only while the split is off |
 | `cast send $ROUTER "setEngine(address)" $NEW_ENGINE` | points every future flush at another contract (it must have code). the old engine keeps what it already holds. this is the one owner switch that directs value to an address the owner picks: a stolen router owner key can redirect the fee stream until the router is locked |
 | `cast send $ROUTER "lock()"` | closes every setter above for good. needs an engine. do it only when the payees and the engine are final |
@@ -275,11 +275,11 @@ cast call $ROUTER "locked()(bool)" --rpc-url $MAINNET_RPC_URL; cast call $ROUTER
 
 ### keeper duties
 
-anyone can run these. none is needed for safety, they keep the engine moving.
+anyone can run these. none is needed for safety, they keep the engine moving. no flush keeper is needed: the Core flushes the router at the start of `sellForEth`, `buyListing`, `compose` and `composeExit` and pays the tip to the caller of the Core.
 
 | duty | call | note |
 |---|---|---|
-| move the fee eth | `router.flush()` | pays the caller the tip, shares with payees once the split is on, sends the rest to the Core, which books it as fees. reverts only while the engine is unset or the engine call fails. an empty balance is a no op |
+| move the fee eth (optional) | `router.flush($TIP_TO)` | pays `$TIP_TO` (a keeper passes its own address) the tip, shares with payees once the split is on, sends the rest to the Core, which books it as fees. reverts only while the engine is unset or the engine call fails. an empty balance is a no op |
 | collect the creator slot | `locker.collectRewards(coin)` | pays the caller a keeper reward and pushes the recipient shares. at lp fee 0 there is no lp income, so this moves only dust |
 | book stray eth | `core.skim()` | books eth the Core received from anyone but the router (for example a partial fill refund from the escrow, claimed with the escrow's `claim`) |
 | compose statements | `core.compose()`, `core.composeExit()` | the caller is repaid gas. set the gas limit above 10 million (about 8 million are used for 80 credits, the cap is 16,777,216) |
@@ -290,8 +290,8 @@ anyone can run these. none is needed for safety, they keep the engine moving.
 
 | when | what happens | what to do |
 |---|---|---|
-| launch block | the pool is live. the skim is 90 points of volume; the bounty share of the baseline and the whole extra go to the router, which holds the eth until someone calls `flush`, and the router shares none of the window with payees. the price state sits at `rateStart` (`rateAtCheckpoint()`) and `ethRate()` reads the clamp of the pot, zero while the pot is empty | read postflight. nothing else is needed |
-| first buy | the bounty eth lands in the router. the first `flush()` sends the tip to the caller and the rest to the Core, which books it into `ethPot` (`FeesAdded` fires) | call `flush()`, then check `ethPot` and the Core balance are equal |
+| launch block | the pool is live. the skim is 90 points of volume; the bounty share of the baseline and the whole extra go to the router, which holds the eth until a flush (the Core pulls it at its next eth pot entry point, or a keeper calls `flush(tipTo)`), and the router shares none of the window with payees. the price state sits at `rateStart` (`rateAtCheckpoint()`) and `ethRate()` reads the clamp of the pot, zero while the pot is empty | read postflight. nothing else is needed |
+| first buy | the bounty eth lands in the router. the first flush sends the tip to `tipTo` and the rest to the Core, which books it into `ethPot` (`FeesAdded` fires) | call `flush(yourAddress)` or any eth pot door of the Core, then check `ethPot` and the Core balance are equal |
 | price paid | the price state climbs lazily, `climbPerMinBps` a minute (50), compounded, up to the lower of `rateCap` and `ceilBps` (125 percent) of the price state at the last fill, loosened by `idleLoosenBps` (2 percent) per 10 idle minutes, and not past the clamp. the price paid is the read: the price state lowered to the clamp of `clampCredits` (20) average credits of hourly room of the current pot. the read equals the price state once the pot reaches `rate * avgScore * clampCredits / spendCapBps`: at `rateStart` 2.0554e13 that is 8.9e17 wei, at 1e11 it is 4.33e15, at 1e15 it is 4.33e19. a price state above the clamp holds, so a small pot adds no climb. unsold statements do not stop the buying | watch `ethRate()` and `rateAtCheckpoint()` |
 | 30 minutes | the anti sniper window ends and the skim is the 6.9 point baseline. the public can add liquidity to the pool after it | none |
 | any time after the pot is funded | credit holders can call `sellForEth` into the bid. a credit sells when its price fits the hourly room, 20 percent of the pot at the window open minus what the window has spent. the ceiling is flat per credit at launch (`flatBps` 10000): `avgScore * rate / 1e4 * (1 + bonus)`, whatever the credit's score | check that real credits clear. at the clamp an average credit without bonus fits a fresh window |

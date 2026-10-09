@@ -253,7 +253,7 @@ contract RehearsalTest is Test, ProdDeployer {
         assertEq(core.ethPot(), pot, "nothing reaches the pot before the flush");
         address keeper = _user("keeper");
         vm.prank(keeper);
-        router.flush();
+        router.flush(keeper);
         uint256 tip = want * c.tipPpm / 1e6;
         if (tip > c.tipCap) tip = c.tipCap;
         assertEq(keeper.balance, tip, "the flusher is paid the tip");
@@ -274,7 +274,7 @@ contract RehearsalTest is Test, ProdDeployer {
         vm.stopPrank();
         assertGt(trader.balance, ethBefore, "sold coin for eth");
         vm.prank(keeper);
-        router.flush();
+        router.flush(keeper);
         assertGt(core.ethPot(), pot, "the sell skim reached the pot too");
         assertEq(coin.balanceOf(Mainnet.DEAD), deadBefore, "no tax and no burn on canonical swaps");
 
@@ -285,7 +285,7 @@ contract RehearsalTest is Test, ProdDeployer {
         ur.execute{value: 1 ether}(hex"10", _v4Swap(true, 1 ether), block.timestamp + 1 hours);
         uint256 gross = address(router).balance;
         vm.prank(keeper);
-        router.flush();
+        router.flush(keeper);
         assertGt(c.creatorPayee.balance, payee0, "from now on the payee is paid its share");
         assertEq(c.creatorPayee.balance - payee0, gross * c.payeePpm / 1e6, "exactly its share of the inflow");
 

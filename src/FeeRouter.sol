@@ -2,8 +2,9 @@
 pragma solidity ^0.8.28;
 
 /// the bounty recipient of the pool. the v2 hook pushes fee eth with the 2,300 gas stipend, so `receive` does nothing at
-/// all: no write, no read, no call, no log. `flush` forwards the balance: a small tip to the caller, a split to up to four
-/// payees once the split has started, the rest to the engine, which books it as fees (docs/FLOW.md 10.2 and 10.6).
+/// all: no write, no read, no call, no log. `flush(tipTo)` forwards the balance: a small tip to `tipTo`, a split to up to
+/// four payees once the split has started, the rest to the engine, which books it as fees (docs/FLOW.md 10.2 and 10.6).
+/// the engine calls `flush` itself at the start of its entry points (docs/FLOW.md 10.8).
 /// eth waits here until an engine is set. the router owner can point every future fee at any engine with `setEngine`
 /// until `lock`. it never touches what an engine already holds, and it has no token path.
 contract FeeRouter {
@@ -87,19 +88,21 @@ contract FeeRouter {
     /// nothing else may be here: the hook gives this call 2,300 gas
     receive() external payable {}
 
-    /// pays out the balance, except what is owed to payees. anyone may call. reverts while no engine is set (a call to
-    /// the zero address would burn the eth) and when the engine call fails. an empty balance is a no op.
+    /// pays out the balance, except what is owed to payees. anyone may call, and the tip goes to `tipTo`. reverts while
+    /// no engine is set (a call to the zero address would burn the eth) and when the engine call fails. an empty
+    /// balance returns before the owed amount is read.
     /// payee shares are parts per million of the gross amount flushed, so a payee gets exactly its share of the inflow.
     /// the tip comes out of the engine's part. before the split starts, and in the one flush that starts it, the payees
     /// get nothing, so eth that arrived during the anti sniper window is never shared
-    function flush() external {
+    function flush(address tipTo) external {
         if (_busy) revert Reentered();
         address to = engine;
         if (to == address(0)) revert NoEngine();
+        if (address(this).balance == 0) return;
         uint256 amount = address(this).balance - totalOwed;
         if (amount == 0) return;
         _busy = true;
-        uint256 tip = _tip(amount);
+        uint256 tip = _tip(amount, tipTo);
         uint256 shared;
         if (splitOn) {
             shared = _payPayees(amount);
@@ -115,13 +118,13 @@ contract FeeRouter {
         emit Flushed(to, toEngine, tip, shared);
     }
 
-    function _tip(uint256 amount) private returns (uint256 tip) {
+    function _tip(uint256 amount, address tipTo) private returns (uint256 tip) {
         tip = amount * tipPpm / PPM;
         if (tip > tipCap) tip = tipCap;
-        if (tip == 0) return 0;
-        (bool ok,) = msg.sender.call{gas: SEND_GAS, value: tip}("");
+        if (tip == 0 || tipTo == address(0)) return 0;
+        (bool ok,) = tipTo.call{gas: SEND_GAS, value: tip}("");
         if (!ok) {
-            emit TipFailed(msg.sender, tip);
+            emit TipFailed(tipTo, tip);
             return 0;
         }
     }

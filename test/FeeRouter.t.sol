@@ -95,7 +95,7 @@ contract FeeRouterTest is Test {
         vm.expectEmit(true, false, false, true, address(r));
         emit IFeeRouter.Flushed(address(eng), 1 ether - tip, tip, 0);
         vm.prank(other);
-        r.flush();
+        r.flush(other);
         assertEq(address(r).balance, 0);
         assertEq(address(eng).balance, 1 ether - tip);
         assertEq(other.balance - before, tip, "tip to the caller");
@@ -107,9 +107,30 @@ contract FeeRouterTest is Test {
         vm.deal(address(r), 50 ether);
         uint256 before = other.balance;
         vm.prank(other);
-        r.flush();
+        r.flush(other);
         assertEq(other.balance - before, 0.005 ether, "capped");
         assertEq(address(eng).balance, 50 ether - 0.005 ether);
+    }
+
+    /// the tip goes to `tipTo`, not to the caller
+    function test_tipGoesToTipToNotToTheCaller() public {
+        _set(address(eng));
+        vm.deal(address(r), 1 ether);
+        address recipient = makeAddr("tip recipient");
+        uint256 callerBefore = other.balance;
+        vm.prank(other);
+        r.flush(recipient);
+        assertEq(recipient.balance, 1 ether * 5_000 / 1_000_000, "tip to tipTo");
+        assertEq(other.balance, callerBefore, "the caller gets nothing");
+    }
+
+    /// a zero `tipTo` pays no tip: the engine gets the whole amount
+    function test_zeroTipToPaysNoTip() public {
+        _set(address(eng));
+        vm.deal(address(r), 1 ether);
+        vm.prank(other);
+        r.flush(address(0));
+        assertEq(address(eng).balance, 1 ether);
     }
 
     function test_noTipFlushSendsAll() public {
@@ -117,7 +138,7 @@ contract FeeRouterTest is Test {
         _set(address(eng));
         vm.deal(address(r), 5 ether);
         vm.prank(other);
-        r.flush();
+        r.flush(other);
         assertEq(address(eng).balance, 5 ether);
         assertEq(other.balance, 0);
     }
@@ -135,13 +156,13 @@ contract FeeRouterTest is Test {
     function test_flushRevertsWhileEngineUnset() public {
         vm.deal(address(r), 1 ether);
         vm.expectRevert(IFeeRouter.NoEngine.selector);
-        r.flush();
+        r.flush(address(this));
         assertEq(address(r).balance, 1 ether, "eth waits");
     }
 
     function test_flushRevertsWhileEngineUnsetEvenWhenEmpty() public {
         vm.expectRevert(IFeeRouter.NoEngine.selector);
-        r.flush();
+        r.flush(address(this));
     }
 
     function test_flushRevertsOnAFailingEngine() public {
@@ -150,7 +171,7 @@ contract FeeRouterTest is Test {
         vm.deal(address(r), 1 ether);
         uint256 before = address(this).balance;
         vm.expectRevert(IFeeRouter.FlushFailed.selector);
-        r.flush();
+        r.flush(address(this));
         assertEq(address(r).balance, 1 ether, "nothing lost");
         assertEq(address(this).balance, before, "the tip reverted with it");
     }
@@ -158,7 +179,7 @@ contract FeeRouterTest is Test {
     function test_flushWithNothingIsANoOp() public {
         _set(address(eng));
         vm.recordLogs();
-        r.flush();
+        r.flush(address(this));
         assertEq(vm.getRecordedLogs().length, 0);
         assertEq(eng.calls(), 0);
     }
@@ -167,7 +188,7 @@ contract FeeRouterTest is Test {
         _noTip();
         _set(address(eng));
         vm.deal(address(r), 1 ether);
-        r.flush{gas: 200_000}();
+        r.flush{gas: 200_000}(address(this));
         assertEq(eng.received(), 1 ether);
     }
 
@@ -176,7 +197,7 @@ contract FeeRouterTest is Test {
         _set(address(eng));
         // a forced send does not run receive; vm.deal stands for selfdestruct or coinbase credit
         vm.deal(address(r), 7 wei);
-        r.flush();
+        r.flush(address(this));
         assertEq(eng.received(), 7 wei);
     }
 
@@ -185,7 +206,7 @@ contract FeeRouterTest is Test {
         ReenteringEngine re = new ReenteringEngine(r);
         _set(address(re));
         vm.deal(address(r), 4 ether);
-        r.flush();
+        r.flush(address(this));
         assertTrue(re.nestedDone());
         assertTrue(re.nestedReverted(), "nested flush must revert");
         assertEq(re.received(), 4 ether, "one send");
@@ -198,9 +219,9 @@ contract FeeRouterTest is Test {
         ReenteringEngine re = new ReenteringEngine(r);
         _set(address(re));
         vm.deal(address(r), 1 ether);
-        r.flush();
+        r.flush(address(this));
         vm.deal(address(r), 2 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(re.received(), 3 ether);
     }
 
@@ -232,7 +253,7 @@ contract FeeRouterTest is Test {
     function test_splitStartsOnlyAfterTheWindowAndNeverSharesTheWindow() public {
         _splitSetup();
         vm.deal(address(r), 10 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(eng.received(), 10 ether, "before the start everything goes to the engine");
         assertFalse(r.splitOn());
 
@@ -241,14 +262,14 @@ contract FeeRouterTest is Test {
         vm.warp(block.timestamp + 1 hours);
         vm.expectEmit(false, false, false, false, address(r));
         emit IFeeRouter.SplitStarted(block.timestamp);
-        r.flush();
+        r.flush(address(this));
         assertEq(eng.received(), 16 ether, "the flush that starts the split shares nothing");
         assertTrue(r.splitOn());
         assertEq(payeeA.balance + payeeB.balance, 0);
 
         // from now on the payees get their parts per million, the engine the rest
         vm.deal(address(r), 100 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(payeeA.balance, 100 ether * 80_515 / 1e6);
         assertEq(payeeB.balance, 100 ether * 80_515 / 1e6);
         assertEq(eng.received(), 16 ether + 100 ether - 2 * (100 ether * 80_515 / 1e6));
@@ -261,7 +282,7 @@ contract FeeRouterTest is Test {
         _set(address(eng));
         vm.warp(block.timestamp + 365 days);
         vm.deal(address(r), 10 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(eng.received(), 10 ether);
         assertFalse(r.splitOn());
     }
@@ -271,14 +292,14 @@ contract FeeRouterTest is Test {
         _set(address(eng));
         vm.prank(ownerA);
         r.setSplitStart(uint64(block.timestamp));
-        r.flush(); // empty: no op, the split is not on yet
+        r.flush(address(this)); // empty: no op, the split is not on yet
         assertFalse(r.splitOn());
         vm.deal(address(r), 1 ether);
-        r.flush(); // starts the split
+        r.flush(address(this)); // starts the split
         assertTrue(r.splitOn());
         vm.deal(address(r), 1 ether);
         uint256 engine0 = address(eng).balance;
-        r.flush();
+        r.flush(address(this));
         // each payee has exactly its parts per million of the 1 eth inflow, the tip (0.5 percent) is not taken from them
         assertEq(payeeA.balance, 80_515_000_000_000_000);
         assertEq(payeeB.balance, 80_515_000_000_000_000);
@@ -289,7 +310,7 @@ contract FeeRouterTest is Test {
         _splitSetup();
         vm.warp(block.timestamp + 1 hours);
         vm.deal(address(r), 1 ether);
-        r.flush();
+        r.flush(address(this));
         assertTrue(r.splitOn());
         vm.prank(ownerA);
         vm.expectRevert(IFeeRouter.SplitIsOn.selector);
@@ -299,7 +320,7 @@ contract FeeRouterTest is Test {
     function _startSplitNow() internal {
         vm.warp(block.timestamp + 1 hours);
         vm.deal(address(r), 1 wei);
-        r.flush();
+        r.flush(address(this));
         assertTrue(r.splitOn());
     }
 
@@ -322,7 +343,7 @@ contract FeeRouterTest is Test {
         vm.deal(address(r), 10 ether);
         vm.expectEmit(true, false, false, true, address(r));
         emit IFeeRouter.PayeeOwed(address(gp), 1 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(payeeB.balance, 0.5 ether);
         assertEq(r.owed(address(gp)), 1 ether);
         assertEq(r.totalOwed(), 1 ether);
@@ -331,7 +352,7 @@ contract FeeRouterTest is Test {
 
         // the owed eth is never forwarded by a later flush
         vm.deal(address(r), 1 ether + 2 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(address(r).balance, 1.2 ether);
         assertEq(r.owed(address(gp)), 1.2 ether);
 
@@ -363,7 +384,7 @@ contract FeeRouterTest is Test {
         _startSplitNow();
         vm.deal(address(r), 5 ether);
         uint256 g = gasleft();
-        r.flush();
+        r.flush(address(this));
         assertLt(g - gasleft(), 300_000, "the burner did not drain the flush");
         assertEq(r.owed(address(burner)), 1 ether);
         assertEq(eng.received(), 1 wei + 4 ether);
@@ -384,7 +405,7 @@ contract FeeRouterTest is Test {
         r.setSplitStart(uint64(block.timestamp));
         _startSplitNow();
         vm.deal(address(r), 5 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(address(wp).balance, 1 ether, "paid directly");
         assertEq(r.owed(address(wp)), 0, "nothing credited");
     }
@@ -394,7 +415,7 @@ contract FeeRouterTest is Test {
         ReenteringEngine re = new ReenteringEngine(r);
         _set(address(re));
         vm.deal(address(r), 1 ether);
-        r.flush();
+        r.flush(address(this));
         assertTrue(re.nestedReverted());
     }
 
@@ -521,7 +542,7 @@ contract FeeRouterTest is Test {
 
         // flush still works after the lock, and ownership can still move (it can no longer redirect)
         vm.deal(address(r), 1 ether);
-        r.flush();
+        r.flush(address(this));
         assertEq(eng.received(), 1 ether - 0.005 ether);
         vm.prank(ownerA);
         r.transferOwnership(other);

@@ -269,7 +269,7 @@ abstract contract Fixture is Test, ProdDeployer {
     function _flush() internal returns (uint256 toCore) {
         uint256 before = address(core).balance;
         vm.prank(flusher);
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         toCore = address(core).balance - before;
     }
 

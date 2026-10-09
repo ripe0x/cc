@@ -211,11 +211,11 @@ contract GasCapTest is SeaportBase {
         ppm[1] = 80_515;
         vm.prank(owner);
         feeRouter.setPayees(who, ppm);
-        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, (flusher));
         _cool(address(feeRouter));
         vm.prank(flusher);
         uint256 g = gasleft();
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         g -= gasleft();
         _row("flush with the split on (tip, two payees, the Core books the fees)", g, data);
     }
@@ -226,11 +226,11 @@ contract GasCapTest is SeaportBase {
         autoFlush = false;
         _buyCoin(funder, 5 ether);
         assertFalse(feeRouter.splitOn());
-        bytes memory data = abi.encodeCall(IFeeRouter.flush, ());
+        bytes memory data = abi.encodeCall(IFeeRouter.flush, (flusher));
         _cool(address(feeRouter));
         vm.prank(flusher);
         uint256 g = gasleft();
-        feeRouter.flush();
+        feeRouter.flush(flusher);
         g -= gasleft();
         assertTrue(feeRouter.splitOn());
         _row("flush that turns the split on (tip, engine only)", g, data);
@@ -420,6 +420,8 @@ contract GasCapTest is SeaportBase {
         bytes memory data =
             abi.encodeWithSignature(exit_ ? "sellForExitToken(uint256[])" : "sellForEth(uint256[])", ids);
         _cool(address(core));
+        // the eth door pulls the router first: the measured sell carries a flush of 1 eth
+        if (!exit_) vm.deal(address(feeRouter), 1 ether);
         vm.prank(seller);
         g = gasleft();
         if (exit_) core.sellForExitToken(ids);

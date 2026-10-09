@@ -16,7 +16,8 @@ import {SettingsStore} from "./SettingsStore.sol";
 import {RateStore} from "./RateStore.sol";
 
 /// the one linked library of the Core: the settings write (validation, storage, event), the eth rate (the climb with its
-/// clamp and ceiling, and the drop on a fill), the exit auction decay and the pool manager swap of the coin buyback.
+/// clamp and ceiling, and the drop on a fill), the exit auction decay, the pool manager swap of the coin buyback and the
+/// pull of the fee router's balance.
 /// it holds no state of its own and is called by delegatecall, so it works on the Core's storage and balance, and the
 /// Core keeps its runtime under the size limit. deployed once before the Core (docs/DEPLOY.md)
 library CoreLib {
@@ -226,6 +227,24 @@ library CoreLib {
         }
         emit CoinRescued(to, amount);
     }
+
+    /// gas forwarded to the router flush of `pullFees`. a flush costs about 600,000 gas at most (the engine booking, the
+    /// tip send at 50,000 and four payee sends at 100,000)
+    uint256 internal constant PULL_GAS = 1_000_000;
+
+    /// @notice calls `flush(tipTo)` on the fee router with at most `PULL_GAS` and ignores the outcome. the router sends
+    /// the fee eth to `Core.receive`, which books it. a router that reverts, burns its gas or has no code leaves the
+    /// caller's entry point unaffected and the fees in the router
+    function pullFees(address router, address tipTo) external {
+        bytes memory data = abi.encodeCall(IRouterFlush.flush, (tipTo));
+        assembly ("memory-safe") {
+            pop(call(PULL_GAS, router, 0, add(data, 0x20), mload(data), 0, 0))
+        }
+    }
+}
+
+interface IRouterFlush {
+    function flush(address tipTo) external;
 }
 
 interface ICoinOf {

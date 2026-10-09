@@ -15,21 +15,25 @@ import {IArtCoinsFactoryV2} from "../src/interfaces/ArtCoinsV2.sol";
 /// today. `test_FIXED_*` proves a finding is closed, `test_ACCEPTED_*` pins a behavior the owner accepted, `test_OK_*`
 /// confirms a property that holds. real contracts on the pinned fork, attacker contracts only where a third party needs code
 
-/// a seller side contract that flushes the fee router when Seaport pays it, i.e. inside the Core's measured call.
-/// `swallow` true catches the failure (the sale goes through), false lets it fail the payment
+/// a seller side contract that flushes the fee router when Seaport pays it, i.e. inside the Core's measured call. it first
+/// sends `topUp` of its own eth to the router, the way a swap inside the call would leave bounty eth there (the Core has
+/// already pulled what the router held before the call). `swallow` true catches the failure (the sale goes through),
+/// false lets it fail the payment
 contract FlushingPayee {
     IFeeRouter public immutable ROUTER;
     bool public armed;
     bool public swallow = true;
     bool public flushOk;
     bool public tried;
+    uint256 public topUp;
 
     constructor(address router_) {
         ROUTER = IFeeRouter(payable(router_));
     }
 
-    function arm(bool swallow_) external {
+    function arm(bool swallow_, uint256 topUp_) external {
         armed = true;
+        topUp = topUp_;
         swallow = swallow_;
     }
 
@@ -37,12 +41,16 @@ contract FlushingPayee {
         if (!armed) return;
         armed = false;
         tried = true;
+        if (topUp != 0) {
+            (bool sent,) = address(ROUTER).call{value: topUp}("");
+            require(sent, "top up");
+        }
         if (swallow) {
-            try ROUTER.flush() {
+            try ROUTER.flush(address(this)) {
                 flushOk = true;
             } catch {}
         } else {
-            ROUTER.flush();
+            ROUTER.flush(address(this));
             flushOk = true;
         }
     }
@@ -70,12 +78,14 @@ contract ReviewSeaportFlushTest is SeaportBase {
         assertGe(core.ethRate(), TARGET_RATE);
     }
 
-    /// leaves `eth` of buy volume worth of fees in the router (the hook pushed them, nobody flushed yet)
+    /// the bounty eth of a real buy of `buyEth` (the hook pushed it, nobody flushed). it is taken out of the router, so
+    /// the pull at the start of the door finds the router empty, and returned for the attacker to push back mid call
     function _queueFees(uint256 buyEth) internal returns (uint256 held) {
         autoFlush = false;
         _buyCoin(funder, buyEth);
         autoFlush = true;
         held = address(feeRouter).balance;
+        vm.deal(address(feeRouter), 0);
     }
 
     /// the maker lists at exactly the ceiling (no savings, so no tip is due) with a one wei second recipient that is
@@ -94,7 +104,8 @@ contract ReviewSeaportFlushTest is SeaportBase {
         uint256 price = core.ceilingOf(id);
         assertGt(held, 0.05 ether);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm(true);
+        vm.deal(address(atk), held);
+        atk.arm(true, held);
         bytes memory data = _order(id, price, atk);
 
         uint256 pot0 = core.ethPot();
@@ -122,12 +133,14 @@ contract ReviewSeaportFlushTest is SeaportBase {
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm(false);
+        vm.deal(address(atk), held);
+        atk.arm(false, held);
         bytes memory data = _order(id, price, atk);
         vm.prank(maker);
         vm.expectRevert(ICore.CallFailed.selector);
         core.buyListing(price, data, id, Mainnet.SEAPORT);
-        assertEq(address(feeRouter).balance, held, "the fees wait in the router");
+        assertEq(address(feeRouter).balance, 0, "the push inside the call reverted with it");
+        assertEq(address(atk).balance, held, "the attacker kept its eth");
     }
 
     /// the fees that waited are booked by a normal flush right after, with the owner's buyback split. the fees skip
@@ -140,7 +153,8 @@ contract ReviewSeaportFlushTest is SeaportBase {
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm(true);
+        vm.deal(address(atk), held);
+        atk.arm(true, held);
         bytes memory data = _order(id, price, atk);
         vm.prank(maker);
         core.buyListing(price, data, id, Mainnet.SEAPORT);
@@ -168,11 +182,17 @@ contract ReviewSeaportFlushTest is SeaportBase {
             uint256 id = _list();
             uint256 price = core.ceilingOf(id);
             FlushingPayee atk = new FlushingPayee(address(feeRouter));
-            atk.arm(round != 1);
+            vm.deal(address(atk), held);
+            atk.arm(round != 1, held);
             bytes memory data = _order(id, price, atk);
             vm.prank(maker);
             if (round == 1) vm.expectRevert(ICore.CallFailed.selector);
             core.buyListing(price, data, id, Mainnet.SEAPORT);
+            if (round == 1) {
+                // the call reverted whole and took the push with it: a later swap leaves the bounty again
+                assertEq(address(feeRouter).balance, 0);
+                vm.deal(address(feeRouter), held);
+            }
             assertEq(address(feeRouter).balance, held, "waiting");
             // same transaction, right after the door (success or revert): the flush goes through
             uint256 pot0 = core.ethPot();
@@ -188,7 +208,7 @@ contract ReviewSeaportFlushTest is SeaportBase {
         uint256 id = _list();
         uint256 price = core.ceilingOf(id);
         FlushingPayee atk = new FlushingPayee(address(feeRouter));
-        atk.arm(true);
+        atk.arm(true, 0);
         bytes memory data = _order(id, price, atk);
         assertEq(address(feeRouter).balance, 0);
         uint256 maker0 = maker.balance;
@@ -299,7 +319,7 @@ contract ReviewRouterGasTest is FeeBase {
 
     function _tryFlush(uint256 g) internal returns (bool ok) {
         vm.prank(flusher);
-        (ok,) = address(feeRouter).call{gas: g}(abi.encodeCall(IFeeRouter.flush, ()));
+        (ok,) = address(feeRouter).call{gas: g}(abi.encodeCall(IFeeRouter.flush, (address(this))));
     }
 
     function test_OK_aNormalFlushPaysTheHeavyPayeeDirectly() public {
@@ -357,7 +377,7 @@ contract FlushOnPayout {
     receive() external payable {
         if (armed) {
             armed = false;
-            ROUTER.flush();
+            ROUTER.flush(address(this));
         }
     }
 }

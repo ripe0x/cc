@@ -37,7 +37,7 @@ interface IFeeRouter {
     function acceptOwnership() external;
     function claim(address payee) external;
     function engine() external view returns (address);
-    function flush() external;
+    function flush(address tipTo) external;
     function lock() external;
     function locked() external view returns (bool);
     function owed(address) external view returns (uint256);

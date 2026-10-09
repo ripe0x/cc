@@ -23,7 +23,7 @@ abstract contract Flushes {
     function _flush() internal {
         if (address(feeRouter) == address(0)) return;
         ++flushes;
-        try feeRouter.flush() {} catch {
+        try feeRouter.flush(address(this)) {} catch {
             ++flushFailed;
         }
     }

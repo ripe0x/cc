@@ -11,7 +11,7 @@ we own four contracts. everything else is live, or for the artcoins v2 stack a c
 | Core | custody and every rule, books the router's flushes as fees, owner of its auction house | ours, predicted at deploy |
 | CoreLib | linked library of the Core: settings write, rate and auction math, the buyback swap, `rescueCoin` | ours, deployed before the Core |
 | ControllerV1 | first policy module, immutable | ours, predicted at deploy |
-| FeeRouter | bounty recipient of the pool. empty `receive`, permissionless `flush` (tip, payees, engine), owner setters closed by one way `lock` | ours, predicted at deploy |
+| FeeRouter | bounty recipient of the pool. empty `receive`, permissionless `flush(tipTo)` (tip, payees, engine), called by the Core at the start of its eth pot doors, owner setters closed by one way `lock` | ours, predicted at deploy |
 | Core's auction house | where statements are listed, created by the Core in its constructor, owned by it forever | created at deploy |
 | pnd auction factory | creates auction houses | 0x77aB853543286C9Cdd7dd6c01222A7cC4Ac93d63 |
 | ArtCoinsTokenV2 | the coin, restricted, launched through the factory | created at launch |
@@ -96,7 +96,7 @@ the system launches on the artcoins v2 stack. everything a launch needs is in on
 | 4 | `forge script script/Preflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
 | 5 | `forge script script/Deploy.s.sol --rpc-url $PRIVATE_RPC --broadcast --slow --ledger` through a private relay, with `CONFIG_HASH` set. nine transactions, the library first, the router setup last. a half finished deploy is finished with `script/Resume.s.sol` |
 | 6 | verify CoreLib, ControllerV1, FeeRouter and Core, then `CORE=0x... forge script script/Postflight.s.sol --rpc-url $MAINNET_RPC_URL` (read only) |
-| 7 | after launch: keepers call `flush` on the router, owner commands on the router (payees, tip, split start, engine, lock) are in docs/DEPLOY.md section 4 |
+| 7 | after launch: the Core pulls the router fees at its doors (a keeper may call `flush(tipTo)`), owner commands on the router (payees, tip, split start, engine, lock) are in docs/DEPLOY.md section 4 |
 
 the full runbook is docs/DEPLOY.md.
 
