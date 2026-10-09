@@ -101,7 +101,7 @@ uint256 constant RATE_START_MAX_WEI = 1e15;
 struct Settings {
     /// share of a bid priced flat per credit, bps. 10_000 is flat, 0 is per score point
     uint16 flatBps;
-    /// the score a flat credit is priced as and the "average credit" of the funded rule, 1e4 scale
+    /// the score a flat credit is priced as and the "average credit" of the clamp, 1e4 scale
     uint32 avgScore;
     /// fall of the eth rate per credit bought, bps of the rate before that credit
     uint16 dropPerCreditBps;

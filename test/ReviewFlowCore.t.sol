@@ -77,6 +77,7 @@ contract ReviewFlowCoreTest is Fixture {
         emit log_named_uint("per tx: paid to the accomplice (wei)", got);
         emit log_named_uint("per tx: share of the pot, bps", got * 10_000 / pot);
         emit log_named_uint("per tx: market value of the credits (wei)", n * MARKET);
+        assertApproxEqAbs(got * 10_000 / pot, 4_951, 10, "49.5 percent of the pot in one block, the figure in docs/FLOW.md");
         assertLe(got, pot / 2, "never above the spend cap of 50 percent");
         assertGe(got, pot * 45 / 100, "at least 45 percent in one block");
         assertGt(got, n * MARKET * 25, "paid 25x market");
@@ -136,7 +137,12 @@ contract ReviewFlowCoreTest is Fixture {
             );
             emit log_named_uint("per day: share of the pot, bps", total * 10_000 / pot0);
             emit log_named_uint("per day: market value of the credits (wei)", credits * MARKET);
-            assertGt(total, pot0 * (mode == 0 ? 90 : 95) / 100, "the seller took it");
+            assertApproxEqAbs(
+                total * 10_000 / pot0,
+                mode == 0 ? 9_999 : 9_950,
+                10,
+                "99.99 percent per day loosest, 99.5 percent at the launch settings, the figures in docs/FLOW.md"
+            );
             _solvent();
         }
     }

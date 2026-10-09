@@ -34,11 +34,6 @@ library BidModel {
         return anchor * (10_000 + uint256(s.idleLoosenBps) * (idle / 10 minutes)) * s.ceilBps / 1e8;
     }
 
-    /// @dev the pot affords one average credit at the stored rate `r`
-    function funded(Settings memory s, uint256 pot, uint256 r) internal pure returns (bool) {
-        return pot * s.spendCapBps >= uint256(s.avgScore) * r;
-    }
-
     /// @dev the price state after `dt` seconds from the stored rate `r`: at most `rateCap` and the ceiling,
     /// compounding `climbPerMinBps` a minute up to the clamp (a price state above the clamp holds)
     function price(Settings memory s, uint256 r, uint256 pot, uint256 anchor, uint256 idle, uint256 dt)

@@ -109,7 +109,6 @@ contract RateFuzzTest is Fixture {
         uint256 pot = bound(potSeed, min, min + 1000 ether);
         uint256 mins = bound(waitSeed, 0, 240);
         _fund(pot);
-        assertTrue(core.funded());
         _warp(mins * 1 minutes);
         uint256 p = _priceAfter(s, START, pot, START, block.timestamp - core.lastFillTime(), mins);
         assertApproxEqRel(core.ethRate(), _readOf(s, pot, p), 1e-7 ether, "compounded per minute, then the clamp");
@@ -128,13 +127,11 @@ contract RateFuzzTest is Fixture {
         uint256 pot = bound(potSeed, 0, min - 1);
         uint256 idle = bound(idleSeed, 0, 3000);
         if (pot != 0) _fund(pot);
-        assertFalse(core.funded());
         _warp(idle * 1 hours);
         assertEq(core.ethRate(), _readOf(s, pot, START), "the price state holds and the read is the clamp");
 
         uint256 top = bound(topSeed, min - pot, min - pot + 100 ether);
         _fund(top);
-        assertTrue(core.funded());
         assertEq(core.rateAtCheckpoint(), START, "no retroactive climb, and the clamp is not stored");
         uint256 clamp = BidModel.clamp(s, pot + top);
         assertEq(core.ethRate(), clamp < START ? clamp : START, "the read is the clamp when it binds");
@@ -171,7 +168,6 @@ contract RateFuzzTest is Fixture {
         assertEq(
             core.ethRate(), _readOf(b, pot, _priceAfter(b, r1, pot, START, idle, 0)), "the read under the new settings"
         );
-        assertEq(core.funded(), BidModel.funded(b, pot, r1), "the funded flag follows the new numbers");
         m2 = bound(m2, 0, 240);
         _warp(m2 * 1 minutes);
         uint256 p2 = _priceAfter(b, r1, pot, START, block.timestamp - core.lastFillTime(), m2);
@@ -350,8 +346,7 @@ contract RateFuzzTest is Fixture {
         _fund(pot);
         _warp(bound(waitSeed, 3000, 20_000) * 1 hours);
         uint256 cap = BidModel.clamp(s, pot);
-        assertEq(core.ethRate(), cap, "pinned at the funded clamp");
-        assertTrue(core.funded());
+        assertEq(core.ethRate(), cap, "pinned at the clamp");
         // one average credit costs what the hourly cap allows, up to rounding down of the rate
         uint256 avgPrice = uint256(s.avgScore) * cap / 1e4;
         assertLe(avgPrice, pot * s.spendCapBps / 10_000);

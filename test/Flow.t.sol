@@ -217,18 +217,20 @@ contract FlowTest is Fixture {
         vm.stopPrank();
     }
 
-    function test_setRate_resyncsFundedFlag() public {
+    function test_setRate_readStaysAtTheClampOfThePot() public {
         _potTo(1e16);
-        assertTrue(core.funded(), "funded at the opening rate");
+        uint256 clamp = uint256(1e16) * 2000 / (4_330_000 * 20);
         Settings memory cs = core.settings();
         cs.rateCap = 1e15;
         _owner(cs);
         vm.prank(owner);
         core.setRate(1e15);
-        assertFalse(core.funded(), "a pot of five average credits at 4e12 cannot fund 1e15");
+        assertEq(core.rateAtCheckpoint(), 1e15);
+        assertEq(core.ethRate(), clamp, "a pot of 1e16 reads its clamp under a stored rate of 1e15");
         vm.prank(owner);
         core.setRate(4e12);
-        assertTrue(core.funded());
+        assertEq(core.rateAtCheckpoint(), 4e12);
+        assertEq(core.ethRate(), clamp, "and under the opening rate");
     }
 
     function test_setXRate_boundsAndEvent() public {
@@ -296,9 +298,8 @@ contract FlowTest is Fixture {
         assertEq(core.ethRate(), _climbed(old, 1, 60), "an hour at 1 bps, the lowest climb");
     }
 
-    function test_checkpoint_fundedFlagFollowsTheNewNumbers() public {
+    function test_checkpoint_clampFollowsTheNewNumbers() public {
         _potTo(1e16);
-        assertTrue(core.funded());
         _warp(5 hours);
         // 20 credits of room at 1e16 is below the opening rate: the read is the clamp
         uint256 held = uint256(1e16) * 2000 / (4_330_000 * 20);
@@ -307,15 +308,13 @@ contract FlowTest is Fixture {
         s.avgScore = 6_000_000;
         s.spendCapBps = 100;
         _owner(s);
-        // the pot of 1e16 cannot afford one 6M credit at the stored rate under a 1 percent cap: 1e18 is below 1.4e18
-        assertFalse(core.funded(), "unfunded at the new average score");
         _warp(100 hours);
         assertEq(core.ethRate(), uint256(1e16) * 100 / (6_000_000 * 20), "the clamp of the new numbers");
         assertEq(core.rateAtCheckpoint(), 4e12, "the price state the change stored");
         s.avgScore = 4_330_000;
         s.spendCapBps = 2_000;
         _owner(s);
-        assertTrue(core.funded());
+        assertEq(core.ethRate(), held, "and back on the old numbers");
     }
 
     function test_checkpoint_exitRateKeepsOldClimb() public {

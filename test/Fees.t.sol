@@ -333,7 +333,6 @@ contract FeeFlowTest is FeeBase {
         _flow(Kind.BuyExactIn, 1 ether, "");
         assertEq(core.checkpointTime(), block.timestamp, "checkpoint time moved to the fee");
         assertEq(core.rateAtCheckpoint(), rateBefore, "the climbed rate was locked in before the pot grew");
-        assertTrue(core.funded());
     }
 
     /// a swap that carries a referrer cannot brick and changes nothing: the referral cap is frozen at zero in the pool
@@ -433,7 +432,6 @@ contract ReceiveTest is FeeBase {
     /// without a checkpoint. the climb stops at the cap after a few dozen day long steps
     function test_receiveGasAfterTwentyYearsAtTheWorstRate() public {
         assertTrue(_hookSend(1 ether));
-        assertTrue(core.funded());
         uint256 slot = stdstore.target(address(core)).sig("rateAtCheckpoint()").find();
         vm.store(address(core), bytes32(slot), bytes32(uint256(1)));
         assertTrue(_hookSend(100_000_000 ether));

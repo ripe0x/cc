@@ -117,7 +117,6 @@ contract EconDialsTest is Fixture {
         _setSettings(s);
         vm.deal(address(core), pot);
         core.skim();
-        assertTrue(core.funded());
         uint256[] memory ids = _credits(seller, 12);
         for (uint256 i; i < ids.length; ++i) {
             uint256 x = core.ceilingOf(ids[i]);

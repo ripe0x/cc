@@ -139,7 +139,6 @@ interface ICore {
     function exitModuleLocked() external view returns (bool);
     function exitStatement(uint256 sid) external;
     function exitToken() external view returns (address);
-    function funded() external view returns (bool);
     function heldStatements() external view returns (uint256[] memory sids);
     function lastBuybackBlock() external view returns (uint256);
     function lastFillTime() external view returns (uint64);

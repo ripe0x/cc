@@ -26,7 +26,7 @@ one `Settings` struct in Core storage, one owner function `setSettings(Settings)
 | setting | launch value | bounds | meaning |
 |---|---|---|---|
 | flatBps | 10_000 | 0 to 10_000 | share of the bid that is flat per credit. price = rate * (flatBps * avgScore + (10_000 - flatBps) * score) / 10_000 / 1e4, before the controller bonus |
-| avgScore | 4_330_000 | 800_000 to 6_000_000 | the score a flat credit is priced as, and the "average credit" in the funded rule |
+| avgScore | 4_330_000 | 800_000 to 6_000_000 | the score a flat credit is priced as, and the "average credit" of the clamp |
 | dropPerCreditBps | 50 | 1 to 1_000 | each credit bought lowers the rate by this share of the rate before that credit |
 | dropFloorBps | 8_000 | 5_000 to 10_000 | within one minute bucket the rate does not fall below this share of the price state at the first fill of the bucket |
 | climbPerMinBps | 50 | 1 to 1_000 | rate climb per minute, compounded |
@@ -60,8 +60,8 @@ the credit bid is a rate in wei per whole point. state: the rate at the last che
 
 * drop: each credit bought with the price state `p` at the fill sets the price state to `p * (10_000 - dropPerCreditBps) / 10_000`, not below `dropFloorBps * minuteStart / 10_000`, where `minuteStart` is the price state at the first fill of the same minute bucket. a `p` already below that floor (restated by `setRate`, or lowered by `ceilBps` or `rateCap`) starts a new floor: `minuteStart` becomes `p`. `p` becomes `lastFillRate` and `lastFillTime` is now. `buyListing` is one fill.
 * price state: the stored rate `rateAtCheckpoint` with the anchor and the minute state. it climbs from checkpoint time `t` to `now` as `rate * (1 + climbPerMinBps / 10_000) ^ ((now - t) / 60)`, compounded per minute with a fractional minute as a fractional exponent, up to the clamp `ethPot * spendCapBps / (avgScore * clampCredits)`. a price state above the clamp holds its value, so a starved pot does not raise it and a refill resumes from the price before the starvation. it never exceeds `rateCap` or the ceiling `lastFillRate * (10_000 + idleLoosenBps * floor((now - lastFillTime) / 600)) * ceilBps / 1e8`, which a checkpoint stores. loosening is linear in the number of idle 10 minute intervals.
-* read: `ethRate()` is the price state lowered to the clamp `ethPot * spendCapBps / (avgScore * clampCredits)`, funded or not. the clamp is computed from the current pot and is not stored, so the read does not fall as the pot grows, is at most the price state, and is zero for an empty pot. the hourly room, `windowPot * spendCapBps / 10_000 - windowSpent`, is a separate check on every spend (`_requireRoom`): a sell batch whose running total crosses it reverts whole with `HourlyCap`, and the credits before the crossing are not filled.
-* a fill pays the read. the drop, the minute floor and the anchor use the price state at the fill, so a fill at the clamp leaves the price state exactly as a fill at full price would. `buyListing` is one fill and checks its price against the read.
+* read: `ethRate()` is the price state lowered to the clamp `ethPot * spendCapBps / (avgScore * clampCredits)`. the clamp is computed from the current pot and is not stored, so the read does not fall as the pot grows, is at most the price state, and is zero for an empty pot. the hourly room, `windowPot * spendCapBps / 10_000 - windowSpent`, is a separate check on every spend (`_requireRoom`): a sell batch whose running total crosses it reverts whole with `HourlyCap`, and the credits before the crossing are not filled.
+* a fill pays the read. the drop, the minute floor and the anchor apply to the price state at the fill, whether or not the clamp binds, so a fill at the clamp leaves the price state exactly as a fill at full price would. `buyListing` is one fill and checks its price against the read.
 * the ceiling and `rateCap` bound both the read and the stored value: a lowered `ceilBps` or `rateCap` takes effect on the next read and the next checkpoint stores the bounded rate.
 * `setRate` restates the price: the stored rate and the ceiling anchor both become `rate`. the fill clock and the minute state stay, and a fill whose price state is below the floor of the minute starts a new floor. the clamp still lowers the read. `setSettings` keeps the anchor.
 
@@ -70,7 +70,7 @@ accepted properties of the rule.
 * anyone can checkpoint the rate (a skim of 1 wei, or a fee receipt). the checkpoint stores the bounded rate and moves `checkpointTime`, which delays the climb of the stored rate. the loosening runs from `lastFillTime` and is not delayed, so a checkpoint delays the bid reaching a loosened ceiling by at most 4 minutes per 10 minute step.
 * a seller who sells at falling prices across minutes can drag the anchor down: the minute floor restarts every minute, so each minute the rate can fall 20 percent and the anchor follows the price state at the fill. the recovery is the loosening of the ceiling or the owner's `setRate`.
 
-also owner settable at once, each with its own small function and event: `setRate(uint256)` (restates the eth rate and its ceiling anchor, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). the funded rule (the hourly cap must afford one average credit) is logic, not a setting. `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
+also owner settable at once, each with its own small function and event: `setRate(uint256)` (restates the eth rate and its ceiling anchor, bounded to the rate bounds and to `rateCap`, checkpoints), `setXRate(uint256)` (within floor and cap). `rateStart` stays a constructor input. nothing else is immutable except addresses of external contracts and the owner.
 
 the skim split (9.5 points to the engine, 0.5 to the creator) was the v1 launch fact and is superseded by section 10: 6.9 points of volume, 6.21 to the router and 0.69 the protocol leg, fixed inside the v2 pool at launch and not adjustable here. say so in the docs.
 
@@ -130,7 +130,7 @@ the real exit module interface is still unknown. the adapter is written later. t
 rules for a later set (the first set behaves as before):
 * same validity checks as the first set on the module and on the unit (code, forbidden targets, unit range, the opening price floor of the exit auction computed with the new unit).
 * a set clears `allowedTarget` of the new module, so a flag set earlier cannot come back to life after the module is replaced.
-* checkpoint the exit rate under the OLD unit before the unit changes, resync the funded flag after. no climb is credited under the wrong numbers.
+* checkpoint the exit rate under the OLD unit before the unit changes, resync the exit funded flag after. no climb is credited under the wrong numbers.
 * the exit auction price is coin per exit token and does not depend on the unit, only the slice size does. a set must never make `buybackExit` cheaper than it was the moment before: a later set never touches `xStartPrice` or `xStartTime`, whether `xToBuyback` is zero or not: the price is found by the market and the unit only changes the slice size, so no rescale is applied. the first set opens the auction as before.
 * pots, piles, held statements are untouched.
 * `ExitModuleSet` is emitted every time.

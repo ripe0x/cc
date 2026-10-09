@@ -295,9 +295,9 @@ abstract contract InvariantFixture is Fixture {
     }
 
     // the hourly window slots of the core, from `forge inspect Core storage-layout`: windowStart is the uint64 at
-    // byte 17 of slot 11, windowPot is slot 12 and windowSpent is slot 13
+    // byte 16 of slot 11, windowPot is slot 12 and windowSpent is slot 13
     function _windowStart() internal view returns (uint256) {
-        return (uint256(vm.load(address(core), bytes32(uint256(11)))) >> 136) & type(uint64).max;
+        return (uint256(vm.load(address(core), bytes32(uint256(11)))) >> 128) & type(uint64).max;
     }
 
     function _windowPot() internal view returns (uint256) {

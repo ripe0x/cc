@@ -294,7 +294,7 @@ contract RehearsalTest is Test, ProdDeployer {
 
     /// finds a real credit held by an account without code and sells it into the bid
     function _sellRealCredit(ICore core) internal {
-        assertTrue(core.funded(), "funded after the fees");
+        assertGt(core.ethPot(), 0, "the pot holds the fees");
         assertGe(core.ethRate(), c.rateStart, "the rate never starts below the config start");
         ICredits credits = ICredits(Mainnet.CREDITS);
         uint256 cap = core.ethPot() * 2000 / 10_000;

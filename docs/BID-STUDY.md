@@ -276,7 +276,7 @@ The rows in this section follow the contract as built in `src/lib/CoreLib.sol` (
 
 1. Idle loosening is linear: the anchor is the last fill rate times `1 + idleLoosenPct x floor(idleSeconds / (idleLoosenMin x 60))`. The earlier sim compounded the percent per interval.
 2. The price state holds the stored rate and the anchor. It climbs per minute toward min(ceiling, rateCap, clamp), where the clamp is the hourly room divided by `clampCredits`. A stored rate above the ceiling or `rateCap` reads as that bound. A stored rate above the clamp holds its value: the clamp stops the climb and never lowers the price state.
-3. The read bid is the price state lowered to the clamp at every pot, funded or not. The read bid is what a seller is paid. A fill drops the price state rate and sets the anchor to the price state rate at the fill, the clamp is never stored. An empty pot reads 0. The minute floor of the drop restarts at the price when the price is already under the floor of the current minute.
+3. The read bid is the price state lowered to the clamp at every pot. The read bid is what a seller is paid. A fill drops the price state rate and sets the anchor to the price state rate at the fill, the clamp is never stored. An empty pot reads 0. The minute floor of the drop restarts at the price when the price is already under the floor of the current minute.
 
 A checkpoint stores the price state. The fill price is the read, and the drop, the minute floor and the anchor use the price state at the fill, so a small pot leaves the stored rate and the anchor at the price state.
 

@@ -39,22 +39,20 @@ contract LifecycleSwapsTest is Fixture {
     }
 
     /// the rate does not climb while the pot cannot afford one average credit, and does not climb retroactively
-    function test_swaps_rateClimbsOnlyOnceFunded() public {
+    function test_swaps_priceStateWaitsForTheClamp() public {
         _skipSniperWindow();
         assertEq(core.rateAtCheckpoint(), core.RATE_START());
         assertEq(core.ethRate(), 0, "an empty pot reads zero");
 
-        // one average credit costs 1.732e15 wei at the start rate (4e12) and funded needs the hourly cap (20 percent of
-        // the pot) to afford it, so a pot of 8.66e15. a small buy leaves less than one average credit in the pot
+        // one average credit costs 1.732e15 wei at the start rate (4e12). a small buy leaves less than one average credit
+        // in the pot
         _buyCoin(trader, 0.01 ether);
         assertLt(core.ethPot(), 1.7e15);
-        assertFalse(core.funded());
         _warp(200 hours);
         assertEq(core.ethRate(), core.ethPot() * 2000 / (core.settings().avgScore * 20), "a small pot reads the clamp");
 
-        // the pot passes the threshold
+        // the pot grows
         _buyCoin(trader, 0.2 ether);
-        assertTrue(core.funded());
         assertLe(core.ethRate(), core.RATE_START(), "no retroactive climb");
         assertEq(core.rateAtCheckpoint(), core.RATE_START(), "the price state waited at the opening rate");
         // a pot with room for 20 average credits lets the climb start
@@ -179,7 +177,6 @@ contract LifecycleDoorsTest is Fixture {
         uint256 rate;
         uint64 checkpointTime;
         uint64 lastFillTime;
-        bool funded;
         uint256 pile;
         uint256 saleA;
         uint256 saleB;
@@ -194,7 +191,6 @@ contract LifecycleDoorsTest is Fixture {
         s.rate = core.rateAtCheckpoint();
         s.checkpointTime = core.checkpointTime();
         s.lastFillTime = core.lastFillTime();
-        s.funded = core.funded();
         s.pile = core.pileSize(Lane.Eth);
         s.saleA = ICreditStrategy(STRATEGY).nftForSale(LISTED_A);
         s.saleB = ICreditStrategy(STRATEGY).nftForSale(LISTED_B);

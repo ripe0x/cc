@@ -135,9 +135,8 @@ contract BidRuleTest is Fixture {
 
     /// the price state does not climb while the pot cannot afford one average credit at the stored rate, and the read is
     /// the clamp of the pot
-    function test_climbWaitsForAFundedPot() public {
+    function test_climbTargetIsTheClamp() public {
         _potTo(1e15);
-        assertFalse(core.funded());
         _warp(2 hours);
         assertEq(core.ethRate(), uint256(1e15) * 2_000 / (4_330_000 * 20), "the read is the clamp");
         vm.deal(address(core), address(core).balance + 1);
@@ -364,7 +363,6 @@ contract BidRuleTest is Fixture {
         core.skim();
         vm.deal(address(core), address(core).balance + 1);
         core.skim();
-        assertTrue(core.funded());
         uint256 clamp = core.ethPot() * 2_000 / (4_330_000 * 20);
         assertLt(clamp, START / 3, "the clamp is a fraction of the opening rate");
         assertEq(core.ethRate(), clamp);
@@ -446,6 +444,31 @@ contract BidRuleTest is Fixture {
             price = price * 9_950 / 10_000;
             assertEq(core.rateAtCheckpoint(), price, "and the price state drops as at full price");
         }
+    }
+
+    /// a batch of three sold into a pot whose clamp is half the opening rate: each credit pays 433 times the clamp of the
+    /// pot it finds, and the anchor is the price state at the third fill
+    function test_clampBoundBatchPaysTheClampedReadAndAnchorsAtThePrice() public {
+        // 86_600_000_000_000_000 * 2000 / 86_600_000 = 2e12, half of the opening rate
+        uint256 pot = 86_600_000_000_000_000;
+        _potTo(pot);
+        assertEq(core.ethRate(), START / 2);
+        uint256[] memory ids = _credits(seller, 3);
+        uint256 expected;
+        for (uint256 i; i < 3; ++i) {
+            expected += 433 * (pot * 2_000 / 86_600_000);
+            pot -= 433 * (pot * 2_000 / 86_600_000);
+        }
+        uint256 before = seller.balance;
+        vm.prank(seller);
+        core.sellForEth(ids);
+        assertEq(seller.balance - before, expected, "the batch pays the clamped reads");
+        assertEq(core.ethPot(), pot);
+        assertLt(expected, 3 * 433 * START, "the clamp binds");
+        (uint256 anchor, uint256 start,) = _anchor();
+        assertEq(anchor, 3_960_100_000_000, "the anchor is the price state at the third fill");
+        assertEq(start, START, "the minute started at the opening rate");
+        assertEq(core.rateAtCheckpoint(), 3_940_299_500_000, "and the price state dropped once per credit");
     }
 
     /// the hourly room is 20 percent of the pot at the first spend of the hour. a pot of exactly 20 credits of room at an

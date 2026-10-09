@@ -266,7 +266,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 public rateAtCheckpoint;
     uint64 public checkpointTime;
     uint64 public lastFillTime;
-    bool public funded;
 
     uint64 windowStart;
     uint256 windowPot;
@@ -373,7 +372,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         uint256 toBuyback = msg.value * _st().feeToBuybackBps / BPS;
         if (toBuyback != 0) ethToBuyback += toBuyback;
         ethPot += msg.value - toBuyback;
-        _syncFunded();
         emit FeesAdded(msg.value);
     }
 
@@ -393,7 +391,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (eth != 0) {
             _checkpoint();
             ethPot += eth;
-            _syncFunded();
         }
         uint256 x;
         address token = exitToken;
@@ -434,12 +431,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         checkpointTime = uint64(block.timestamp);
     }
 
-    /// funded means the pot affords one average credit at the stored rate: `ethPot * spendCapBps >= avgScore * rate`
-    function _syncFunded() private {
-        Settings storage s = _st();
-        funded = ethPot * s.spendCapBps >= uint256(s.avgScore) * rateAtCheckpoint;
-    }
-
     /// the price of credit id at `rate`: the flat share of the bid prices it as an average credit, the rest by its own
     /// score, then the controller bonus. with a fully flat bid the score contract is not read
     function _ceiling(uint256 id, uint256 rate) private view returns (uint256) {
@@ -450,7 +441,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         return blend * rate * (BPS + _bonus(id, s.bonusCapBps)) / (BPS * BPS * 1e4);
     }
 
-    /// checkpoints, then books a spend of x from the pot: hourly cap, rate drop, fill time, funded flag.
+    /// checkpoints, then books a spend of x from the pot: hourly cap, rate drop, fill time.
     function _spend(uint256 x) private {
         _checkpoint();
         uint256 p = ethPot;
@@ -462,7 +453,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         rateAtCheckpoint = r;
         lastFillTime = uint64(block.timestamp);
         ethPot = p - x;
-        _syncFunded();
         emit EthRateFill(x, r, p - x);
     }
 
@@ -758,7 +748,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         if (r != 0) {
             _checkpoint();
             ethPot -= r;
-            _syncFunded();
         }
     }
 
@@ -845,7 +834,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         ethToBuyback += toBuyback;
         _checkpoint();
         ethPot += amount - toBuyback;
-        _syncFunded();
         emit SalesCollected(amount, toBuyback);
     }
 
@@ -1166,7 +1154,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// sets every economic setting at once, effective now. the eth rate and the exit rate are checkpointed first, so no
     /// climb is credited under the wrong numbers, then the call is handed to the library untouched: it checks every
-    /// field against its bounds, stores them and logs them. the funded flags are recomputed after, the exit rate is
+    /// field against its bounds, stores them and logs them. the exit funded flag is recomputed after, the exit rate is
     /// held inside the new band, and the exit auction is re anchored at its price now when its half life changes
     function setSettings(Settings calldata) external onlyOwner nonReentrant {
         _checkpoint();
@@ -1194,7 +1182,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             xStartTime = uint64(block.timestamp);
         }
         xRateAtCheckpoint = xRateAtCheckpoint.min(s.xRateCap).max(s.xRateFloor);
-        _syncFunded();
         if (module) _syncXFunded();
     }
 
@@ -1205,7 +1192,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         RateStore.load().lastFillRate = rate;
         rateAtCheckpoint = rate;
         checkpointTime = uint64(block.timestamp);
-        _syncFunded();
         emit RateSet(rate);
     }
 
@@ -1220,7 +1206,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
 
     /// sets or replaces the exit module. the exit token never changes once set.
     /// the unit is read again every time, so naming the same module again is how the unit is updated. the exit rate is
-    /// checkpointed under the old unit first and the funded flag resynced after. a later set never touches the exit
+    /// checkpointed under the old unit first and the exit funded flag resynced after. a later set never touches the exit
     /// auction price or clock: the price is coin per exit token, the unit only changes the slice. a dormant allowed
     /// target flag of the new module is cleared, so it cannot come back to life when the module is replaced
     function _setExitModule(address module) private {

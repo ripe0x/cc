@@ -158,10 +158,10 @@ abstract contract HandlerBase is Test {
     bytes32 internal constant SKIM_SPLIT = keccak256("SkimSplit(bytes32,uint256,uint256,uint256,uint256)");
     bytes32 internal constant TRANSFER = keccak256("Transfer(address,address,uint256)");
 
-    // core storage slots of windowStart (offset 17 in slot 11), windowPot and windowSpent.
+    // core storage slots of windowStart (offset 16 in slot 11), windowPot and windowSpent.
     // from `forge inspect Core storage-layout`. the fixture proves them against public getters.
     uint256 internal constant SLOT_WINDOW_START = 11;
-    uint256 internal constant WINDOW_START_SHIFT = 136;
+    uint256 internal constant WINDOW_START_SHIFT = 128;
     uint256 internal constant SLOT_WINDOW_POT = 12;
     uint256 internal constant SLOT_WINDOW_SPENT = 13;
 
@@ -681,7 +681,6 @@ abstract contract HandlerBase is Test {
         Settings st;
         uint256 rate;
         uint256 pot;
-        bool funded;
         uint256 anchor;
         uint256 lastFill;
         uint256 stored;
@@ -694,7 +693,6 @@ abstract contract HandlerBase is Test {
         s.pot = core.ethPot();
         s.stored = core.rateAtCheckpoint();
         s.cp = core.checkpointTime();
-        s.funded = s.pot * s.st.spendCapBps >= uint256(s.st.avgScore) * s.stored;
         (s.anchor,,) = _anchorState();
         s.lastFill = core.lastFillTime();
     }
@@ -709,7 +707,7 @@ abstract contract HandlerBase is Test {
     }
 
     /// the rate a fill in the next transaction starts its minute from: the stored start inside the current minute
-    /// bucket, `rate` (the rate it pays) when the bucket is new
+    /// bucket, `rate` (the price state at the fill) when the bucket is new
     function _minuteStartNow(uint256 rate) internal view returns (uint256) {
         (, uint256 start, uint256 bucket) = _anchorState();
         return bucket == block.timestamp / 60 ? start : rate;
@@ -733,9 +731,8 @@ abstract contract HandlerBase is Test {
     /// one action or one warp, only the owner's calls change them and those are checked on their own). across a warp
     /// the read equals the model read from the state the interval started in. in an interval without time passing
     /// (any action except a warp, `setRate` and `setSettings`) the stored rate is at most the larger of the stored rate
-    /// and the price state at the start of the interval, and the read is at most the larger of the read at the start
-    /// and the clamp of the pot at the end.
-    /// the stored funded flag must agree with the pot and the stored rate
+    /// and the price state at the start of the interval, and the read equals the model read from the state and the
+    /// settings at the end.
     function _rsCheck(RS memory s, uint256 dt) internal {
         uint256 rate1 = core.ethRate();
         uint256 p =
@@ -748,11 +745,11 @@ abstract contract HandlerBase is Test {
             if (core.rateAtCheckpoint() > s.stored.max(p)) {
                 _flag(V_RATE_BOUND, "the stored rate rose with no time passing");
             }
-            if (rate1 > s.rate.max(BidModel.clamp(s.st, core.ethPot()))) {
-                _flag(V_RATE_BOUND, "the rate rose above the previous read and the clamp with no time passing");
+            Settings memory end = core.settings();
+            if (rate1 != BidModel.read(end, core.ethPot(), _priceNow(end))) {
+                _flag(V_RATE_BOUND, "the read differs from the price state lowered to the clamp of the end pot");
             }
         }
-        _fundedCheck();
     }
 
     /// the exit side of the same rule, read from the core's storage (slots 14 and 15, `forge inspect Core
@@ -763,12 +760,6 @@ abstract contract HandlerBase is Test {
         bool stored = (uint256(vm.load(address(core), bytes32(uint256(15)))) >> 64) & 0xff != 0;
         bool want = core.xPot() * 10_000 >= uint256(st.avgScore) * rate * core.unitPerPoint();
         if (stored != want) _flag(V_FUNDED_STALE, "exit funded flag disagrees with pot, stored rate and unit");
-    }
-
-    function _fundedCheck() internal {
-        Settings memory st = core.settings();
-        bool want = core.ethPot() * st.spendCapBps >= uint256(st.avgScore) * core.rateAtCheckpoint();
-        if (core.funded() != want) _flag(V_FUNDED_STALE, "funded flag disagrees with pot and the stored rate");
     }
 
     /// independent hourly window ghost. a spend after the window expired opens a new window whose pot is the pot as
@@ -1023,7 +1014,6 @@ abstract contract HandlerBase is Test {
         _coinCheck();
         _houseCheck();
         _settingsCheck();
-        _fundedCheck();
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -98,7 +98,6 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
         core.skim();
         assertEq(core.ethPot(), 10 ether);
         assertEq(core.ethRate(), 4e12);
-        assertTrue(core.funded());
         // ten minutes at 0.5 percent a minute from the opening rate, 4e12 * 1.005^10
         _warp(10 minutes);
         uint256 r1 = core.ethRate();
@@ -349,7 +348,6 @@ contract RateModelFuzz is ReviewEconBase {
             _step(seed);
             assertApproxEqRel(core.ethRate(), _modelAt(block.timestamp), 1e10, "rate equals the model");
         }
-        assertTrue(core.funded(), "the walk ended funded");
         assertTrue(core.ethRate() != 4e12, "and the rate moved");
     }
 }

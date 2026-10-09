@@ -236,7 +236,6 @@ abstract contract HandlerOwner is HandlerHouse {
             if (stored != p.price) _flag(V_RATE_BOUND, "a settings call moved the stored eth rate");
             if (core.ethRate() != want) _flag(V_RATE_BOUND, "a settings call moved the eth rate");
         }
-        _fundedCheck();
         if (phase2()) _xFundedCheck();
         // the exit rate is held inside the new band and nothing else
         uint256 want = p.xRate > ns.xRateCap ? ns.xRateCap : p.xRate;
@@ -475,7 +474,6 @@ abstract contract HandlerOwner is HandlerHouse {
             if (core.ethRate() != want || core.rateAtCheckpoint() != rate || anchor != rate) {
                 _flag(V_RATE_BOUND, "setRate did not land on the rate and the anchor");
             }
-            _fundedCheck();
             if (core.checkpointTime() != block.timestamp) {
                 _flag(V_RATE_BOUND, "setRate did not restart the climb clock");
             }

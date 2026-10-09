@@ -252,18 +252,11 @@ abstract contract InvariantsBase is InvariantFixture {
         vm.revertToState(snap);
     }
 
-    /// 6. the rate does not rise in any interval where the pot was unfunded, whatever the settings. checked around
-    /// every action and every warp against the settings in force over the interval. the only calls that make the stored
-    /// rate jump are the owner's `setRate`, which lands on the rate asked for, and nothing else: a settings call keeps
-    /// the rate exactly. the funded flag is recomputed independently from the pot, the stored rate and the settings.
-    function invariant_06_rateNeverRisesWhileUnfunded() public view {
+    /// 6. the stored price state and the read follow the model around every action and every warp, against the
+    /// settings in force over the interval. the only calls that make the stored rate jump are the owner's `setRate`,
+    /// which lands on the rate asked for: a settings call keeps the rate exactly.
+    function invariant_06_rateFollowsTheModel() public view {
         _zero(g6);
-        Settings memory st = core.settings();
-        assertEq(
-            core.funded(),
-            core.ethPot() * st.spendCapBps >= uint256(st.avgScore) * core.rateAtCheckpoint(),
-            "funded flag stale"
-        );
     }
 
     /// 7. hourly eth spend never exceeds the cap. the core applies the cap in force at each spend to the pot the window

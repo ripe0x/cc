@@ -580,12 +580,8 @@ contract ReviewFundedTest is Fixture {
     function _check(ICore c) internal view {
         uint256 pot = c.ethPot();
         uint256 stored = c.rateAtCheckpoint();
-        // the flag is exactly the definition: the hourly cap affords one average credit at the stored rate
-        assertEq(c.funded(), pot * 2000 >= AVG * stored, "funded flag equals its definition");
         uint256 r = c.ethRate();
-        if (c.funded()) {
-            assertLe(AVG * r, pot * 2000, "funded: the hourly cap affords an average credit at the live rate");
-        }
+        assertLe(AVG * r, pot * 2000, "the hourly cap affords an average credit at the live rate");
         // the price state never climbs while the cap cannot afford an average credit, and the read is the clamp
         if (pot * 2000 < AVG * stored) {
             assertEq(r, pot * 2000 / (AVG * 20), "the read is the clamp while unaffordable");
@@ -603,13 +599,11 @@ contract ReviewFundedTest is Fixture {
             if (op == 0) {
                 _fees(c, bound(arg, 1e9, 20 ether));
             } else if (op == 1) {
-                bool was = c.funded();
                 uint256 r0 = c.ethRate();
                 uint256 pot = c.ethPot();
                 vm.warp(block.timestamp + bound(arg, 1, 400 hours));
                 uint256 r1 = c.ethRate();
-                if (!was) assertEq(r1, r0, "unfunded rate moved");
-                else assertGe(r1, r0, "funded rate fell without a fill");
+                assertGe(r1, r0, "the read fell without a fill");
                 uint256 cap = pot * 2000 / AVG;
                 assertLe(r1, r0 > cap ? r0 : cap, "climbed above the clamp");
             } else if (op == 2) {
@@ -652,16 +646,16 @@ contract ReviewFundedTest is Fixture {
         top.rateCap = uint64(1e15);
         ICore lo = Prod.newCore(owner, address(coin), predicted, st, 1e11, top);
         ICore hi = Prod.newCore(owner, address(coin), address(1), st, 1e15, top);
-        assertEq(lo.ethRate(), 1e11);
-        assertEq(hi.ethRate(), 1e15);
-        // funded thresholds: five average credits at the rate
-        _fees(lo, 2.165e14 - 1);
-        assertFalse(lo.funded());
+        assertEq(lo.rateAtCheckpoint(), 1e11);
+        assertEq(hi.rateAtCheckpoint(), 1e15);
+        // the pot at which the clamp equals the rate: 100 average credits at the rate
+        _fees(lo, 4.33e15 - 1);
+        assertEq(lo.ethRate(), 1e11 - 1);
         _fees(lo, 1);
-        assertTrue(lo.funded());
-        _fees(hi, 2.165e18 - 1);
-        assertFalse(hi.funded());
+        assertEq(lo.ethRate(), 1e11);
+        _fees(hi, 4.33e19 - 1);
+        assertEq(hi.ethRate(), 1e15 - 1);
         _fees(hi, 1);
-        assertTrue(hi.funded());
+        assertEq(hi.ethRate(), 1e15);
     }
 }

@@ -304,7 +304,6 @@ contract RedeemRepayTest is RedeemBase {
         assertEq(repaid, 1e12, "the whole pot");
         assertEq(potLost, 1e12);
         assertEq(core.ethPot(), 0);
-        assertEq(core.funded(), false);
     }
 
     function test_repay_zeroPotPaysZeroAndDoesNotRevert() public {
@@ -454,9 +453,6 @@ contract RedeemRepayTest is RedeemBase {
         uint256 toBb = owed * core.settings().exitToBuybackBps / 10_000;
         assertEq(core.xToBuyback() - xb, toBb);
         assertEq(core.xPot() - xp, owed - toBb);
-        // the funded flag follows the pot
-        Settings memory s = core.settings();
-        assertEq(core.funded(), core.ethPot() * s.spendCapBps >= uint256(s.avgScore) * core.rateAtCheckpoint());
     }
 
     // ------------------------------------------------------------------ reentrancy

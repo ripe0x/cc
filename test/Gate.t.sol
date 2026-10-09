@@ -44,7 +44,6 @@ contract GateTest is Fixture {
         _warp(30 days);
         _sellOne();
         assertEq(core.heldStatements().length, 2, "still unsold");
-        assertTrue(core.funded());
         // the climb is clamped by the hourly cap the pot affords, so give the pot room for ten more minutes of it. a v2 buy
         // lands about 5.2 points in the pot, not the 9.5 of v1, so the one sale above left less of it
         _fundPot(core.ethPot() + 5 ether);
@@ -135,16 +134,17 @@ contract GateFuzzTest is Fixture {
     }
 
     /// forge-config: default.fuzz.runs = 40
-    function testFuzz_rateNeverRisesAcrossAnUnfundedInterval(uint256 seed) public {
+    function testFuzz_priceStateNeverRisesAcrossAnIntervalUnderTheClamp(uint256 seed) public {
         for (uint256 i; i < 14; ++i) {
             seed = uint256(keccak256(abi.encode(seed, i)));
             uint256 op = seed % 9;
-            bool unfunded = !core.funded();
-            uint256 r0 = core.ethRate();
+            Settings memory st = core.settings();
+            uint256 r0 = core.rateAtCheckpoint();
+            bool starved = core.ethPot() * st.spendCapBps / (uint256(st.avgScore) * st.clampCredits) < r0;
             if (op < 3) _warp(bound(seed >> 8, 1 minutes, 3 days));
             else _try(op, seed);
-            if (unfunded) {
-                assertLe(core.ethRate(), r0, "the rate rose across an interval that was unfunded at its start");
+            if (starved) {
+                assertLe(core.rateAtCheckpoint(), r0, "the price state rose across an interval that began under the clamp");
             }
             _solvent();
         }
