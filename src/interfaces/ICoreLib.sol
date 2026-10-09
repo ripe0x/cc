@@ -26,6 +26,7 @@ interface ICoreLib {
     error ZeroAmount();
     error ZeroId();
 
+    event CoinRescued(address indexed to, uint256 amount);
     event CreditAdopted(uint256 indexed id, uint256 cost);
     event CreditBought(uint256 indexed id, address indexed from, Lane lane, uint256 cost);
     event ExitRateFill(uint256 rate, uint256 pot);

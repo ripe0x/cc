@@ -8,16 +8,20 @@ import {LaunchConfig} from "./LaunchConfig.sol";
 import {LaunchChecks} from "./Checks.sol";
 
 /// @notice sends `coin.lockRecipients()` for the launched system at `CORE`: the hook bounty recipient (the fee router)
-/// and the locker reward recipients are frozen. the pool then pays the router for good, and the engine behind the router
-/// changes only through `router.setEngine`. one way. runs the postflight first and stops on any failed row, sends
-/// nothing unless SEND=1 and the run has `--broadcast` and a signer that is the coin admin, and reads the lock back.
+/// and the locker reward recipients are frozen. the pool then pays the router from then on, and the engine behind the
+/// router changes only through `router.setEngine`. one way. runs the postflight first and stops on any failed row,
+/// requires the hook bounty recipient to be the fee router whatever COIN_CHANGED says, sends nothing unless SEND=1 and
+/// the run has `--broadcast` and a signer that is the coin admin. the lock read back at the end is read in forge's
+/// simulation, the confirmation is Postflight with RECIPIENTS_LOCKED=1 against the chain.
 /// `CORE=0x... forge script script/Lock.s.sol --rpc-url $MAINNET_RPC_URL` (add `SEND=1 --broadcast --ledger` or
 /// `--account <name>` to send). docs/DEPLOY.md section 4
 contract Lock is Script, LaunchChecks {
     /// @dev the signer is not the admin of the coin
     error NotCoinAdmin(address admin, address signer);
-    /// @dev the recipients are still unlocked after the transaction
+    /// @dev the recipients are still unlocked after the simulated transaction
     error NotLocked();
+    /// @dev the hook pays another address than the fee router: the lock would freeze it
+    error BountyRecipientNotRouter(address recipient, address router);
 
     function run() external {
         LaunchConfig memory c = _config();
@@ -30,6 +34,9 @@ contract Lock is Script, LaunchChecks {
             console.log("the fee recipients are locked already, nothing to send");
             return;
         }
+        address router = ICore(payable(core)).FEE_SOURCE();
+        address recipient = address(_hookSkim(c.stack.hook, t.canonicalPoolId()).bountyRecipient);
+        if (recipient != router) revert BountyRecipientNotRouter(recipient, router);
         console.log("coin", address(t));
         console.log("coin admin", t.admin());
         console.log("lockRecipients calldata");
@@ -44,7 +51,8 @@ contract Lock is Script, LaunchChecks {
         t.lockRecipients();
         vm.stopBroadcast();
         if (!t.recipientsLocked()) revert NotLocked();
-        console.log("sent. the fee recipients are locked. run Postflight with RECIPIENTS_LOCKED=1");
+        console.log("simulated: the fee recipients read as locked after the transaction");
+        console.log("confirm on chain once it is mined: Postflight with RECIPIENTS_LOCKED=1");
     }
 
     /// @dev the launch config (LAUNCH_CONFIG or the shipped file), the Core (CORE), the broadcast flag (SEND=1) and the

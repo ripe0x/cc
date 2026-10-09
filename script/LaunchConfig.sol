@@ -46,8 +46,8 @@ struct LaunchConfig {
     uint32 sniperSeconds;
     /// the protocol's share of the locker rewards, bps. 0 appends no protocol slot. the factory default is 2_000
     uint16 protocolBps;
-    /// the coin is launched restricted (docs/FLOW.md 18) and the extra allowlist entries beyond the factory's own seeds
-    /// and the Core, which the builder always adds (docs/FLOW.md 29)
+    /// the coin is launched restricted (docs/FLOW.md 18) and the extra allowlist entries beyond the factory's own seeds.
+    /// the Core is not listed (docs/FLOW.md 29)
     bool restricted;
     address[] allowed;
     // the fee router (docs/FLOW.md 10.6): one payee at launch, by parts per million of a flush. later payees are set

@@ -86,7 +86,7 @@ abstract contract Fixture is Test, ProdDeployer {
     IArtCoinsFeeEscrowV2 internal ESCROW;
     /// @dev the fee router: the pool's bounty recipient. `_flush` forwards its eth to the Core
     IFeeRouter internal feeRouter;
-    /// @dev the account that calls `flush` in the helpers and so collects the tips
+    /// @dev the account that calls `flush` in the helpers
     address internal flusher;
     /// @dev when true the swap helpers flush the router right after the swap, so the Core books the fees at once
     bool internal autoFlush = true;
@@ -268,7 +268,7 @@ abstract contract Fixture is Test, ProdDeployer {
         if (autoFlush) _flush();
     }
 
-    /// @notice flushes the fee router as `flusher`, which collects the tip. the Core books what the router sends.
+    /// @notice flushes the fee router as `flusher`. the Core books what the router sends.
     /// returns the eth the Core received from the router (zero when the router held nothing)
     function _flush() internal returns (uint256 toCore) {
         uint256 before = address(core).balance;
@@ -307,8 +307,8 @@ abstract contract Fixture is Test, ProdDeployer {
         if (block.timestamp < at) vm.warp(at);
     }
 
-    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.87 percent
-    /// of every buy reaches the pot (6.9 points of skim, 96.38 percent to the router, minus the payee and the tip), inside
+    /// @notice generates fees through real buys until the eth pot holds at least `eth`. in steady state about 5.90 percent
+    /// of every buy reaches the pot (6.9 points of skim, 96.38 percent to the router, minus the payee), inside
     /// the sniper window more
     function _fundPot(uint256 eth) internal {
         for (uint256 i; i < 8 && core.ethPot() < eth; ++i) {

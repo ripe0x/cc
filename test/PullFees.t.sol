@@ -104,7 +104,7 @@ contract PullFeesTest is CoreBase {
         assertEq(CREDITS.ownerOf(ids[0]), address(core));
     }
 
-    /// the caller of the Core receives the sale price only: the flush pays the caller nothing
+    /// the caller of the Core receives the sale price: the flush output goes to the payees and the Core
     function test_sellPaysTheCallerOnlyThePrice() public {
         uint256[] memory ids = _credits(alice, 1);
         _fund(1 ether);
@@ -397,7 +397,7 @@ contract PullFeesTest is CoreBase {
         assertEq(CREDITS.ownerOf(ids[0]), address(core));
     }
 
-    /// a keeper may still call `flush` directly: it delivers, and the door that follows finds an empty router
+    /// a keeper `flush` delivers the fees, and the door that follows finds an empty router
     function test_aKeeperFlushStillWorks() public {
         _load();
         uint256 toCore = _flush();

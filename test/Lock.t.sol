@@ -12,6 +12,15 @@ contract LockProbe is Lock {
     address internal core_;
     address internal signer_;
     bool internal send_;
+    bool internal coinChanged_;
+
+    function setCoinChanged(bool on) external {
+        coinChanged_ = on;
+    }
+
+    function _coinChanged() internal view override returns (bool) {
+        return coinChanged_;
+    }
 
     function configure(LaunchConfig memory c, address core, address signer, bool send) external {
         config_ = abi.encode(c);
@@ -78,6 +87,17 @@ contract LockTest is Fixture {
     function test_aSignerThatIsNotTheCoinAdminIsRefused() public {
         probe.configure(lc, address(core), creator, true);
         vm.expectRevert(abi.encodeWithSelector(Lock.NotCoinAdmin.selector, owner, creator));
+        probe.run();
+        assertFalse(coin.recipientsLocked());
+    }
+
+    /// COIN_CHANGED=1 relaxes the postflight row, and the lock still refuses a pool that pays another address
+    function test_aRepointedBountyRecipientRefusesTheLockWhateverCoinChangedSays() public {
+        vm.prank(owner);
+        IArtCoinsHookV2(lc.stack.hook).setBountyRecipient(poolId, payable(address(core)));
+        probe.setCoinChanged(true);
+        probe.configure(lc, address(core), owner, true);
+        vm.expectRevert(abi.encodeWithSelector(Lock.BountyRecipientNotRouter.selector, address(core), address(feeRouter)));
         probe.run();
         assertFalse(coin.recipientsLocked());
     }

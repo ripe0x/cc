@@ -1714,6 +1714,42 @@ contract RestrictedCoinTest is FeeBase {
         assertEq(coin.balanceOf(friend), 0);
     }
 
+    /// the Core is off the allowlist, so coin reaches it only from a holder the coin admin lists. the owner can send that
+    /// coin on with `rescueCoin`, nobody else can
+    function test_coinFromAListedHolderIsRescuedByTheOwner() public {
+        uint256 amount = 1_000e18;
+        vm.prank(owner);
+        coin.setAllowed(trader, true);
+        vm.prank(trader);
+        coin.transfer(address(core), amount);
+        assertEq(coin.balanceOf(address(core)), amount);
+
+        address to = _user("rescue to");
+        vm.prank(trader);
+        vm.expectRevert(ICore.OnlyOwner.selector);
+        core.rescueCoin(to, amount);
+        // the Core is off the allowlist, so the rescue reaches a listed address only
+        vm.prank(owner);
+        vm.expectRevert();
+        core.rescueCoin(to, amount);
+        vm.prank(owner);
+        coin.setAllowed(to, true);
+
+        vm.expectEmit(true, false, false, true, address(core));
+        emit ICore.CoinRescued(to, amount);
+        vm.prank(owner);
+        core.rescueCoin(to, amount);
+        assertEq(coin.balanceOf(to), amount);
+        assertEq(coin.balanceOf(address(core)), 0);
+
+        vm.startPrank(owner);
+        vm.expectRevert(ICore.ZeroAddress.selector);
+        core.rescueCoin(address(0), 1);
+        vm.expectRevert();
+        core.rescueCoin(to, 1);
+        vm.stopPrank();
+    }
+
     /// a hookless side pool cannot even be seeded: moving coin into the pool manager needs an allowance only the canonical
     /// hook grants. this is the deterrent that keeps the volume in the canonical pool
     function test_aHooklessSidePoolCannotBeSeeded() public {

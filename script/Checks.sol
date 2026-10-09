@@ -463,7 +463,6 @@ abstract contract LaunchChecks is PostflightChecks {
     function _preSimulate(LaunchConfig memory c, address deployer) private {
         uint64 nonce = _controllerNonce(deployer);
         address routerAt = vm.computeCreateAddress(deployer, nonce + 1);
-        address coreAt = vm.computeCreateAddress(deployer, nonce + 2);
         IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg = buildConfig(c, c.owner, routerAt);
         (bool ok, address coin, uint256 gas, bytes memory why) = _simulateLaunch(c, deployer, cfg);
         _check(

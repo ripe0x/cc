@@ -171,6 +171,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     event ExitModuleSet(address exitModule, address exitToken, uint256 unitPerPoint);
     event TargetAdded(address target);
     event TargetRemoved(address target);
+    event CoinRescued(address indexed to, uint256 amount);
     event NftRescued(address indexed token, uint256 indexed id, address indexed to);
     event SuccessorSet(address successor);
     event SuccessorLocked();
@@ -199,6 +200,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 private constant READ_GAS = 200_000;
     /// the most gas of an exit the redeem reimbursement counts, so a gas burning module cannot inflate it
     uint256 private constant EXIT_GAS = 1_500_000;
+    /// the most gas of a compose the reimbursement counts: the page, the router flush, `COMPOSE_OVERHEAD_GAS` and, in the
+    /// eth lane, `LIST_GAS`. the flush runs inside the counted window with at most `PULL_GAS` and every payee send with
+    /// `PAYEE_GAS`, so a payee that burns its gas cannot raise the repaid gas past this bound. the worst measured count is
+    /// 11.38 million (test/GasCap.t.sol, router with four burning payees)
+    uint256 private constant COMPOSE_GAS = 12_000_000;
     /// gas the controller's `nextPage` may use, in both lanes. a full page of ControllerV1 costs about 73,000 (measured
     /// in test/ReviewFlowCore.t.sol), so this is about 7 times that. a gas burning controller cannot inflate the
     /// compose reimbursement past it
@@ -701,7 +707,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         }
 
         uint256 reimbursement = _repay(
-            gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0),
+            (gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0)).min(COMPOSE_GAS),
             lane == Lane.Eth ? cost : _notionalCap()
         );
         if (lane == Lane.Eth) cost += reimbursement;
@@ -1108,6 +1114,15 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     function lockTargets() external onlyOwner {
         targetsLocked = true;
         emit TargetsLocked();
+    }
+
+    /// sends coin the core holds to `to`. the core holds coin only in passing (the buyback burns what it buys in the same
+    /// call), so this reaches only coin that an allowlisted holder sent to it, which the restriction of the coin permits.
+    /// coin only: never eth, credits, statements or the exit token. owner only and guarded, both checked by the library,
+    /// to which the call is handed untouched (the bytes saved keep the runtime under the size limit). it refuses the
+    /// zero address, sends and logs `CoinRescued`
+    function rescueCoin(address, uint256) external {
+        _toLib();
     }
 
     /// sends an ERC721 token the core holds to `to` with `transferFrom`: a credit only while it is not in a pile, a

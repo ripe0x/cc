@@ -106,8 +106,9 @@ contract V2PortRestrictionTest is FeeBase {
     }
 
     /// the restriction passes a transfer when either side is on the allowlist. coin sent from a holder the coin admin
-    /// lists stays in the Core, outside every book, and the buyback burns only what it bought
-    function test_ACCEPTED_coinFromAListedHolderStaysInTheCore() public {
+    /// lists reaches the Core, outside every book, the buyback burns only what it bought, and the owner takes the coin
+    /// back out with `rescueCoin`. nobody else can
+    function test_coinFromAListedHolderIsInertAndRescuable() public {
         vm.prank(owner);
         coin.setAllowed(trader, true);
         _fillEthBuyback();
@@ -125,6 +126,18 @@ contract V2PortRestrictionTest is FeeBase {
         assertEq(supply0 - coin.totalSupply(), _bought(pm0), "the buyback burned only what it bought");
         assertEq(coin.balanceOf(address(core)), 1_000e18, "the sent coin was not touched");
         _solvent();
+        vm.prank(trader);
+        vm.expectRevert(ICore.OnlyOwner.selector);
+        core.rescueCoin(trader, 1);
+        // the Core is off the allowlist, so the rescue reaches a listed address only: the sender is listed
+        vm.prank(owner);
+        vm.expectRevert();
+        core.rescueCoin(creator, 1_000e18);
+        uint256 before = coin.balanceOf(trader);
+        vm.prank(owner);
+        core.rescueCoin(trader, 1_000e18);
+        assertEq(coin.balanceOf(trader) - before, 1_000e18);
+        assertEq(coin.balanceOf(address(core)), 0);
     }
 
     /// with the restriction turned off by the coin admin, plain transfers work, a transfer to the Core is inert in the same
@@ -147,5 +160,8 @@ contract V2PortRestrictionTest is FeeBase {
         assertEq(supply0 - coin.totalSupply(), _bought(pm0));
         assertEq(coin.balanceOf(address(core)), 1e18, "the transferred coin stays");
         _solvent();
+        vm.prank(owner);
+        core.rescueCoin(friend, 1e18);
+        assertEq(coin.balanceOf(address(core)), 0);
     }
 }

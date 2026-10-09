@@ -219,6 +219,7 @@ abstract contract PostflightV2 is SystemBuilder, Report {
         _postAllowlist(c, core, t, ch);
         _warn("warn: coin allowlist is not locked", !t.allowlistLocked(), "allowlistLocked(): the admin can no longer change the allowlist");
         _postRecipientsLock(t);
+        _warn("warn: core holds no coin", t.balanceOf(core) == 0, "coin sent by an allowlisted holder, the owner can call rescueCoin");
     }
 
     /// @dev the hook bounty recipient and the locker reward recipients are frozen by `coin.lockRecipients()`, the step

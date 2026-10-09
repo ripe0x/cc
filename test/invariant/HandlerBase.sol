@@ -185,7 +185,7 @@ abstract contract HandlerBase is Test {
     address internal HOOK;
     address internal mev;
     IFeeRouter public feeRouter;
-    /// the account that flushes the router and collects the tips
+    /// the account that flushes the router
     address internal flusher;
     /// the engine the handler last saw the router owner set, and the two other engines the hostile owner can point it at:
     /// one that takes eth and one that refuses it. `parked` is the eth waiting in the router since a flush failed
@@ -1079,7 +1079,8 @@ abstract contract HandlerBase is Test {
 
     /// tries to move coin between wallets and into a side pool. the coin is restricted: the pool is the only way to
     /// move it, so a wallet to wallet transfer must revert and move nothing. a transfer to the core reverts as well (the
-    /// core is not on the allowlist). the books of the core must not move
+    /// core is not on the allowlist), unless the owner lists the sender: then the coin sits in the core and the owner
+    /// takes it out again with `rescueCoin`. the books of the core must not move either way
     function walletMove(uint256 aSeed, uint256 amtSeed) external checked {
         uint8 a = A_WALLET_MOVE;
         address who = _actor(aSeed);
@@ -1103,6 +1104,16 @@ abstract contract HandlerBase is Test {
                 _flag(V_SUPPLY, "a transfer of the restricted coin to the core went through");
             } catch {}
             if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "the core holds coin");
+            vm.prank(owner);
+            try coin.setAllowed(who, true) {
+                vm.prank(who);
+                coin.transfer(address(core), amt);
+                vm.prank(owner);
+                core.rescueCoin(who, amt);
+                vm.prank(owner);
+                coin.setAllowed(who, false);
+                if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "rescueCoin left coin in the core");
+            } catch {}
         }
         _eth(b0, 0, 0, "walletMove");
         if (core.ethPot() != pot0) _flag(V_POT, "a coin move changed the pot");

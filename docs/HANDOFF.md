@@ -7,8 +7,8 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | item | state |
 |---|---|
 | branch | `main` is the only branch, local and on github ripe0x/cc. every commit is pushed there. work on `main` or on short lived branches merged back into it |
-| engine | ported to the artcoins v2 stack and tested: 1048 tests pass, 0 fail, 8 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on, on the v2 d4aa46b artifacts. the deep run below is from commit 6dd6805 and predates the v2 move. deep run (64 runs, depth 200) of the 7 Deep suites on 6dd6805: all clean after the hourly window followed inflows |
-| contracts | `src/Core.sol` 24,120 bytes runtime (456 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 16,754 (linked library, 7,822 bytes of room), `src/ControllerV1.sol` 4,445, `src/FeeRouter.sol` 4,446, `src/CoreLens.sol` 8,702 |
+| engine | ported to the artcoins v2 stack and tested: 1054 tests pass, 0 fail, 8 skipped (the Deep invariant suites), full run with REHEARSAL=1 on foundry 1.8.1 with isolate on, on the v2 d4aa46b artifacts. the deep run below is from commit 6dd6805 and predates the v2 move. deep run (64 runs, depth 200) of the 7 Deep suites on 6dd6805: all clean after the hourly window followed inflows |
+| contracts | `src/Core.sol` 24,172 bytes runtime (404 bytes of headroom under 24,576), `src/lib/CoreLib.sol` 16,967 (linked library, 7,609 bytes of room), `src/ControllerV1.sol` 4,445, `src/FeeRouter.sol` 4,446, `src/CoreLens.sol` 8,702 |
 | v2 in tests | the real artcoins v2 contracts (v2 commit d4aa46b, branch v2-legibility of the launcher repo, the owner says final, not deployed on mainnet) are deployed onto the pinned fork from vendored build output in test/v2-artifacts/ by test/utils/V2Stack.sol |
 | reviews | docs/REVIEW-*.md. the latest, REVIEW-v2port.md: one medium (a router flush inside a measured purchase) and one low (buyback sandwich above 2 eth), both fixed. an external audit (A01, A02) is fixed in the scripts |
 | gas | every transaction fits the 16,777,216 mainnet cap (test/GasCap.t.sol). compose is the largest, 8.7 million. a keeper must send compose with a gas limit above 10 million |
@@ -19,7 +19,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 
 | topic | as built |
 |---|---|
-| coin | name and symbol `CC`. launched on artcoins v2 as a `restricted` coin (no wallet to wallet transfers), no transfer tax, the Core off the coin's allowlist |
+| coin | name and symbol `CC`. launched on artcoins v2 as a `restricted` coin (no wallet to wallet transfers), no transfer tax, the Core off the coin's allowlist (coin an allowlisted holder sends it is taken out with `rescueCoin`) |
 | owner | 0xCB43078C32423F5348Cab5885911C3B5faE217F9: engine owner, creator, token admin, and the artcoins factory owner. the artcoins protocol is a separate business: never describe its revenue as the engine owner's income |
 | trading fee | 6.9 percent skim in eth, no lp fee. anti sniper: 90 points falling to 6.9 over 30 minutes |
 | fee path | pool, then `FeeRouter` (the pool's fee recipient: empty receive, `flush()` forwards), then the Core. the Core calls `flush` itself at the start of `sellForEth`, `buyListing`, `compose` and `composeExit` (FLOW 10.8), so no keeper is needed. the router pays one payee (the owner address, 0.75 points of volume, 112,778 ppm of the router inflow, to be repointed at the owner's own splitter), the rest to the engine. everything from the sniper window goes to the engine. the router's engine is owner settable until a one way lock, so a later engine can take over the fees |
@@ -27,7 +27,7 @@ for a session that takes this work over. read this, then docs/NEXT.md (the open 
 | statements | priced by the controller: 110 percent of cost falling one point every 3 hours to 75 percent. auction mode on the engine's own pnd auction house at launch, buy only mode is a controller switch. hard floor 75 percent in the Core |
 | sale proceeds | 50 percent back to the pot, 50 percent buys and burns the coin, both adjustable |
 | phase 2 | `exitModule` and `exitToken` placeholders. unsold statements redeem after 105 hours listed with no bid. module replaceable by the owner |
-| owner control | every setting, the controller, the exitModule, targets, the router: changed at once, no timelock. four one way locks on the Core (the fourth closes `setSuccessor`), one on the router, two step owner handover on both. `rescueNft` moves stuck NFTs, `migrate` moves everything the Core tracks to the successor. the owner refused extra hard limits |
+| owner control | every setting, the controller, the exitModule, targets, the router: changed at once, no timelock. four one way locks on the Core (the fourth closes `setSuccessor`), one on the router, two step owner handover on both. `rescueCoin` and `rescueNft` move stuck coin and stuck NFTs, `migrate` moves everything the Core tracks to the successor. the owner refused extra hard limits |
 
 ## 3. open work
 
@@ -39,23 +39,23 @@ docs/NEXT.md is the list: what the owner decided but is not built, what waits fo
 |---|---|
 | naming | the phase 2 contracts are referred to only as `exitModule` and `exitToken` in code, comments, tests, docs and commit messages. never name or describe them |
 | tests | mainnet fork tests pinned to a block, real contracts only (live ones, and v2 from its vendored build output). the only doubles are test/standins and attacker contracts |
-| toolchain | foundry 1.8.1 (isolate on, the default since 1.8.0), solc 0.8.30. the suite is green on it with REHEARSAL=1: 1028 pass, 0 fail, 9 skipped (the deep invariant suites). deep runs: `INVARIANT_DEEP=1 FOUNDRY_INVARIANT_RUNS=64 FOUNDRY_INVARIANT_DEPTH=200 forge test --match-contract '^<Suite>Deep$'`, 375 to 475 s per suite |
+| toolchain | foundry 1.8.1 (isolate on, the default since 1.8.0), solc 0.8.30. the suite is green on it with REHEARSAL=1: 1054 pass, 0 fail, 8 skipped (the deep invariant suites). deep runs: `INVARIANT_DEEP=1 FOUNDRY_INVARIANT_RUNS=64 FOUNDRY_INVARIANT_DEPTH=200 forge test --match-contract '^<Suite>Deep$'`, 375 to 475 s per suite |
 | build | section 6. a clean build is about 4 minutes and 3 gb. the full suite is about 25 minutes: run it in the background and poll, or by path. after changing a production contract's external surface run `script/tools/gen-interfaces.sh` and repin test/BuildIdentity.t.sol |
 | small machines | never run two forge processes at once on 8 gb. a sandbox that reclaims idle sessions kills background work: keep a foreground loop alive while agents run |
 | rpc | public endpoints rate limit (429, 408). rerun a suite alone with `-j 1` before treating that as a failure |
 | safety | no mainnet broadcast and no private key without the owner's explicit instruction |
-| Core size | 739 bytes left, margin rule at least 60. new logic goes into `CoreLib`, which reads the Core's state through `CoreState` (docs/ARCHITECTURE.md section 1). never drop a check to make room |
+| Core size | 404 bytes left, margin rule at least 60. new logic goes into `CoreLib`, which reads the Core's state through `CoreState` (docs/ARCHITECTURE.md section 1). never drop a check to make room |
 
 ## 5. things that are known and not fixed
 
 | item | detail |
 |---|---|
 | exitModule gas | `exitStatement` forwards gas to a contract that does not exist yet. measure against the gas cap when it does |
-| v2 not live | five v2 addresses in script/config/mainnet.json are placeholders. the real preflight, the signoff hash and the preflight comparison of the live hook constants hash with the vendored artifacts wait for the v2 deployment |
+| v2 not live | five v2 addresses in script/config/mainnet.json are placeholders. the real preflight, the signoff hash and the preflight comparison of the live hook constants hash with the vendored artifacts wait for the v2 deployment. that hash shows the Constants values match the artifacts and does not show the bytecode matches: the comparison of the live bytecode against test/v2-artifacts is the open check until the live stack is attached |
 | owner step on the v2 factory before launch | lower the minimum protocol skim share to 362 (`setMinProtocolSkimShareBps(362)`). preflight names it. the factory accepts the launch lp fee of 0 because the baseline skim is above 0 |
 | owner power over the fee stream | two switches. the coin admin (the owner) repoints the hook bounty recipient and the creator reward slot recipient until `coin.lockRecipients()`, a launch step (`Lock.s.sol`, NEXT item 18), which freezes both. the router owner points the router at another engine with `setEngine` until `router.lock()`, an owner decision (NEXT item 19). postflight warns until the recipients are locked and fails after `RECIPIENTS_LOCKED=1` |
-| fees per 100 eth of volume as built | skim 6.9 eth. protocol 0.24978 (`bountyBps` 9,638 leaves it 362 of 10,000), router 6.65022, of which payee 0.7499985 (112,778 ppm), engine 5.90022. inside the anti sniper window the payee share is 0 and the engine receives the router inflow. at comparable volume (1,961 eth in 90 days, the first 30 minutes of fees to the engine) the payee receives about 12 eth |
-| owner powers over assets | `migrate` moves the eth pots, exit token pots and credits to the successor with no delay, until `lockSuccessor()` (the held statements stay in the Core and are sold out there); `rescueNft` takes stuck NFTs out. the successor is unset at launch and the lock is a later decision. a stolen owner key can move the whole engine at once: use a multisig, watch `SuccessorSet` and `Migrated` (docs/ARCHITECTURE.md section 10, FLOW 10.10) |
+| fees per 100 eth of volume as built | skim 6.9 eth. protocol 0.24978 (`bountyBps` 9,638 leaves it 362 of 10,000), router 6.65022, of which payee 0.7499985 (112,778 ppm), engine 5.9002215 (the three legs sum to 6.9). inside the anti sniper window the payee share is 0 and the engine receives the router inflow. at comparable volume (1,961 eth in 90 days, the first 30 minutes of fees to the engine) the payee receives about 12 eth |
+| owner powers over assets | `migrate` moves the eth pots, exit token pots and credits to the successor with no delay, until `lockSuccessor()` (the held statements stay in the Core and are sold out there); `rescueNft` takes stuck NFTs out; `rescueCoin` takes out coin that an allowlisted holder sent to the Core. the successor is unset at launch and the lock is a later decision. a stolen owner key can move the whole engine at once: use a multisig, watch `SuccessorSet` and `Migrated` (docs/ARCHITECTURE.md section 10, FLOW 10.10) |
 | pricing rule | the bid drops only in proportion to the share of the pot spent, so it follows a falling market badly. NEXT item 10 |
 
 ## 6. the build loop (done)

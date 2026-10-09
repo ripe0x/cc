@@ -13,6 +13,7 @@ import {MockExitToken} from "./standins/MockExitToken.sol";
 import {MockExitModule} from "./standins/MockExitModule.sol";
 import {SeaportBase} from "./Seaport.t.sol";
 import {OrderComponents} from "./utils/SeaportTypes.sol";
+import {GasBurningPayee} from "./attackers/GasBurners.sol";
 
 /// @notice every transaction this system needs, against the per transaction gas cap of mainnet (EIP-7825, since the
 /// fusaka upgrade): 16,777,216 gas. one test per transaction, real contracts on the pinned fork, from an EOA style
@@ -236,8 +237,8 @@ contract GasCapTest is SeaportBase {
         _row("flush that turns the split on (engine only)", g, data);
     }
 
-    /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), and `skim()` books it
-    function test_gas_escrowClaim_skim() public {
+    /// @dev the keeper calls the v2 escrow adds: claim the Core's credit (anyone), `skim()` books it and `rescueCoin`
+    function test_gas_escrowClaim_skim_rescue() public {
         _skipToSplitStart();
         _buyCoin(funder, 5 ether);
         vm.deal(v2.hook, 1 ether);
@@ -259,6 +260,18 @@ contract GasCapTest is SeaportBase {
         core.skim();
         g -= gasleft();
         _row("skim books the claimed eth", g, data);
+
+        vm.prank(owner);
+        coin.setAllowed(funder, true);
+        vm.prank(funder);
+        coin.transfer(address(core), 1_000e18);
+        data = abi.encodeCall(core.rescueCoin, (funder, 1_000e18));
+        _cool(address(core));
+        vm.prank(owner);
+        g = gasleft();
+        core.rescueCoin(funder, 1_000e18);
+        g -= gasleft();
+        _row("rescueCoin", g, data);
     }
 
     // ------------------------------------------------------------------ compose, exit, overprint
@@ -290,6 +303,100 @@ contract GasCapTest is SeaportBase {
         vm.revertToState(snap);
         _cool(address(core));
         _measureCompose("compose eth lane, 80 credits, second compose, cold");
+    }
+
+    /// @dev the `COMPOSE_GAS` bound of `Core` (src/Core.sol): the most gas of a compose the reimbursement counts
+    uint256 internal constant COMPOSE_GAS = 12_000_000;
+
+    /// @dev turns the router split on, and with `burning` replaces the payees by four that burn all the gas they are
+    /// given (the most expensive flush). called before the pile is filled: the sales that fill it pull the router
+    function _splitOn(bool burning) internal {
+        _skipToSplitStart();
+        vm.deal(address(feeRouter), 1 gwei);
+        _flush();
+        assertTrue(feeRouter.splitOn(), "the split is on");
+        if (!burning) return;
+        address[] memory who = new address[](4);
+        uint32[] memory ppm = new uint32[](4);
+        for (uint256 i; i < 4; ++i) {
+            who[i] = address(new GasBurningPayee());
+            ppm[i] = 50_000;
+        }
+        vm.prank(owner);
+        feeRouter.setPayees(who, ppm);
+    }
+
+    /// @dev puts 1 eth in the router, so the compose pulls it
+    function _loadRouter() internal {
+        vm.deal(address(feeRouter), 1 ether);
+    }
+
+    /// @dev the gas the Core counted for a compose, read back from the repayment at the basefee and the repay rate. the
+    /// Core meters in its own frame, which reads higher than the delta around the call. valid while the cap of the
+    /// repayment does not bind
+    function _countedFrom(uint256 repaid) internal view returns (uint256) {
+        return repaid * 10_000 / (block.basefee * core.settings().reimburseBps);
+    }
+
+    function _composeLoaded(bool burning) internal returns (uint256 g) {
+        _splitOn(burning);
+        _fillEthPile(80);
+        _loadRouter();
+        vm.fee(composeBasefee);
+        _cool(address(core));
+        uint256 kb = keeper.balance;
+        vm.prank(keeper);
+        g = gasleft();
+        core.compose();
+        g -= gasleft();
+        assertEq(address(feeRouter).balance, burning ? feeRouter.totalOwed() : 0, "the compose pulled the router");
+        _row(
+            burning ? "compose eth lane, router 1 eth, four burning payees, cold" : "compose eth lane, router 1 eth, cold",
+            g,
+            abi.encodeCall(core.compose, ())
+        );
+        // the repaid gas is the counted gas under the bound, at the basefee and the repay rate
+        uint256 counted = _countedFrom(keeper.balance - kb);
+        console.log("compose counted gas", counted);
+        assertLt(counted, COMPOSE_GAS, "the bound leaves room above the worst case");
+    }
+
+    function test_gas_compose_ethLane_routerLoaded() public {
+        _composeLoaded(false);
+    }
+
+    function test_gas_compose_ethLane_routerWorstCaseFlush() public {
+        _composeLoaded(true);
+    }
+
+    function _composeExitLoaded(bool burning) internal returns (uint256 g) {
+        _splitOn(burning);
+        _exitPile();
+        _loadRouter();
+        vm.fee(composeBasefee);
+        _cool(address(core));
+        uint256 kb = keeper.balance;
+        vm.prank(keeper);
+        g = gasleft();
+        core.composeExit();
+        g -= gasleft();
+        assertEq(address(feeRouter).balance, burning ? feeRouter.totalOwed() : 0, "the compose pulled the router");
+        _row(
+            burning ? "composeExit, router 1 eth, four burning payees, cold" : "composeExit, router 1 eth, cold",
+            g,
+            abi.encodeCall(core.composeExit, ())
+        );
+        uint256 counted = _countedFrom(keeper.balance - kb);
+        console.log("composeExit counted gas", counted);
+        assertLt(counted, COMPOSE_GAS, "the bound leaves room above the worst case");
+    }
+
+    function test_gas_composeExit_routerLoaded() public {
+        _composeExitLoaded(false);
+    }
+
+    function test_gas_composeExit_routerWorstCaseFlush() public {
+        _composeExitLoaded(true);
     }
 
     /// @dev phase 2 with the exit pot funded and 80 credits sold into the exit bid, so the exit pile is full
