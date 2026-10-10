@@ -130,32 +130,31 @@ abstract contract HandlerBase is Test {
     uint256 internal constant V_DEPART = 8; // a statement left the core without a recorded legal exit
     uint256 internal constant V_EXIT_SHORT = 9; // an exit that returned less than rating * unit per point
     uint256 internal constant V_MODEL = 10; // the core disagrees with the handler's ghost model
-    uint256 internal constant V_RATE_UNFUNDED = 11; // the rate rose in an interval that began unfunded
-    uint256 internal constant V_RATE_BOUND = 12; // the rate moved faster or slower than the settings in force allow
-    uint256 internal constant V_FUNDED_STALE = 13; // the stored funded flag disagrees with pot and rate
-    uint256 internal constant V_WINDOW = 14; // hourly spend above the cap the core had to apply in the ghost window
-    uint256 internal constant V_HOSTILE_OK = 15; // a hostile listing target got through
-    uint256 internal constant V_PROBE_OK = 16; // a controller attack call succeeded
-    uint256 internal constant V_REENTER = 17; // a reentry attempt succeeded
-    uint256 internal constant V_REVERT_CHANGED = 18; // a reverted action changed core state
-    uint256 internal constant V_OVERPRINT = 19; // an overprint outside the rules
-    uint256 internal constant V_BUYBACK = 20; // a buyback slice or tip outside the rules
+    uint256 internal constant V_RATE_BOUND = 11; // the rate moved faster or slower than the settings in force allow
+    uint256 internal constant V_FUNDED_STALE = 12; // the stored funded flag disagrees with pot and rate
+    uint256 internal constant V_WINDOW = 13; // hourly spend above the cap the core had to apply in the ghost window
+    uint256 internal constant V_HOSTILE_OK = 14; // a hostile listing target got through
+    uint256 internal constant V_PROBE_OK = 15; // a controller attack call succeeded
+    uint256 internal constant V_REENTER = 16; // a reentry attempt succeeded
+    uint256 internal constant V_REVERT_CHANGED = 17; // a reverted action changed core state
+    uint256 internal constant V_OVERPRINT = 18; // an overprint outside the rules
+    uint256 internal constant V_BUYBACK = 19; // a buyback slice or tip outside the rules
     /// least share of the metered gross gas left after the EIP-3529 refund (the refund is at most 20 percent of it). the
     /// cap of the exit gas repayment divides the net gas by it to get the metered gas
     uint256 internal constant REFUND_FLOOR_BPS = 8_000;
-    uint256 internal constant V_COMPOSE = 21; // a compose that paid its caller, took an invalid page or made another statement than the next id
-    uint256 internal constant V_POT = 22; // pot bookkeeping off from the action's flows
-    uint256 internal constant V_REFUND = 23; // a house refund or payout that is not what the house rules give
-    uint256 internal constant V_RECEIVE = 24; // the core's receive() reverted, or a swap failed for an unexplained reason
-    uint256 internal constant V_SUPPLY = 25; // coin supply differs from the ghost, or rose
-    uint256 internal constant V_AUCTION = 26; // the exit token auction broke its price, slice or restart rules
-    uint256 internal constant V_SETTINGS = 27; // settings changed outside the owner's call, or an owner call misbehaved
-    uint256 internal constant V_HOUSE = 28; // sale proceeds on the house or their collection are off the ghost
-    uint256 internal constant V_OWNER = 29; // an owner action moved assets or the books it must not touch
-    uint256 internal constant V_SALE_PATH = 30; // a sellTo or buy sale outside the rules: price, booking, holder or record
-    uint256 internal constant V_LOCK = 31; // a one way lock came undone, or a handover left a power behind
-    uint256 internal constant V_ROUTER = 32; // router eth went somewhere but the engine set at that time, or a flush broke its rule
-    uint256 internal constant N_VIOL = 33;
+    uint256 internal constant V_COMPOSE = 20; // a compose that paid its caller, took an invalid page or made another statement than the next id
+    uint256 internal constant V_POT = 21; // pot bookkeeping off from the action's flows
+    uint256 internal constant V_REFUND = 22; // a house refund or payout that is not what the house rules give
+    uint256 internal constant V_RECEIVE = 23; // the core's receive() reverted, or a swap failed for an unexplained reason
+    uint256 internal constant V_SUPPLY = 24; // coin supply differs from the ghost, or rose
+    uint256 internal constant V_AUCTION = 25; // the exit token auction broke its price, slice or restart rules
+    uint256 internal constant V_SETTINGS = 26; // settings changed outside the owner's call, or an owner call misbehaved
+    uint256 internal constant V_HOUSE = 27; // sale proceeds on the house or their collection are off the ghost
+    uint256 internal constant V_OWNER = 28; // an owner action moved assets or the books it must not touch
+    uint256 internal constant V_SALE_PATH = 29; // a sellTo or buy sale outside the rules: price, booking, holder or record
+    uint256 internal constant V_LOCK = 30; // a one way lock came undone, or a handover left a power behind
+    uint256 internal constant V_ROUTER = 31; // router eth went somewhere but the engine set at that time, or a flush broke its rule
+    uint256 internal constant N_VIOL = 32;
 
     ICredits internal constant CREDITS = ICredits(Mainnet.CREDITS);
     IStatements internal constant STATEMENTS = IStatements(Mainnet.STATEMENTS);
@@ -195,8 +194,6 @@ abstract contract HandlerBase is Test {
     address public refusingEngine;
     uint256 public parked;
     bool public gRouterLocked;
-    uint256 public routerFlushes;
-    uint256 public routerRepoints;
     address public owner;
     address public v1;
     FuzzController public fuzz;
@@ -266,7 +263,6 @@ abstract contract HandlerBase is Test {
 
     mapping(uint256 => CG) public cg;
     uint256[] internal cgList;
-    uint256[2] public pileCount;
 
     // ghost statements. status: the one place every statement ever composed sits at any time
     uint8 public constant S_LISTED = 1; // eth lane, on the house under `auctionId`
@@ -292,7 +288,6 @@ abstract contract HandlerBase is Test {
         uint256 required; // exit: rating times unit per point
         uint256 received; // exit: exit token the core received
         uint256 base; // overprint top: the base it went into
-        uint256 ratingSum; // overprint top: rating of base plus rating of top before
         address module; // exit: the module that took it
     }
 
@@ -323,7 +318,6 @@ abstract contract HandlerBase is Test {
     uint256 internal gOpCount;
 
     // ghost totals for the summary
-    uint256 public totalSpentEth;
     uint256 public biggestSpendBps;
 
     constructor(Wiring memory w) {
@@ -483,24 +477,12 @@ abstract contract HandlerBase is Test {
         gWinCap = core.settings().spendCapBps;
     }
 
-    function numActors() external view returns (uint256) {
-        return actors.length;
-    }
-
     function everHeldCount() external view returns (uint256) {
         return everHeld.length;
     }
 
     function statementGhost(uint256 sid) external view returns (SG memory) {
         return _sg[sid];
-    }
-
-    function creditCount() external view returns (uint256) {
-        return cgList.length;
-    }
-
-    function creditAt(uint256 i) external view returns (uint256) {
-        return cgList[i];
     }
 
     function watchedCount() external view returns (uint256) {
@@ -599,7 +581,6 @@ abstract contract HandlerBase is Test {
     function _addCredit(uint256 id, uint8 lane, uint256 cost) internal {
         if (!cg[id].inPile && cg[id].cost == 0) cgList.push(id);
         cg[id] = CG(true, lane, cost);
-        pileCount[lane]++;
     }
 
     function _ownerOf(uint256 sid) internal view returns (address o) {
@@ -793,7 +774,6 @@ abstract contract HandlerBase is Test {
         }
         gWinSpent += x;
         gSpendEvents++;
-        totalSpentEth += x;
         if (gWinPot != 0) {
             uint256 bps = gWinSpent * 10_000 / gWinPot;
             if (bps > biggestSpendBps) biggestSpendBps = bps;
@@ -935,7 +915,6 @@ abstract contract HandlerBase is Test {
         uint256 w0 = parked;
         vm.prank(flusher);
         try feeRouter.flush() {
-            routerFlushes++;
             if (held != owed && eng.balance - e0 != want) {
                 _flag(V_ROUTER, "the engine got other than the flush rule gives");
             }
@@ -1661,7 +1640,6 @@ abstract contract HandlerBase is Test {
         for (uint256 i; i < 80; ++i) {
             cg[ids[i]].inPile = false;
         }
-        pileCount[uint8(lane)] -= 80;
         SG storage g = _sg[sid];
         g.lane = uint8(lane);
         g.cost = cost;
@@ -1753,7 +1731,6 @@ abstract contract HandlerBase is Test {
         _sg[base].cost += _sg[top].cost;
         _sg[top].status = S_TOP;
         _sg[top].base = base;
-        _sg[top].ratingSum = rb + rt;
         // the eth lane base is listed again at the summed cost, its clock restarts. the exit lane is never listed
         bool eth = _sg[base].lane == uint8(Lane.Eth);
         if (eth) _ghostListed(base, _sg[base].cost, saleFloorBps, logs);
@@ -2262,7 +2239,6 @@ abstract contract HandlerBase is Test {
         }
         if (q.ok) {
             parked = 0;
-            if (moved) routerFlushes++;
         } else if (q.held > q.owed) {
             parked = q.held - q.owed;
         }

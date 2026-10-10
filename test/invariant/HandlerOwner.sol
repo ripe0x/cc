@@ -683,7 +683,6 @@ abstract contract HandlerOwner is HandlerHouse {
         }
         vm.prank(ro);
         try feeRouter.setEngine(target) {
-            routerRepoints++;
             if (gRouterLocked) {
                 _flag(V_ROUTER, "setEngine worked on a locked router");
             } else if (target == address(0) || target.code.length == 0) {
@@ -964,7 +963,6 @@ abstract contract HandlerOwner is HandlerHouse {
                 _flag(V_MODEL, "the core moved a credit the ghost does not have in a pile");
             } else {
                 c.inPile = false;
-                pileCount[c.lane]--;
             }
         }
         // statements: the held list is as it was

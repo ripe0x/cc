@@ -264,7 +264,6 @@ contract RateModelFuzz is ReviewEconBase {
     function _sell(uint256 seed) internal {
         uint256[] memory ids = _credits(seller, 1);
         _checkpoint();
-        uint256 before = seller.balance;
         vm.prank(seller);
         try core.sellForEth(ids) {
             if (block.timestamp / 60 != mBucket) {

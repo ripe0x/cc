@@ -29,9 +29,8 @@ abstract contract HandlerSale is HandlerOwner {
     bool public gLockedC;
     bool public gLockedE;
     bool public gLockedT;
-    /// sales through `sellTo` and the eth they brought
+    /// sales through `sellTo`
     uint256 public gSoldTo;
-    uint256 public gSoldToEth;
 
     /// the fixture hands over what only it can build (from artifacts, so the contract stays small)
     function setSaleParts(address selling_, address[] calldata heirs_) external {
@@ -45,10 +44,6 @@ abstract contract HandlerSale is HandlerOwner {
             _snapBase(heirs_[i]);
         }
         if (address(module) != address(0)) modulesEver.push(module);
-    }
-
-    function formerOwnerCount() external view returns (uint256) {
-        return formerOwners.length;
     }
 
     function moduleEverCount() external view returns (uint256) {
@@ -79,7 +74,6 @@ abstract contract HandlerSale is HandlerOwner {
         uint256 floor;
         uint256 price;
         uint256 value;
-        bool priced;
         address buyer;
         address payer;
         bytes4 want;
@@ -133,7 +127,6 @@ abstract contract HandlerSale is HandlerOwner {
         g.reserve = p.floor;
         g.floorAtSet = p.floor;
         gSoldTo++;
-        gSoldToEth += paid;
     }
 
     /// a refused sale changes nothing: books, holder, record, house
@@ -186,7 +179,6 @@ abstract contract HandlerSale is HandlerOwner {
         uint256 value = !priced ? 1 ether : (short_ ? price - 1 : price + (xSeed % 3 == 0 ? 0 : _logBound(xSeed, 1, 1 ether)));
         SalePre memory p = _salePre(sid, who, who, value);
         p.price = price;
-        p.priced = priced;
         p.want = _buyRefusal(sid, p, short_);
         vm.deal(who, who.balance + value);
         p.payerBal = who.balance;

@@ -142,7 +142,6 @@ abstract contract InvariantFixture is Fixture {
         if (hostile) core.setController(address(fuzz));
         if (phase2) core.setExitModule(address(mod));
         vm.stopPrank();
-        inPhase2 = phase2;
         assertTrue(core.allowedTarget(address(probeTarget)));
     }
 

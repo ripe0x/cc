@@ -87,10 +87,4 @@ contract LeftoverSpender {
     }
 
     receive() external payable {}
-
-    function spendAlone(uint256 amount) external returns (bool ok) {
-        try COIN.transfer(POOL_MANAGER, amount) returns (bool r) {
-            ok = r;
-        } catch {}
-    }
 }

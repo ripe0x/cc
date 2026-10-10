@@ -41,7 +41,6 @@ abstract contract OwnerBase is Fixture {
     uint256 internal constant D_RATE = 4;
     uint256 internal constant D_XRATE = 5;
     uint256 internal constant D_REMOVE = 6;
-    uint256 internal constant D_HANDOVER = 7;
     uint256 internal constant N_DOORS = 8;
 
     function _doorData(uint256 i) internal returns (bytes memory) {

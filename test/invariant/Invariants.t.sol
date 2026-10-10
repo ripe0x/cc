@@ -37,22 +37,22 @@ import {HandlerBase} from "./HandlerBase.sol";
 /// a violation recorded in the ghosts cannot be lost to `fail_on_revert = false`.
 abstract contract InvariantsBase is InvariantFixture {
     /// the violation codes of the handler, grouped by SPEC item.
-    uint256[] internal g1 = [1, 2, 3, 4, 6, 20, 21, 23, 18, 26];
+    uint256[] internal g1 = [1, 2, 3, 4, 6, 19, 20, 22, 17, 25];
     uint256[] internal g2 = [5];
     uint256[] internal g3 = [7];
-    uint256[] internal g4 = [8, 9, 19, 10];
-    uint256[] internal g5 = [22, 28];
-    uint256[] internal g6 = [11, 12, 13];
-    uint256[] internal g7 = [14];
-    uint256[] internal g8 = [15, 16, 17, 27, 29];
-    uint256[] internal g9 = [25];
-    uint256[] internal g10 = [24];
+    uint256[] internal g4 = [8, 9, 18, 10];
+    uint256[] internal g5 = [21, 27];
+    uint256[] internal g6 = [11, 12];
+    uint256[] internal g7 = [13];
+    uint256[] internal g8 = [14, 15, 16, 26, 28];
+    uint256[] internal g9 = [24];
+    uint256[] internal g10 = [23];
     /// sales through sellTo and buy, and the departures of statements
-    uint256[] internal g11 = [7, 8, 30];
+    uint256[] internal g11 = [7, 8, 29];
     /// locks and handovers
-    uint256[] internal g12 = [31];
+    uint256[] internal g12 = [30];
     /// the fee router: its eth goes only to the engine set at that time, by the flush rule
-    uint256[] internal g13 = [32];
+    uint256[] internal g13 = [31];
 
     function _zero(uint256[] storage codes) internal view {
         for (uint256 i; i < codes.length; ++i) {

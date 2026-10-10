@@ -274,10 +274,6 @@ abstract contract ReviewHarness is Test, ProdDeployer {
         assertEq(counts[uint256(Class.Slip)], 0, "something slipped");
     }
 
-    function hashOf(LaunchConfig memory c) external pure returns (bytes32) {
-        return configHash(c);
-    }
-
     function requireDeployerExt(address want, address got) external pure {
         _requireDeployer(want, got);
     }

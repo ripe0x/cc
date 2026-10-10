@@ -113,7 +113,6 @@ abstract contract Fixture is Test, ProdDeployer {
 
     MockExitToken internal xt;
     MockExitModule internal mod;
-    bool internal inPhase2;
 
     // ------------------------------------------------------------------ compose
 
@@ -274,16 +273,6 @@ abstract contract Fixture is Test, ProdDeployer {
         vm.prank(flusher);
         feeRouter.flush();
         toCore = address(core).balance - before;
-    }
-
-    /// @notice sends `amount` eth to the Core from the fee source (the router address), the way a flush does. the Core
-    /// books it as fees. for tests that need an exact amount booked
-    function _feePays(uint256 amount) internal {
-        address src = core.FEE_SOURCE();
-        vm.deal(src, src.balance + amount);
-        vm.prank(src);
-        (bool ok,) = address(core).call{value: amount}("");
-        require(ok, "fee push failed");
     }
 
     /// @notice swap hook data that names `referrer` and asks for `bps` of volume (100k denominator)
@@ -538,7 +527,6 @@ abstract contract Fixture is Test, ProdDeployer {
         xt = new MockExitToken("Exit Token", "XT");
         mod = new MockExitModule(address(xt), UNIT);
         _setExitModule(address(mod));
-        inPhase2 = true;
     }
 
     /// @notice composes the eth pile, lets its auction run out and exits the statement, which puts half of the

@@ -58,17 +58,12 @@ interface ICredits {
     function balanceOf(address owner) external view returns (uint256);
     function setApprovalForAll(address operator, bool approved) external;
     function isApprovedForAll(address owner, address operator) external view returns (bool);
-    function getApproved(uint256 id) external view returns (address);
     function approve(address to, uint256 id) external;
     function transferFrom(address from, address to, uint256 id) external;
 }
 
 interface ICreditScore {
     function scoreOf(bytes21 seed, uint64 paidAt) external pure returns (uint256);
-    function traitsOf(bytes21 seed, uint64 paidAt)
-        external
-        pure
-        returns (uint256 mask, uint256 active, uint256 occupied, uint256 eights, uint256 band);
 }
 
 interface IStatements {
@@ -198,7 +193,6 @@ library Mainnet {
     address internal constant POSITION_MANAGER = 0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e;
     address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address internal constant DEAD = 0x000000000000000000000000000000000000dEaD;
-    address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant UNIVERSAL_ROUTER = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
     // the artcoins v2 stack addresses are config inputs and not constants: `defaultStack` leaves them zero, the Core

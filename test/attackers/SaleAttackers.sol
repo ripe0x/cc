@@ -35,14 +35,6 @@ contract SellingController is ScriptedController {
             lastWhy = why;
         }
     }
-
-    /// calls the core with arbitrary data, records the result
-    function poke(bytes calldata data, uint256 value) external returns (bool ok) {
-        bytes memory out;
-        (ok, out) = address(CORE).call{value: value}(data);
-        lastOk = ok;
-        lastWhy = out;
-    }
 }
 
 /// a buyer of a statement through the controller that tries to re enter on the refund of its excess
@@ -58,8 +50,6 @@ contract ReentrantBuyer {
     bool public sellBlocked;
     bool public repriceBlocked;
     bool public exitBlocked;
-    bool public skimOk;
-    bool public collectOk;
     bytes4 public buySel;
     bytes4 public repriceSel;
 
@@ -97,12 +87,8 @@ contract ReentrantBuyer {
         catch {
             exitBlocked = true;
         }
-        try CORE.skim() {
-            skimOk = true;
-        } catch {}
-        try CORE.collectSales() {
-            collectOk = true;
-        } catch {}
+        try CORE.skim() {} catch {}
+        try CORE.collectSales() {} catch {}
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
