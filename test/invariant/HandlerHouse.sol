@@ -257,6 +257,7 @@ abstract contract HandlerHouse is HandlerBase {
                 _flag(V_POT, "collected buyback share is not saleToBuybackBps");
             }
             if (core.ethPot() != pot0 + owed - toBuyback) _flag(V_POT, "collected pot share is not the rest");
+            _booked(owed);
             _potIn(owed - toBuyback);
             if (house.pendingRefunds(address(core)) != 0) _flag(V_HOUSE, "the house owes the core after collectSales");
             gCollected += owed;

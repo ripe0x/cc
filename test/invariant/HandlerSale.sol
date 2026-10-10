@@ -113,6 +113,7 @@ abstract contract HandlerSale is HandlerOwner {
         if (core.ethToBuyback() != p.tb + toBb || core.ethPot() != p.pot + paid - toBb) {
             _flag(V_SALE_PATH, "the sale payment was not booked exactly, split by saleToBuybackBps");
         }
+        _booked(paid);
         _potIn(paid - toBb);
         if (_ownerOf(sid) != p.buyer) _flag(V_SALE_PATH, "the buyer does not hold the statement");
         (bool held,,,) = core.statementInfo(sid);

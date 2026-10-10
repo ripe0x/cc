@@ -4,6 +4,9 @@ pragma solidity ^0.8.28;
 import {console} from "forge-std/Test.sol";
 import {ICore} from "../../src/interfaces/ICore.sol";
 import {Lane, Mainnet, Settings} from "../../src/interfaces/Interfaces.sol";
+import {IControllerV1} from "../../src/interfaces/IControllerV1.sol";
+import {ICoreLens} from "../../src/interfaces/ICoreLens.sol";
+import {RateStore} from "../../src/lib/RateStore.sol";
 import {IAuctionHouse} from "../../src/interfaces/AuctionHouse.sol";
 import {IArtCoinsMevSkimV2} from "../../src/interfaces/ArtCoinsV2.sol";
 import {InvariantFixture} from "./InvariantFixture.sol";
@@ -406,6 +409,332 @@ abstract contract InvariantsBase is InvariantFixture {
         for (uint256 i; i < n; ++i) {
             assertTrue(!handler.modulesEver(i).calledOk(), "a module made a call into the core that went through");
         }
+    }
+
+    /// 16. the eth bid stays open. when a credit held by an actor has a price (`ceilingOf`) that the eth pot and the
+    /// hourly room both cover, a one credit `sellForEth` by its holder succeeds. the check runs after every action
+    /// under a snapshot that is reverted, so the state is unchanged. it starts with the flush of the fee router that
+    /// every `sellForEth` makes first, so the price is the one the sale itself reads. a hostile controller answers
+    /// `wants` differently from call to call and is left out.
+    function invariant_16_theBidNeverCloses() public {
+        if (_hostileController()) return;
+        uint256 snap = vm.snapshotState();
+        vm.prank(address(core));
+        try feeRouter.flush{gas: 1_000_000}() {} catch {}
+        uint256 room = core.hourlyRoom();
+        uint256 pot = core.ethPot();
+        (address holder, uint256 id) = _sellable(room < pot ? room : pot);
+        if (holder == address(0)) {
+            vm.revertToState(snap);
+            return;
+        }
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.startPrank(holder);
+        CREDITS.setApprovalForAll(address(core), true);
+        (bool ok, bytes memory why) = address(core).call(abi.encodeWithSignature("sellForEth(uint256[])", ids));
+        vm.stopPrank();
+        vm.revertToState(snap);
+        assertTrue(
+            ok,
+            string.concat(
+                "sellForEth refused a credit whose price the pot and the room cover, selector ",
+                vm.toString(bytes4(why))
+            )
+        );
+    }
+
+    /// the sale of invariant 16 has a seller in the state `setUp` builds, so its success branch runs in the campaigns
+    function test_theBidCheckFindsASeller() public {
+        if (_hostileController()) return;
+        uint256 room = core.hourlyRoom();
+        uint256 pot = core.ethPot();
+        (address holder,) = _sellable(room < pot ? room : pot);
+        assertTrue(holder != address(0), "no actor holds a credit that the pot and the room cover");
+        invariant_16_theBidNeverCloses();
+    }
+
+    /// the first credit among the first four of each actor whose price is above zero and at most `afford`
+    function _sellable(uint256 afford) internal view returns (address holder, uint256 id) {
+        uint256 n = handler.actorCount();
+        for (uint256 a; a < n; ++a) {
+            address actor = handler.actors(a);
+            uint256[] memory held = CREDITS.tokensOf(actor);
+            for (uint256 j; j < held.length && j < 4; ++j) {
+                uint256 price = core.ceilingOf(held[j]);
+                if (price != 0 && price <= afford) return (actor, held[j]);
+            }
+        }
+    }
+
+    function _hostileController() internal view returns (bool) {
+        return core.controller() == address(fuzz) && fuzz.hostile();
+    }
+
+    /// 17. every credit the core owns is in exactly one place. a credit in a pile is reached by walking that pile from
+    /// its head, is recorded as in that pile and in that lane, is owned by the core and appears once across both piles.
+    /// each pile holds as many credits as its size says and its walk ends. a credit the core owns outside both piles has
+    /// no record and `adopt` puts it into the eth pile. a credit the ghost ever piled that the core does not own has no
+    /// record.
+    function invariant_17_everyCreditInExactlyOnePlace() public {
+        uint256[] memory eth = _walkPile(Lane.Eth);
+        uint256[] memory exitIds = _walkPile(Lane.Exit);
+        uint256[] memory table = _emptySet(eth.length + exitIds.length);
+        for (uint256 i; i < eth.length; ++i) {
+            assertTrue(_insert(table, eth[i]), "a credit appears twice in the eth pile");
+        }
+        for (uint256 i; i < exitIds.length; ++i) {
+            assertTrue(_insert(table, exitIds[i]), "a credit is in both piles or twice in the exit pile");
+        }
+        uint256[] memory owned = CREDITS.tokensOf(address(core));
+        uint256[] memory loose = new uint256[](owned.length);
+        uint256 looseCount;
+        for (uint256 i; i < owned.length; ++i) {
+            if (_contains(table, owned[i])) continue;
+            (bool inPile,,,) = core.creditInfo(owned[i]);
+            assertTrue(!inPile, "a credit recorded as piled is not reached by walking its pile");
+            loose[looseCount++] = owned[i];
+        }
+        assertEq(owned.length, eth.length + exitIds.length + looseCount, "an owned credit is counted twice or missed");
+        _adoptable(loose, looseCount);
+        uint256 piled = handler.everPiledCount();
+        for (uint256 i; i < piled; ++i) {
+            uint256 id = handler.everPiled(i);
+            if (_creditOwner(id) == address(core)) continue;
+            (bool inPile,,,) = core.creditInfo(id);
+            assertTrue(!inPile, "a credit the core no longer owns still has a pile record");
+        }
+    }
+
+    /// the owner of a credit, zero once the credit was burned into a statement
+    function _creditOwner(uint256 id) internal view returns (address o) {
+        (bool ok, bytes memory out) = address(CREDITS).staticcall(abi.encodeWithSignature("ownerOf(uint256)", id));
+        if (ok && out.length == 32) o = abi.decode(out, (address));
+    }
+
+    /// the credits of a pile from its head to its end. every id is recorded in the pile, is owned by the core, and the
+    /// walk takes exactly `pileSize` steps
+    function _walkPile(Lane lane) internal view returns (uint256[] memory ids) {
+        uint256 size = core.pileSize(lane);
+        ids = new uint256[](size);
+        uint256 n;
+        uint256 id = core.pileHead(lane);
+        while (id != 0) {
+            assertLt(n, size, "a pile walk runs past its size");
+            ids[n++] = id;
+            (bool inPile, Lane l,,) = core.creditInfo(id);
+            assertTrue(inPile, "a credit of a pile has no pile record");
+            assertEq(uint256(l), uint256(lane), "a credit is recorded in another lane than its pile");
+            assertEq(CREDITS.ownerOf(id), address(core), "a pile holds a credit the core does not own");
+            id = core.pileNext(id);
+        }
+        assertEq(n, size, "a pile walk is shorter than its size");
+    }
+
+    /// `adopt` of the credits the core owns without a record puts all of them into the eth pile. undone afterwards
+    function _adoptable(uint256[] memory loose, uint256 count) internal {
+        if (count == 0) return;
+        uint256[] memory ids = new uint256[](count);
+        for (uint256 i; i < count; ++i) {
+            ids[i] = loose[i];
+        }
+        uint256 snap = vm.snapshotState();
+        uint256 size = core.pileSize(Lane.Eth);
+        vm.prank(address(0xADA9));
+        core.adopt(ids);
+        assertEq(core.pileSize(Lane.Eth), size + count, "adopt did not pile every unrecorded credit");
+        for (uint256 i; i < count; ++i) {
+            (bool inPile, Lane l,,) = core.creditInfo(ids[i]);
+            assertTrue(inPile && l == Lane.Eth, "an adopted credit is not in the eth pile");
+        }
+        vm.revertToState(snap);
+    }
+
+    /// an open addressing set of ids in memory, sized for `n` entries
+    function _emptySet(uint256 n) internal pure returns (uint256[] memory) {
+        uint256 cap = 8;
+        while (cap < 2 * n + 1) cap *= 2;
+        return new uint256[](cap);
+    }
+
+    /// false when `id` is already in the set
+    function _insert(uint256[] memory table, uint256 id) internal pure returns (bool) {
+        uint256 cap = table.length;
+        uint256 i = id % cap;
+        while (table[i] != 0) {
+            if (table[i] == id) return false;
+            i = (i + 1) % cap;
+        }
+        table[i] = id;
+        return true;
+    }
+
+    function _contains(uint256[] memory table, uint256 id) internal pure returns (bool) {
+        uint256 cap = table.length;
+        uint256 i = id % cap;
+        while (table[i] != 0) {
+            if (table[i] == id) return true;
+            i = (i + 1) % cap;
+        }
+        return false;
+    }
+
+    /// 18. the eth books balance over the whole run. the pots (`ethPot + ethToBuyback`) at the start of the run plus
+    /// every amount booked into them (fee flushes, sale proceeds, sale payments, skims) equal the pots now plus every
+    /// amount that left them (credit purchases, tips, exit repayments, buyback spends, migrations). the handler adds
+    /// each amount to its ledger where the action measures it at the recipient. unbooked eth, forced eth included, is
+    /// outside the sum until `skim` books it.
+    function invariant_18_ethConservation() public view {
+        assertEq(
+            core.ethPot() + core.ethToBuyback() + handler.gEthOut(),
+            handler.gEthStart() + handler.gEthIn(),
+            "the eth books do not balance: start + booked != pots + paid out"
+        );
+    }
+
+    /// 19. the price state and the read stay inside the bounds the settings and the state give, with no model of the
+    /// climb. the read never exceeds the price state. the price state never exceeds `rateCap` and the ceiling, which is
+    /// `ceilBps` of the last fill rate grown by `idleLoosenBps` per full 10 minutes since the last fill. the read is
+    /// either the price state or the clamp, so one average credit at the read costs at most `spendCapBps` of the pot.
+    function invariant_19_bidBounds() public view {
+        Settings memory st = core.settings();
+        uint256 rate = core.ethRate();
+        uint256 price = core.ethPrice();
+        assertLe(rate, price, "the read is above the price state");
+        uint256 lastFill = core.lastFillTime();
+        uint256 idle = block.timestamp > lastFill ? block.timestamp - lastFill : 0;
+        uint256 lastFillRate = uint256(vm.load(address(core), RateStore.SLOT));
+        uint256 ceiling = lastFillRate * (10_000 + uint256(st.idleLoosenBps) * (idle / 600)) * st.ceilBps / 1e8;
+        uint256 cap = ceiling < st.rateCap ? ceiling : st.rateCap;
+        assertLe(price, cap, "the price state is above the rate cap and the ceiling");
+        assertTrue(
+            rate * st.avgScore / 1e4 <= core.ethPot() * st.spendCapBps / 1e4 || rate == price,
+            "the read is below the price state yet above the clamp of the pot"
+        );
+    }
+
+    /// 20. `CoreLens` reports what the Core, the fee router and the house report. every scalar of `snapshot` equals the
+    /// direct read, the flush fields equal the split of the router balance (and an actual flush when the engine is the
+    /// core), and `statementsPage` over the held list equals the Core's held list and records, whole and in a window.
+    /// the page readiness and the asking prices come from the controller, which a hostile one answers differently from
+    /// call to call, and are left out then.
+    function invariant_20_lensEqualsTheCore() public {
+        ICoreLens.Snapshot memory s = lens.snapshot();
+        Settings memory st = core.settings();
+        assertEq(s.ethRate, core.ethRate(), "lens ethRate");
+        assertEq(s.ethPrice, core.ethPrice(), "lens ethPrice");
+        assertEq(s.averageBid, uint256(st.avgScore) * core.ethRate() / 1e4, "lens averageBid");
+        assertEq(s.hourlyRoom, core.hourlyRoom(), "lens hourlyRoom");
+        assertEq(s.ethPileSize, core.pileSize(Lane.Eth), "lens ethPileSize");
+        assertEq(s.ethPileHead, core.pileHead(Lane.Eth), "lens ethPileHead");
+        assertEq(s.exitPileSize, core.pileSize(Lane.Exit), "lens exitPileSize");
+        assertEq(s.exitPileHead, core.pileHead(Lane.Exit), "lens exitPileHead");
+        assertEq(s.ethPot, core.ethPot(), "lens ethPot");
+        assertEq(s.ethToBuyback, core.ethToBuyback(), "lens ethToBuyback");
+        assertEq(s.xPot, core.xPot(), "lens xPot");
+        assertEq(s.xToBuyback, core.xToBuyback(), "lens xToBuyback");
+        uint256 booked = core.ethPot() + core.ethToBuyback();
+        assertEq(s.unbookedEth, address(core).balance > booked ? address(core).balance - booked : 0, "lens unbookedEth");
+        assertEq(s.salesOwed, house.pendingRefunds(address(core)), "lens salesOwed");
+        assertEq(s.routerBalance, address(feeRouter).balance, "lens routerBalance");
+        assertEq(s.routerOwed, feeRouter.totalOwed(), "lens routerOwed");
+        assertEq(s.controller, core.controller(), "lens controller");
+        assertEq(s.successor, core.successor(), "lens successor");
+        assertEq(s.controllerLocked, core.controllerLocked(), "lens controllerLocked");
+        assertEq(s.exitModuleLocked, core.exitModuleLocked(), "lens exitModuleLocked");
+        assertEq(s.targetsLocked, core.targetsLocked(), "lens targetsLocked");
+        assertEq(s.successorLocked, core.successorLocked(), "lens successorLocked");
+        _lensFlush(s);
+        bool hostile = _hostileController();
+        if (!hostile) {
+            assertEq(s.ethPageReady, _pageReady(s.controller, Lane.Eth), "lens ethPageReady");
+            assertEq(s.exitPageReady, _pageReady(s.controller, Lane.Exit), "lens exitPageReady");
+        }
+        uint256[] memory held = core.heldStatements();
+        assertEq(s.statements.length, held.length, "lens statement count");
+        ICoreLens.StatementView[] memory page = lens.statementsPage(0, held.length);
+        assertEq(page.length, held.length, "lens page length");
+        for (uint256 i; i < held.length; ++i) {
+            _lensStatement(s.statements[i], held[i], s.controller, hostile);
+            _lensStatement(page[i], held[i], s.controller, hostile);
+        }
+        if (held.length > 2) {
+            uint256 start = held.length / 2;
+            ICoreLens.StatementView[] memory part = lens.statementsPage(start, 3);
+            uint256 expected = held.length - start < 3 ? held.length - start : 3;
+            assertEq(part.length, expected, "lens partial page length");
+            for (uint256 i; i < part.length; ++i) {
+                assertEq(part[i].id, held[start + i], "lens partial page id");
+            }
+        }
+        assertEq(lens.statementsPage(held.length, 5).length, 0, "lens page past the end");
+    }
+
+    /// the flush fields against the split of the router balance read directly, and against an actual flush (undone)
+    /// when the engine is the core
+    function _lensFlush(ICoreLens.Snapshot memory s) internal {
+        uint256 balance = address(feeRouter).balance;
+        uint256 owed = feeRouter.totalOwed();
+        uint256 toPayees;
+        uint256 toCore;
+        if (feeRouter.engine() != address(0) && balance > owed) {
+            uint256 amount = balance - owed;
+            if (feeRouter.splitOn()) {
+                (, uint32[] memory ppm) = feeRouter.payees();
+                for (uint256 i; i < ppm.length; ++i) {
+                    toPayees += amount * ppm[i] / 1_000_000;
+                }
+            }
+            toCore = amount - toPayees;
+        }
+        assertEq(s.flushToCore, toCore, "lens flushToCore");
+        assertEq(s.flushToPayees, toPayees, "lens flushToPayees");
+        if (feeRouter.engine() == address(core) && balance > owed) {
+            uint256 snap = vm.snapshotState();
+            uint256 before = address(core).balance;
+            try feeRouter.flush() {
+                assertEq(address(core).balance - before, s.flushToCore, "lens flushToCore differs from a flush");
+            } catch {}
+            vm.revertToState(snap);
+        }
+    }
+
+    function _pageReady(address ctl, Lane lane) internal view returns (bool ready) {
+        (bool ok, bytes memory out) = ctl.staticcall{gas: 500_000}(abi.encodeCall(IControllerV1.nextPage, (lane)));
+        ready = ok && out.length >= 82 * 32 && abi.decode(out, (uint256)) == 1;
+    }
+
+    /// a statement view against the Core's record, status and (outside a hostile controller) the asking price
+    function _lensStatement(ICoreLens.StatementView memory v, uint256 sid, address ctl, bool hostile) internal view {
+        assertEq(v.id, sid, "lens statement id");
+        (, Lane lane, uint256 cost, uint64 listedAt) = core.statementInfo(sid);
+        assertEq(uint256(v.lane), uint256(lane), "lens statement lane");
+        assertEq(v.cost, cost, "lens statement cost");
+        uint8 status;
+        uint256 auctionId;
+        uint256 bid;
+        uint64 endTime;
+        bool listed;
+        try core.statementStatus(sid) returns (ICore.StatementStatus st, uint256 aid, uint256, uint256 b, uint64 end) {
+            status = uint8(st);
+            auctionId = aid;
+            bid = b;
+            endTime = end;
+            listed = st == ICore.StatementStatus.Listed || st == ICore.StatementStatus.Bid
+                || st == ICore.StatementStatus.Ended;
+        } catch {}
+        assertEq(v.status, status, "lens statement status");
+        assertEq(v.auctionId, auctionId, "lens statement auction");
+        assertEq(v.topBid, bid, "lens statement top bid");
+        assertEq(v.endTime, endTime, "lens statement end time");
+        assertEq(v.listed, listed, "lens statement listed");
+        if (hostile) return;
+        uint256 asking;
+        if (lane == Lane.Eth && listedAt != 0 && status == uint8(ICore.StatementStatus.Listed)) {
+            (bool ok, bytes memory out) = ctl.staticcall{gas: 200_000}(abi.encodeCall(IControllerV1.priceOf, (sid)));
+            if (ok && out.length == 32) asking = abi.decode(out, (uint256));
+        }
+        assertEq(v.askingPrice, asking, "lens statement asking price");
     }
 
     /// logs how often each action ran, succeeded and was skipped in this run, and over all runs so far.

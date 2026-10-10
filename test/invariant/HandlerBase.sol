@@ -320,6 +320,13 @@ abstract contract HandlerBase is Test {
     // ghost totals for the summary
     uint256 public biggestSpendBps;
 
+    /// ledger of the eth books: the pots (`ethPot + ethToBuyback`) when the run began, the eth the core booked into them
+    /// since (fee flushes, sale proceeds, sale payments, skims) and the eth that left them (credit purchases, tips,
+    /// exit repayments, buyback spends, migrations). each amount is the one measured at the recipient by the action
+    uint256 public gEthStart;
+    uint256 public gEthIn;
+    uint256 public gEthOut;
+
     constructor(Wiring memory w) {
         core = w.core;
         house = w.house;
@@ -470,6 +477,10 @@ abstract contract HandlerBase is Test {
         everHeld.push(sid);
     }
 
+    function seedEthBooks() external {
+        gEthStart = core.ethPot() + core.ethToBuyback();
+    }
+
     function seedGhostWindow(uint256 start, uint256 pot, uint256 spent) external {
         gWinStart = start;
         gWinPot = pot;
@@ -479,6 +490,19 @@ abstract contract HandlerBase is Test {
 
     function everHeldCount() external view returns (uint256) {
         return everHeld.length;
+    }
+
+    function actorCount() external view returns (uint256) {
+        return actors.length;
+    }
+
+    /// the credits the ghost has had in a pile at some time, in the order they first entered
+    function everPiledCount() external view returns (uint256) {
+        return cgList.length;
+    }
+
+    function everPiled(uint256 i) external view returns (uint256) {
+        return cgList[i];
     }
 
     function statementGhost(uint256 sid) external view returns (SG memory) {
@@ -641,6 +665,7 @@ abstract contract HandlerBase is Test {
 
     /// eth flows of one action. `out` and `in_` are what the action explains, measured at the recipients.
     function _eth(uint256 b0, uint256 out, uint256 in_, string memory what) internal {
+        gEthOut += out;
         uint256 b1 = address(core).balance;
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 expected = int256(b0) + int256(in_) - int256(out);
@@ -751,6 +776,11 @@ abstract contract HandlerBase is Test {
         bool stored = (uint256(vm.load(address(core), bytes32(uint256(15)))) >> 64) & 0xff != 0;
         bool want = core.xPot() * 10_000 >= uint256(st.avgScore) * rate * core.unitPerPoint();
         if (stored != want) _flag(V_FUNDED_STALE, "exit funded flag disagrees with pot, stored rate and unit");
+    }
+
+    /// eth booked into the pots (the pot share and the buyback share) enters the ledger
+    function _booked(uint256 amount) internal {
+        gEthIn += amount;
     }
 
     /// eth booked into the pot adds to the window pot while the window is open
@@ -921,6 +951,7 @@ abstract contract HandlerBase is Test {
             if (address(feeRouter).balance != owed) _flag(V_ROUTER, "a flush left eth in the router");
             parked = 0;
             toCore = eng == address(core) ? want : 0;
+            _booked(toCore);
             _potIn(toCore - toCore * core.settings().feeToBuybackBps / 10_000);
         } catch {
             // only the core and the counting engine are known to take eth: `repoint` also sets an address built from the fuzz
@@ -1879,6 +1910,7 @@ abstract contract HandlerBase is Test {
         // the sale proceeds the house owed were collected first, once, by the amount it owed
         if (collected != p.owed) _flag(V_HOUSE, "buyback collected something other than what the house owed");
         gCollected += collected;
+        _booked(collected);
         _potIn(collected - collected * p.st.saleToBuybackBps / 10_000);
         // the skim of the swap went to the router. the flush books its engine share, split by feeToBuybackBps
         (uint256 held, uint256 toCore) = _flushRouter();
@@ -1930,6 +1962,7 @@ abstract contract HandlerBase is Test {
             if (core.ethPot() != pot0 + booked || core.ethToBuyback() != tb0) {
                 _flag(V_POT, "skim booked the wrong eth");
             }
+            _booked(booked);
             _potIn(booked);
             _eth(b0, 0, 0, "skim");
             if (core.exitToken() != address(0)) {
@@ -2218,6 +2251,7 @@ abstract contract HandlerBase is Test {
     /// after a door succeeded: the pull inside it did what the flush rule gives. the router holds what is owed to
     /// payees and nothing else after a flush that went through, the engine got its part
     function _pullChecks(Pull memory q, Vm.Log[] memory logs) internal {
+        _booked(q.toCore);
         _potIn(q.toCore - q.toCore * core.settings().feeToBuybackBps / 10_000);
         bool moved = q.ok && q.held > q.owed;
         uint256 flushes;

@@ -283,6 +283,7 @@ abstract contract InvariantFixture is Fixture {
             else handler.seedGhostStatement(held[i], address(0), 0, false);
         }
         handler.seedGhostWindow(_windowStart(), _windowPot(), _windowSpent());
+        handler.seedEthBooks();
     }
 
     function _seedLane(Lane lane) internal {
