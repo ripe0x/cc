@@ -260,15 +260,30 @@ everything in SPEC sections 10 and 11 still needs coverage, adapted to this file
 
 ## 13. invariants
 
-SPEC section 10 invariants hold, with these changes.
+`test/invariant/Invariants.t.sol` holds twenty `invariant_` functions, numbered as in the table. all eight concrete suites run all twenty against the real system on the fork: the real Core, house, Credits, Statements and artcoins stack, with the exit module and the exit token as the only stand ins. the suites are phase 1 after the sniper window, phase 1 inside it, phase 2, phase 2 under a hostile controller, phase 2 under a hostile owner, and three that add the sale and owner actions of `HandlerSale` (phase 1, phase 2, phase 2 hostile). seven of them have a Deep variant that takes its runs and depth from the environment.
 
-| # | invariant on this branch |
-|---|---|
-| 3 | a statement only leaves the Core by a house auction whose reserve was at least the hard floor (`cost * saleFloorBps / 10_000`) when it was set, by `sellTo` with payment at least the hard floor, by an exit that returned at least `rating * unitPerPoint`, or as the top of an overprint |
-| 5 | pots never exceed what the Core holds, and eth owed to the Core by the house is not counted in the pots until `collectSales` books it |
-| new | the owner cannot transfer assets out directly (section 10), under every setting inside the bounds. the owner can still overpay a seller of credits it controls, at a bounded pace (section 10, item 28 of section 14) |
-| new | no state of the statement stock closes the bid, stops the climb or stops a fill |
-| new | the router's eth only ever goes to the engine the owner set at that time, by the flush rule (the payees' parts, the rest to the engine). a flush against an engine that refuses reverts and the eth waits, swaps never fail on it, a lock is one way, and nothing the router owner does moves an asset or a pot of the Core (`invariant_15`, with the `flush` and `repoint` actions) |
+| # | test | invariant |
+|---|---|---|
+| 1 | `ethOnlyLeavesByAllowedPaths` | eth leaves the Core only as a credit purchase within the ceiling, a `buyListing` tip, an exit gas repayment, a buyback slice with its keeper tip, a refund of overpayment or a migration, each within the caps of the settings in force |
+| 2 | `noCreditAboveBonusCap` | no credit is bought above the blended ceiling with the controller bonus at `bonusCapBps` |
+| 3 | `noStatementSoldBelowItsReserve` | every sold statement sold at or above the reserve the Core set, and that reserve is at least the hard floor `cost * saleFloorBps / 10_000` |
+| 4 | `everyStatementIsInExactlyOnePlace` | every statement ever composed is listed on the house, held by the Core, sold, exited or overprinted, and the records of the Core, the house and the statements token agree |
+| 5 | `potsNeverExceedBalances` | `ethPot + ethToBuyback` and the exit token pots stay within the Core's balances, and the house debt is booked only by `collectSales` |
+| 6 | `rateFollowsTheModel` | the stored rate and the read follow the bid model around every action and every warp, and only `setRate` makes the rate jump |
+| 7 | `hourlySpendWithinCap` | hourly eth spend stays within `spendCapBps` of the window pot, and the window in Core storage equals the ghost window |
+| 8 | `ownerAndControllersNeverGain` | the owner and every controller address hold no more eth, coin, credits, statements or exit token than at the start of the run |
+| 9 | `coinSupplyOnlyFallsByBurns` | coin supply never rises and falls only by the buyback burns and the auction fill burns, and the Core holds no coin |
+| 10 | `receiveNeverReverts` | `receive()` accepted every direct send and the hook's `BidForwardFailed` never occurred in a real swap |
+| 11 | `noUnexpectedReverts` | every action the model expects to succeed succeeded, and every refusal carried the expected selector |
+| 12 | `aStatementOnlyLeavesByASaleAnExitOrAnOverprint` | every statement left the Core by an auction sale, a `sellTo` sale, an exit or an overprint, and both sale kinds paid at least the hard floor |
+| 13 | `locksAndHandoversNeverComeUndone` | the four locks (controller, exit module, targets, successor) stay closed, former owners hold no power, and the owner is the last accepted owner |
+| 14 | `noCallFromInsideAnExitEverWorked` | every call a hostile exit module makes into the Core from inside an exit (compose, composeExit, skim, collectSales, buyback, buybackExit, exitStatement, repriceStatement, adopt, sellForEth, buyListing, sellTo) and into the selling controller reverts |
+| 15 | `routerEthOnlyGoesToTheEngineSetAtThatTime` | the fee router pays only the engine the owner set at that time and the payees, by the flush rule, and a lock is one way |
+| 16 | `theBidNeverCloses` | a credit whose price the eth pot and the hourly room cover is bought by a one credit `sellForEth` of its holder |
+| 17 | `everyCreditInExactlyOnePlace` | every credit the Core owns is in exactly one pile, reached by walking that pile, or has no record and `adopt` piles it, and each pile walk ends after `pileSize` steps |
+| 18 | `ethConservation` | the pots at the start of the run plus all eth booked into them equal the pots now plus all eth paid out of them |
+| 19 | `bidBounds` | the read is at most the price state, the price state is at most `rateCap` and the idle loosened ceiling, and the read is the price state or the clamp of the pot |
+| 20 | `lensEqualsTheCore` | every field of `CoreLens.snapshot` and every statement view of `statementsPage` equals the direct reads of the Core, the router and the house |
 
 ## 14. accepted properties and risks for the owner to confirm
 
@@ -276,7 +291,7 @@ none of these is a code change in this repo. each is a deliberate departure from
 
 | # | item | what it means |
 |---|---|---|
-| 1 | the owner can change every economic number at once | the bid, the reserve, the split of proceeds, the buyback slice, the exit bid, the exit auction. no delay. holders trust the owner. only the bounds limit it. the owner cannot transfer assets out directly under any of them, but it can overpay a seller it controls (item 28) |
+| 1 | the owner can change every economic number at once | the bid, the reserve, the split of proceeds, the buyback slice, the exit bid, the exit auction. no delay. holders trust the owner. only the bounds limit it. the owner moves assets only through `migrate` to the successor (lockable), `rescueNft` for NFTs the Core holds in no pile and on no book, and `rescueCoin` for coin, and it can overpay a seller it controls (item 28) |
 | 2 | `saleFloorBps` can be set as low as 1,000 | the controller can then ask, and the Core accept, as little as 10 percent of the cost. selling below cost is the stated goal, but a low floor with a low controller price gives statements away. `repriceStatement` moves old listings, so a cut reaches the whole stock at the price of one call each. a raise of the floor or of the controller price reaches a listing only through `repriceStatement`, and a raise is not atomic (item 39) |
 | 3 | the 5 percent raise and the 15 minute extension are fixed in the house | the Core cannot change them. the owner cannot change the house, it is non upgradeable. the house fee is fixed at the factory default at creation (0 at the pin) |
 | 4 | sale proceeds sit in the house until someone calls `collectSales` | they are in no pot, so they do not fund buying or the buyback until then. `buyback()` collects first. a keeper should call `collectSales` regularly |

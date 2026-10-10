@@ -50,7 +50,7 @@ graph LR
     exit --> dutch
 ```
 
-credits keep being bought whatever the statements do. the bid is flat per credit at launch (`flatBps` 10_000) and can blend score back in. the full rules, the settings table and the owner powers are in docs/ARCHITECTURE.md. the owner cannot transfer assets out directly, but it sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit, at a bounded pace (docs/ARCHITECTURE.md section 10). holders trust the owner key.
+credits keep being bought whatever the statements do. the bid is flat per credit at launch (`flatBps` 10_000) and can blend score back in. the full rules, the settings table and the owner powers are in docs/ARCHITECTURE.md. the owner moves assets only through `migrate` to the successor (lockable), `rescueNft` for NFTs the Core holds in no pile and on no book, and `rescueCoin` for coin, and it sets the price the engine pays, so a dishonest owner or a stolen owner key could drain the eth pot by selling credits to the engine at an inflated limit, at a bounded pace (docs/ARCHITECTURE.md section 10). holders trust the owner key.
 
 ## branches
 
