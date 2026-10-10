@@ -193,7 +193,7 @@ these replace the old `frozen` flag and the Freeze action. the setters revert wi
 
 ## 10. port to the artcoins v2 stack (owner confirmed 2026-10-07)
 
-the coin launches on the artcoins v2 factory, not the v1 stack the launch package was built on. reference: the v2 repo, branch v2-legibility, commit d4aa46b (vendored as prebuilt artifacts, test/v2-artifacts/README.md). the analysis is docs/V2-PORT.md: it is the working reference for every detail below, this section is the binding decision list. where V2-PORT.md and this section differ, this section wins. v2 is not on mainnet yet and its audit is pending, so every v2 address stays a config input and the final run waits for the live stack.
+the coin launches on the artcoins v2 factory, not the v1 stack the launch package was built on. reference: the v2 repo, branch v2-legibility, commit d4aa46b (deployed on mainnet from launcher commit fbe07c7, script/config/v2-mainnet.json). the analysis is docs/V2-PORT.md: it is the working reference for every detail below, this section is the binding decision list. where V2-PORT.md and this section differ, this section wins. the v2 audit is pending and the stack is live, so every v2 address stays a config input and preflight pins the live code hashes.
 
 ### 10.1 decisions
 
@@ -227,7 +227,7 @@ rewritten for `IArtCoinsFactoryV2`: `DeploymentConfigV2`, the factory's own `pre
 
 ### 10.5 tests
 
-real contracts on the fork as before. the v2 stack is not on mainnet, so the fixture deploys it onto the pinned fork from prebuilt v2 artifacts (built from the v2 repo at the reference commit with the v2 repo's own compiler settings, vendored under test/v2-artifacts/ with the commit hash and the build command recorded in a README there), following the v2 repo's own deploy library. no hand written copy of a v2 contract and no mock of one. when v2 is live the fixture switches to the mainnet addresses by config.
+real contracts on the fork as before. the fixture attaches to the live v2 stack on the pinned fork at the addresses of script/config/v2-mainnet.json, with the factory owner impersonated. no hand written copy of a v2 contract and no mock of one.
 
 ### 10.6 amendments (owner, 2026-10-08). these win over 10.1 to 10.5
 

@@ -2,7 +2,7 @@
 
 ## status after the port (2026-10-08)
 
-the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the amendments win over the plan below). the engine was ported on v2 commit 87a7522 and runs on the vendored v2 artifacts of commit d4aa46b (test/v2-artifacts/README.md). the changes between the two are in the next section. where this file and section 10 differ, section 10 wins.
+the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the amendments win over the plan below). the engine was ported on v2 commit 87a7522 and runs on the live v2 stack (script/config/v2-mainnet.json), deployed on mainnet from launcher commit fbe07c7 whose contract sources equal d4aa46b. the stack was deployed on 2026-10-09 (blocks 26157195 to 26157205, wiring to 26157222) and the factory is deprecated, owner only. the changes between the two are in the next section. where this file and section 10 differ, section 10 wins.
 
 ### v2 changes from 87a7522 to d4aa46b that touch the engine
 
@@ -47,7 +47,7 @@ the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the am
 
 | # | question | owner |
 |---|---|---|
-| 1 | v2 is not on mainnet and its audit is pending. the five stack addresses are zero in the tracked config. before the real preflight compare the live hook `constantsHash()` and the factory runtime code with the vendored artifacts (`test/v2-artifacts/README.md`) | owner, v2 team |
+| 1 | the v2 audit is pending. the live stack is pinned by code hash in preflight (`V2_CODEHASH_*` in `script/LaunchConfig.sol`, read at block 26158000) and its `constantsHash()` by `V2_CONSTANTS_HASH`. the live runtime code equals the d4aa46b ci build except at the immutable slots (all ten contracts, same byte lengths) | owner, v2 team |
 | 2 | `payeePpm` was 161,031 as FLOW 10.7 said (the first port used 161,030); the current value is 112,778, FLOW 10.9. the payee share is of the gross flush and the engine receives the rest (V2R-4) | owner rules |
 | 3 | `predictToken` depends on mutable factory state (default allowlist, token deployer, hook escrow). preflight reads it, the config hash does not cover it: recompute right before the broadcast | operator |
 | 4 | the partial fill refund path of the Core's own buyback has never run on a real pool | v2 team, live check |

@@ -9,9 +9,9 @@ import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 // requires it of the hook and of the other four members the config names
 bytes32 constant V2_CONSTANTS_HASH = 0x69b6027a6426e4db8d91e06f74d3977b5d6e616067cf30c29f74d7c785ae4027;
 
-// the runtime code hashes (`extcodehash`) of the live v2 stack contracts, read at this block. the contracts have no
-// proxy and no selfdestruct, so the hashes hold at every later block. preflight requires each one of the contract the
-// config and the factory point at. script/config/v2-mainnet.json holds the addresses
+// the runtime code hashes (`extcodehash`, immutables included) of the live v2 stack contracts, read at this block.
+// preflight requires the hash of each contract the config and the factory point at. script/config/v2-mainnet.json
+// holds the addresses
 uint256 constant V2_PIN_BLOCK = 26158000;
 bytes32 constant V2_CODEHASH_HOOK = 0xdfd4453028eb0f5176cd00fdbbeb495e75754cef9fd36091767cdb593449562b;
 bytes32 constant V2_CODEHASH_FACTORY = 0x521076a0cde91c74a1c3a72f676818dd423d125647a5e038531443a86a9a9156;

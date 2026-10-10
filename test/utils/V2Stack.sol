@@ -30,8 +30,8 @@ interface IV2Reads {
 }
 
 /// @notice the live artcoins v2 stack on the pinned fork. addresses come from script/config/v2-mainnet.json, the record
-/// the scripts read as well. nothing here imitates a v2 contract. the factory owner of the record is the owner of the
-/// whole stack and stays a deprecated factory (only the owner launches, through `deployTokenAsOwner`)
+/// the scripts read as well. the factory owner of the record is the owner of the whole stack. the factory is
+/// deprecated: the owner launches, through `deployTokenAsOwner`
 library V2Stack {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
@@ -185,8 +185,8 @@ library V2Stack {
     }
 
     /// @notice the FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`, owner `owner`,
-    /// the coin bound later by `setup`. it is deployed per coin and is not part of the live stack, so its build output
-    /// is vendored (test/v2-artifacts). the caller still registers it as an escrow depositor
+    /// the coin bound later by `setup`. it is deployed per coin, outside the live stack, from vendored build output
+    /// (test/v2-artifacts). the caller still registers it as an escrow depositor
     /// (`escrow.addDepositor(swapper, false)`, owner only) and calls `setup(coin)` as the deployer
     function deploySwapper(Stack memory s, address owner, address endRecipient, address coin_)
         internal
