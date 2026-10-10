@@ -338,7 +338,7 @@ anyone can run these. none is needed for safety, they keep the engine moving. no
 | move the fee eth (optional) | `router.flush()` | shares with payees once the split is on, sends the rest to the Core, which books it as fees. reverts only while the engine is unset or the engine call fails. an empty balance is a no op |
 | collect the creator slot | `locker.collectRewards(coin)` | pushes the recipient shares. the locker `keeperRewardBps` is 0, so the caller is paid nothing. at lp fee 0 there is no lp income, so this moves only dust |
 | book stray eth | `core.skim()` | books eth the Core received from anyone but the router (for example a partial fill refund from the escrow, claimed with the escrow's `claim`) |
-| compose statements | `core.compose()`, `core.composeExit()` | the caller pays the gas, about 8 million for 80 credits, including the flush of the fee router, and receives nothing from the Core. there is no compose bounty and no compose keeper: holders compose, and the owner composes when nobody does. set the gas limit above 10 million (the cap is 16,777,216) |
+| compose statements | `core.compose()`, `core.composeExit()` | the caller pays the gas, about 8 million for 80 credits, including the flush of the fee router. holders compose, and the owner composes when nobody does. set the gas limit above 10 million (the cap is 16,777,216) |
 | adopt credits | `core.adopt(ids)` | puts credits that were transferred to the Core outside its doors into the eth pile at the basis of the price state now. event `CreditAdopted` |
 | collect sales | `core.collectSales()` | moves statement sale proceeds into the pots. `buyback()` calls it first |
 | buyback | `core.buyback()` | burns coin bought with one slice of the buyback pot, caller tip `keeperTipBps` |

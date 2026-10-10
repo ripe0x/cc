@@ -90,7 +90,7 @@ what the call does:
 1. the fee pull of section 7.
 2. `NotReady` when the controller reports no page. `BadFormat` for a format above 7.
 3. the 80 credits leave the pile (`NotInPile`, `NotHeld`) and go to `Statements.compose`. `BadStatement` when the result is not the next statement id held by the Core with 80 credits.
-4. the statement is booked with the sum of the cost bases of its 80 credits. the Core pays the caller nothing, so the caller bears the gas of the call including the fee pull. holders of the coin and people in the project compose, and the owner composes when nobody does.
+4. the statement is booked with the sum of the cost bases of its 80 credits. the caller pays the gas of the call, including the fee pull. holders of the coin and people in the project compose, and the owner composes when nobody does.
 5. event `Composed(sid, lane, format, cost, caller)`. an eth lane statement is listed on the house in the same call (`StatementListed(sid, auctionId, reserve)`).
 
 send at least 10,000,000 gas: the live Statements contract needs about 8.5 million for 80 credits (section 13).
@@ -123,7 +123,7 @@ the pool sends fee eth to the fee router. the router holds it until `flush()`:
 * while the split is on (`splitOn`, from `splitStart`), each payee receives `amount * ppm / 1_000_000` with 100,000 gas. a share that fails is recorded in `owed` and paid by `claim(payee)`.
 * the rest goes to the engine, the Core, whose `receive()` books it: `feeToBuybackBps` to the coin buyback pot, the rest to `ethPot`. `FlushFailed` when the engine refuses it, and the fees stay in the router. `NoEngine` while no engine is set. an empty balance returns early.
 
-the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush()` first. The caller of `compose` or `composeExit` pays the gas of the flush. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore` and `flushToPayees`.
+the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush()` first. the caller of `compose` or `composeExit` pays the gas of the flush. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore` and `flushToPayees`.
 
 ## 8. adopt
 
