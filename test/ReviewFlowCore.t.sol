@@ -589,20 +589,12 @@ contract ReviewFlowCoreTest is Fixture {
         emit log_named_uint("ControllerV1.nextPage gas, full page, warm", g - gasleft());
     }
 
-    /// FC-4 (fixed): the controller's nextPage read has a fixed gas cap. a controller that burns gas cannot farm the
-    /// pot: past the cap its page is refused, below it the compose pays its caller nothing
-    function test_FIXED_gasBurningControllerCannotFarmTheExitLaneCompose() public {
+    /// FC-4 (fixed): the read of the controller's `nextPage` is cut at `PAGE_GAS` (500,000). a controller that burns
+    /// gas there makes the compose revert `NotReady` and the gas of the call stays bounded by the cut
+    function test_FIXED_gasBurningControllerCannotFarmTheExitLaneReimbursement() public {
         _skipSniperWindow();
         _enterPhase2();
         _fundPot(3 ether);
-        // the eth rate is as high as the owner can set it, with the reimbursement settings at their maximum
-        Settings memory s = core.settings();
-        s.rateCap = uint64(RATE_START_MAX_WEI);
-        s.reimburseBps = 15_000;
-        s.reimburseCapBps = 1_000;
-        _setSettings(s);
-        vm.prank(owner);
-        core.setRate(RATE_START_MAX_WEI);
         xt.mint(address(core), 1e20);
         core.skim();
         uint256[] memory ids = _credits(seller, 80);
@@ -610,25 +602,24 @@ contract ReviewFlowCoreTest is Fixture {
         core.sellForExitToken(ids);
         assertEq(core.pileSize(Lane.Exit), 80);
 
-        // 20M gas of burning is far past the cap (500,000): the read fails and the page is not ready
+        // 20M gas of burning is far past the cut: the read fails and the page is not ready
         BurnController bc = new BurnController(address(core), 20_000_000);
         _setController(address(bc));
         vm.fee(20 gwei);
         vm.prank(keeper);
+        uint256 g = gasleft();
         vm.expectRevert(ICore.NotReady.selector);
         core.composeExit{gas: 30_000_000}();
+        g -= gasleft();
+        assertLt(g, 1_000_000, "the read is cut at 500,000 and the rest of the call is small");
 
-        // burning 200,000 is answered: with the cold page read of about 242,000 gas it stays under the cap of 500,000
-        uint256 snap = vm.snapshotState();
+        // burning 200,000 is answered: with the cold page read of about 242,000 gas it stays under the cut
         bc = new BurnController(address(core), 200_000);
         _setController(address(bc));
-        uint256 potBefore = core.ethPot();
-        uint256 b = keeper.balance;
+        uint256 supply = STATEMENTS.supply();
         vm.prank(keeper);
         core.composeExit{gas: 30_000_000}();
-        assertEq(keeper.balance, b, "the compose pays the caller nothing");
-        assertEq(core.ethPot(), potBefore, "the eth pot is unchanged");
-        vm.revertToState(snap);
+        assertEq(STATEMENTS.supply(), supply + 1, "the page under the cut composes");
     }
 
     /// held: at the clamp the flat ceiling equals the hourly cap, so a bonus on top makes the credit unsellable

@@ -541,6 +541,37 @@ contract FlowTest is Fixture {
         assertTrue(listed, "StatementListed");
     }
 
+    /// the `Composed` log: `sid` and `caller` are indexed, the data is `(lane, format, cost)` with the cost the sum of the
+    /// 80 bases of the page
+    function test_compose_emitsComposedWithTheSumOfTheBases() public {
+        _fillEthPile(80);
+        uint256[] memory page = core.pilePage(Lane.Eth, 0, 80);
+        uint256 sum;
+        for (uint256 i; i < 80; ++i) {
+            (,, uint256 base,) = core.creditInfo(page[i]);
+            sum += base;
+        }
+        vm.fee(composeBasefee);
+        vm.recordLogs();
+        vm.prank(keeper);
+        core.compose();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 seen;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(core) || logs[i].topics[0] != ICore.Composed.selector) continue;
+            ++seen;
+            assertEq(logs[i].topics.length, 3, "sid and caller are indexed");
+            assertEq(uint256(logs[i].topics[1]), STATEMENTS.supply(), "sid");
+            assertEq(address(uint160(uint256(logs[i].topics[2]))), keeper, "caller");
+            (uint8 lane, uint8 format, uint256 cost) = abi.decode(logs[i].data, (uint8, uint8, uint256));
+            assertEq(lane, uint8(Lane.Eth));
+            assertEq(format, 0);
+            assertEq(cost, sum, "cost is the sum of the 80 bases");
+            assertEq(logs[i].data.length, 96, "lane, format and cost only");
+        }
+        assertEq(seen, 1, "one Composed");
+    }
+
     function test_compose_exitLaneIsNeverListed() public {
         _enterPhase2();
         uint256[] memory ids = _credits(seller, 80);

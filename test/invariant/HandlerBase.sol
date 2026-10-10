@@ -1531,7 +1531,6 @@ abstract contract HandlerBase is Test {
         uint256 supply;
         uint256 sum;
         uint256 basefee;
-        uint256 gasUsed;
         Settings st;
         bool valid;
         Pull pull;
@@ -1573,11 +1572,9 @@ abstract contract HandlerBase is Test {
         _endPull(p.pull);
         vm.recordLogs();
         _att(a);
-        uint256 g0 = gasleft();
         vm.prank(keeper);
         if (lane == Lane.Eth) {
             try core.compose() {
-                p.gasUsed = g0 - gasleft();
                 _ok(a);
                 _afterCompose(lane, ids, p);
             } catch (bytes memory why) {
@@ -1586,7 +1583,6 @@ abstract contract HandlerBase is Test {
             }
         } else {
             try core.composeExit() {
-                p.gasUsed = g0 - gasleft();
                 _ok(a);
                 _afterCompose(lane, ids, p);
             } catch (bytes memory why) {
