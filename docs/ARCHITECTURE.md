@@ -248,7 +248,7 @@ real contracts only. fork at block 26158000 (`FORK_BLOCK`), rpc from `MAINNET_RP
 
 | group | rule |
 |---|---|
-| live, never faked | Credits, Statements, CreditScore, CreditStrategy, Seaport 1.6, the pool manager, the pnd auction factory and the Core's real house. the v2 stack (factory, token deployer, skim hook, locker, escrow, mev module) at its mainnet addresses (`script/config/v2-mainnet.json`). the fork block is after the stack deploy. the factory owner is the engine owner in every fixture, impersonated on the fork. the only vendored v2 build output is `FeeAutoSwapperV2` (`test/v2-artifacts`), which is deployed per coin and is not on chain |
+| live, never faked | Credits, Statements, CreditScore, CreditStrategy, Seaport 1.6, the pool manager, the pnd auction factory and the Core's real house. the v2 stack (factory, token deployer, skim hook, locker, escrow, mev module) at its mainnet addresses (`script/config/v2-mainnet.json`). the fork block is after the stack deploy. the factory owner is the engine owner in every fixture, impersonated on the fork |
 | the two stand ins | `MockExitModule` and `MockExitToken` in `test/standins/`. nothing is deployed for them yet |
 | attackers | hostile target, scripted and fuzz controllers, probes, statement buyers, mid swap callers, in `test/attackers/`. they attack the real system, they do not replace any of it |
 | swaps | a small unlock based test swapper (a caller, not a stand in) and one test that buys and sells through the real universal router. the helpers flush the router after each swap (set `autoFlush` false to hold the eth in it). `test/PullFees.t.sol` loads the router and calls the Core doors |

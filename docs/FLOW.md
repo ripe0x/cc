@@ -199,9 +199,9 @@ the coin launches on the artcoins v2 factory, not the v1 stack the launch packag
 
 | # | decision |
 |---|---|
-| 18 | the coin is launched `restricted` (v2 decision D73). there is no transfer tax any more: the tax config, the 44 venues and the exemption are deleted from the launch package. the Core, the fee router and the fee swapper are NOT put on the coin's allowlist (the hook grants the allowance each canonical swap needs, burns always pass) |
+| 18 | the coin is launched `restricted` (v2 decision D73). there is no transfer tax any more: the tax config, the 44 venues and the exemption are deleted from the launch package. the Core and the fee router are NOT put on the coin's allowlist (the hook grants the allowance each canonical swap needs, burns always pass) |
 | 19 | a `FeeRouter` contract is the bounty recipient of the pool. the Core books eth as fees when it arrives from the router, no longer from the hook |
-| 20 | the lp fee income of the project side goes through a v2 `FeeAutoSwapperV2` whose end recipient is the router, so it reaches the engine as eth |
+| 20 | no lp income exists: `lpFeePips` is 0 (decision 23), so the locker has nothing to pay and no fee swapper is deployed |
 | 21 | launch values follow the v2 factory defaults: engine share `bountyBps` and `lpFee` at the v2 factory defaults (replaced by decisions 23, 24 and 31), protocol locker slot at the factory default. skim stays 10 points of volume, anti sniper stays 90 points falling to 10 over 30 minutes if the v2 mev module allows it (else the nearest allowed values, reported) |
 | 22 | the launch is signed by the v2 factory owner key (`deployTokenAsOwner`), which is the engine owner. the fresh deployer path and the factory admin enable and revoke steps are removed |
 

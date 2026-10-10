@@ -476,9 +476,9 @@ contract ReviewDeployTest is ReviewHarness {
         s.stack.locker = v2.locker;
         s.stack.escrow = v2.escrow;
         s.mevModule = v2.mev;
-        s.owner = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
-        s.creator = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
-        s.creatorPayee = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+        s.owner = v2.owner;
+        s.creator = v2.owner;
+        s.creatorPayee = v2.owner;
         s.name = "CC";
         s.salt = keccak256("CC");
     }

@@ -12,7 +12,6 @@ import {
     IArtCoinsFeeEscrowV2,
     IArtCoinsMevSkimV2,
     IArtCoinsKeeperV2,
-    IFeeAutoSwapperV2,
     IOwnable2StepV2
 } from "../../src/interfaces/ArtCoinsV2.sol";
 
@@ -182,33 +181,5 @@ library V2Stack {
         require(f.defaultAllowed().length == 0, "v2: default allowed must ship empty");
         require(f.deprecated(), "v2: factory must ship deprecated");
         require(f.STACK_VERSION() == 2, "v2: stack version");
-    }
-
-    /// @notice the FeeAutoSwapperV2 for one coin, as the v2 docs deploy it: end recipient `endRecipient`, owner `owner`,
-    /// the coin bound later by `setup`. it is deployed per coin, outside the live stack, from vendored build output
-    /// (test/v2-artifacts). the caller still registers it as an escrow depositor
-    /// (`escrow.addDepositor(swapper, false)`, owner only) and calls `setup(coin)` as the deployer
-    function deploySwapper(Stack memory s, address owner, address endRecipient, address coin_)
-        internal
-        returns (address swapper)
-    {
-        IFeeAutoSwapperV2.Config memory c = IFeeAutoSwapperV2.Config({
-            owner: owner,
-            poolManager: Mainnet.POOL_MANAGER,
-            feeEscrow: s.escrow,
-            hook: s.hook,
-            poolFee: Mainnet.POOL_FEE,
-            tickSpacing: Mainnet.TICK_SPACING,
-            endRecipient: endRecipient,
-            coin: coin_,
-            maxSlippageBps: 500,
-            minBlocksBetweenConverts: 5,
-            maxStepIn: 1000 ether
-        });
-        bytes memory code = abi.encodePacked(vm.getCode("test/v2-artifacts/FeeAutoSwapperV2.json"), abi.encode(c));
-        assembly {
-            swapper := create(0, add(code, 0x20), mload(code))
-        }
-        require(swapper != address(0), "v2: swapper create failed");
     }
 }

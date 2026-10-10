@@ -31,7 +31,8 @@ struct LaunchConfig {
     /// `feeSource` is not read from the config file: the deploy creates the fee router and fills it in
     Stack stack;
     address mevModule;
-    // placeholders that must be filled before a launch
+    // launch inputs. the shipped config file holds the live stack and every field below. test/Config.t.sol asserts that
+    // `unsetFields` is empty for it
     address owner;
     address creator;
     string name;

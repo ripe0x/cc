@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Fixture} from "./utils/Fixture.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
+import {CreditIds} from "./utils/CreditIds.sol";
 import {
     LaunchConfig,
     V2_CODEHASH_HOOK,
@@ -23,8 +24,6 @@ import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 contract ConfigTest is Fixture {
     /// @dev SETTINGS_CHANGED of the operator, a flag here so parallel tests never share an environment variable
     bool internal changedFlag;
-
-    address internal constant SHIPPED_OWNER = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
 
     function _settingsChanged() internal view override returns (bool) {
         return changedFlag;
@@ -51,15 +50,15 @@ contract ConfigTest is Fixture {
         d.stack.locker = live.locker;
         d.stack.escrow = live.escrow;
         d.mevModule = live.mev;
-        d.owner = SHIPPED_OWNER;
-        d.creator = SHIPPED_OWNER;
-        d.creatorPayee = SHIPPED_OWNER;
+        d.owner = v2.owner;
+        d.creator = v2.owner;
+        d.creatorPayee = v2.owner;
         d.name = "CC";
         d.salt = keccak256("CC");
         assertEq(abi.encode(f.stack), abi.encode(d.stack));
         assertTrue(_same(f, d), "script/config/mainnet.json drifted from the default config");
-        assertEq(f.owner, SHIPPED_OWNER);
-        assertEq(f.creator, SHIPPED_OWNER);
+        assertEq(f.owner, v2.owner);
+        assertEq(f.creator, v2.owner);
         assertEq(f.name, "CC");
         assertEq(f.symbol, "CC");
         assertEq(f.salt, keccak256("CC"));
@@ -274,6 +273,16 @@ contract ConfigTest is Fixture {
 
     function rowDetailExt(string memory name) external view returns (string memory) {
         return _rowDetail(name);
+    }
+
+    /// every id of `CreditIds` is owned by the CreditStrategy at the fork block, and the three listed ids too
+    function test_creditIdsAreHeldByTheStrategy() public view {
+        for (uint256 i; i < 640; ++i) {
+            assertEq(CREDITS.ownerOf(CreditIds.at(i)), STRATEGY, "credit id moved");
+        }
+        assertEq(CREDITS.ownerOf(LISTED_A), STRATEGY);
+        assertEq(CREDITS.ownerOf(LISTED_B), STRATEGY);
+        assertEq(CREDITS.ownerOf(LISTED_C), STRATEGY);
     }
 
     function test_preflightSimulatesTheLaunchAndLeavesNoTrace() public {

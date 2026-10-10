@@ -14,7 +14,6 @@ the port is implemented as docs/FLOW.md section 10 decides (10.1 to 10.7, the am
 | hook: `setBountyRecipient`, `minProtocolShareBps(poolId)`. `setDeliveryParams` and the delivery globals removed. `SkimConfig` loses `referralPayout` and `quoteToken`, `globals()` holds the fee escrow and the extension allowlist | the bounty recipient is repointable by the coin admin until `lockRecipients()` (FLOW 10.12) |
 | locker: `setRewardRecipient`, `protocolSlotIndex`. `placeLiquidity` takes `hasProtocolSlot` | the creator slot recipient is repointable by the coin admin until `lockRecipients()` |
 | token: `metadata` and `context` merged into `description`. `lock` split into `lockAllowlist` and `lockRecipients`. `verify`, `isVerified`, `originalAdmin` removed | postflight reads `description`, `allowlistLocked` and `recipientsLocked` |
-| fee swapper: `artCoin` is `coin` | `test/utils/V2Stack.sol` `deploySwapper` |
 
 ### claims that were wrong or are superseded
 

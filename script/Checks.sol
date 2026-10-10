@@ -530,8 +530,12 @@ abstract contract LaunchChecks is PostflightChecks {
     function _preDeprecatedGate(LaunchConfig memory c, IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg) private {
         address fa = c.stack.factory;
         (bool ok, bool dep) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.deprecated, ()));
-        if (!ok || !dep) {
-            _info("factory: not deprecated, no deprecated gate", ok ? "public launches are open" : "unreadable");
+        if (!ok) {
+            _check("factory: deprecated() is readable", false, "the deprecated flag could not be read");
+            return;
+        }
+        if (!dep) {
+            _info("factory: not deprecated, no deprecated gate", "public launches are open");
             return;
         }
         (, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));

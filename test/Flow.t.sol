@@ -1424,9 +1424,11 @@ contract FlowTest is Fixture {
         return 0;
     }
 
-    /// @dev the seller sells a credit. whatever the settings, the core pays the quoted ceiling and nothing else
+    /// @dev the seller sells a credit. whatever the settings, the core pays the quoted ceiling. the door flushes the fee
+    /// router first and the Core books that eth, so the router is flushed before the balance is read
     function _sellMaybe(uint256 id) internal {
         if (CREDITS.ownerOf(id) != seller) return;
+        _flush();
         uint256 quote = core.ceilingOf(id);
         uint256 coreBefore = address(core).balance;
         uint256 sellerBefore = seller.balance;

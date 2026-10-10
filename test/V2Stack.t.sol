@@ -11,8 +11,7 @@ import {
     IArtCoinsHookV2,
     IArtCoinsTokenV2,
     IArtCoinsLpLockerV2,
-    IArtCoinsFeeEscrowV2,
-    IFeeAutoSwapperV2
+    IArtCoinsFeeEscrowV2
 } from "../src/interfaces/ArtCoinsV2.sol";
 import {V2Stack, IV2Reads} from "./utils/V2Stack.sol";
 import {V2_CONSTANTS_HASH} from "../script/LaunchConfig.sol";
@@ -136,12 +135,12 @@ contract V2StackTest is Test {
         vm.stopPrank();
     }
 
-    function test_stackDeploysAndChecks() public view {
+    function test_liveStackPassesCheck() public view {
         V2Stack.check(s, p); // the DeployV2Lib post deploy requires, on the live stack
         assertEq(F(s.factory).owner(), owner);
         assertTrue(F(s.factory).deprecated());
-        assertEq(F(s.factory).deployFee(), 0.069 ether);
-        assertEq(uint160(s.hook) & 0x3FFF, 0x28CC);
+        assertEq(F(s.factory).deployFee(), V2Stack.MAINNET_DEPLOY_FEE);
+        assertEq(uint160(s.hook) & 0x3FFF, V2Stack.HOOK_LOW_BITS);
     }
 
     /// the constants hash of the live stack, which preflight pins (`V2_CONSTANTS_HASH`)
@@ -235,21 +234,6 @@ contract V2StackTest is Test {
         assertGt(coinPaid, 0, "coin lp fee reached the reward recipient");
         console.log("lp fee eth to creator", creator.balance);
         console.log("lp fee coin to creator", t.balanceOf(creator));
-    }
-
-    /// the fee swapper of FLOW decision 20: end recipient a plain address here, deployed by this test, bound to the
-    /// coin by its deployer, registered by the owner as a non core escrow depositor
-    function test_feeSwapperDeploysAndBinds() public {
-        EmptyRecipient r = new EmptyRecipient();
-        (address coin,) = _launch(address(r), bytes32(uint256(5)));
-        address sw = V2Stack.deploySwapper(s, owner, address(r), address(0));
-        vm.prank(owner);
-        IArtCoinsFeeEscrowV2(s.escrow).addDepositor(sw, false);
-        IFeeAutoSwapperV2(sw).setup(coin);
-        assertTrue(IFeeAutoSwapperV2(sw).setupFinalized());
-        assertEq(IFeeAutoSwapperV2(sw).coin(), coin);
-        assertEq(IFeeAutoSwapperV2(sw).endRecipient(), address(r));
-        assertEq(IFeeAutoSwapperV2(sw).feeEscrow(), s.escrow);
     }
 
     /// the v1 launch values do not fit the mainnet env knobs (V2-PORT section 5.1): bounty 9500 reverts, and a launch

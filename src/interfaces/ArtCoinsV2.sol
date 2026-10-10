@@ -247,31 +247,6 @@ interface IArtCoinsMevSkimV2 {
     function hook() external view returns (address);
 }
 
-interface IFeeAutoSwapperV2 {
-    /// constructor bundle, declared on the FeeAutoSwapperV2 contract (not in the v2 interface file)
-    struct Config {
-        address owner;
-        address poolManager;
-        address feeEscrow;
-        address hook;
-        uint24 poolFee;
-        int24 tickSpacing;
-        address endRecipient;
-        address coin;
-        uint256 maxSlippageBps;
-        uint256 minBlocksBetweenConverts;
-        uint256 maxStepIn;
-    }
-
-    function convert(uint256 minOut) external returns (uint256 pairedOut);
-    function flushPaired() external returns (uint256 pairedOut);
-    function setup(address coin_) external;
-    function setupFinalized() external view returns (bool);
-    function coin() external view returns (address);
-    function endRecipient() external view returns (address);
-    function feeEscrow() external view returns (address);
-}
-
 interface IArtCoinsKeeperV2 {
     function collectAndForward(address token, bool doConvert, uint256 minOut) external;
     function factory() external view returns (address);
