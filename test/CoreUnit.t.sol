@@ -1807,7 +1807,7 @@ contract CoreComposedTest is CoreBase {
         (bool held, Lane lane, uint256 cost, uint64 clockStart) = core.statementInfo(c.sid);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Eth));
-        assertEq(cost, c.cost + c.reimb, "cost basis is the credits plus the gas refund");
+        assertEq(cost, c.cost, "cost basis is the sum of the credits' cost bases");
         assertEq(clockStart, c.at);
         assertEq(uint256(_live(c.sid).status), uint256(ICore.StatementStatus.Listed));
 
@@ -1821,7 +1821,7 @@ contract CoreComposedTest is CoreBase {
         uint256[] memory h = _held();
         assertEq(h.length, 1);
         assertEq(h[0], c.sid);
-        assertEq(core.ethPot(), c.potBefore - c.reimb);
+        assertEq(core.ethPot(), c.potBefore);
         _solvent();
     }
 
@@ -1833,102 +1833,31 @@ contract CoreComposedTest is CoreBase {
         assertGt(c.cost, 80 * 4_330_000 * 3e12 / 1e4, "and not far under");
     }
 
-    /// the reimbursement tracks the gas of the call at `reimburseBps` of the basefee, plus the fixed overhead of the
-    /// work after it and of the listing on the house. the part of the call after the reimbursement is computed (the
-    /// statement books, the events, the listing) is repaid by that fixed overhead and not by the meter
-    function test_compose_gasReimbursementTracksGas() public {
-        Composed memory c = _composeOnce();
-        assertGt(c.reimb, 0);
-        assertLt(c.reimb, c.cost * 500 / 10_000, "far below the 5 percent cap at this basefee");
-        // the gas the Core counted: the call up to the reimbursement plus 50k overhead plus 350k for the listing
-        uint256 counted = c.reimb * 10_000 / (composeBasefee * 8_000);
-        assertGe(counted, 400_000);
-        // the Core meters gross gas. the EIP-3529 refund cap returns 20 percent of it to the caller (the compose clears
-        // enough storage to reach the cap), so 80 percent of the metered gas is the gas the caller paid
-        assertApproxEqAbs(
-            counted * 8_000 / 10_000,
-            c.gasUsed,
-            100_000,
-            "80 percent of the meter plus the overhead is the net gas of the call"
-        );
-        assertLe(
-            c.reimb, (c.gasUsed + 400_000) * composeBasefee, "the repayment never exceeds the net gas plus the overhead"
-        );
-        assertEq(keeper.balance, c.reimb, "the caller was repaid and nobody else");
-    }
-
-    /// the same compose under other basefees, caps and pot sizes, from the state kept right before the first compose
-    function test_compose_gasReimbursementCapAndPotLimit() public {
-        Composed memory c = _composeOnce();
-        uint256 snap = preComposeSnap;
-        uint256 pot = c.potBefore;
-        uint256 supply = c.supplyBefore;
-
-        // a huge basefee: the refund is capped at 5 percent of the credits' cost, exactly
-        vm.revertToState(snap);
-        vm.fee(2 gwei);
-        vm.prank(keeper);
-        core.compose();
-        assertEq(keeper.balance, c.cost * 500 / 10_000, "2 gwei is far above the cap so the cap binds exactly");
-        (,, uint256 cost,) = core.statementInfo(supply + 1);
-        assertEq(cost, c.cost + c.cost * 500 / 10_000);
-        assertEq(core.ethPot(), pot - c.cost * 500 / 10_000);
-
-        // no basefee, no refund, and the cost basis is only the credits
-        vm.revertToState(snap);
-        vm.fee(0);
-        vm.prank(keeper);
-        core.compose();
-        assertEq(keeper.balance, 0);
-        (,, cost,) = core.statementInfo(supply + 1);
-        assertEq(cost, c.cost);
-        assertEq(core.ethPot(), pot);
-
-        // the refund never exceeds the pot either. the pot slot is forced to 7 wei, the balance still covers it
-        vm.revertToState(snap);
-        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(7));
-        vm.fee(1000 gwei);
-        vm.prank(keeper);
-        core.compose();
-        assertEq(keeper.balance, 7, "limited by the pot");
-        assertEq(core.ethPot(), 0);
-    }
-
-    /// the reimbursement dials: a cap of 1 percent, no reimbursement at all, and the largest rate (1.5 times the gas)
-    function test_compose_gasReimbursementAtChangedSettings() public {
+    /// a compose moves no eth out of the Core: the Core balance and `ethPot` are unchanged and the caller pays its own
+    /// gas, at any basefee and any reimbursement setting
+    function test_compose_movesNoEthOut() public {
         Composed memory c = _composeOnce();
         uint256 snap = preComposeSnap;
         uint256 supply = c.supplyBefore;
-        uint256 reimb8 = c.reimb;
+        uint256 gasPrice = 5 gwei;
         Settings memory s = core.settings();
-
-        vm.revertToState(snap);
-        s.reimburseCapBps = 100;
-        _setSettings(s);
-        vm.fee(2 gwei);
-        vm.prank(keeper);
-        core.compose();
-        assertEq(keeper.balance, c.cost * 100 / 10_000, "the cap of 1 percent binds exactly");
-
-        vm.revertToState(snap);
-        s.reimburseCapBps = 500;
-        s.reimburseBps = 0;
-        _setSettings(s);
-        vm.prank(keeper);
-        core.compose();
-        assertEq(keeper.balance, 0, "no reimbursement at all");
-        (,, uint256 cost,) = core.statementInfo(supply + 1);
-        assertEq(cost, c.cost);
-
-        vm.revertToState(snap);
         s.reimburseBps = 15_000;
+        s.reimburseCapBps = 1_000;
+
+        vm.revertToState(snap);
         _setSettings(s);
-        vm.fee(composeBasefee);
+        vm.fee(gasPrice);
+        vm.txGasPrice(gasPrice);
+        uint256 coreBefore = address(core).balance;
+        uint256 potBefore = core.ethPot();
+        uint256 callerBefore = keeper.balance;
         vm.prank(keeper);
         core.compose();
-        assertApproxEqAbs(keeper.balance, reimb8 * 15 / 8, 2, "15000 over 8000 of the same gas");
-        (,, cost,) = core.statementInfo(supply + 1);
-        assertEq(cost, c.cost + keeper.balance);
+        assertEq(address(core).balance, coreBefore, "the core balance is unchanged");
+        assertEq(core.ethPot(), potBefore, "the eth pot is unchanged");
+        assertEq(keeper.balance, callerBefore, "the caller receives nothing");
+        (,, uint256 cost,) = core.statementInfo(supply + 1);
+        assertEq(cost, c.cost, "the cost basis is the credits only");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -2230,11 +2159,10 @@ contract CoreComposedTest is CoreBase {
         (bool held, Lane lane, uint256 cost,) = core.statementInfo(sidX);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Exit));
-        assertEq(cost, sumExit, "exit token cost basis, no refund added");
+        assertEq(cost, sumExit, "exit token cost basis");
         assertEq(core.pileSize(Lane.Exit), 0);
-        assertEq(core.ethPot(), potBefore - paid);
-        assertLe(paid, 80 * 4_330_000 * core.ethRate() / 1e4 * 500 / 10_000, "notional cap");
-        assertGt(paid, 0);
+        assertEq(core.ethPot(), potBefore);
+        assertEq(paid, 0, "the compose pays the caller nothing");
         assertEq(uint256(_live(sidX).status), uint256(ICore.StatementStatus.Held));
         vm.expectRevert(ICore.NotListed.selector);
         core.repriceStatement(sidX);
@@ -2253,55 +2181,6 @@ contract CoreComposedTest is CoreBase {
         assertEq(core.xStartTime(), startTime);
         assertEq(STATEMENTS.ownerOf(sidX), address(mod));
         _solvent();
-    }
-
-    /// the notional cap of an exit lane compose follows `avgScore`, the opening rate `RATE_START` (not the live eth rate,
-    /// which the owner can set) and `reimburseCapBps` of the settings
-    function test_exitLane_composeReimbursementCapFollowsTheSettings() public {
-        Settings memory s = core.settings();
-        s.reimburseCapBps = 100;
-        s.avgScore = 2_000_000;
-        _setSettings(s);
-        _fillExitBuyback();
-        xt.mint(address(core), 100e18);
-        core.skim();
-        uint256[] memory ids = _credits(alice, 80);
-        vm.prank(alice);
-        core.sellForExitToken(ids);
-        vm.fee(1000 gwei);
-        uint256 rate = core.RATE_START();
-        uint256 before = keeper.balance;
-        vm.prank(keeper);
-        core.composeExit();
-        assertEq(
-            keeper.balance - before,
-            80 * 2_000_000 * rate / 1e4 * 100 / 10_000,
-            "1 percent of 80 notional credits, exactly"
-        );
-    }
-
-    /// a pot whose clamp is under the opening rate leaves the exit lane repay cap at the value of 80 notional
-    /// credits at `RATE_START`
-    function test_exitLane_composeReimbursementCapIgnoresTheClampOfASmallPot() public {
-        Settings memory s = core.settings();
-        s.reimburseCapBps = 100;
-        _setSettings(s);
-        _fillExitBuyback();
-        xt.mint(address(core), 100e18);
-        core.skim();
-        uint256[] memory ids = _credits(alice, 80);
-        vm.prank(alice);
-        core.sellForExitToken(ids);
-        // the cap is 1_385_600_000_000_000 wei, so a pot of 1.5e15 pays it in full
-        stdstore.target(address(core)).sig("ethPot()").checked_write(uint256(1.5e15));
-        assertLt(core.ethRate(), core.RATE_START(), "the read is under the opening rate");
-        vm.fee(1000 gwei);
-        uint256 before = keeper.balance;
-        vm.prank(keeper);
-        core.composeExit();
-        assertEq(
-            keeper.balance - before, 80 * 4_330_000 * core.RATE_START() / 1e4 * 100 / 10_000, "the cap at RATE_START"
-        );
     }
 
     /*//////////////////////////////////////////////////////////////

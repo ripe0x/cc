@@ -1611,26 +1611,12 @@ abstract contract HandlerBase is Test {
         }
     }
 
-    /// @dev the reimbursement checks of a compose, returns what the caller was paid (a helper so the locals of
-    /// `_afterCompose` fit the stack)
-    function _composeReimbursement(Lane lane, CPre memory p) internal returns (uint256 reimb) {
-        reimb = keeper.balance - p.callerBal;
-        // gas reimbursement: min(net gas * basefee * reimburseBps / REFUND_FLOOR_BPS, reimburseCapBps of the cost). the exit
-        // lane caps against 80 average credits at the opening rate RATE_START. the gas used is the net gas the caller paid
-        // (isolation: the transaction gas after the EIP-3529 refund), plus the fixed overhead and, on the eth lane, the
-        // gas the core counts for the listing. the core meters gross gas and the refund is at most 20 percent of it, so
-        // at 8000 bps the repayment is at most the net gas plus the overhead
-        uint256 extra = 50_000 + (lane == Lane.Eth ? 350_000 : 0);
-        uint256 gasCap = (p.gasUsed + extra) * p.basefee * p.st.reimburseBps / REFUND_FLOOR_BPS;
-        uint256 base = lane == Lane.Eth ? p.sum : 80 * uint256(p.st.avgScore) * core.RATE_START() / 1e4;
-        uint256 costCap = base * p.st.reimburseCapBps / 10_000;
-        uint256 cap = gasCap < costCap ? gasCap : costCap;
-        if (reimb > cap) {
-            _flag(V_COMPOSE, "gas reimbursement above min(gas * basefee * reimburseBps, reimburseCapBps of cost)");
-        }
-        if (reimb > p.pot) _flag(V_COMPOSE, "gas reimbursement above the pot");
-        _eth(p.bal, reimb, 0, "compose");
-        if (core.ethPot() != p.pot - reimb) _flag(V_POT, "compose pot not reduced by the reimbursement");
+    /// @dev a compose moves no eth out of the core: the caller receives nothing, the core balance and the pot are as
+    /// the pull of the fee router left them (a helper so the locals of `_afterCompose` fit the stack)
+    function _composeMovesNoEth(CPre memory p) internal {
+        if (keeper.balance != p.callerBal) _flag(V_COMPOSE, "a compose paid its caller");
+        _eth(p.bal, 0, 0, "compose");
+        if (core.ethPot() != p.pot) _flag(V_POT, "compose changed the pot");
     }
 
     function _afterCompose(Lane lane, uint256[] memory ids, CPre memory p) internal {
@@ -1641,8 +1627,8 @@ abstract contract HandlerBase is Test {
         if (sid != p.supply + 1 || STATEMENTS.ownerOf(sid) != (lane == Lane.Eth ? address(house) : address(core))) {
             _flag(V_COMPOSE, "new statement id is not supply + 1 or not held by the house (eth lane) or the core");
         }
-        uint256 reimb = _composeReimbursement(lane, p);
-        uint256 cost = lane == Lane.Eth ? p.sum + reimb : p.sum;
+        _composeMovesNoEth(p);
+        uint256 cost = p.sum;
         (bool held, Lane l, uint256 coreCost,) = core.statementInfo(sid);
         if (!held || l != lane || coreCost != cost) _flag(V_MODEL, "statement cost basis differs from the ghost sum");
         for (uint256 i; i < 80; ++i) {

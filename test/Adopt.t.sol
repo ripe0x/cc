@@ -224,16 +224,14 @@ contract AdoptTest is Fixture {
         }
         assertGt(sum, 0);
         uint256 supply = STATEMENTS.supply();
-        uint256 keeperBefore = keeper.balance;
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.compose();
-        uint256 reimbursement = keeper.balance - keeperBefore;
         uint256 sid = supply + 1;
         (bool held, Lane lane, uint256 cost,) = core.statementInfo(sid);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Eth));
-        assertEq(cost, sum + reimbursement, "statement cost is the sum of the bases and the gas reimbursement");
+        assertEq(cost, sum, "statement cost is the sum of the bases");
         assertEq(core.pileSize(Lane.Eth), 0);
         // the listing is priced from that cost
         assertEq(_live(sid).reserve, _reserveFor(cost), "reserve");

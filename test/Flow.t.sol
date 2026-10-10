@@ -487,7 +487,7 @@ contract FlowTest is Fixture {
         (bool held, Lane lane, uint256 cost, uint64 listedAt) = core.statementInfo(c.sid);
         assertTrue(held);
         assertEq(uint256(lane), uint256(Lane.Eth));
-        assertEq(cost, c.cost + c.reimb, "cost basis is the credits plus the reimbursement");
+        assertEq(cost, c.cost, "cost basis is the sum of the credits' cost bases");
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
         assertEq(uint256(l.status), uint256(ICore.StatementStatus.Listed));
@@ -1289,7 +1289,7 @@ contract FlowTest is Fixture {
     /// owner and the controller never end up holding more eth, coin, credits, statements or exit token than they
     /// began with, an owner call never changes what the core holds, and eth leaves the core only by a sale of a credit
     /// (paid to the seller, exactly the quoted ceiling) or by the buyback (at most one slice). the exit is a paid door
-    /// (it repays its caller's gas from the pot like compose), so it is called by a neutral keeper that is not watched,
+    /// (it repays its caller's gas from the pot), so it is called by a neutral keeper that is not watched,
     /// and what that keeper receives is at most the reimbursement cap
     /// forge-config: default.fuzz.runs = 40
     function testFuzz_rule8_noSettingsOrOwnerCallMovesAssetsOut(uint256 seed) public {

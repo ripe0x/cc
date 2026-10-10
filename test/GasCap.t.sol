@@ -284,11 +284,11 @@ contract GasCapTest is SeaportBase {
         core.compose();
         g -= gasleft();
         assertEq(core.heldStatements().length, held + 1, "composed");
-        assertGt(keeper.balance, kb, "reimbursement paid");
+        assertEq(keeper.balance, kb, "the compose pays the caller nothing");
         _row(name, g, abi.encodeCall(core.compose, ()));
     }
 
-    /// @dev full page of 80, listing on the house and the reimbursement included, nothing warmed by earlier work
+    /// @dev full page of 80, listing on the house included, nothing warmed by earlier work
     function test_gas_compose_ethLane_firstCold() public {
         _fillEthPile(80);
         _cool(address(core));
@@ -304,9 +304,6 @@ contract GasCapTest is SeaportBase {
         _cool(address(core));
         _measureCompose("compose eth lane, 80 credits, second compose, cold");
     }
-
-    /// @dev the `COMPOSE_GAS` bound of `Core` (src/Core.sol): the most gas of a compose the reimbursement counts
-    uint256 internal constant COMPOSE_GAS = 12_000_000;
 
     /// @dev turns the router split on, and with `burning` replaces the payees by four that burn all the gas they are
     /// given (the most expensive flush). called before the pile is filled: the sales that fill it pull the router
@@ -331,20 +328,12 @@ contract GasCapTest is SeaportBase {
         vm.deal(address(feeRouter), 1 ether);
     }
 
-    /// @dev the gas the Core counted for a compose, read back from the repayment at the basefee and the repay rate. the
-    /// Core meters in its own frame, which reads higher than the delta around the call. valid while the cap of the
-    /// repayment does not bind
-    function _countedFrom(uint256 repaid) internal view returns (uint256) {
-        return repaid * 10_000 / (block.basefee * core.settings().reimburseBps);
-    }
-
     function _composeLoaded(bool burning) internal returns (uint256 g) {
         _splitOn(burning);
         _fillEthPile(80);
         _loadRouter();
         vm.fee(composeBasefee);
         _cool(address(core));
-        uint256 kb = keeper.balance;
         vm.prank(keeper);
         g = gasleft();
         core.compose();
@@ -355,10 +344,6 @@ contract GasCapTest is SeaportBase {
             g,
             abi.encodeCall(core.compose, ())
         );
-        // the repaid gas is the counted gas under the bound, at the basefee and the repay rate
-        uint256 counted = _countedFrom(keeper.balance - kb);
-        console.log("compose counted gas", counted);
-        assertLt(counted, COMPOSE_GAS, "the bound leaves room above the worst case");
     }
 
     function test_gas_compose_ethLane_routerLoaded() public {
@@ -375,7 +360,6 @@ contract GasCapTest is SeaportBase {
         _loadRouter();
         vm.fee(composeBasefee);
         _cool(address(core));
-        uint256 kb = keeper.balance;
         vm.prank(keeper);
         g = gasleft();
         core.composeExit();
@@ -386,9 +370,6 @@ contract GasCapTest is SeaportBase {
             g,
             abi.encodeCall(core.composeExit, ())
         );
-        uint256 counted = _countedFrom(keeper.balance - kb);
-        console.log("composeExit counted gas", counted);
-        assertLt(counted, COMPOSE_GAS, "the bound leaves room above the worst case");
     }
 
     function test_gas_composeExit_routerLoaded() public {

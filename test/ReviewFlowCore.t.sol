@@ -573,30 +573,6 @@ contract ReviewFlowCoreTest is Fixture {
         }
     }
 
-    /// what the reimbursement pays at the cap, default and maximum
-    function test_reimbursementAtTheCap() public {
-        _skipSniperWindow();
-        _fillEthPile(80);
-        uint256 snap = vm.snapshotState();
-        for (uint256 j; j < 2; ++j) {
-            if (j == 1) {
-                Settings memory s = core.settings();
-                s.reimburseBps = 15_000;
-                s.reimburseCapBps = 1_000;
-                _setSettings(s);
-            }
-            vm.fee(50 gwei);
-            uint256 b = keeper.balance;
-            vm.prank(keeper);
-            core.compose();
-            uint256 sid = STATEMENTS.supply();
-            (,, uint256 cost,) = core.statementInfo(sid);
-            emit log_named_uint("reimbursement (wei)", keeper.balance - b);
-            emit log_named_uint("statement cost incl reimbursement (wei)", cost);
-            vm.revertToState(snap);
-        }
-    }
-
     /// the real cost of ControllerV1.nextPage for a full page, which sizes the fixed gas cap of the core's read
     function test_measure_controllerV1PageGas() public {
         _fillEthPile(80);
@@ -613,14 +589,13 @@ contract ReviewFlowCoreTest is Fixture {
         emit log_named_uint("ControllerV1.nextPage gas, full page, warm", g - gasleft());
     }
 
-    /// FC-4 (fixed): the exit lane reimbursement is capped by the notional cost of an average statement at the immutable
-    /// RATE_START, and the controller's nextPage read has a fixed gas cap. a controller that burns gas cannot farm the
-    /// pot: past the cap its page is refused, below it the refund is held at the notional cap
-    function test_FIXED_gasBurningControllerCannotFarmTheExitLaneReimbursement() public {
+    /// FC-4 (fixed): the controller's nextPage read has a fixed gas cap. a controller that burns gas cannot farm the
+    /// pot: past the cap its page is refused, below it the compose pays its caller nothing
+    function test_FIXED_gasBurningControllerCannotFarmTheExitLaneCompose() public {
         _skipSniperWindow();
         _enterPhase2();
         _fundPot(3 ether);
-        // the eth rate is as high as the owner can set it, which used to lift the cap with it
+        // the eth rate is as high as the owner can set it, with the reimbursement settings at their maximum
         Settings memory s = core.settings();
         s.rateCap = uint64(RATE_START_MAX_WEI);
         s.reimburseBps = 15_000;
@@ -643,22 +618,16 @@ contract ReviewFlowCoreTest is Fixture {
         vm.expectRevert(ICore.NotReady.selector);
         core.composeExit{gas: 30_000_000}();
 
-        // burning 200,000 is answered: with the cold page read of about 242,000 gas it stays under the cap of 500,000. the
-        // refund is held at the notional cap of the launch rate
+        // burning 200,000 is answered: with the cold page read of about 242,000 gas it stays under the cap of 500,000
         uint256 snap = vm.snapshotState();
         bc = new BurnController(address(core), 200_000);
         _setController(address(bc));
-        uint256 notional = 80 * uint256(s.avgScore) * core.RATE_START() / 1e4 * s.reimburseCapBps / 10_000;
         uint256 potBefore = core.ethPot();
         uint256 b = keeper.balance;
         vm.prank(keeper);
         core.composeExit{gas: 30_000_000}();
-        uint256 refunded = keeper.balance - b;
-        emit log_named_uint("notional cap at RATE_START (wei)", notional);
-        emit log_named_uint("caller refunded (wei)", refunded);
-        assertEq(potBefore - core.ethPot(), refunded);
-        assertLe(refunded, notional, "never above the notional cap at RATE_START");
-        assertLt(refunded, 0.06 ether, "was 0.82 eth for the same page before the fix");
+        assertEq(keeper.balance, b, "the compose pays the caller nothing");
+        assertEq(core.ethPot(), potBefore, "the eth pot is unchanged");
         vm.revertToState(snap);
     }
 
@@ -692,7 +661,7 @@ contract ReviewFlowCoreTest is Fixture {
     }
 
     /// held: the exit bid at 100 percent of score pays exactly what the module pays back for the same credits, so
-    /// selling credits for exit token and exiting them leaves the exit pot whole (the eth pot pays the compose refund)
+    /// selling credits for exit token and exiting them leaves the exit pot whole
     function test_exitBidAtParIsAWash() public {
         _skipSniperWindow();
         _enterPhase2();

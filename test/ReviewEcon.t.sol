@@ -136,18 +136,15 @@ contract LaunchSettingsExactNumbers is ReviewEconBase {
 
 /// @notice the reimbursement cap and the sale at the reserve, and the statement that arrives from outside
 contract ReserveSaleAndOutsiders is ReviewEconBase {
-    /// E-6: the reimbursement is paid at compose and is part of the cost the statement then lists against. the cap is
-    /// 5 percent of the page cost whatever the reserve is, and the keeper is paid 110 percent of gas at most, so the
-    /// sale under cost adds no farm. at the reserve the pot gets back 0.45 of the cost and the buyback pot 0.45
-    function test_POC_reimbursementCapAndTheReserveSale() public {
+    /// E-6: a compose pays the caller nothing, so the cost the statement lists against is the page cost. at the
+    /// reserve the pot gets back 0.45 of the cost and the buyback pot 0.45
+    function test_POC_composeRepaysNothingAndTheReserveSale() public {
         composeBasefee = 400 gwei;
         uint256 before = keeper.balance;
         (uint256 sid, uint256 cost) = _composeOne();
-        uint256 reimb = keeper.balance - before;
-        uint256 pageCost = cost - reimb;
-        assertEq(reimb, pageCost * 500 / 10_000, "capped at 5 percent of the page cost");
+        assertEq(keeper.balance, before, "the compose pays the caller nothing");
         uint256 reserve = _live(sid).reserve;
-        assertEq(reserve, cost * 11_000 / 10_000, "the reserve is the 110 percent opening ask of the cost with the reimbursement in it");
+        assertEq(reserve, cost * 11_000 / 10_000, "the reserve is the 110 percent opening ask of the page cost");
 
         uint256 pot = core.ethPot();
         uint256 bb = core.ethToBuyback();
@@ -158,8 +155,7 @@ contract ReserveSaleAndOutsiders is ReviewEconBase {
         assertEq(core.ethToBuyback() - bb, toBuyback);
         assertEq(core.ethPot() - pot, reserve - toBuyback);
         assertGt(reserve, cost, "sold above cost at the opening ask");
-        // the engine paid pageCost + reimb for it and got back 1.1 of that, half of it to the buyback
-        emit log_named_uint("reimbursement, bps of page cost", reimb * 10_000 / pageCost);
+        // the engine paid the page cost for it and got back 1.1 of that, half of it to the buyback
         emit log_named_uint("pot gets back, bps of cost", (core.ethPot() - pot) * 10_000 / cost);
         _solvent();
     }

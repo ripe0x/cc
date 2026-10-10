@@ -118,9 +118,9 @@ struct Settings {
     uint16 bonusCapBps;
     uint16 tipSavingsBps;
     uint16 tipCapBps;
-    /// compose gas reimbursement, bps of gas cost
+    /// gas reimbursement of `exitStatement`, bps of gas cost
     uint16 reimburseBps;
-    /// cap of the reimbursement, bps of the statement cost
+    /// cap of the `exitStatement` reimbursement, bps of the statement cost
     uint16 reimburseCapBps;
     /// the hard floor of a statement sale, bps of the statement cost. no sale clears below it. the controller prices
     /// above it, the house reserve and `sellTo` are floored at it
@@ -226,8 +226,8 @@ library Mainnet {
             bonusCapBps: 2_500,
             tipSavingsBps: 1_000,
             tipCapBps: 200,
-            // the Core meters gross gas. the EIP-3529 refund cap returns up to 20 percent of it to the caller, and compose
-            // and exit clear enough storage to reach the cap, so 80 percent of the metered gas is the net cost
+            // the Core meters gross gas. the EIP-3529 refund cap returns up to 20 percent of it to the caller, and an exit
+            // clears enough storage to reach the cap, so 80 percent of the metered gas is the net cost
             reimburseBps: 8_000,
             reimburseCapBps: 500,
             saleFloorBps: 7_500,

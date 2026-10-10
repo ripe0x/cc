@@ -16,7 +16,6 @@ contract ReviewFlowHouseTest is Fixture {
     function test_measure_composeAndDeliveryGas() public {
         Composed memory c = _composeOnce();
         emit log_named_uint("compose gas as the caller saw it", c.gasUsed);
-        emit log_named_uint("reimbursement", c.reimb);
         emit log_named_uint("block gas limit", block.gaslimit);
         // listing gas on its own: cancel and list again as the core
         vm.startPrank(address(core));

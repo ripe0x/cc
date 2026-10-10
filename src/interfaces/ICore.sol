@@ -72,9 +72,7 @@ interface ICore {
 
     event Buyback(address indexed caller, uint256 amountIn, uint256 tip);
     event CoinRescued(address indexed to, uint256 amount);
-    event Composed(
-        uint256 indexed sid, Lane lane, uint8 format, uint256 cost, uint256 reimbursement, address indexed caller
-    );
+    event Composed(uint256 indexed sid, Lane lane, uint8 format, uint256 cost, address indexed caller);
     event ControllerLocked();
     event ControllerSet(address controller);
     event CreditAdopted(uint256 indexed id, uint256 cost);

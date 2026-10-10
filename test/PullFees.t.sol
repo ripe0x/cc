@@ -268,15 +268,7 @@ contract PullFeesTest is CoreBase {
 
     // ------------------------------------------------------------------ compose
 
-    function _reimbursement(Vm.Log[] memory logs) internal pure returns (uint256 reimbursement) {
-        for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].topics[0] == ICore.Composed.selector) {
-                (,,, reimbursement) = abi.decode(logs[i].data, (uint8, uint8, uint256, uint256));
-            }
-        }
-    }
-
-    function test_composePullsAndRepaysTheCaller() public {
+    function test_composePullsAndPaysTheCallerNothing() public {
         uint256 size = core.pileSize(Lane.Eth);
         if (size < 80) _fillEthPile(80 - size);
         vm.fee(composeBasefee);
@@ -288,16 +280,14 @@ contract PullFeesTest is CoreBase {
         uint256 keeperBefore = keeper.balance;
         uint256 supply = STATEMENTS.supply();
 
-        vm.recordLogs();
         vm.prank(keeper);
         core.compose();
-        uint256 reimbursement = _reimbursement(vm.getRecordedLogs());
         assertEq(STATEMENTS.supply(), supply + 1, "composed");
         assertEq(address(feeRouter).balance, 0, "router emptied");
         assertEq(_payeeBalance() - payeeBefore, x.shared, "payee share");
         assertEq(core.ethToBuyback() - buyback, x.toBuyback);
-        assertEq(keeper.balance - keeperBefore, reimbursement, "gas repayment to the caller");
-        assertEq(core.ethPot(), pot + x.toPot - reimbursement, "the pot took the fees and repaid the caller");
+        assertEq(keeper.balance, keeperBefore, "no gas repayment to the caller");
+        assertEq(core.ethPot(), pot + x.toPot, "the pot took the fees");
     }
 
     // ------------------------------------------------------------------ a router that fails

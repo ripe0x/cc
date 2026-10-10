@@ -382,7 +382,7 @@ contract LifecycleComposeTest is Fixture {
 
     // ------------------------------------------------------------------ compose
 
-    /// compose through ControllerV1: the 80 oldest credits, format 0, the id is the new supply, cost basis, refund,
+    /// compose through ControllerV1: the 80 oldest credits, format 0, the id is the new supply, the cost basis
     /// and the statement is listed on the house at 110 percent of its cost
     function test_compose_throughControllerV1() public {
         _prepare();
@@ -403,11 +403,11 @@ contract LifecycleComposeTest is Fixture {
         }
         assertEq(STATEMENTS.creditScoreOf(c.sid), _sumScores(page));
 
-        // cost basis is the credits plus the gas refund, and the reserve is 110 percent of it (the opening ask)
+        // cost basis is the sum of the credits' cost bases, and the reserve is 110 percent of it (the opening ask)
         (bool held, Lane lane, uint256 basis, uint64 listedAt) = core.statementInfo(c.sid);
         assertTrue(held);
         assertEq(uint8(lane), uint8(Lane.Eth));
-        assertEq(basis, c.cost + c.reimb);
+        assertEq(basis, c.cost);
         assertEq(listedAt, c.at);
         Live memory l = _live(c.sid);
         assertEq(uint8(l.status), uint8(ICore.StatementStatus.Listed));
@@ -426,28 +426,21 @@ contract LifecycleComposeTest is Fixture {
             assertFalse(inPile);
         }
 
-        // reimbursement: positive, never above 5 percent of the credits' cost, never above the pot, and at a low
-        // basefee it tracks the net gas of the call (the listing on the house included): the core repays 80 percent of the
-        // metered gross gas and the refund cap returns up to 20 percent of the gross to the caller
-        assertGt(c.reimb, 0);
-        assertLe(c.reimb, c.cost * 500 / 10_000);
-        assertLe(c.reimb, c.potBefore);
-        assertEq(keeper.balance, c.reimb);
-        assertEq(core.ethPot(), c.potBefore - c.reimb);
-        assertGe(c.reimb, (c.gasUsed - 100_000) * composeBasefee, "at least the net gas of the call");
-        assertLe(c.reimb, (c.gasUsed + 450_000) * composeBasefee, "and not more than the fixed allowance");
+        // a compose pays the caller nothing and leaves the pot as it was
+        assertEq(keeper.balance, 0);
+        assertEq(core.ethPot(), c.potBefore);
         _solvent();
 
-        // the same page at a basefee far above the cap is paid exactly 5 percent of the credits' cost
+        // the same page at a basefee far above any cap has the same cost basis
         vm.revertToState(preComposeSnap);
         composeBasefee = 1000 gwei;
-        Composed memory capped = _composeOnce();
-        assertEq(capped.sid, c.sid);
-        assertEq(capped.cost, c.cost);
-        assertEq(capped.reimb, c.cost * 500 / 10_000, "the cap binds exactly");
-        (,, uint256 basis2,) = core.statementInfo(capped.sid);
-        assertEq(basis2, c.cost + capped.reimb);
-        assertEq(_live(capped.sid).reserve, basis2 * 11_000 / 10_000, "the reserve follows the basis");
+        Composed memory high = _composeOnce();
+        assertEq(high.sid, c.sid);
+        assertEq(high.cost, c.cost);
+        (,, uint256 basis2,) = core.statementInfo(high.sid);
+        assertEq(basis2, c.cost);
+        assertEq(_live(high.sid).reserve, basis2 * 11_000 / 10_000, "the reserve follows the basis");
+        assertEq(keeper.balance, 0);
 
         // the controller cannot be asked again, there is no full page left
         vm.expectRevert(ICore.NotReady.selector);
@@ -777,28 +770,25 @@ contract LifecyclePhase2Test is Fixture {
         }
         _solvent();
 
-        // compose the exit lane. the refund comes from the eth pot, is capped at a notional 5 percent and is not
-        // added to the cost basis, which is in the exit token
+        // compose the exit lane. the caller receives nothing, the eth pot is unchanged and the cost basis is in the
+        // exit token
         uint256 supply0 = STATEMENTS.supply();
         uint256 ethPot0 = core.ethPot();
         uint256 keeper0 = keeper.balance;
-        uint256 cap = 80 * uint256(core.settings().avgScore) * core.ethRate() / 1e4;
         vm.fee(composeBasefee);
         vm.prank(keeper);
         core.composeExit();
         uint256 sid = supply0 + 1;
         {
-            uint256 reimb = keeper.balance - keeper0;
             assertEq(STATEMENTS.supply(), sid);
             assertEq(STATEMENTS.ownerOf(sid), address(core), "held by the core, never listed");
             assertEq(core.pileSize(Lane.Exit), 0);
             (bool held, Lane lane, uint256 basis,) = core.statementInfo(sid);
             assertTrue(held);
             assertEq(uint8(lane), uint8(Lane.Exit));
-            assertEq(basis, total, "the basis is the exit token paid, no refund in it");
-            assertGt(reimb, 0);
-            assertLe(reimb, cap * 500 / 10_000);
-            assertEq(core.ethPot(), ethPot0 - reimb);
+            assertEq(basis, total, "the basis is the exit token paid");
+            assertEq(keeper.balance, keeper0);
+            assertEq(core.ethPot(), ethPot0);
 
             // no auction in the exit lane
             Live memory l = _live(sid);

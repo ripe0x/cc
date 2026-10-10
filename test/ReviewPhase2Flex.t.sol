@@ -531,29 +531,23 @@ contract ReviewPhase2FlexTest is Fixture {
 
     // ------------------------------------------------------------------ the exit lane share
 
-    function _exitLane() internal returns (uint256 sid, uint256 reimb) {
+    function _exitLane() internal returns (uint256 sid) {
         uint256[] memory ids = _credits(seller, 80);
         _potX(5e19);
         vm.prank(seller);
         core.sellForExitToken(ids);
         vm.fee(composeBasefee);
-        uint256 k = keeper.balance;
         vm.prank(keeper);
         core.composeExit();
-        reimb = keeper.balance - k;
         sid = STATEMENTS.supply();
     }
 
     /// OK: at 10_000 the bid pot never refills from the exit lane, nothing divides by zero, the bid runs dry with a
-    /// plain PotTooSmall, composeExit repays the same gas as at 0, and every unit of the exit goes to the buyback pot
+    /// plain PotTooSmall, and every unit of the exit goes to the buyback pot
     function test_OK_exitLaneShareAtMaxIsHarmless() public {
         _enterPhase2();
-        uint256 snap = vm.snapshotState();
-        (, uint256 reimb0) = _exitLane();
-        vm.revertToState(snap);
         _edit(5_000, 10_000, 6 hours);
-        (uint256 sid, uint256 reimb1) = _exitLane();
-        assertEq(reimb1, reimb0, "the eth reimbursement does not depend on the share");
+        uint256 sid = _exitLane();
         uint256 pot = core.xPot();
         uint256 xb = xt.balanceOf(address(core));
         core.exitStatement(sid);
@@ -589,7 +583,7 @@ contract ReviewPhase2FlexTest is Fixture {
     /// to the buyback and the other way round, and the eth lane ignores the setting
     function test_OK_exitLaneShareChangedBetweenComposeAndExit() public {
         _enterPhase2();
-        (uint256 sid,) = _exitLane();
+        uint256 sid = _exitLane();
         _edit(5_000, 10_000, 6 hours);
         uint256 pot = core.xPot();
         uint256 b = xt.balanceOf(address(core));

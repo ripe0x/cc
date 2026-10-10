@@ -142,9 +142,7 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     );
     event EthRateFill(uint256 spent, uint256 rate, uint256 pot);
     event ExitRateFill(uint256 rate, uint256 pot);
-    event Composed(
-        uint256 indexed sid, Lane lane, uint8 format, uint256 cost, uint256 reimbursement, address indexed caller
-    );
+    event Composed(uint256 indexed sid, Lane lane, uint8 format, uint256 cost, address indexed caller);
     /// a statement was listed on the house (at compose, after an unwind, after an overprint)
     event StatementListed(uint256 indexed sid, uint256 indexed auctionId, uint256 reserve);
     /// `syncStatement` found the auction gone and the statement with `holder`: the sale cleared, the proceeds are
@@ -194,20 +192,13 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
     uint256 private constant SPEND_WINDOW = 1 hours;
     uint256 private constant PAGE = 80;
     uint256 private constant MAX_FORMAT = 7;
-    /// gas of the work after the compose that the reimbursement counts, and the listing on the house (eth lane only)
-    uint256 private constant COMPOSE_OVERHEAD_GAS = 50_000;
-    uint256 private constant LIST_GAS = 350_000;
     uint256 private constant READ_GAS = 200_000;
-    /// the most gas of an exit the redeem reimbursement counts, so a gas burning module cannot inflate it
+    /// gas of the work after the end of `exitStatement` that its reimbursement counts
+    uint256 private constant EXIT_OVERHEAD_GAS = 50_000;
+    /// the most gas of an exit the reimbursement counts, so a gas burning module cannot inflate it
     uint256 private constant EXIT_GAS = 1_500_000;
-    /// the most gas of a compose the reimbursement counts: the page, the router flush, `COMPOSE_OVERHEAD_GAS` and, in the
-    /// eth lane, `LIST_GAS`. the flush runs inside the counted window with at most `PULL_GAS` and every payee send with
-    /// `PAYEE_GAS`, so a payee that burns its gas cannot raise the repaid gas past this bound. the worst measured count is
-    /// 11.38 million (test/GasCap.t.sol, router with four burning payees)
-    uint256 private constant COMPOSE_GAS = 12_000_000;
     /// gas the controller's `nextPage` may use, in both lanes. a full page of ControllerV1 costs about 73,000 (measured
-    /// in test/ReviewFlowCore.t.sol), so this is about 7 times that. a gas burning controller cannot inflate the
-    /// compose reimbursement past it
+    /// in test/ReviewFlowCore.t.sol), so this is about 7 times that
     uint256 private constant PAGE_GAS = 500_000;
     address private constant DEAD = Mainnet.DEAD;
     bytes32 private constant MEASURING_SLOT = keccak256("core.measuring");
@@ -673,21 +664,20 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
                                COMPOSING
     //////////////////////////////////////////////////////////////*/
 
-    /// composes the controller's page of eth lane credits into a statement. anyone may call and is repaid gas.
+    /// composes the controller's page of eth lane credits into a statement and lists it on the house. anyone may call.
+    /// the caller pays the gas, which includes the fee router flush
     function compose() external nonReentrant {
         _compose();
     }
 
-    /// composes the controller's page of exit lane credits into a statement. anyone may call and is repaid gas.
+    /// composes the controller's page of exit lane credits into a statement. anyone may call. the caller pays the gas,
+    /// which includes the fee router flush
     function composeExit() external nonReentrant {
         _compose();
     }
 
     /// one body for both lanes, told apart by the selector of the call, so the code is not duplicated
     function _compose() private {
-        // `gasStart` is taken before the pull, so the repay covers the gas of the flush. the flush raises `ethPot`,
-        // which can lift the `ethPot` term of the `_repay` cap
-        uint256 gasStart = gasleft();
         _pullFees();
         Lane lane = msg.sig == this.composeExit.selector ? Lane.Exit : Lane.Eth;
         (bool ready, uint256[80] memory ids, uint256 format) = _nextPage(lane);
@@ -706,11 +696,6 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             revert BadStatement();
         }
 
-        uint256 reimbursement = _repay(
-            (gasStart - gasleft() + COMPOSE_OVERHEAD_GAS + (lane == Lane.Eth ? LIST_GAS : 0)).min(COMPOSE_GAS),
-            lane == Lane.Eth ? cost : _notionalCap()
-        );
-        if (lane == Lane.Eth) cost += reimbursement;
         _heldIds.push(sid);
         _statements[sid] = CoreLib.Statement({
             cost: cost,
@@ -722,12 +707,11 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
             listed: false
         });
         // forge-lint: disable-next-line(unsafe-typecast)
-        emit Composed(sid, lane, uint8(format), cost, reimbursement, msg.sender);
+        emit Composed(sid, lane, uint8(format), cost, msg.sender);
         if (lane == Lane.Eth) _list(sid);
-        if (reimbursement != 0) SafeTransferLib.safeTransferETH(msg.sender, reimbursement);
     }
 
-    /// the gas reimbursement of a compose or an exit: `reimburseBps` of the gas cost, at most `reimburseCapBps` of `cap`
+    /// the gas reimbursement of an exit: `reimburseBps` of the gas cost, at most `reimburseCapBps` of `cap`
     /// and of the pot. the pot is debited here, the caller pays it out last
     function _repay(uint256 gasUsed, uint256 cap) private returns (uint256 r) {
         Settings storage s = _st();
@@ -934,10 +918,10 @@ contract Core is ICoreViews, IUnlockCallback, ReentrancyGuard {
         xPot += received - toBuyback;
         _syncXFunded();
         emit StatementExited(sid, s.lane, received);
-        // the caller's gas is repaid from the eth pot like a compose, after all state is final. nothing is added to a
-        // cost basis. the gas counted is bounded, so a gas burning module cannot push it past the cap
+        // the caller's gas is repaid from the eth pot after all state is final. nothing is added to a cost basis. the
+        // gas counted is bounded, so a gas burning module cannot push it past the cap
         uint256 repay = _repay(
-            (gasStart - gasleft() + COMPOSE_OVERHEAD_GAS).min(EXIT_GAS), s.lane == Lane.Eth ? s.cost : _notionalCap()
+            (gasStart - gasleft() + EXIT_OVERHEAD_GAS).min(EXIT_GAS), s.lane == Lane.Eth ? s.cost : _notionalCap()
         );
         if (repay != 0) SafeTransferLib.safeTransferETH(msg.sender, repay);
     }

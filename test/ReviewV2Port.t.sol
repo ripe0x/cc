@@ -442,7 +442,7 @@ contract ReviewFlushInPayoutTest is FeeBase {
         assertEq(address(feeRouter).balance, 0, "the router was flushed");
     }
 
-    function test_OK_flushInsideTheComposeReimbursement() public {
+    function test_OK_flushInsideTheCompose() public {
         autoFlush = true;
         _composeOnce(); // fills the pile and composes once; the state before is kept
         vm.revertToState(preComposeSnap);
@@ -453,9 +453,8 @@ contract ReviewFlushInPayoutTest is FeeBase {
         (, uint256 toEngine) = _routerSplit(address(feeRouter).balance);
         uint256 a0 = address(atk).balance;
         atk.go(address(core), abi.encodeCall(ICore.compose, ()));
-        uint256 r = address(atk).balance - a0; // the reimbursement
-        assertGt(r, 0);
-        assertEq(core.ethPot(), pot0 - r + toEngine, "pot = old - reimbursement + the booked fees");
+        assertEq(address(atk).balance, a0, "the compose pays the caller nothing");
+        assertEq(core.ethPot(), pot0 + toEngine, "pot = old + the booked fees");
         _consistent();
     }
 
@@ -492,8 +491,8 @@ contract ReviewFlushInPayoutTest is FeeBase {
 
 /// F5. the carried question: can the Core pay more than `reimburseCapBps` of the statement cost (or of the notional cap on
 /// the exit lane), even by 1 wei. `_repay` pays `min(floor(gas * basefee * reimburseBps / BPS), floor(cap * reimburseCapBps / BPS),
-/// ethPot)` with `cap` the cost before the reimbursement is added (eth lane compose), the stored cost (exit of an eth lane
-/// statement) or `floor(80 * avgScore * RATE_START / 1e4)` (exit lane). every term is a floor, so the payment is at most
+/// ethPot)` with `cap` the stored cost (exit of an eth lane statement) or `floor(80 * avgScore * RATE_START / 1e4)`
+/// (exit lane). every term is a floor, so the payment is at most
 /// the exact quotient. only a mirror that rounds up (or divides once instead of twice) can see 1 wei more
 contract ReviewReimburseTest is Fixture {
     uint16[8] internal caps = [1, 7, 99, 333, 500, 777, 999, 1000];
@@ -502,51 +501,6 @@ contract ReviewReimburseTest is Fixture {
         Settings memory s = core.settings();
         s.reimburseCapBps = bps;
         _setSettings(s);
-    }
-
-    function _ethLane(uint16 bps, uint256 basefee, uint256 snap) internal returns (uint256 r, uint256 p, uint256 stored) {
-        vm.revertToState(snap);
-        _cap(bps);
-        vm.fee(basefee);
-        uint256 k0 = keeper.balance;
-        vm.prank(keeper);
-        core.compose();
-        r = keeper.balance - k0;
-        (,, stored,) = core.statementInfo(STATEMENTS.supply());
-        p = stored - r;
-    }
-
-    function test_OK_ethLaneComposeNeverPaysAboveTheCapAndFloorsTheQuotient() public {
-        _composeOnce();
-        uint256 snap = preComposeSnap;
-        uint256 inexact;
-        for (uint256 i; i < caps.length; ++i) {
-            (uint256 r, uint256 p, uint256 stored) = _ethLane(caps[i], 50 gwei, snap);
-            assertEq(r, p * caps[i] / 10_000, "the cap binds and is the floor of the exact quotient");
-            assertLe(r * 10_000, p * caps[i], "never above the exact cap");
-            assertLe(r * 10_000, stored * caps[i], "nor above the cap of the stored statement cost");
-            if (caps[i] == 333) {
-                emit log_named_uint("example: pulled cost P", p);
-                emit log_named_uint("example: cap bps C", caps[i]);
-                emit log_named_uint("example: P*C", p * caps[i]);
-                emit log_named_uint("example: P*C mod 10000", p * caps[i] % 10_000);
-                emit log_named_uint("example: paid r", r);
-            }
-            if (p * caps[i] % 10_000 != 0) {
-                ++inexact;
-                assertLt(r * 10_000, p * caps[i], "strictly below: the exact quotient has a fraction");
-                assertGt((r + 1) * 10_000, p * caps[i], "a mirror that rounds up sees exactly one wei more");
-            }
-        }
-        assertGt(inexact, 3, "the cases include inexact quotients");
-    }
-
-    /// forge-config: default.fuzz.runs = 24
-    function testFuzz_OK_ethLaneAnyBasefeeAnyCap(uint16 capSeed, uint256 feeSeed) public {
-        _composeOnce();
-        (uint256 r, uint256 p,) = _ethLane(uint16(bound(capSeed, 0, 1000)), bound(feeSeed, 1, 80 gwei), preComposeSnap);
-        assertLe(r * 10_000, p * core.settings().reimburseCapBps);
-        assertLe(r, core.ethPot() + r, "and within the pot");
     }
 
     function _exitLane(uint16 bps, uint256 sid, uint256 snap) internal returns (uint256 r) {

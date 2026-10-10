@@ -124,8 +124,6 @@ abstract contract Fixture is Test, ProdDeployer {
         uint256[80] ids;
         /// @dev sum of the cost bases of the credits
         uint256 cost;
-        /// @dev gas reimbursement paid to the caller
-        uint256 reimb;
         uint256 potBefore;
         uint64 at;
         /// @dev gas of the whole call as the caller saw it
@@ -410,12 +408,10 @@ abstract contract Fixture is Test, ProdDeployer {
         preComposeSnap = vm.snapshotState();
 
         vm.expectCall(address(STATEMENTS), abi.encodeWithSelector(IStatements.compose.selector, c.ids, uint8(0)));
-        uint256 keeperBefore = keeper.balance;
         uint256 gasBefore = gasleft();
         vm.prank(keeper);
         core.compose();
         c.gasUsed = gasBefore - gasleft();
-        c.reimb = keeper.balance - keeperBefore;
         c.sid = c.supplyBefore + 1;
         c.at = uint64(block.timestamp);
 

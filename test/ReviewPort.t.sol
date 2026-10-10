@@ -49,10 +49,6 @@ contract SwapOnReceive {
         c.sellForEth(ids);
     }
 
-    function compose(ICore c) external {
-        c.compose();
-    }
-
     function buyback(ICore c) external {
         c.buyback();
     }
@@ -358,7 +354,7 @@ contract ReviewPort is Fixture {
         assertEq(address(core).balance, core.ethPot() + core.ethToBuyback(), what);
     }
 
-    /// a swap fired from the eth callback of a sell payout, a compose reimbursement and the keeper tip of the coin buyback. the
+    /// a swap fired from the eth callback of a sell payout and the keeper tip of the coin buyback. the
     /// hook pushes into `receive()` mid door, it is booked in full, and the books stay exact
     function test_held_swapInsidePayoutCallbacks() public {
         _stockPool();
@@ -376,17 +372,6 @@ contract ReviewPort is Fixture {
         assertTrue(actor.fired(), "swap fired inside the payout");
         assertGt(core.ethPot(), pot0 - 1 ether, "bounty booked");
         _assertClean("after sell");
-
-        uint256 sidBase = STATEMENTS.supply();
-        _fillEthPile(80);
-        vm.fee(0.2 gwei);
-        actor.arm(1 ether);
-        uint256 potC = core.ethPot();
-        actor.compose(core);
-        assertTrue(actor.fired(), "swap fired inside the reimbursement");
-        assertGt(STATEMENTS.supply(), sidBase);
-        assertGt(core.ethPot(), potC - 1, "bounty booked");
-        _assertClean("after compose");
 
         // the keeper tip of the coin buyback is paid to the caller, who swaps from inside it
         _forceBuyback(1 ether);
