@@ -344,19 +344,29 @@ abstract contract HandlerSale is HandlerOwner {
                     the owner swapping the controller and the module
     //////////////////////////////////////////////////////////////*/
 
-    /// the call a hostile module makes from inside an exit: nothing, or one door of the core, or the selling controller
+    /// the call a hostile module makes from inside an exit: nothing, or one door of the core, or the selling controller.
+    /// k = 1..13 selects compose, skim, collectSales, buyback, exitStatement, repriceStatement, the selling controller's
+    /// sell, adopt, composeExit, sellForEth, buyListing, sellTo and buybackExit
     function _callout(uint256 k, uint256 seed, MockExitModule next) internal {
         if (k == 0) return;
         address target = address(core);
         bytes memory data;
         uint256 n = everHeld.length;
         uint256 sid = n == 0 ? 1 : everHeld[seed % n];
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = seed >> 8;
         if (k == 1) data = abi.encodeCall(ICore.compose, ());
         else if (k == 2) data = abi.encodeCall(ICore.skim, ());
         else if (k == 3) data = abi.encodeCall(ICore.collectSales, ());
         else if (k == 4) data = abi.encodeCall(ICore.buyback, ());
         else if (k == 5) data = abi.encodeCall(ICore.exitStatement, (sid));
         else if (k == 6) data = abi.encodeCall(ICore.repriceStatement, (sid));
+        else if (k == 8) data = abi.encodeCall(ICore.adopt, (ids));
+        else if (k == 9) data = abi.encodeCall(ICore.composeExit, ());
+        else if (k == 10) data = abi.encodeWithSignature("sellForEth(uint256[])", ids);
+        else if (k == 11) data = abi.encodeCall(ICore.buyListing, (1, "", seed >> 8, address(next)));
+        else if (k == 12) data = abi.encodeCall(ICore.sellTo, (sid, address(next)));
+        else if (k == 13) data = abi.encodeCall(ICore.buybackExit, (type(uint256).max));
         else {
             target = address(selling);
             data = abi.encodeCall(SellingController.sell, (sid, address(next)));
@@ -378,7 +388,7 @@ abstract contract HandlerSale is HandlerOwner {
             uint256 burn = (mode >> 4) % 4;
             if (burn == 1) next.setBurn(300_000);
             else if (burn == 2) next.setBurn(2_000_000);
-            _callout((mode >> 8) % 9, seed >> 16, next);
+            _callout((mode >> 8) % 14, seed >> 16, next);
         }
         bool lockedC = core.controllerLocked();
         bool lockedE = core.exitModuleLocked();

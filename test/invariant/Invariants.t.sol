@@ -60,14 +60,15 @@ abstract contract InvariantsBase is InvariantFixture {
         }
     }
 
-    /// 1. eth leaves the core only as a credit purchase within the ceiling, a tip within tipCapBps and tipSavingsBps, a
-    /// compose reimbursement within its cap, a buyback slice (the swap input plus the keeper tip) or a refund of
-    /// overpayment. every action's balance change is matched to those flows, measured at the recipients, against the
-    /// settings in force at that moment (the owner changes them throughout). the only inflows are the hook's skim pushed
-    /// into receive() during real swaps, including the one the hook pushes back during the buyback, `collectSales` (and
-    /// the collection a buyback starts with) and a plain donation. any other movement is a violation. exit token flows
-    /// too: it leaves the core only as a bid payment in sellForExitToken or as an auction slice paid for at or above
-    /// the quoted coin price.
+    /// 1. eth leaves the core only as a credit purchase within the ceiling, a `buyListing` tip within tipCapBps and
+    /// tipSavingsBps, the gas repayment of an exit within reimburseBps, reimburseCapBps and the pot, a buyback slice (the
+    /// swap input plus the keeper tip), a refund of overpayment, or a migration to the successor. `compose` and
+    /// `composeExit` pay the caller nothing. every action's balance change is matched to those flows, measured at the
+    /// recipients, against the settings in force at that moment (the owner changes them throughout). the inflows are the
+    /// hook's skim pushed into receive() during real swaps, including the one the hook pushes back during the buyback, the
+    /// fee router's flush, `collectSales` (and the collection a buyback starts with), `sellTo` payments and a plain
+    /// donation. any other movement is a violation. exit token flows too: it leaves the core only as a bid payment in
+    /// sellForExitToken or as an auction slice paid for at or above the quoted coin price.
     function invariant_01_ethOnlyLeavesByAllowedPaths() public view {
         _zero(g1);
     }
@@ -352,11 +353,11 @@ abstract contract InvariantsBase is InvariantFixture {
         }
     }
 
-    /// 12. docs/FLOW.md 9.2, SPEC invariant 3 as changed: a statement leaves the core only by a house auction whose reserve
-    /// was at least the hard floor (cost * saleFloorBps) when the core set it and which cleared at or above it, by `sellTo`
-    /// with a payment at least the hard floor, booked whole and split by saleToBuybackBps, by an exit that returned at
-    /// least rating * unitPerPoint, or as the top of an overprint. every ghost status is one of those, the record and the
-    /// house agree (invariant 4), and nobody the owner can name holds a statement they did not pay the floor for.
+    /// 12. docs/FLOW.md 9.2: a statement leaves the core only by a house auction, by `sellTo`, by an exit or as the top of
+    /// an overprint. every ever held statement has one of the ghost statuses Listed, Held, Sold, SoldTo, Exited or Top,
+    /// a sale at auction or through `sellTo` paid at least the hard floor (cost * saleFloorBps of the settings in force
+    /// when the statement was listed or repriced), and the handler's departure and sale path violation codes (codes 7, 8
+    /// and 30: price, booking by saleToBuybackBps, holder and record of each sale) stay at zero.
     function invariant_12_aStatementOnlyLeavesByASaleAnExitOrAnOverprint() public view {
         _zero(g11);
         uint256 n = handler.everHeldCount();
@@ -373,9 +374,10 @@ abstract contract InvariantsBase is InvariantFixture {
         }
     }
 
-    /// 13. the three one way locks never come undone, the setter of a locked door always refuses, every former owner has no
-    /// power for the core or for the controller's sale settings, and the core's owner is the one the handler last saw
-    /// accept. the handler checks each of these again on every call here
+    /// 13. the four one way locks (controller, exit module, targets, successor) never come undone and the setter of a
+    /// locked door always refuses. every former owner has no power over the core or over the controller's sale
+    /// settings, and the core's owner is the one the handler last saw accept. the handler checks each of these again on
+    /// every call to `lockCheck` and `formerOwnersCheck`.
     function invariant_13_locksAndHandoversNeverComeUndone() public {
         handler.lockCheck();
         handler.formerOwnersCheck();
@@ -384,10 +386,10 @@ abstract contract InvariantsBase is InvariantFixture {
         assertTrue(core.pendingOwner() != core.owner(), "the pending owner is the owner");
     }
 
-    /// 15. the fee router's eth only ever goes to the engine the owner set at that time (the tip to the caller, the payees'
-    /// parts, the rest to the engine), whichever engine that is. a flush against an engine that refuses reverts and the eth
-    /// waits, a lock is one way, and nothing the router owner does moves an asset or a pot of the core. what the core books
-    /// from the router is exactly the engine share of the flush when it is the engine, and nothing when it is not
+    /// 15. the fee router's eth goes only to the engine the owner set at that time (the payees' parts, the rest to the
+    /// engine), whichever engine that is. a flush against an engine that refuses reverts and the eth waits, the lock is
+    /// one way, and nothing the router owner does moves an asset or a pot of the core. what the core books from the
+    /// router is exactly the engine share of the flush when the engine is the core, and zero when it is not.
     function invariant_15_routerEthOnlyGoesToTheEngineSetAtThatTime() public view {
         _zero(g13);
         assertEq(feeRouter.engine(), handler.gEngine(), "the router engine differs from the last one set");
@@ -395,8 +397,10 @@ abstract contract InvariantsBase is InvariantFixture {
         assertGe(address(feeRouter).balance, handler.parked(), "eth that waited in the router is gone");
     }
 
-    /// 14. no exit module ever called the core, or the selling controller, successfully from inside an exit: every door is
-    /// shut while the core is inside `exitStatement`, whatever the module does with its gas
+    /// 14. no exit module ever called the core, or the selling controller, successfully from inside an exit. the hostile
+    /// module's callouts are compose, composeExit, skim, collectSales, buyback, buybackExit, exitStatement,
+    /// repriceStatement, adopt, sellForEth, buyListing, sellTo and the selling controller's sell. every one of them
+    /// reverts while the core is inside `exitStatement`, whatever the module does with its gas
     function invariant_14_noCallFromInsideAnExitEverWorked() public view {
         uint256 n = handler.moduleEverCount();
         for (uint256 i; i < n; ++i) {

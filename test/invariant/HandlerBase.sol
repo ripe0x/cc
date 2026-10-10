@@ -140,9 +140,10 @@ abstract contract HandlerBase is Test {
     uint256 internal constant V_REVERT_CHANGED = 18; // a reverted action changed core state
     uint256 internal constant V_OVERPRINT = 19; // an overprint outside the rules
     uint256 internal constant V_BUYBACK = 20; // a buyback slice or tip outside the rules
-    /// share of the metered gross gas the caller pays net of the EIP-3529 refund (the refund is at most 20 percent)
+    /// least share of the metered gross gas left after the EIP-3529 refund (the refund is at most 20 percent of it). the
+    /// cap of the exit gas repayment divides the net gas by it to get the metered gas
     uint256 internal constant REFUND_FLOOR_BPS = 8_000;
-    uint256 internal constant V_COMPOSE = 21; // a compose outside the rules or a reimbursement above its cap
+    uint256 internal constant V_COMPOSE = 21; // a compose that paid its caller, took an invalid page or made another statement than the next id
     uint256 internal constant V_POT = 22; // pot bookkeeping off from the action's flows
     uint256 internal constant V_REFUND = 23; // a house refund or payout that is not what the house rules give
     uint256 internal constant V_RECEIVE = 24; // the core's receive() reverted, or a swap failed for an unexplained reason
@@ -1079,8 +1080,8 @@ abstract contract HandlerBase is Test {
 
     /// tries to move coin between wallets and into a side pool. the coin is restricted: the pool is the only way to
     /// move it, so a wallet to wallet transfer must revert and move nothing. a transfer to the core reverts as well (the
-    /// core is not on the allowlist), unless the owner lists the sender: then the coin sits in the core and the owner
-    /// takes it out again with `rescueCoin`. the books of the core must not move either way
+    /// core is not on the allowlist), unless the token admin lists the sender: then the coin sits in the core and the
+    /// owner takes it out again with `rescueCoin`. the books of the core must not move either way
     function walletMove(uint256 aSeed, uint256 amtSeed) external checked {
         uint8 a = A_WALLET_MOVE;
         address who = _actor(aSeed);
@@ -1104,20 +1105,50 @@ abstract contract HandlerBase is Test {
                 _flag(V_SUPPLY, "a transfer of the restricted coin to the core went through");
             } catch {}
             if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "the core holds coin");
-            vm.prank(owner);
-            try coin.setAllowed(who, true) {
-                vm.prank(who);
-                coin.transfer(address(core), amt);
-                vm.prank(owner);
-                core.rescueCoin(who, amt);
-                vm.prank(owner);
-                coin.setAllowed(who, false);
-                if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "rescueCoin left coin in the core");
-            } catch {}
+            _allowRescue(who, amt);
         }
         _eth(b0, 0, 0, "walletMove");
         if (core.ethPot() != pot0) _flag(V_POT, "a coin move changed the pot");
         if (coin.totalSupply() != supply0) _flag(V_SUPPLY, "a coin move changed the supply");
+    }
+
+    /// the revert of the coin's allowlist setter for a caller that is not the token admin
+    bytes4 internal constant COIN_NOT_ADMIN = 0x7bfa4b9f;
+
+    /// the owner lists `who` on the coin allowlist. the token admin is the account that launched the coin, so the call
+    /// succeeds exactly while the caller is that admin and the allowlist is open, and reverts with `COIN_NOT_ADMIN`
+    /// otherwise (after a handover of the core the owner is no longer the admin). on success `who` sends `amt` coin to
+    /// the core, a stranger's `rescueCoin` reverts with OnlyOwner, the owner's `rescueCoin` returns exactly `amt` to
+    /// `who` and leaves no coin in the core, and `who` is taken off the list again
+    function _allowRescue(address who, uint256 amt) internal {
+        bool mayList = owner == coin.admin() && !coin.allowlistLocked();
+        vm.prank(owner);
+        try coin.setAllowed(who, true) {
+            if (!mayList) _flag(V_OWNER, "the allowlist changed for a caller that is not the token admin");
+        } catch (bytes memory why) {
+            if (mayList || bytes4(why) != COIN_NOT_ADMIN) {
+                _unexpected(A_WALLET_MOVE, why);
+            }
+            return;
+        }
+        if (!mayList) return;
+        uint256 before = coin.balanceOf(who);
+        vm.prank(who);
+        coin.transfer(address(core), amt);
+        if (coin.balanceOf(address(core)) != amt) _flag(V_SUPPLY, "the allowlisted transfer did not reach the core");
+        address stranger = address(uint160(uint256(keccak256(abi.encode("rescuer", who, amt)))));
+        vm.prank(stranger);
+        try core.rescueCoin(who, amt) {
+            _flag(V_OWNER, "a stranger rescued coin from the core");
+        } catch (bytes memory why) {
+            if (bytes4(why) != ICore.OnlyOwner.selector) _unexpected(A_WALLET_MOVE, why);
+        }
+        vm.prank(owner);
+        core.rescueCoin(who, amt);
+        if (coin.balanceOf(who) != before) _flag(V_OWNER, "rescueCoin did not return exactly the coin sent");
+        if (coin.balanceOf(address(core)) != 0) _flag(V_SUPPLY, "rescueCoin left coin in the core");
+        vm.prank(owner);
+        coin.setAllowed(who, false);
     }
 
     /// sells coin for eth through the launch pool. exact in or exact out.
@@ -2166,7 +2197,7 @@ abstract contract HandlerBase is Test {
     uint256 internal constant PULL_GAS = 1_000_000;
 
     /// one door call with the router pull inside it. `*0` is the state before the pull (what a reverted door leaves),
-    /// the rest is what the pull does: eth booked by the Core, the tip to the caller, the router balance after
+    /// the rest is what the pull does: eth booked by the Core and the router balance after
     struct Pull {
         uint256 snap;
         uint256 bal0;
