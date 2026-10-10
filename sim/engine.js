@@ -18,7 +18,7 @@ export const SETTINGS = {
   bonusCapBps: 2500, // the controller pays no bonus, so no effect
   tipSavingsBps: 1000,
   tipCapBps: 200,
-  reimburseBps: 8000,
+  reimburseBps: 8000, // governs exitStatement gas repay; the simulator does not model exit gas
   reimburseCapBps: 500,
   saleFloorBps: 7500, // the hard floor: no sale of a statement below cost * saleFloorBps / 10000, whatever the controller asks
   auctionDuration: 24 * 3600, // runs from the first bid
@@ -102,8 +102,6 @@ export const CORE_PARAMS = {
   SUPPLY: 1e9,
   XRATE_START: 6000,
   PAGE: 80,
-  COMPOSE_OVERHEAD_GAS: 50000,
-  LIST_GAS: 350000, // the listing on the house, eth lane only
   BID_RAISE_BPS: 500, // the house: a later bid must beat the top bid by 5 percent
   TIME_BUFFER: 15 * 60, // the house: a bid in the last 15 minutes pushes the end to 15 minutes from the bid
 };
@@ -179,8 +177,6 @@ export const SIM_DEFAULTS = {
   holders: 96800,
   listedShare: 0, // share of market offers that are visible listings the keeper takes at the ask through the listing door
   strategyOn: true,
-  gasGwei: 1.5,
-  composeGas: 8.3e6,
   // statement buyers
   stmtPerDay: 8,
   stmtDecayDays: 21,
@@ -401,22 +397,10 @@ export class Core {
     if (!this.spend(ask + tip, now)) return null;
     return { cost: ask, tip };
   }
-  // compose 80 credits. cost is the sum of their costs. returns the statement (eth lane: listed at age zero, so at the start price)
-  compose(costSum, lane, now, gasPriceGwei) {
-    const p = this.p, s = this.s;
-    const gas = p.composeGas + p.COMPOSE_OVERHEAD_GAS + (lane === 'eth' ? p.LIST_GAS : 0);
-    const gasEth = (gas * gasPriceGwei * 1e-9 * s.reimburseBps) / BPS;
-    const cap = lane === 'eth' ? costSum : (p.PAGE * s.avgScore * p.rateStart) / 1e4 / W; // notional at the immutable rateStart, not the live rate (FC-4)
-    const reimb = Math.min(gasEth, (cap * s.reimburseCapBps) / BPS, this.ethPot);
-    let cost = costSum;
-    if (reimb > 0) {
-      this.checkpoint(now);
-      this.ethPot -= reimb;
-      this.syncFunded();
-      if (lane === 'eth') cost += reimb;
-    }
-    const st = { cost, reimb, t0: now, lane, bid: 0, bids: 0, end: 0, bidderWtp: 0 };
-    if (lane === 'eth') { st.reserve = this.askingPrice(st, now); st.duration = s.auctionDuration; }
+  // compose 80 credits. repays nothing: cost is the sum of their costs in both lanes. returns the statement (eth lane: listed at age zero, so at the start price)
+  compose(costSum, lane, now) {
+    const st = { cost: costSum, t0: now, lane, bid: 0, bids: 0, end: 0, bidderWtp: 0 };
+    if (lane === 'eth') { st.reserve = this.askingPrice(st, now); st.duration = this.s.auctionDuration; }
     return st;
   }
   // ControllerV1.statementPrice(sid, cost, listedAt): steps = floor(age / stepEvery), bps = max(startBps - min(steps * stepBps, startBps), floorBps).
@@ -712,7 +696,7 @@ export function simulate(userParams = {}) {
   let live = []; // statements with a bid and a running timer
   let lnM = 0, nextSid = 1;
   const T = { // totals
-    fees: 0, feesBuyback: 0, feesTaker: 0, saleGross: 0, saleToPot: 0, saleToBuyback: 0, spent: 0, tips: 0, reimb: 0,
+    fees: 0, feesBuyback: 0, feesTaker: 0, saleGross: 0, saleToPot: 0, saleToBuyback: 0, spent: 0, tips: 0,
     bought: 0, boughtX: 0, pts: 0, cost: 0, mkt: 0, ask: 0, sumM: 0, composed: 0, composedX: 0, sold: 0, exited: 0, exitedX: 0,
     soldPrice: 0, soldCost: 0, soldPts: 0, soldFloor: 0, soldAge: 0, soldAtFloor: 0, soldInstant: 0, bidsOnSold: 0, contested: 0, rebids: 0, extended: 0, buybackSpent: 0, buybackTips: 0, burned: 0, burnedX: 0,
     listBought: 0, stratBought: 0, xFills: 0, xCoin: 0, xValue: 0, xGross: 0, xDiscSum: 0, xRecv: 0, xSpent: 0, firstFill: -1,
@@ -880,17 +864,17 @@ export function simulate(userParams = {}) {
       const page = ethPile.splice(0, p.PAGE);
       let cost = 0, rating = 0;
       for (const c of page) { cost += c.cost; rating += c.pts; }
-      const st = core.compose(cost, 'eth', now, p.gasGwei);
+      const st = core.compose(cost, 'eth', now);
       st.rating = rating; st.id = nextSid++;
-      T.reimb += st.reimb; T.composed++; T.stCost += st.cost; T.stRating += rating;
+      T.composed++; T.stCost += st.cost; T.stRating += rating;
       unbid.push(st);
     }
     while (xPile.length >= p.PAGE && core.moduleSet) {
       const page = xPile.splice(0, p.PAGE);
       let rating = 0;
       for (const c of page) rating += c.pts;
-      const st = core.compose(0, 'exit', now, p.gasGwei);
-      T.reimb += st.reimb; T.composedX++;
+      const st = core.compose(0, 'exit', now);
+      T.composedX++;
       const res = core.exitStatement(st, rating, now);
       T.exitedX++; T.xRecv += res.received;
     }
@@ -1182,7 +1166,7 @@ export function simulate(userParams = {}) {
     bidsPerSale: T.sold ? T.bidsOnSold / T.sold : 0, contestedShare: T.sold ? T.contested / T.sold : 0,
     stmtArrivals: T.stmtArrivals, stmtMiss: T.stmtMiss,
     xFills: T.xFills, xMedianIntervalH: med(intervals), xMeanDiscount: T.xFills ? T.xDiscSum / T.xFills : 0,
-    potCheck: T.fees + T.feesBuyback + T.feesTaker - core.feeToBuyback + T.saleToPot - T.spent - T.reimb - core.ethPot,
+    potCheck: T.fees + T.feesBuyback + T.feesTaker - core.feeToBuyback + T.saleToPot - T.spent - core.ethPot,
     buybackCheck: T.saleToBuyback + core.feeToBuyback - core.ethToBuyback - T.buybackSpent - T.buybackTips,
     houseCheck: T.saleGross - T.saleToPot - T.saleToBuyback - core.houseOwed,
     stallHours: stallTotal / 3600, stallHoursMax: stallMax / 3600, gapHoursMax: gapMax / 3600, stallRuns, stallCauseHours: Object.fromEntries(Object.entries(stallCause).map(([k, v]) => [k, v / 3600])), gateClosedHours: gateClosed / 3600, rateCapHours: rateCapSec / 3600,

@@ -30,7 +30,7 @@ export function metrics(res) {
     saleOverCost: st.saleOverCost, saleOverFloor: st.saleOverFloor, saleAgeH: st.saleAgeHours, saleAtFloor: st.saleAtFloorShare, soldInstant: T.soldInstant, bidsPerSale: st.bidsPerSale, contestedShare: st.contestedShare,
     stmtArrivals: st.stmtArrivals, stmtMiss: st.stmtMiss, rebids: T.rebids, extended: T.extended,
     xFills: st.xFills, xMedianIntervalH: st.xMedianIntervalH, xMeanDiscount: st.xMeanDiscount,
-    boughtX: T.boughtX, exitedX: T.exitedX, burnEthM: T.burned / 1e6, burnXM: T.burnedX / 1e6, tips: T.tips, reimb: T.reimb, spent: T.spent,
+    boughtX: T.boughtX, exitedX: T.exitedX, burnEthM: T.burned / 1e6, burnXM: T.burnedX / 1e6, tips: T.tips, spent: T.spent,
     stCost: T.composed ? T.stCost / T.composed : NaN, stRating: T.composed ? T.stRating / T.composed : NaN,
     xPotEnd: res.core.xPot, xToBuybackEnd: res.core.xToBuyback, potEnd: res.core.ethPot, toBuybackEnd: res.core.ethToBuyback,
     feeToBurnEnd: res.core.feeToBuyback,
@@ -208,7 +208,7 @@ batches.q9 = () => {
     ['offersPerHour', 60, 400], ['supplyElast', 0.5, 3], ['bookChurn', 0.02, 0.15], ['stmtPerDay', 3, 20], ['wtpMult', 0.7, 1.3],
     ['buyShareLate', 0.42, 0.52], ['rateStart', rateAt(0.25), rateAt(1.25)], ['flatBps', 0, 10000], ['startBps', 9000, 13000], ['stepEvery', 3600, 6 * 3600], ['floor, both floors', { floorBps: 5000, saleFloorBps: 5000 }, { floorBps: 7500, saleFloorBps: 7500 }],
     ['buyOnly', false, true], ['feeToBuybackBps', 0, 2500], ['buyerWaits', 'no', 'floor'], ['auctionDuration', 6 * 3600, 72 * 3600],
-    ['saleToBuybackBps', 0, 10000], ['dropPerCreditPct', 0.25, 2], ['climbPerMin', 0.25, 2], ['ceilPct', 110, 200], ['idleLoosenPct', 0, 5], ['spendCapBps', 1000, 10000], ['gasGwei', 0.5, 10],
+    ['saleToBuybackBps', 0, 10000], ['dropPerCreditPct', 0.25, 2], ['climbPerMin', 0.25, 2], ['ceilPct', 110, 200], ['idleLoosenPct', 0, 5], ['spendCapBps', 1000, 10000],
     ['listedShare', 0, 0.5], ['sniperVolShare', 0.2, 0.6], ['h1Share', 0.45, 0.7], ['exitAfter', 24 * 3600, 7 * 86400], ['stmtPick', 'cheapest', 'random'],
   ];
   const out = { base, rows: [] };

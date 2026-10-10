@@ -1,6 +1,6 @@
 # simulation of the credits engine
 
-follows the contract at commit `cd7d404`. launch values are script/config/mainnet.json.
+follows the contract at commit `cd7d404`. launch values are script/config/mainnet.json. the engine at commit `382b967` repays nothing to the compose caller and the statement cost is the sum of the 80 credit bases; the batches below were run with the earlier compose repay (under 1 percent of a statement's cost at 1.5 gwei), which is inside the seed noise of every figure, so they were not rerun. the simulator code follows `382b967`.
 
 sim/engine.js is a deterministic model of the engine in src/Core.sol, src/lib/CoreLib.sol and src/ControllerV1.sol on branch flow. it covers the stepped bid rule (drop per credit, drop floor, climb per minute, ceiling with idle loosening, the clamp at one average credit, `rateCap`), the blended bid (`flatBps`, `avgScore`), the funded flag, the hourly cap, both buy doors, compose, the statement asking price (controller settings `startBps`, `stepBps`, `stepEvery`, `floorBps`, `buyOnly`) with the Core's hard floor `saleFloorBps`, the english auction on the pnd auction house, instant sales in buy only mode, `collectSales`, the swap fee share `feeToBuybackBps`, the buyback, the exit lane, the exitToken bid, the exitToken dutch auction and settings changes mid run. rules and names are the contracts' (docs/FLOW.md section 9). launch values are script/config/mainnet.json and a test reads the file. the launch position is concentrated liquidity math. sellers, statement buyers and coin volume are calibrated on the 13 day data pull in sim/data/notes.md. the time step is 60 seconds after the first hour (the first hour runs in 120 second sub steps for the anti sniper window), which matches the minute bucket of the contract's drop floor and climb. every number below is a mean over 3 to 5 seeds of a 90 day run unless stated. raw rows are in sim/results/*.json (node run.mjs q1 to q11), the interactive page is sim/index.html. `exitModule` and `exitToken` are the only names used for phase 2. the owner sets the exitModule, the controller and the allowed targets at once, so every change applies at once in the model.
 
@@ -115,7 +115,7 @@ verdict in one paragraph: **the engine keeps buying under every volume preset, a
 | statement sale | auction mode (launch): a buyer at or above the asking price opens the english auction at that price, `auctionDuration` timer from the first bid, 5 percent raise, 15 minute extension. buy only mode: the buyer pays the asking price and gets the statement at once. unbid statements stay listed |
 | proceeds | auction: credited to the Core in the house, reach the pots when `collectSales` runs (an hourly keeper). buy only: booked at once. both split by `saleToBuybackBps` |
 | fees | the fee router pays the Core: 6.65022 points of volume at the baseline plus the anti sniper extra, less, from 30 minutes after launch, 112,778 ppm to the payee. `feeToBuybackBps` (launch 0) of the booked eth goes to the buyback pot, the rest to the pot |
-| compose | `reimburseBps` 8000 |
+| exit (`exitStatement`) | `reimburseBps` 8000 |
 | phase 2 exit | an unbid listing may exit through the exitModule after `exitAfter` (105 hours, where the asking price reaches its floor), a statement with a bid stays out of the exitModule. the owner sets the exitModule at once |
 | settings | one `Settings` object with the Core's field names plus the controller's five, `schedule` of `{day, patch}` changes them mid run with the Core's checkpoint and bounds |
 | opening limit | `rateStart` 2.0554e13, 100 percent of the market price of a credit over `avgScore` |
@@ -496,7 +496,7 @@ low and high value of each input against the base case (31,510 credits and 394 s
 | `auctionDuration` | 24 hours | keep, shorten if the second bidder share is high | 6 hours recycles 12% more eth under the lowest ask rule. a real house may differ |
 | `feeToBuybackBps` | 0 | keep: a launch decision | 89% of fees come on day one. 1000 burns 57% more eth for 6% fewer credits, 2500 burns 2.4 times for 17% fewer. after day 7 the result is unchanged |
 | `saleToBuybackBps` | 5000 | keep for the first week | the first week is unchanged by it. decide between day 7 and day 18, it is the largest lever left |
-| `reimburseBps` | 8000 | keep | compose reimbursement, in every run |
+| `reimburseBps` | 8000 | keep | governs the `exitStatement` gas repay, the simulator does not model exit gas |
 | `exitAfter` | 105 hours | keep, and keep it equal to the hour the curve reaches its floor | applies in phase 2 only. if `stepEvery` or `stepBps` slow the curve, raise it with them, or statements exit before they reach their lowest price |
 | `exitToBuybackBps`, `exitLaneToBuybackBps` and exitToken settings | as launched (the exit lane share is 0: exit lane proceeds stay in the exit bid pot) | keep | phase 2 only. the auction pace is slow (1 slice per 6 hours) |
 
