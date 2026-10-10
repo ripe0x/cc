@@ -5,9 +5,23 @@ import {CommonBase} from "forge-std/Base.sol";
 import {Stack, Settings, Sale, Mainnet, RATE_START_MIN_WEI, RATE_START_MAX_WEI} from "../src/interfaces/Interfaces.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 
-// the `constantsHash()` the v2 stack reports (hook, factory, locker, escrow, mev module and the rest). the vendored
-// artifacts of test/v2-artifacts report this value, and preflight requires it of the live hook
+// the `constantsHash()` the live v2 stack reports (hook, factory, locker, escrow, mev module and the rest). preflight
+// requires it of the hook and of the other four members the config names
 bytes32 constant V2_CONSTANTS_HASH = 0x69b6027a6426e4db8d91e06f74d3977b5d6e616067cf30c29f74d7c785ae4027;
+
+// the runtime code hashes (`extcodehash`) of the live v2 stack contracts, read at this block. the contracts have no
+// proxy and no selfdestruct, so the hashes hold at every later block. preflight requires each one of the contract the
+// config and the factory point at. script/config/v2-mainnet.json holds the addresses
+uint256 constant V2_PIN_BLOCK = 26158000;
+bytes32 constant V2_CODEHASH_HOOK = 0xdfd4453028eb0f5176cd00fdbbeb495e75754cef9fd36091767cdb593449562b;
+bytes32 constant V2_CODEHASH_FACTORY = 0x521076a0cde91c74a1c3a72f676818dd423d125647a5e038531443a86a9a9156;
+bytes32 constant V2_CODEHASH_LOCKER = 0xc0d3e2539d75cdaf225bd64266bfd3e6ee7c602abfd173f59dd04fc43195eaad;
+bytes32 constant V2_CODEHASH_ESCROW = 0x2f88e4ff28749a58a6710c291c1a17d05dd099b6da1289acf6116182c0c673a4;
+bytes32 constant V2_CODEHASH_MEV_MODULE = 0x5b513087e1c593a3d8a3932a9a768491658eadee76941502d2351a7081a3581b;
+bytes32 constant V2_CODEHASH_TOKEN_DEPLOYER = 0xa1ea224b73bee06c71738152d536147b9845ccd2969070ba01c01904670fbd98;
+bytes32 constant V2_CODEHASH_ALLOWLIST = 0x7a98bacb16f0ec968f5d450c37e6a5a4ef213a8d48c61c666b2cea3e0f6318c4;
+bytes32 constant V2_CODEHASH_FEE_CONTROLLER = 0x8c3e7bdfc124978e815095822a16b9f0c5fbd1f4925b99eaedeed542b5ca3feb;
+bytes32 constant V2_CODEHASH_BURN_ROUTER = 0x937f1a92e636aed39eb430bd3be2882201479768a84f5c253f3788114f4574fb;
 
 /// @notice everything a launch needs. one struct, loaded from script/config/mainnet.json by the scripts and built in
 /// memory by the tests. nothing here is read by `src/`: the Core takes `stack`, `rateStart` and `settings` as constructor
@@ -238,7 +252,7 @@ abstract contract ConfigReader is CommonBase {
         if (bytes(c.symbol).length == 0) tmp[n++] = "symbol";
         if (c.salt == bytes32(0)) tmp[n++] = "salt";
         if (c.creatorPayee == address(0)) tmp[n++] = "router.creatorPayee";
-        // the v2 stack is not live yet: its addresses are zero placeholders until it is
+        // a config file that leaves a stack address at zero is refused
         if (c.stack.hook == address(0)) tmp[n++] = "stack.hook";
         if (c.stack.factory == address(0)) tmp[n++] = "stack.factory";
         if (c.stack.locker == address(0)) tmp[n++] = "stack.locker";

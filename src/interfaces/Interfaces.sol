@@ -201,9 +201,9 @@ library Mainnet {
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant UNIVERSAL_ROUTER = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
-    // the artcoins v2 stack is not on mainnet yet (docs/V2-PORT.md). its addresses are config inputs, never constants:
-    // `defaultStack` leaves them zero, the Core refuses a zero member and the deploy script refuses a zero config.
-    // the tests take them from the stack the fixture deploys on the fork (test/utils/V2Stack.sol)
+    // the artcoins v2 stack addresses are config inputs and not constants: `defaultStack` leaves them zero, the Core
+    // refuses a zero member and the deploy script refuses a zero config. script/config/v2-mainnet.json records the live
+    // stack, script/config/mainnet.json carries it into the launch config, test/utils/V2Stack.sol reads it for the tests
 
     /// the dynamic fee flag every artcoins pool uses, and its tick spacing
     uint24 internal constant POOL_FEE = 0x800000;
@@ -256,7 +256,7 @@ library Mainnet {
     }
 
     /// the default stack: the fixed parts of mainnet. the v2 members (hook, factory, locker, escrow) and the fee router
-    /// are zero placeholders that must be filled before a launch
+    /// are zero and are filled by the config before a launch
     function defaultStack() internal pure returns (Stack memory) {
         return Stack({
             poolManager: POOL_MANAGER,

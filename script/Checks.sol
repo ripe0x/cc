@@ -11,11 +11,28 @@ import {
     IArtCoinsFeeEscrowV2,
     IArtCoinsMevSkimV2
 } from "../src/interfaces/ArtCoinsV2.sol";
-import {LaunchConfig, V2_CONSTANTS_HASH} from "./LaunchConfig.sol";
+import {
+    LaunchConfig,
+    V2_CONSTANTS_HASH,
+    V2_PIN_BLOCK,
+    V2_CODEHASH_HOOK,
+    V2_CODEHASH_FACTORY,
+    V2_CODEHASH_LOCKER,
+    V2_CODEHASH_ESCROW,
+    V2_CODEHASH_MEV_MODULE,
+    V2_CODEHASH_TOKEN_DEPLOYER,
+    V2_CODEHASH_ALLOWLIST,
+    V2_CODEHASH_FEE_CONTROLLER,
+    V2_CODEHASH_BURN_ROUTER
+} from "./LaunchConfig.sol";
 import {PostflightChecks} from "./PostflightChecks.sol";
 
 interface ISupply {
     function supply() external view returns (uint256);
+}
+
+interface IFeeControllerV2 {
+    function burnRouter() external view returns (address);
 }
 
 /// @notice the read only checks run before a launch (`preflight`) and after it (`postflight`). they only read state,
@@ -51,6 +68,9 @@ abstract contract LaunchChecks is PostflightChecks {
     /// beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta (0x28CC, v2 `DeployV2Lib`)
     uint160 internal constant HOOK_FLAG_MASK = 0x3FFF;
     uint160 internal constant HOOK_FLAGS = 0x28CC;
+    /// @dev the factory error `Deprecated()`: the first statement of the factory's `_launch` reverts with it for every
+    /// caller but the owner while `deprecated` is true
+    bytes4 internal constant DEPRECATED_SELECTOR = bytes4(keccak256("Deprecated()"));
     int24 internal constant MAX_TICK = 887_272;
     /// @dev v4 limit of the tick spacing
     int24 internal constant MAX_TICK_SPACING = 32_767;
@@ -320,11 +340,39 @@ abstract contract LaunchChecks is PostflightChecks {
         (ok, b) = _bool(s.escrow, abi.encodeCall(IArtCoinsFeeEscrowV2.isDepositor, (s.locker)));
         _check("escrow: the locker is a depositor", ok && b, "isDepositor(locker)");
         _preStackVersion(c);
+        _preStackCode(c);
     }
 
-    /// @dev the stack version of the factory and the constants hash of the stack against the vendored artifacts the
-    /// rehearsal ran: the hook reports `V2_CONSTANTS_HASH` and the hook, factory, locker, escrow and mev module report
-    /// the same hash
+    /// @dev the runtime code hash of each live v2 contract the launch reaches, against the hashes read from the live
+    /// stack at `V2_PIN_BLOCK`: the five contracts of the config, the token deployer and protocol recipient the factory
+    /// points at, the extension allowlist of the hook and the burn router of the fee controller
+    function _preStackCode(LaunchConfig memory c) private {
+        Stack memory s = c.stack;
+        (, address deployer_) = _addr(s.factory, abi.encodeCall(IArtCoinsFactoryV2.tokenDeployer, ()));
+        (, address controller) = _addr(s.factory, abi.encodeCall(IArtCoinsFactoryV2.protocolRecipient, ()));
+        (, address router) = _addr(controller, abi.encodeCall(IFeeControllerV2.burnRouter, ()));
+        _pin("hook", s.hook, V2_CODEHASH_HOOK);
+        _pin("factory", s.factory, V2_CODEHASH_FACTORY);
+        _pin("locker", s.locker, V2_CODEHASH_LOCKER);
+        _pin("escrow", s.escrow, V2_CODEHASH_ESCROW);
+        _pin("mev module", c.mevModule, V2_CODEHASH_MEV_MODULE);
+        _pin("token deployer", deployer_, V2_CODEHASH_TOKEN_DEPLOYER);
+        _pin("extension allowlist", _hookGlobals(s.hook).extensionAllowlist, V2_CODEHASH_ALLOWLIST);
+        _pin("protocol fee controller", controller, V2_CODEHASH_FEE_CONTROLLER);
+        _pin("burn router", router, V2_CODEHASH_BURN_ROUTER);
+    }
+
+    function _pin(string memory name, address who, bytes32 want) private {
+        bytes32 got = who.code.length == 0 ? bytes32(0) : who.codehash;
+        _check(
+            string.concat("code hash: ", name, " is the live v2 contract"),
+            got == want,
+            string.concat(vm.toString(who), " ", vm.toString(got), " pinned at block ", vm.toString(V2_PIN_BLOCK))
+        );
+    }
+
+    /// @dev the stack version of the factory and the constants hash of the stack: the hook reports `V2_CONSTANTS_HASH`
+    /// and the hook, factory, locker, escrow and mev module report the same hash
     function _preStackVersion(LaunchConfig memory c) private {
         Stack memory s = c.stack;
         (bool ok, uint256 v) = _word(s.factory, abi.encodeCall(IArtCoinsFactoryV2.STACK_VERSION, ()));
@@ -332,9 +380,9 @@ abstract contract LaunchChecks is PostflightChecks {
         bytes memory q = abi.encodeCall(IArtCoinsHookV2.constantsHash, ());
         (bool okh, uint256 h) = _word(s.hook, q);
         _check(
-            "v2: hook constantsHash equals the vendored artifacts",
+            "v2: hook constantsHash equals the pinned live value",
             okh && bytes32(h) == V2_CONSTANTS_HASH,
-            string.concat("hook ", vm.toString(bytes32(h)), " vendored ", vm.toString(V2_CONSTANTS_HASH))
+            string.concat("hook ", vm.toString(bytes32(h)), " pinned ", vm.toString(V2_CONSTANTS_HASH))
         );
         address[4] memory rest = [s.factory, s.locker, s.escrow, c.mevModule];
         bool same = okh;
@@ -471,6 +519,36 @@ abstract contract LaunchChecks is PostflightChecks {
             ok
                 ? string.concat("coin ", vm.toString(coin), " launch gas ", vm.toString(gas))
                 : string.concat("reverts with ", vm.toString(why))
+        );
+        _preDeprecatedGate(c, cfg);
+    }
+
+    /// @dev the deprecated state of the factory admits the owner and refuses every other caller. the owner half is the
+    /// simulation above (`deployTokenAsOwner` is `onlyOwner` and reaches `_launch`). the refusal half is a launch by an
+    /// account that is not the owner through `deployToken`, which reverts with `Deprecated()` at the first statement of
+    /// `_launch`, before any config validation
+    function _preDeprecatedGate(LaunchConfig memory c, IArtCoinsFactoryV2.DeploymentConfigV2 memory cfg) private {
+        address fa = c.stack.factory;
+        (bool ok, bool dep) = _bool(fa, abi.encodeCall(IArtCoinsFactoryV2.deprecated, ()));
+        if (!ok || !dep) {
+            _info("factory: not deprecated, no deprecated gate", ok ? "public launches are open" : "unreadable");
+            return;
+        }
+        (, uint256 fee) = _word(fa, abi.encodeCall(IArtCoinsFactoryV2.deployFee, ()));
+        address stranger = address(uint160(uint256(keccak256("credits.preflight.stranger"))));
+        uint256 snap = vm.snapshotState();
+        vm.deal(stranger, fee);
+        vm.prank(stranger);
+        bytes memory out;
+        (ok, out) = fa.call{value: fee, gas: TX_GAS_CAP - 21_000}(abi.encodeCall(IArtCoinsFactoryV2.deployToken, (cfg)));
+        vm.revertToState(snap);
+        bool refused = !ok && out.length == 4 && bytes4(out) == DEPRECATED_SELECTOR;
+        _check(
+            "factory: deprecated, the owner launches and any other caller reverts Deprecated()",
+            refused,
+            refused
+                ? "deployToken by a stranger reverts Deprecated(). deployTokenAsOwner is the owner path (simulated above)"
+                : string.concat("deployToken by a stranger ", ok ? "succeeded" : "reverted with ", vm.toString(out))
         );
     }
 

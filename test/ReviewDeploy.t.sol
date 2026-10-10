@@ -467,9 +467,15 @@ contract ReviewDeployTest is ReviewHarness {
         _requireConfigHash(c, h);
     }
 
-    /// the default config plus the launch inputs of script/config/mainnet.json (owner, creator, payee, name, salt)
-    function _shipped() internal pure returns (LaunchConfig memory s) {
+    /// the default config plus the launch inputs of script/config/mainnet.json (the live v2 stack, owner, creator, payee,
+    /// name, salt)
+    function _shipped() internal view returns (LaunchConfig memory s) {
         s = defaultConfig();
+        s.stack.hook = v2.hook;
+        s.stack.factory = v2.factory;
+        s.stack.locker = v2.locker;
+        s.stack.escrow = v2.escrow;
+        s.mevModule = v2.mev;
         s.owner = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.creator = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
         s.creatorPayee = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;

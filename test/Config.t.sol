@@ -4,7 +4,19 @@ pragma solidity ^0.8.28;
 import {Fixture} from "./utils/Fixture.sol";
 import {SettingsFields} from "../script/SettingsFields.sol";
 import {Mainnet, Settings} from "../src/interfaces/Interfaces.sol";
-import {LaunchConfig} from "../script/LaunchConfig.sol";
+import {
+    LaunchConfig,
+    V2_CODEHASH_HOOK,
+    V2_CODEHASH_FACTORY,
+    V2_CODEHASH_LOCKER,
+    V2_CODEHASH_ESCROW,
+    V2_CODEHASH_MEV_MODULE,
+    V2_CODEHASH_TOKEN_DEPLOYER,
+    V2_CODEHASH_ALLOWLIST,
+    V2_CODEHASH_FEE_CONTROLLER,
+    V2_CODEHASH_BURN_ROUTER
+} from "../script/LaunchConfig.sol";
+import {V2Stack} from "./utils/V2Stack.sol";
 import {SettingsBounds} from "../src/lib/SettingsBounds.sol";
 
 /// @notice the config file, the placeholder guard, the preflight and the postflight on the pinned fork
@@ -29,10 +41,16 @@ contract ConfigTest is Fixture {
     }
 
     /// the json file is the default config plus the launch inputs the owner supplied (owner, creator, name, the creator
-    /// payee) and the salt, keccak256 of "CC". the v2 stack addresses are still placeholders
+    /// payee) and the salt, keccak256 of "CC", and the live v2 stack of script/config/v2-mainnet.json
     function test_jsonEqualsDefaultConfig() public view {
         LaunchConfig memory f = loadConfig(DEFAULT_CONFIG_FILE);
         LaunchConfig memory d = defaultConfig();
+        V2Stack.Stack memory live = V2Stack.live();
+        d.stack.hook = live.hook;
+        d.stack.factory = live.factory;
+        d.stack.locker = live.locker;
+        d.stack.escrow = live.escrow;
+        d.mevModule = live.mev;
         d.owner = SHIPPED_OWNER;
         d.creator = SHIPPED_OWNER;
         d.creatorPayee = SHIPPED_OWNER;
@@ -59,14 +77,10 @@ contract ConfigTest is Fixture {
         assertTrue(f.restricted);
         assertEq(f.allowed.length, 0);
         assertEq(f.payeePpm, 112_778);
-        // the v2 stack is not live: its addresses are placeholders the deploy refuses
-        string[] memory unset = unsetFields(f);
-        assertEq(unset.length, 5, "the placeholders left in the shipped file");
-        assertEq(unset[0], "stack.hook");
-        assertEq(unset[1], "stack.factory");
-        assertEq(unset[2], "stack.locker");
-        assertEq(unset[3], "stack.escrow");
-        assertEq(unset[4], "stack.mevModule");
+        // the stack addresses of the shipped file are the record of the live stack, the factory owner is the config owner
+        assertEq(unsetFields(f).length, 0, "the shipped file leaves nothing unset");
+        assertEq(live.owner, f.owner, "the factory owner of the record is the config owner");
+        assertEq(live.owner, FACTORY.owner(), "and the owner on chain");
     }
 
     function requireExt(LaunchConfig memory c) external pure {
@@ -143,14 +157,18 @@ contract ConfigTest is Fixture {
         this.requireExt(c);
     }
 
-    /// the shipped file has the v2 placeholders, so it is refused as it stands. with the stack filled
-    /// in memory it is complete, and the refusal is proven by blanking each field of it
+    /// the shipped file is complete and passes the guard, and the refusal is proven by blanking each field of it
     function test_shippedFileBlankedIsRefused() public {
-        LaunchConfig memory c = loadConfig(DEFAULT_CONFIG_FILE);
+        LaunchConfig memory c = _shipped();
+        this.requireExt(c);
+        c.stack.hook = address(0);
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "stack.hook"));
         this.requireExt(c);
         c = _shipped();
+        c.mevModule = address(0);
+        vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "stack.mevModule"));
         this.requireExt(c);
+        c = _shipped();
         c.owner = address(0);
         vm.expectRevert(abi.encodeWithSelector(ConfigUnset.selector, "owner"));
         this.requireExt(c);
@@ -174,11 +192,6 @@ contract ConfigTest is Fixture {
 
     function _shipped() internal view returns (LaunchConfig memory c) {
         c = loadConfig(DEFAULT_CONFIG_FILE);
-        c.stack.hook = lc.stack.hook;
-        c.stack.factory = lc.stack.factory;
-        c.stack.locker = lc.stack.locker;
-        c.stack.escrow = lc.stack.escrow;
-        c.mevModule = lc.mevModule;
     }
 
     /// @dev the owner is the factory owner and the deployer. it holds the fee and the gas
@@ -214,6 +227,53 @@ contract ConfigTest is Fixture {
         _print("preflight");
         // every launch input has a row: the count is part of the report
         assertGe(rows.length, 90, "preflight rows");
+    }
+
+    /// each pinned code hash has a row. appending one byte of code to a contract fails exactly its row
+    function test_preflightPinsTheLiveCodeHashes() public {
+        address d2 = _funded();
+        address[9] memory at = [
+            lc.stack.hook, lc.stack.factory, lc.stack.locker, lc.stack.escrow, lc.mevModule, v2.tokenDeployer,
+            v2.allowlist, v2.controller, v2.burnRouter
+        ];
+        bytes32[9] memory want = [
+            V2_CODEHASH_HOOK, V2_CODEHASH_FACTORY, V2_CODEHASH_LOCKER, V2_CODEHASH_ESCROW, V2_CODEHASH_MEV_MODULE,
+            V2_CODEHASH_TOKEN_DEPLOYER, V2_CODEHASH_ALLOWLIST, V2_CODEHASH_FEE_CONTROLLER, V2_CODEHASH_BURN_ROUTER
+        ];
+        string[9] memory name = [
+            "hook", "factory", "locker", "escrow", "mev module", "token deployer", "extension allowlist",
+            "protocol fee controller", "burn router"
+        ];
+        for (uint256 i; i < 9; ++i) {
+            assertEq(at[i].codehash, want[i], name[i]);
+            uint256 snap = vm.snapshotState();
+            vm.etch(at[i], abi.encodePacked(at[i].code, hex"00"));
+            preflight(lc, d2);
+            assertEq(_failedNames(), string.concat("code hash: ", name[i], " is the live v2 contract"), name[i]);
+            vm.revertToState(snap);
+        }
+        preflight(lc, d2);
+        assertEq(_failedNames(), "", "unchanged code passes");
+    }
+
+    /// the deprecated gate row: a stranger launch reverts Deprecated(). with the factory public the row is an info line
+    function test_preflightDeprecatedGateRow() public {
+        address d2 = _funded();
+        string memory row = "factory: deprecated, the owner launches and any other caller reverts Deprecated()";
+        preflight(lc, d2);
+        assertTrue(bytes(_rowDetail(row)).length > 10, "row present while deprecated");
+        vm.prank(owner);
+        FACTORY.setDeprecated(false);
+        LaunchConfig memory c = lc;
+        c.allowOpenFactory = true;
+        preflight(c, d2);
+        vm.expectRevert(bytes("row missing"));
+        this.rowDetailExt(row);
+        assertEq(_failedNames(), "", "an open factory passes with the override");
+    }
+
+    function rowDetailExt(string memory name) external view returns (string memory) {
+        return _rowDetail(name);
     }
 
     function test_preflightSimulatesTheLaunchAndLeavesNoTrace() public {
