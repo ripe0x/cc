@@ -90,8 +90,8 @@ what the call does:
 1. the fee pull of section 7.
 2. `NotReady` when the controller reports no page. `BadFormat` for a format above 7.
 3. the 80 credits leave the pile (`NotInPile`, `NotHeld`) and go to `Statements.compose`. `BadStatement` when the result is not the next statement id held by the Core with 80 credits.
-4. the caller is repaid `min(gasUsed * basefee * reimburseBps / 10_000, reimburseCapBps * cost / 10_000, ethPot)` (8,000 and 500 at launch), where `gasUsed` is the measured gas plus 50,000 and, on the eth lane, 350,000 for the listing. the reimbursement is added to the statement cost on the eth lane.
-5. event `Composed(sid, lane, format, cost, reimbursement, caller)`. an eth lane statement is listed on the house in the same call (`StatementListed(sid, auctionId, reserve)`).
+4. the statement is booked with the sum of the cost bases of its 80 credits. the Core pays the caller nothing, so the caller bears the gas of the call including the fee pull. holders of the coin and people in the project compose, and the owner composes when nobody does.
+5. event `Composed(sid, lane, format, cost, caller)`. an eth lane statement is listed on the house in the same call (`StatementListed(sid, auctionId, reserve)`).
 
 send at least 10,000,000 gas: the live Statements contract needs about 8.5 million for 80 credits (section 13).
 
@@ -123,7 +123,7 @@ the pool sends fee eth to the fee router. the router holds it until `flush()`:
 * while the split is on (`splitOn`, from `splitStart`), each payee receives `amount * ppm / 1_000_000` with 100,000 gas. a share that fails is recorded in `owed` and paid by `claim(payee)`.
 * the rest goes to the engine, the Core, whose `receive()` books it: `feeToBuybackBps` to the coin buyback pot, the rest to `ethPot`. `FlushFailed` when the engine refuses it, and the fees stay in the router. `NoEngine` while no engine is set. an empty balance returns early.
 
-the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush()` first. `compose` and `composeExit` start the gas measurement of their repay before the pull, so the repay covers the flush. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore` and `flushToPayees`.
+the Core pulls the fees itself. `sellForEth` (both forms), `buyListing`, `compose`, `composeExit` and `adopt` call `flush()` first. The caller of `compose` or `composeExit` pays the gas of the flush. `CoreLib.pullFees` uses at most 1,000,000 gas and ignores a failing router. `adopt` pulls as well, before it reads the price. `sellForExitToken`, `exitStatement`, `collectSales`, `sellTo`, `skim` and `buyback` read no eth price and book on their own schedule. `lens.snapshot()` reports what a flush would send now: `flushToCore` and `flushToPayees`.
 
 ## 8. adopt
 
@@ -138,7 +138,7 @@ the call, in order: the fee pull of section 7, so pending router eth is booked b
 
 the cost basis is `core.ethPrice() * score / 1e4`, at least 1 wei: the price state per whole point at that moment before the clamp, times the score of the credit. the price state is what the engine pays with a funded pot, so a statement built from adopted credits is priced at that level. the read after the clamp of a thin pot would book a basis of 1 wei and the statement price would collapse with it. a donor who inflates the basis of a statement only loses the credits.
 
-the basis is booked and the eth pile grows. eth, the rate state, the hourly room and the pots keep their values apart from the fee pull. the order of the pile is the order of the ids. a statement composed from adopted credits costs the sum of their bases plus the compose reimbursement.
+the basis is booked and the eth pile grows. eth, the rate state, the hourly room and the pots keep their values apart from the fee pull. the order of the pile is the order of the ids. a statement composed from adopted credits costs the sum of their bases.
 
 a successor Core (section 9) receives credits without records and adopts them the same way. a credit that left through `migrate` and returned can be adopted again.
 
@@ -200,7 +200,7 @@ the Core (`src/interfaces/ICore.sol`):
 | event | fields | emitted when |
 |---|---|---|
 | `Buyback` | `address indexed caller, uint256 amountIn, uint256 tip` | `buyback`: `amountIn` eth swapped for coin and the coin burned, `tip` paid to `caller` |
-| `Composed` | `uint256 indexed sid, Lane lane, uint8 format, uint256 cost, uint256 reimbursement, address indexed caller` | `compose` or `composeExit`. `lane` 0 or 1, `format` the Statements format, `cost` the cost basis of the statement (the bases of the 80 credits plus `reimbursement` on the eth lane), `reimbursement` the gas repayment sent to `caller` |
+| `Composed` | `uint256 indexed sid, Lane lane, uint8 format, uint256 cost, address indexed caller` | `compose` or `composeExit`. `lane` 0 or 1, `format` the Statements format, `cost` the cost basis of the statement (the sum of the bases of the 80 credits) |
 | `ControllerLocked` | (empty) | `lockController` |
 | `ControllerSet` | `address controller` | `setController` (also at construction) |
 | `CreditAdopted` | `uint256 indexed id, uint256 cost` | `adopt`, one per credit. `cost` is the cost basis written |
@@ -370,9 +370,9 @@ measured on the pinned fork with foundry 1.8.1. `tx` includes the intrinsic 21,0
 | `buyListing` through Seaport, basic order | tx 498,098 | `test_gas_buyListing_seaport_basic` |
 | `buyListing` through Seaport, basic order with a fee recipient | tx 535,429 | `test_gas_buyListing_seaport_basicWithFee` |
 | `buyListing` through Seaport, advanced order | tx 511,987 | `test_gas_buyListing_seaport_advanced` |
-| `compose()`, eth lane, 80 credits, first compose | tx 8,727,886 | `test/GasCap.t.sol` `test_gas_compose_ethLane_firstCold` |
-| `compose()`, second compose | tx 8,677,591 | `test_gas_compose_ethLane_secondWarmAndCold` |
-| `composeExit()`, 80 credits | tx 8,486,449 | `test_gas_composeExit_andExitStatement_exitLane` |
+| `compose()`, eth lane, 80 credits, first compose | tx 8,708,380 | `test/GasCap.t.sol` `test_gas_compose_ethLane_firstCold` |
+| `compose()`, second compose | tx 8,657,728 | `test_gas_compose_ethLane_secondWarmAndCold` |
+| `composeExit()`, 80 credits | tx 8,464,777 | `test_gas_composeExit_andExitStatement_exitLane` |
 | `ControllerV1.nextPage`, full eth pile, cold | 238,573 (the Core allows 500,000) | `test_gas_readCaps_nextPageAndStatementPrice` |
 | `repriceStatement` | tx 102,405 | `test_gas_repriceStatement` |
 | house `createBid`, first bid | tx 102,760 | `test_gas_house_createBid_andEndAuction` |

@@ -325,7 +325,7 @@ write each as a fuzz or invariant test.
 pin a block. composing through a public rpc fork is slow, so cache state.
 
 * buy through `sellForEth`, through Seaport, and through CreditStrategy
-* compose from the core and confirm the statement id, cost basis, and gas refund
+* compose from the core and confirm the statement id and cost basis
 * auction price curve, sale, split, refund of excess
 * phase 2 with the mocks: exit, the received amount check, the splits, the exit token bid, the exit token lane compounding
 * a hostile exit module that returns too little must revert

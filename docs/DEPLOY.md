@@ -157,7 +157,7 @@ settings. one struct, `Settings`, in Core storage, in the config file under `set
 | `spendCapBps` | 10000 | 100 to 10000 | hourly spend cap, share of the pot at the window open plus the eth booked since. also, over `avgScore`, the clamp of the read and of the climb: the price of one average credit that the pot affords | yes |
 | `bonusCapBps` | 2500 | 0 to 5000 | largest controller bonus on a ceiling | yes |
 | `tipSavingsBps`, `tipCapBps` | 1000, 200 | 0 to 2500, 0 to 500 | `buyListing` keeper tip, share of savings capped at a share of cost | yes |
-| `reimburseBps`, `reimburseCapBps` | 8000, 500 | 0 to 15000, 0 to 1000 | gas reimbursement for compose and exit, 80 percent of the metered gas cost (the Core meters gross gas and the EIP-3529 refund cap returns up to 20 percent of it to the caller) capped at a share of statement cost | yes |
+| `reimburseBps`, `reimburseCapBps` | 8000, 500 | 0 to 15000, 0 to 1000 | gas reimbursement for `exitStatement`, 80 percent of the metered gas cost (the Core meters gross gas and the EIP-3529 refund cap returns up to 20 percent of it to the caller) capped at a share of statement cost | yes |
 | `saleFloorBps` | 7500 | 1000 to 40000 | the hard floor of a statement sale, bps of the statement cost. no sale clears below it: the house reserve and `sellTo` are floored at it. the controller prices above it (see the sale controller). a low value lets a bad setting sell a statement cheap, which is why the settings are owner only and public in `SettingsSet`. a changed floor does not reach listings that have no bid yet until `repriceStatement` runs on each (see changing settings after launch) | yes |
 | `auctionDuration` | 86400 | 21600 to 2592000 s | statement auction length, runs from the first bid | yes |
 | `exitAfter` | 378000 | 3600 to 31536000 s | how long an eth lane statement must have been listed without a bid before it may be redeemed in phase 2 (105 hours, the hour the asking price reaches its floor) | yes |
@@ -235,8 +235,8 @@ mainnet caps one transaction at 16,777,216 gas (EIP-7825). every transaction of 
 
 | transaction | gas | share of the cap |
 |---|---|---|
-| `compose()`, eth lane, 80 credits, first compose | 8,728,243 | 52.0 percent |
-| `composeExit()`, 80 credits | 8,486,449 | 50.5 percent |
+| `compose()`, eth lane, 80 credits, first compose | 8,708,380 | 52.0 percent |
+| `composeExit()`, 80 credits | 8,464,777 | 50.5 percent |
 | `overprint()`, scripted controller, 160 to 560 credits | 1,694,385 to 1,807,186 | 10.0 to 10.7 percent |
 | every other call (doors, buybacks, flush, owner calls, the house) | under 500,000 | under 3 percent |
 
@@ -338,7 +338,7 @@ anyone can run these. none is needed for safety, they keep the engine moving. no
 | move the fee eth (optional) | `router.flush()` | shares with payees once the split is on, sends the rest to the Core, which books it as fees. reverts only while the engine is unset or the engine call fails. an empty balance is a no op |
 | collect the creator slot | `locker.collectRewards(coin)` | pushes the recipient shares. the locker `keeperRewardBps` is 0, so the caller is paid nothing. at lp fee 0 there is no lp income, so this moves only dust |
 | book stray eth | `core.skim()` | books eth the Core received from anyone but the router (for example a partial fill refund from the escrow, claimed with the escrow's `claim`) |
-| compose statements | `core.compose()`, `core.composeExit()` | the caller is repaid gas at basefee (80 percent of the metered gas, capped at 5 percent of the statement cost), so a compose is free to run below about 4 gwei. there is no compose bounty and no compose keeper: holders compose, and the owner composes when nobody does. set the gas limit above 10 million (about 8 million are used for 80 credits, the cap is 16,777,216) |
+| compose statements | `core.compose()`, `core.composeExit()` | the caller pays the gas, about 8 million for 80 credits, including the flush of the fee router, and receives nothing from the Core. there is no compose bounty and no compose keeper: holders compose, and the owner composes when nobody does. set the gas limit above 10 million (the cap is 16,777,216) |
 | adopt credits | `core.adopt(ids)` | puts credits that were transferred to the Core outside its doors into the eth pile at the basis of the price state now. event `CreditAdopted` |
 | collect sales | `core.collectSales()` | moves statement sale proceeds into the pots. `buyback()` calls it first |
 | buyback | `core.buyback()` | burns coin bought with one slice of the buyback pot, caller tip `keeperTipBps` |
