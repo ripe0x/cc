@@ -31,6 +31,8 @@ function Exchange({ account, chainId }: { account?: Address; chainId?: number })
   const wallet = useWalletCredits(account);
   const [selected, setSelected] = useState(new Set<number>());
   const [slippage, setSlippage] = useState(50);
+  // display order of the wallet's Credits by rating; selection and the sale follow the ids, not this order
+  const [sortDesc, setSortDesc] = useState(true);
   const [receipt, setReceipt] = useState<ExchangeReceipt>();
   const [review, setReview] = useState<{
     market: Snapshot; token: BalanceTokenInfo; wallet: typeof wallet.data; selected: Set<number>; slippage: number;
@@ -101,7 +103,7 @@ function Exchange({ account, chainId }: { account?: Address; chainId?: number })
   }
 
   return <ExchangeView
-    rows={rows.map((credit) => ({
+    rows={[...rows].sort((a, b) => (a.score === b.score ? 0 : (a.score > b.score) === sortDesc ? -1 : 1)).map((credit) => ({
       id: credit.id, rating: rating(credit.score),
       gross: amount(market?.balanceUnit ? credit.score * market.balanceUnit : undefined),
       selected: selection.has(credit.id),
@@ -115,6 +117,10 @@ function Exchange({ account, chainId }: { account?: Address; chainId?: number })
     selectedRating={selectedRating}
     total={order.length === 0 ? "0" : amount(quoteAvailable ? quote?.total : undefined)}
     fee={quote && order.length > 0 ? `−${amount(quote.fee)}` : undefined}
+    grossTotal={quote && order.length > 0 ? amount(quote.gross) : undefined}
+    discount={market ? `${(10_000 - Number(market.balanceRate)) / 100}%` : undefined}
+    sortDesc={sortDesc}
+    onSortToggle={() => setSortDesc((d) => !d)}
     available={available && market?.balanceAvailable !== undefined ? amount(market.balanceAvailable) : undefined}
     adjustment={quoteAvailable && quote && order.length > 0 && quote.adjustment > 0n ? `−${amount(quote.adjustment)}` : undefined}
     minimum={amount(quoteAvailable && order.length > 0 ? quote?.minOut : undefined)}

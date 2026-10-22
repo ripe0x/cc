@@ -60,7 +60,6 @@
 
 .exchange-summary { position: sticky; top: 0; max-height: 100svh; overflow-y: auto; display: flex; min-width: 0; min-height: calc(100svh - 96px); align-self: start; flex-direction: column; justify-content: flex-start; padding: 92px 11% 32px; background: #1a1a1a; color: #f6f5f0; }
 .exchange-available { margin: 0 0 28px; color: #aaa79d; font-size: 12px; line-height: 1.7; }
-.exchange-mobile-bar { display: none; }
 .exchange-quote-status { margin: 0 0 28px; padding: 14px 16px; border: 1px solid #55554d; border-left: 3px solid #ffd400; color: #f6f5f0; font-size: 12px; line-height: 1.7; }
 .exchange-eyebrow { margin: 0 0 8px; color: #a6a39a; font-size: 14px; }
 .exchange-total { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 14px; font-size: clamp(42px, 5.4vw, 108px); line-height: 1; font-weight: 500; letter-spacing: -4px; overflow-wrap: anywhere; }
@@ -84,6 +83,12 @@
 .exchange-submit > button:disabled { cursor: default; opacity: 0.45; }
 .exchange-submit > p { margin: 14px 0 0; color: #aaa79d; font-size: 11px; line-height: 1.7; }
 .exchange-submit .exchange-error { margin: 0 0 16px; color: #ffc3b3; overflow-wrap: anywhere; }
+/* list controls (all widths): the sort toggle beside select all */
+.exchange-list-controls { display: flex; gap: 14px; align-items: baseline; }
+.exchange-control { min-height: 24px; padding: 0; flex-shrink: 0; font: inherit; color: inherit; border: 0; background: transparent; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.exchange-control:disabled { color: #77766e; cursor: default; }
+/* mobile only pieces, hidden on wider layouts */
+.exchange-mob, .exchange-bar, .exchange-scrim, .exchange-sheet { display: none; }
 .exchange-page button:focus-visible, .exchange-page input:focus-visible, .exchange-header button:focus-visible, .exchange-header a:focus-visible { outline: 3px solid #00a3e0; outline-offset: 4px; }
 .exchange-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
@@ -107,8 +112,6 @@
   .exchange-header .exchange-account { display: none; }
   .exchange-page { display: block; background: #f6f5f0; }
   .exchange-summary { position: static; max-height: none; overflow: visible; }
-  .exchange-mobile-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px -20px -48px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); background: #1a1a1a; color: #f6f5f0; font-size: 13px; }
-  .exchange-mobile-bar a { flex-shrink: 0; padding: 10px 18px; color: #1a1a1a; background: #ffd400; font-weight: 600; text-decoration: none; }
   .exchange-inventory { padding: 44px 20px 48px; }
   .exchange-inventory h1 { margin-bottom: 40px; font-size: 28px; letter-spacing: -0.8px; max-width: 440px; }
   .exchange-summary { min-height: 640px; padding: 40px 24px 32px; }
@@ -126,6 +129,62 @@
   .exchange-selection input { width: 24px; height: 24px; }
   .exchange-list-heading { font-size: 11px; }
   .exchange-list-heading strong { font-size: 14px; }
+}
+
+/* mobile exchange: the list scrolls with the headline, the count, sort and select controls stick at the top, 60 px
+   rows with 40 px art, a fixed bar with the total and the sell button, and the breakdown in a sheet opened from the
+   total (the desktop summary column is hidden) */
+@media (max-width: 760px) {
+  .exchange-desk { display: none; }
+  .exchange-mob { display: inline; }
+  .exchange-summary { display: none; }
+  .exchange-page { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .exchange-inventory h1 { margin-bottom: 32px; font-size: 26px; line-height: 1.25; }
+  .exchange-list-heading { position: sticky; top: 0; z-index: 3; align-items: center; flex-wrap: nowrap; margin: 0 -20px; padding: 12px 20px; background: #f6f5f0; font-size: 14px; }
+  .exchange-list-heading .exchange-mob { color: #77766e; }
+  .exchange-list-heading .exchange-mob strong { color: #1a1a1a; font-size: 14px; }
+  .exchange-list-controls { gap: 8px; }
+  .exchange-control { padding: 8px 12px; border: 1px solid #d9d7cf; background: #f6f5f0; font-size: 13px; text-decoration: none; }
+  .exchange-table thead { display: none; }
+  .exchange-table tbody tr { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; min-height: 60px; border-bottom: 1px solid #e4e2db; }
+  .exchange-table tbody tr:last-child { border-bottom: 0; }
+  .exchange-table tbody th, .exchange-table tbody td { border-bottom: 0; padding: 0; }
+  .exchange-table tbody .exchange-selection { order: -1; padding-left: 16px; text-align: left; }
+  .exchange-table tbody .exchange-rating { padding-right: 16px; font-size: 17px; }
+  .exchange-credit { gap: 14px; }
+  .exchange-credit strong { font-size: 15px; }
+  .exchange-art { width: 40px; height: 40px; flex-basis: 40px; }
+
+  .exchange-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 84px; padding: 0 20px env(safe-area-inset-bottom); background: #1a1a1a; color: #f6f5f0; }
+  .exchange-bar-total { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0; font: inherit; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
+  .exchange-bar-total span { color: #a6a39a; font-size: 12px; }
+  .exchange-bar-total strong { font-size: 28px; font-weight: 600; letter-spacing: -1px; white-space: nowrap; }
+  .exchange-bar-total small, .exchange-sheet-total small { font-size: 12px; font-weight: 600; letter-spacing: 0; }
+  .exchange-bar-action > button, .exchange-sheet-action > button { display: flex; align-items: center; justify-content: center; min-height: 56px; padding: 0 26px; color: #1a1a1a; background: #ffd400; border: 1px solid #ffd400; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .exchange-bar-action > button:disabled, .exchange-sheet-action > button:disabled { cursor: default; opacity: 0.45; }
+
+  .exchange-scrim { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(26, 26, 26, 0.45); opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .exchange-scrim.is-open { opacity: 1; pointer-events: auto; }
+  .exchange-sheet { display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; max-height: 82svh; padding: 0 24px calc(20px + env(safe-area-inset-bottom)); background: #1a1a1a; color: #f6f5f0; transform: translateY(100%); transition: transform 0.25s ease, visibility 0.25s; visibility: hidden; }
+  .exchange-sheet.is-open { transform: none; visibility: visible; }
+  .exchange-sheet-handle { flex: none; width: 100%; height: 28px; padding: 0; border: 0; background: linear-gradient(#55554d, #55554d) center / 44px 4px no-repeat; cursor: pointer; }
+  .exchange-sheet-head { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 0 16px; border-bottom: 1px solid #383834; }
+  .exchange-sheet-head strong { font-size: 16px; }
+  .exchange-sheet-head span { color: #a6a39a; font-size: 13px; }
+  .exchange-sheet .exchange-quote-status { margin: 14px 0 0; }
+  .exchange-sheet-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; font-size: 13px; }
+  .exchange-sheet-list > div, .exchange-sheet-sums > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; color: #aaa79d; }
+  .exchange-sheet-list > div { border-bottom: 1px solid #2c2c29; }
+  .exchange-sheet-list dd, .exchange-sheet-sums dd { margin: 0; color: #f6f5f0; }
+  .exchange-sheet-sums { flex: none; margin: 8px 0 0; font-size: 13px; }
+  .exchange-sheet-total { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 10px; padding: 18px 0; border-top: 1px solid #383834; }
+  .exchange-sheet-total span { color: #aaa79d; font-size: 13px; }
+  .exchange-sheet-total strong { font-size: 34px; font-weight: 600; letter-spacing: -1.5px; white-space: nowrap; }
+  .exchange-sheet-action { flex: none; }
+  .exchange-sheet-action > button { width: 100%; min-height: 60px; }
+  .exchange-sheet .exchange-error { margin: 0 0 12px; color: #ffc3b3; }
+  .exchange-sheet-note { flex: none; margin: 14px 0 0; color: #aaa79d; font-size: 12px; line-height: 1.6; }
+  .exchange-sheet .exchange-success { padding: 12px 0 0; }
 }
 
 /* the claim page (/claim): burn CC for a share of the treasury's claim reserve, the same cream/dark split as the exchange */
