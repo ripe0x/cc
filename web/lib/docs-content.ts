@@ -141,6 +141,60 @@ export const docPages: DocPage[] = [
     ],
   },
   {
+    slug: "guides/balance",
+    group: "Guides",
+    title: "Exchange Credits for BALANCE",
+    eyebrow: "Guide / BALANCE exchange",
+    summary: "Sell eligible Credit NFTs for BALANCE and help build the Core's next Statement.",
+    mainnetAddresses: [
+      { label: "Core", address: "0xcdb1889ae12074d750CD9B8531B692015465e0dD" },
+      { label: "Credits", address: "0x97630aA70AB14ed9883B41dAfccBc11349723043" },
+      { label: "Phase2BalanceTreasury", address: "0xB85CF439Ca57b4bfC28fA1Cb8a97Ee85555B0496" },
+      { label: "BALANCE", address: "0x3620540c994433D7B4a628C46d2ED5F92572eA07" },
+    ],
+    sections: [
+      {
+        id: "cycle",
+        title: "The Credit and BALANCE cycle",
+        points: [
+          "The Core acquires Credits through its ETH bid, approved listings, and BALANCE exchanges. It gathers 80 Credits into a Statement and holds that Statement.",
+          "When a held Statement is eligible and conversion is enabled, the Core sends it through the selected treasury. The conversion delivers BALANCE to the treasury. A configured share is reserved; the rest becomes working BALANCE that can fund Credit exchanges.",
+          "Exchanging a Credit spends BALANCE now and adds that Credit to the Core's pile. A later Statement conversion can replenish the treasury and increase its BALANCE holdings. Treasury growth depends on what conversions bring in relative to payouts and other uses of its funds.",
+        ],
+      },
+      {
+        id: "quote",
+        title: "Check your quote",
+        points: [
+          "If you hold Credits, you can exchange eligible ones when the BALANCE bid is open and the treasury has working funds. Check Core.settings().balanceBidOn, the selected Core.balanceModule(), and Core.balanceToken(). The treasury's available() must cover the full batch payout plus artist royalties.",
+          "Read balanceBidOf for each Credit ID. A single-Credit quote does not guarantee the full batch can be paid, and balanceBidOn must be checked separately.",
+        ],
+        entries: [
+          { signature: "Core.balanceBidOf(uint256 id) → uint256", description: "Current payout quote for one Credit in BALANCE base units." },
+        ],
+      },
+      {
+        id: "exchange",
+        title: "Exchange Credits",
+        points: [
+          "Approve the Core to transfer the selected Credits. Set minOut in BALANCE base units and pass the current balanceToken as expectedToken. Simulate the full batch before sending.",
+          "A return lock, changed quote, or insufficient treasury funds can stop the sale.",
+        ],
+        entries: [
+          { signature: "Core.sellForBalance(uint256[] ids, uint256 minOut, address expectedToken)", description: "Exchange approved Credits for BALANCE, with a minimum total payout and a pinned payment token." },
+        ],
+      },
+      {
+        id: "result",
+        title: "Read the result",
+        points: [
+          "The Credits enter the Core pile and the treasury pays the seller in BALANCE. The artist royalty is paid separately.",
+          "Core emits CreditBought and BalanceFill for each Credit. Pair the logs with the transaction and block.",
+        ],
+      },
+    ],
+  },
+  {
     slug: "guides/statements",
     group: "Guides",
     title: "Statements",
@@ -232,6 +286,9 @@ export const docPages: DocPage[] = [
         title: "Quotes and state",
         entries: [
           { signature: "bidOf(uint256 id) → uint256", description: "Live ETH bid for a Credit ID, limited by available pot room.", access: "view" },
+          { signature: "balanceBidOf(uint256 id) → uint256", description: "BALANCE payout quote for one Credit; zero when the module cannot cover the payout and artist royalty. Check balanceBidOn separately.", access: "view" },
+          { signature: "balanceModule() → address", description: "Selected treasury for BALANCE payments.", access: "view" },
+          { signature: "balanceToken() → address", description: "Token paid by the selected treasury.", access: "view" },
           { signature: "bidForScore(uint256 score) → uint256", description: "Live ETH bid for a raw score.", access: "view" },
           { signature: "ethRate() → uint256", description: "ETH rate for the reference score of 100 points.", access: "view" },
           { signature: "RATE_START() → uint256", description: "Recorded opening ETH rate per 100 points; use ethRate() for the current rate.", access: "view" },
@@ -246,6 +303,7 @@ export const docPages: DocPage[] = [
         title: "Credit doors",
         entries: [
           { signature: "sellForEth(uint256[] ids, uint256 minOut)", description: "Transfer approved Credits in and pay the caller in ETH.", errors: "ReturnLocked, SpendCapReached, PotTooSmall, Slippage" },
+          { signature: "sellForBalance(uint256[] ids, uint256 minOut, address expectedToken)", description: "Transfer approved Credits in and pay the caller in BALANCE from the selected treasury.", errors: "BalanceBidOff, BalanceTokenChanged, ReturnLocked, PotTooSmall, Slippage" },
           { signature: "buyListing(address adapter, uint256 id, bytes params)", description: "Buy one approved venue listing at or below the bid, subject to the ETH spend budget.", errors: "AdapterNotAllowed, AboveBid, SpendCapReached" },
           { signature: "swapCredit(uint256 inId, uint256 outId)", description: "Swap an eligible pile Credit for a holder's Credit of equal or higher score, burning the CC fee." },
         ],
@@ -275,6 +333,7 @@ export const docPages: DocPage[] = [
         title: "Events to index",
         entries: [
           { signature: "CreditBought(id, from, cost, toArtist)", description: "A Credit entered the Core from a seller." },
+          { signature: "BalanceFill(paid, toArtist, available)", description: "A Credit exchange paid BALANCE to the seller and accounted for its artist royalty." },
           { signature: "ListingBought(id, adapter, caller, cost, paid, rate, toArtist)", description: "The Core swept an external listing." },
           { signature: "Composed(sid, ids, format, cost, price, caller)", description: "The pile became a Statement." },
           { signature: "StatementSoldTo(sid, buyer, price, toBuyback, toArtist, toOperator)", description: "The Core settled a Statement sale." },
