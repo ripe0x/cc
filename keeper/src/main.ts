@@ -83,6 +83,9 @@ export function listingCooldown(outcome: Outcome, listing?: Listing): { key: str
 export class Keeper {
   private seen = new Map<string, bigint>();
   private lastBookAt = 0n;
+  // the block the keeper last sent a syncFill, so the door fires at most once per block (syncFill has no on-chain
+  // per-block guard, unlike the two refresh calls)
+  private lastSyncFillBlock = 0n;
   private skipLogged = new Map<string, number>();
   private client: PublicClient;
   private cfg: Config;
@@ -109,7 +112,7 @@ export class Keeper {
   async tick(): Promise<TickResult> {
     const read = await readState(this.client, this.cfg.record.core, this.fixed, this.cfg.split);
     const { snap } = read;
-    const state = { ...read.state, lastBookAt: this.lastBookAt };
+    const state = { ...read.state, lastBookAt: this.lastBookAt, lastSyncFillBlock: this.lastSyncFillBlock };
     const pending = await this.exec.reconcile();
     if (pending) {
       log("info", "pending transaction", { block: state.blockNumber, outcome: pending });
@@ -151,6 +154,7 @@ export class Keeper {
       // one transaction per tick: the next decision reads the state after it
       if (outcome.kind === "sent" || (outcome.kind === "failed" && this.exec.hasPending())) {
         if (outcome.kind === "sent" && c.door === "book") this.lastBookAt = state.timestamp;
+        if (outcome.kind === "sent" && c.door === "syncFill") this.lastSyncFillBlock = state.blockNumber;
         break;
       }
     }

@@ -3,7 +3,7 @@
 
 import { createPublicClient, fallback, http, zeroAddress, type Address, type PublicClient } from "viem";
 import { readSnapshot, mc, type Snapshot } from "@cc/engine/snapshot";
-import { controllerAbi, coreAbi, erc20Abi, escrowAbi, factoryAbi, treasuryAbi } from "@cc/engine/abis";
+import { controllerAbi, controllerV3Abi, coreAbi, erc20Abi, escrowAbi, factoryAbi, treasuryAbi } from "@cc/engine/abis";
 import type { Config, SplitConfig } from "./config.ts";
 import type { State } from "./decide.ts";
 import { log } from "./log.ts";
@@ -104,6 +104,58 @@ export async function readSplitBalances(
   return { eth, balance };
 }
 
+// the ControllerV3 state the keeper's two new doors read, all from the controller at the block, read tolerantly: a
+// ControllerV2 or V1 controller answers none of these, so `isV3` is false and both doors stay inert. `isV3` is probed
+// through idleSince(), as the slice instructions require. exported for the test of the fallback
+export interface ControllerV3State {
+  isV3: boolean;
+  idleKnown: boolean;
+  ccPoolKeySet: boolean;
+  ccReferencePrice: bigint;
+  ccReferenceTime: bigint;
+  ccMaxStale: bigint;
+  ccMinSeconds: bigint;
+  ccRateBpsPerHour: bigint;
+  ccStepBps: bigint;
+}
+
+export async function readControllerV3(
+  client: Pick<PublicClient, "multicall">,
+  controller: Address,
+  blockNumber?: bigint,
+): Promise<ControllerV3State> {
+  const k = { address: controller, abi: controllerV3Abi } as const;
+  const [idle, poolKeySet, refPrice, refTime, quote] = await client.multicall({
+    ...mc,
+    blockNumber,
+    allowFailure: true,
+    contracts: [
+      { ...k, functionName: "idleSince" },
+      { ...k, functionName: "ccPoolKeySet" },
+      { ...k, functionName: "ccReferencePrice" },
+      { ...k, functionName: "ccReferenceTime" },
+      { ...k, functionName: "ccQuote" },
+    ] as const,
+  });
+  // idleSince() answering is the V3 probe. known defaults false, but isV3 gates the door, so the loosening is never
+  // overstated against a non-V3 controller
+  const isV3 = idle.status === "success";
+  const known = idle.status === "success" ? (idle.result as readonly [bigint, boolean])[1] : false;
+  // ccQuote(): rateBpsPerHour, stepBps, maxStale, minSeconds, avgSeconds, minLiquidity (src/interfaces/Interfaces.sol)
+  const q = quote.status === "success" ? (quote.result as readonly [number, number, number, number, number, bigint]) : undefined;
+  return {
+    isV3,
+    idleKnown: known,
+    ccPoolKeySet: poolKeySet.status === "success" ? (poolKeySet.result as boolean) : false,
+    ccReferencePrice: refPrice.status === "success" ? (refPrice.result as bigint) : 0n,
+    ccReferenceTime: refTime.status === "success" ? BigInt(refTime.result as bigint | number) : 0n,
+    ccMaxStale: q ? BigInt(q[2]) : 0n,
+    ccMinSeconds: q ? BigInt(q[3]) : 0n,
+    ccRateBpsPerHour: q ? BigInt(q[0]) : 0n,
+    ccStepBps: q ? BigInt(q[1]) : 0n,
+  };
+}
+
 export async function readState(client: PublicClient, core: Address, fixed: Fixed, split?: SplitConfig): Promise<Read> {
   const snap = await readSnapshot(client, core);
   if (!snap.pinned || snap.blockNumber === undefined) throw new Error("the node refused a pinned read");
@@ -139,9 +191,10 @@ export async function readState(client: PublicClient, core: Address, fixed: Fixe
     : [];
   // the phase 2 treasury's conversionReady(), read tolerant: a module without the view (StatementBalanceModule) leaves
   // it undefined, which the decision treats as ready
-  const [conversionReady, splitBalances] = await Promise.all([
+  const [conversionReady, splitBalances, v3] = await Promise.all([
     readConversionReady(client, snap.balanceModule, blockNumber),
     split ? readSplitBalances(client, split, snap.balanceToken, blockNumber) : Promise.resolve(undefined),
+    readControllerV3(client, snap.controller, blockNumber),
   ]);
   const st = snap.settings;
   const state: State = {
@@ -191,6 +244,17 @@ export async function readState(client: PublicClient, core: Address, fixed: Fixe
     referenceRateBpsPerHour: BigInt(snap.value.quote?.referenceRateBpsPerHour ?? 0),
     referenceStepBps: BigInt(snap.value.quote?.referenceStepBps ?? 0),
     spot: snap.value.spot ?? 0n,
+    // ControllerV3 reads; lastSyncFillBlock is carried by the Keeper, defaulted here and set in main.tick
+    isV3: v3.isV3,
+    idleKnown: v3.idleKnown,
+    lastSyncFillBlock: 0n,
+    ccPoolKeySet: v3.ccPoolKeySet,
+    ccReferencePrice: v3.ccReferencePrice,
+    ccReferenceTime: v3.ccReferenceTime,
+    ccMaxStale: v3.ccMaxStale,
+    ccMinSeconds: v3.ccMinSeconds,
+    ccRateBpsPerHour: v3.ccRateBpsPerHour,
+    ccStepBps: v3.ccStepBps,
     balanceToken: snap.balanceToken,
     splitEth: splitBalances?.eth,
     splitBalance: splitBalances?.balance,

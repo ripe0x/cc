@@ -1,7 +1,7 @@
 import { ponder } from "ponder:registry";
 import { zeroAddress, type Hex } from "viem";
 
-import { COLLECTIONS, CORE_ADDRESS, STRATEGY_ADDRESS } from "../ponder.config";
+import { COLLECTIONS, CORE_ADDRESS, MARKET_REDEEMER, STRATEGY_ADDRESS } from "../ponder.config";
 import {
   activity,
   anchorMove,
@@ -10,6 +10,7 @@ import {
   engine,
   settingChange,
   statement,
+  redeemer,
   statementCredit,
   statementFormat,
   strategyListing,
@@ -564,10 +565,32 @@ ponder.on("Controller:StatementRedeemDelaySet", async ({ event, context }) => {
   await controllerSetting(context, event, "StatementRedeemDelaySet", { statementRedeemDelaySeconds: BigInt(event.args.delaySeconds) });
 });
 
-// ---- phase 2 treasury (src/adapters/Phase2BalanceTreasury.sol) ---------------------------------------------------
+// ControllerV3 (src/ControllerV3.sol): the idle-loosening premium and the CC price reference (pool key, quote
+// settings) are recorded as controller setting history; the fill sync pointer, recorded resales and CC reference
+// refreshes are operational, recorded to the log only. No page consumes these as indexed state yet: the web reads
+// the live V3 views (resale price, CC reference). Every ControllerV1 and V2 event above still indexes for a V3.
+for (const name of ["IdleLooseningSet", "CcPoolKeySet", "CcQuoteSet"] as const) {
+  ponder.on(`Controller:${name}`, async ({ event, context }) => {
+    await record(context, event, "controller", name);
+    await settingValue(context, event, "controller", name, null, event.args);
+  });
+}
+for (const name of ["FillSynced", "CreditSoldRecorded", "CcReferenceRefreshed"] as const) {
+  ponder.on(`Controller:${name}`, async ({ event, context }) => {
+    await record(context, event, "controller", name);
+  });
+}
+
+// ---- treasury: phase 2 (Phase2BalanceTreasury) and phase 3 (BalanceTreasuryV2) ----------------------------------
+// One factory source (the balance module named by BalanceModuleSet) decodes both ABIs, so phase 2 and phase 3 events
+// share these handlers. Events the two versions emit with the same signature and meaning (PaymentAccrued, OwedClaimed,
+// WorkingWithdrawn, TokenRescued, ConversionToClaimBpsSet) have one handler. SwitchesSet shares a signature but its
+// third switch differs (phase 2 CC redemption, v2 the bid), so it branches on treasury_state.version. CCRedeemed,
+// StatementConverted and MigrationReceived differ in signature, so each version has its own handler by full signature.
 
 type TreasuryRow = typeof treasuryEvent.$inferInsert;
 type TreasuryStateRow = typeof treasuryState.$inferInsert;
+type StateTotalKey = "convertedTotal" | "contributedTotal" | "conversions" | "redeemedCcTotal" | "paidBalanceTotal" | "redemptions" | "ownerFundedTotal" | "ownerAllocatedTotal" | "ownerReturnedTotal" | "ownerWithdrawnTotal" | "accruedTotal" | "claimedTotal" | "totalOwed" | "bidInTotal" | "bidOutTotal" | "bidFills" | "bidCreditsTotal" | "sweptSurplusTotal" | "bucketsFundedTotal" | "allocatedTotal" | "unallocatedTotal" | "claimReleasedTotal";
 
 /**
  * Every treasury event: the log row, the treasury_event row and the treasury_state patch, with the running totals
@@ -580,7 +603,7 @@ async function treasuryEventRow(
   name: string,
   row: Pick<TreasuryRow, "kind"> & Partial<Omit<TreasuryRow, "id" | "treasury" | "kind" | "blockNumber" | "blockTimestamp" | "txHash" | "logIndex">>,
   patch: Partial<Omit<TreasuryStateRow, "id" | "balanceToken" | "setBlock" | "active">> = {},
-  totals: Partial<Record<"convertedTotal" | "contributedTotal" | "conversions" | "redeemedCcTotal" | "paidBalanceTotal" | "redemptions" | "ownerFundedTotal" | "ownerAllocatedTotal" | "ownerReturnedTotal" | "ownerWithdrawnTotal" | "accruedTotal" | "claimedTotal" | "totalOwed", bigint>> = {},
+  totals: Partial<Record<StateTotalKey, bigint>> = {},
 ) {
   await record(ctx, e, "treasury", name);
   const id = lc(e.log.address);
@@ -591,13 +614,47 @@ async function treasuryEventRow(
   await ctx.db.update(treasuryState, { id }).set({ ...patch, ...added, lastEventBlock: e.block.number });
 }
 
-ponder.on("Treasury:StatementConverted", async ({ event, context }) => {
+type RedeemerRow = typeof redeemer.$inferInsert;
+type RedeemerTotalKey = "redeemedCcTotal" | "paidBalanceTotal" | "redemptions" | "allocatedTotal" | "unallocatedTotal" | "claimReleasedTotal";
+
+/** Upserts the per-redeemer registry row (phase 3), adding the running totals. The redeemer is scoped to its treasury. */
+async function bumpRedeemer(
+  ctx: Ctx,
+  e: At & { log: { address: Hex } },
+  redeemerAddr: Hex,
+  patch: Partial<Omit<RedeemerRow, "id" | "treasury" | "redeemer" | "firstBlock" | "lastEventBlock">> = {},
+  totals: Partial<Record<RedeemerTotalKey, bigint>> = {},
+) {
+  const treasury = lc(e.log.address);
+  const id = `${treasury}:${redeemerAddr}`;
+  const cur = await ctx.db.find(redeemer, { id });
+  if (!cur) {
+    await ctx.db.insert(redeemer).values({ id, treasury, redeemer: redeemerAddr, firstBlock: e.block.number, lastEventBlock: e.block.number, ...patch, ...totals });
+    return;
+  }
+  const added = Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, (cur as unknown as Record<string, bigint>)[k] + v]));
+  await ctx.db.update(redeemer, { id }).set({ ...patch, ...added, lastEventBlock: e.block.number });
+}
+
+// phase 2: allocated is the amount sent to the claim reserve; claimReserve is the reserve after the conversion
+ponder.on("Treasury:StatementConverted(uint256 indexed statementId, uint256 received, uint256 allocated, uint16 contributionBps, uint256 claimReserve)", async ({ event, context }) => {
   const { statementId, received, allocated, contributionBps, claimReserve } = event.args;
   await treasuryEventRow(
     context, event, "StatementConverted",
     { kind: "statement_converted", statementId, amount: received, claimReserve, bps: Number(contributionBps), detail: toJson({ allocated }) },
     { claimReserve },
     { convertedTotal: received, contributedTotal: allocated, conversions: 1n },
+  );
+});
+
+// v2: toProRata is the amount contributed to the pro-rata redeemer's bucket; there is no single claim reserve
+ponder.on("Treasury:StatementConverted(uint256 indexed statementId, uint256 received, uint256 toProRata, uint16 contributionBps)", async ({ event, context }) => {
+  const { statementId, received, toProRata, contributionBps } = event.args;
+  await treasuryEventRow(
+    context, event, "StatementConverted",
+    { kind: "statement_converted", statementId, amount: received, bps: Number(contributionBps), detail: toJson({ toProRata }) },
+    {},
+    { convertedTotal: received, contributedTotal: toProRata, conversions: 1n },
   );
 });
 
@@ -611,8 +668,8 @@ ponder.on("Treasury:OwedClaimed", async ({ event, context }) => {
   await treasuryEventRow(context, event, "OwedClaimed", { kind: "owed_claimed", amount, actor: lc(to) }, {}, { claimedTotal: amount, totalOwed: -amount });
 });
 
-// a public redemption: the burner's CC for a share of the claim reserve. the reserve and the supply are after the burn
-ponder.on("Treasury:CCRedeemed", async ({ event, context }) => {
+// phase 2 public redemption: the burner's CC for a share of the claim reserve. the reserve and the supply are after the burn
+ponder.on("Treasury:CCRedeemed(address indexed burner, address indexed recipient, uint256 ccIn, uint256 balanceOut, uint256 claimReserve, uint256 ccSupply, uint64 configEpoch)", async ({ event, context }) => {
   const { burner, recipient, ccIn, balanceOut, claimReserve, ccSupply, configEpoch } = event.args;
   await treasuryEventRow(
     context, event, "CCRedeemed",
@@ -622,12 +679,31 @@ ponder.on("Treasury:CCRedeemed", async ({ event, context }) => {
   );
 });
 
+// v2 public redemption through a registered redeemer: ccIn burned, amount paid, mode immediate/linear/deferred with a
+// claimId for a held claim. the redeemer draws from its own bucket; the current bucket is a live read (section 9.6)
+ponder.on("Treasury:CCRedeemed(address indexed redeemer, address indexed burner, address indexed recipient, uint256 ccIn, uint256 amount, uint8 mode, uint32 duration, uint256 claimId, uint64 epoch)", async ({ event, context }) => {
+  const { redeemer: redeemerAddr, burner, recipient, ccIn, amount, mode, duration, claimId, epoch } = event.args;
+  const r = lc(redeemerAddr);
+  await treasuryEventRow(
+    context, event, "CCRedeemed",
+    { kind: "cc_redeemed", ccIn, balanceOut: amount, configEpoch: BigInt(epoch), actor: lc(burner), recipient: lc(recipient), redeemer: r, detail: toJson({ mode: Number(mode), duration: Number(duration), claimId }) },
+    {},
+    { redeemedCcTotal: ccIn, paidBalanceTotal: amount, redemptions: 1n },
+  );
+  await bumpRedeemer(context, event, r, {}, { redeemedCcTotal: ccIn, paidBalanceTotal: amount, redemptions: 1n });
+});
+
+// phase 2 switches are conversion, working payments and CC redemption; v2's third switch is the bid. one signature,
+// so the meaning of the third flag follows the module version recorded at BalanceModuleSet.
 ponder.on("Treasury:SwitchesSet", async ({ event, context }) => {
-  const { conversionEnabled, workingPaymentsEnabled, ccRedemptionEnabled } = event.args;
+  const { conversionEnabled, workingPaymentsEnabled } = event.args;
+  const third = (event.args as { ccRedemptionEnabled: boolean }).ccRedemptionEnabled;
+  const cur = await context.db.find(treasuryState, { id: lc(event.log.address) });
+  const thirdPatch = cur?.version === "v2" ? { bidEnabled: third } : { ccRedemptionEnabled: third };
   await treasuryEventRow(
     context, event, "SwitchesSet",
-    { kind: "switches_set", detail: toJson({ conversionEnabled, workingPaymentsEnabled, ccRedemptionEnabled }) },
-    { conversionEnabled, workingPaymentsEnabled, ccRedemptionEnabled },
+    { kind: "switches_set", detail: toJson({ conversionEnabled, workingPaymentsEnabled, third }) },
+    { conversionEnabled, workingPaymentsEnabled, ...thirdPatch },
   );
 });
 
@@ -686,7 +762,8 @@ ponder.on("Treasury:TreasuryMigrated", async ({ event, context }) => {
   );
 });
 
-ponder.on("Treasury:MigrationReceived", async ({ event, context }) => {
+// phase 2: the destination's reserve becomes the event's figure (its own plus the import) at the given epoch
+ponder.on("Treasury:MigrationReceived(address indexed predecessor, uint256 claimsImported, uint256 claimReserve, uint64 configEpoch)", async ({ event, context }) => {
   const { predecessor, claimsImported, claimReserve } = event.args;
   const configEpoch = BigInt(event.args.configEpoch);
   await treasuryEventRow(
@@ -694,6 +771,141 @@ ponder.on("Treasury:MigrationReceived", async ({ event, context }) => {
     { kind: "migration_received", amount: claimsImported, claimReserve, configEpoch, actor: lc(predecessor) },
     migrationReceivedPatch(claimReserve, configEpoch),
   );
+});
+
+// v2: the predecessor's balance arrives into custody; v2 has per-redeemer buckets, not a single reserve or epoch here
+ponder.on("Treasury:MigrationReceived(address indexed predecessor, uint256 claimsImported, uint256 custody)", async ({ event, context }) => {
+  const { predecessor, claimsImported, custody } = event.args;
+  await treasuryEventRow(
+    context, event, "MigrationReceived",
+    { kind: "migration_received", amount: claimsImported, actor: lc(predecessor), detail: toJson({ custody }) },
+  );
+});
+
+// ---- treasury: phase 3 only (BalanceTreasuryV2) -----------------------------------------------------------------
+
+// a $BALANCE bid call: the seller's Credits bought for paid (artist royalty on top), bidBudget the budget after the fill
+ponder.on("Treasury:BidFill", async ({ event, context }) => {
+  const { seller, credits, paid, toArtist, bidBudget } = event.args;
+  await treasuryEventRow(
+    context, event, "BidFill",
+    { kind: "bid_fill", amount: paid, actor: lc(seller), detail: toJson({ credits, toArtist, bidBudget }) },
+    { bidBudget },
+    { bidOutTotal: paid + toArtist, bidFills: 1n, bidCreditsTotal: credits },
+  );
+});
+
+// one credit bought by the bid; recorded to the log for per-credit score and bidBps, aggregated by BidFill above
+ponder.on("Treasury:CreditSold", async ({ event, context }) => {
+  await record(context, event, "treasury", "CreditSold");
+});
+
+// surplus working funds moved into the bid budget and the redeemer buckets in the owner's shares. BidFill carries the
+// authoritative budget after a fill; between fills a sweep adds toBid to the last known budget.
+ponder.on("Treasury:Swept", async ({ event, context }) => {
+  const { surplus, toBid, toBuckets } = event.args;
+  const cur = await context.db.find(treasuryState, { id: lc(event.log.address) });
+  await treasuryEventRow(
+    context, event, "Swept",
+    { kind: "swept", amount: surplus, detail: toJson({ toBid, toBuckets }) },
+    { bidBudget: (cur?.bidBudget ?? 0n) + toBid },
+    { bidInTotal: toBid, sweptSurplusTotal: surplus, bucketsFundedTotal: toBuckets },
+  );
+});
+
+// owner surplus moved into (Allocated) or out of (Unallocated) a redeemer's bucket
+ponder.on("Treasury:Allocated", async ({ event, context }) => {
+  const { redeemer: r, amount } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(context, event, "Allocated", { kind: "allocated", amount, redeemer: addr }, {}, { allocatedTotal: amount });
+  await bumpRedeemer(context, event, addr, {}, { allocatedTotal: amount });
+});
+
+ponder.on("Treasury:Unallocated", async ({ event, context }) => {
+  const { redeemer: r, amount } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(context, event, "Unallocated", { kind: "unallocated", amount, redeemer: addr }, {}, { unallocatedTotal: amount });
+  await bumpRedeemer(context, event, addr, {}, { unallocatedTotal: amount });
+});
+
+ponder.on("Treasury:RedeemerRegistered", async ({ event, context }) => {
+  const { redeemer: r, activeAt } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(context, event, "RedeemerRegistered", { kind: "redeemer_registered", redeemer: addr, detail: toJson({ activeAt }) });
+  await bumpRedeemer(context, event, addr, { registered: true, activeAt: BigInt(activeAt) });
+});
+
+ponder.on("Treasury:RedeemerCapsSet", async ({ event, context }) => {
+  const { redeemer: r, perCall, perPeriod, lifetime, epoch } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(context, event, "RedeemerCapsSet", { kind: "redeemer_caps_set", redeemer: addr, configEpoch: BigInt(epoch), detail: toJson({ perCall, perPeriod, lifetime }) });
+  await bumpRedeemer(context, event, addr, { perCall, perPeriod, lifetime, epoch: BigInt(epoch) });
+});
+
+ponder.on("Treasury:RedeemerSwitched", async ({ event, context }) => {
+  const { redeemer: r, on } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(context, event, "RedeemerSwitched", { kind: "redeemer_switched", redeemer: addr, detail: toJson({ on }) });
+  await bumpRedeemer(context, event, addr, { on });
+});
+
+// a redeemer's share of a sweep, plus the bid's share and the running total (treasury-wide)
+ponder.on("Treasury:SharesSet", async ({ event, context }) => {
+  const { redeemer: r, shareBps, bidShareBps, totalShareBps } = event.args;
+  const addr = lc(r);
+  await treasuryEventRow(
+    context, event, "SharesSet",
+    { kind: "shares_set", redeemer: addr, bps: Number(shareBps), detail: toJson({ bidShareBps, totalShareBps }) },
+    { bidShareBps: Number(bidShareBps), totalShareBps: Number(totalShareBps) },
+  );
+  await bumpRedeemer(context, event, addr, { shareBps: Number(shareBps) });
+});
+
+// Redeemer 2 (MarketRedeemer, a static source, ponder.config.ts) sets its premium; PremiumSet also fires at
+// construction, before the treasury registers it. The premium and epoch land on the same `treasury:redeemer` row the
+// treasury's RedeemerRegistered writes, so this upserts (creating the row if it arrives first). The row's treasury is
+// taken from the deployment record because PremiumSet is emitted by the redeemer, not the treasury. Registered only
+// when MARKET_REDEEMER is configured; otherwise the source indexes nothing (ponder.config.ts).
+if (MARKET_REDEEMER) {
+  const { address: marketAddr, treasury: marketTreasury } = MARKET_REDEEMER;
+  const marketRowId = `${marketTreasury}:${marketAddr}`;
+  ponder.on("MarketRedeemer:PremiumSet", async ({ event, context }) => {
+    const patch = { premiumBps: Number(event.args.premiumBps), premiumEpoch: BigInt(event.args.configEpoch) };
+    const cur = await context.db.find(redeemer, { id: marketRowId });
+    if (!cur) {
+      await context.db.insert(redeemer).values({
+        id: marketRowId, treasury: marketTreasury, redeemer: marketAddr,
+        firstBlock: event.block.number, lastEventBlock: event.block.number, ...patch,
+      });
+      return;
+    }
+    await context.db.update(redeemer, { id: marketRowId }).set({ ...patch, lastEventBlock: event.block.number });
+  });
+}
+
+// a vesting or deferred claim paid out to its recipient; the claim was created in full at redemption time
+ponder.on("Treasury:ClaimReleased", async ({ event, context }) => {
+  const { claimId, recipient, amount } = event.args;
+  await treasuryEventRow(
+    context, event, "ClaimReleased",
+    { kind: "claim_released", amount, recipient: lc(recipient), detail: toJson({ claimId }) },
+    {},
+    { claimReleasedTotal: amount },
+  );
+});
+
+ponder.on("Treasury:CushionSet", async ({ event, context }) => {
+  const { cushion } = event.args;
+  await treasuryEventRow(context, event, "CushionSet", { kind: "cushion_set", amount: cushion }, { cushion });
+});
+
+ponder.on("Treasury:PausedSet", async ({ event, context }) => {
+  const { paused } = event.args;
+  await treasuryEventRow(context, event, "PausedSet", { kind: "paused_set", detail: toJson({ paused }) }, { paused });
+});
+
+ponder.on("Treasury:BidSet", async ({ event, context }) => {
+  await treasuryEventRow(context, event, "BidSet", { kind: "bid_set", detail: toJson(event.args.bid) });
 });
 
 ponder.on("Treasury:TokenRescued", async ({ event, context }) => {

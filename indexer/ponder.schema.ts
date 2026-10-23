@@ -193,21 +193,34 @@ export const controller = onchainTable("controller", (t) => ({
 // ---- phase 2 treasury (src/adapters/Phase2BalanceTreasury.sol) ---------------------------------------------------
 
 export const treasuryEventKind = onchainEnum("treasury_event_kind", [
-  "statement_converted", // StatementConverted: amount received, detail allocated and contributionBps
-  "cc_redeemed", // CCRedeemed, a public burn: ccIn, balanceOut, ccSupply after the burn, actor the burner
-  "claims_funded", // ClaimsFunded, an owner transfer into the claim reserve: amount, actor the funder
-  "claims_allocated", // ClaimsAllocated, an owner reclassification of working funds as backing: amount
-  "claims_returned", // ClaimsReturned, an owner reduction of backing while redemption is off: amount, configEpoch
+  "statement_converted", // StatementConverted: amount received, detail allocated/toProRata and contributionBps
+  "cc_redeemed", // CCRedeemed, a public burn: ccIn, balanceOut, actor the burner; v2 also carries redeemer, mode, claimId
+  "claims_funded", // ClaimsFunded (phase 2): an owner transfer into the claim reserve: amount, actor the funder
+  "claims_allocated", // ClaimsAllocated (phase 2): an owner reclassification of working funds as backing: amount
+  "claims_returned", // ClaimsReturned (phase 2): an owner reduction of backing while redemption is off: amount, configEpoch
   "working_withdrawn", // WorkingWithdrawn, an owner withdrawal of free working funds: amount, actor the recipient
-  "policy_set", // RedemptionPolicySet: policy, configEpoch
-  "fee_set", // RedemptionFeeSet: bps, configEpoch
-  "switches_set", // SwitchesSet: detail the three switches
+  "policy_set", // RedemptionPolicySet (phase 2): policy, configEpoch
+  "fee_set", // RedemptionFeeSet (phase 2): bps, configEpoch
+  "switches_set", // SwitchesSet: detail the three switches (phase 2 ccRedemption; v2 bid)
   "contribution_set", // ConversionToClaimBpsSet: bps
-  "minimum_working_set", // MinimumWorkingBalanceSet: amount
+  "minimum_working_set", // MinimumWorkingBalanceSet (phase 2): amount
   "payment_accrued", // PaymentAccrued, a short or failed working payment recorded as debt: amount, actor the payee
   "owed_claimed", // OwedClaimed: amount, actor the payee
-  "migrated_out", // TreasuryMigrated: amount moved, detail claimsImported, actor the successor, configEpoch
-  "migration_received", // MigrationReceived: amount claimsImported, actor the predecessor, configEpoch
+  "migrated_out", // TreasuryMigrated (phase 2): amount moved, detail claimsImported, actor the successor, configEpoch
+  "migration_received", // MigrationReceived: amount claimsImported, actor the predecessor; v2 detail custody
+  // phase 3 (BalanceTreasuryV2)
+  "bid_fill", // BidFill: a $BALANCE bid call. amount the seller payout, detail credits/toArtist/bidBudget, actor the seller
+  "swept", // Swept: surplus moved into the bid budget and redeemer buckets. detail surplus/toBid/toBuckets
+  "allocated", // Allocated: owner surplus into a redeemer's bucket. redeemer, amount
+  "unallocated", // Unallocated: owner surplus out of a redeemer's bucket. redeemer, amount
+  "redeemer_registered", // RedeemerRegistered: redeemer, detail activeAt
+  "redeemer_caps_set", // RedeemerCapsSet: redeemer, configEpoch, detail perCall/perPeriod/lifetime
+  "redeemer_switched", // RedeemerSwitched: redeemer, detail on
+  "shares_set", // SharesSet: redeemer, bps the redeemer's share, detail bidShareBps/totalShareBps
+  "claim_released", // ClaimReleased: a vesting or deferred claim paid out. amount, recipient, detail claimId
+  "cushion_set", // CushionSet: amount the reserved cushion
+  "paused_set", // PausedSet (v2): detail paused
+  "bid_set", // BidSet (v2): detail the bid parameters tuple
 ]);
 
 /**
@@ -230,6 +243,7 @@ export const treasuryEvent = onchainTable(
     bps: t.integer(),
     actor: t.hex(), // burner, funder, recipient, payee, successor or predecessor per kind
     recipient: t.hex(), // cc_redeemed: where the balance token went
+    redeemer: t.hex(), // phase 3 redeemer-scoped events (allocated, unallocated, redeemer_*, shares_set, cc_redeemed)
     policy: t.hex(),
     statementId: t.bigint(),
     detail: t.json(), // the remaining event fields, bigints as strings
@@ -242,6 +256,7 @@ export const treasuryEvent = onchainTable(
     byTreasury: index().on(table.treasury, table.blockNumber),
     byKind: index().on(table.kind, table.blockNumber),
     byActor: index().on(table.actor),
+    byRedeemer: index().on(table.redeemer),
   }),
 );
 
@@ -253,36 +268,92 @@ export const treasuryEvent = onchainTable(
  */
 export const treasuryState = onchainTable("treasury_state", (t) => ({
   id: t.hex().primaryKey(), // treasury address
+  version: t.text(), // "phase2", "v2" or null (a StatementBalanceModule), detected at BalanceModuleSet
   balanceToken: t.hex().notNull(), // BalanceModuleSet.balanceToken
   setBlock: t.bigint().notNull(),
   active: t.boolean().notNull(), // the Core's current module
-  claimReserve: t.bigint(), // the latest event-carried reserve; 0 after TreasuryMigrated
+  claimReserve: t.bigint(), // phase 2: the latest event-carried reserve; 0 after TreasuryMigrated. v2 has per-redeemer buckets
   totalOwed: t.bigint().notNull().default(0n), // PaymentAccrued less OwedClaimed since registration
   configEpoch: t.bigint(),
-  policy: t.hex(),
+  policy: t.hex(), // phase 2 only
   conversionToClaimBps: t.integer(),
-  redemptionFeeBps: t.integer(),
+  redemptionFeeBps: t.integer(), // phase 2 only (v2's fee lives in the ProRataRedeemer)
   conversionEnabled: t.boolean(),
   workingPaymentsEnabled: t.boolean(),
-  ccRedemptionEnabled: t.boolean(),
-  minimumWorkingBalance: t.bigint(),
+  ccRedemptionEnabled: t.boolean(), // phase 2 SwitchesSet third switch; null on v2
+  bidEnabled: t.boolean(), // v2 SwitchesSet third switch; null on phase 2
+  paused: t.boolean(), // v2 PausedSet
+  minimumWorkingBalance: t.bigint(), // phase 2 only
   migrated: t.boolean().notNull().default(false),
   successor: t.hex(),
+  // phase 3 (BalanceTreasuryV2) state and earmarks; the web reads the current working, committed and per-redeemer
+  // bucket balances live (docs/INDEXER.md section 9.6), these are the event-carried values and cumulative totals
+  proRataRedeemer: t.hex(), // the shipped redeemer 1 (read at registration)
+  cushion: t.bigint(), // CushionSet: working funds reserved for the Core's 80% exchange
+  bidBudget: t.bigint(), // the $BALANCE bid budget, from BidFill (after-value) and Swept.toBid
+  bidShareBps: t.integer(), // SharesSet: the bid's share of a sweep
+  totalShareBps: t.integer(), // SharesSet: the sum of the bid and redeemer shares
   // running totals since registration
   convertedTotal: t.bigint().notNull().default(0n), // StatementConverted.received
-  contributedTotal: t.bigint().notNull().default(0n), // StatementConverted.allocated
+  contributedTotal: t.bigint().notNull().default(0n), // StatementConverted allocated (phase 2) / toProRata (v2)
   conversions: t.bigint().notNull().default(0n),
   redeemedCcTotal: t.bigint().notNull().default(0n), // CCRedeemed.ccIn
-  paidBalanceTotal: t.bigint().notNull().default(0n), // CCRedeemed.balanceOut
+  paidBalanceTotal: t.bigint().notNull().default(0n), // CCRedeemed balanceOut (phase 2) / amount (v2)
   redemptions: t.bigint().notNull().default(0n),
-  ownerFundedTotal: t.bigint().notNull().default(0n), // ClaimsFunded.amount
-  ownerAllocatedTotal: t.bigint().notNull().default(0n), // ClaimsAllocated.amount
-  ownerReturnedTotal: t.bigint().notNull().default(0n), // ClaimsReturned.amount
+  ownerFundedTotal: t.bigint().notNull().default(0n), // ClaimsFunded.amount (phase 2)
+  ownerAllocatedTotal: t.bigint().notNull().default(0n), // ClaimsAllocated.amount (phase 2)
+  ownerReturnedTotal: t.bigint().notNull().default(0n), // ClaimsReturned.amount (phase 2)
   ownerWithdrawnTotal: t.bigint().notNull().default(0n), // WorkingWithdrawn.amount
   accruedTotal: t.bigint().notNull().default(0n), // PaymentAccrued.amount
   claimedTotal: t.bigint().notNull().default(0n), // OwedClaimed.amount
+  // phase 3 bid and sweep totals
+  bidInTotal: t.bigint().notNull().default(0n), // Swept.toBid, cumulative funding into the bid budget
+  bidOutTotal: t.bigint().notNull().default(0n), // BidFill paid plus toArtist, cumulative paid out of the bid budget
+  bidFills: t.bigint().notNull().default(0n), // BidFill count
+  bidCreditsTotal: t.bigint().notNull().default(0n), // BidFill.credits, credits bought by the bid
+  sweptSurplusTotal: t.bigint().notNull().default(0n), // Swept.surplus
+  bucketsFundedTotal: t.bigint().notNull().default(0n), // Swept.toBuckets
+  allocatedTotal: t.bigint().notNull().default(0n), // Allocated.amount, owner surplus into buckets
+  unallocatedTotal: t.bigint().notNull().default(0n), // Unallocated.amount
+  claimReleasedTotal: t.bigint().notNull().default(0n), // ClaimReleased.amount
   lastEventBlock: t.bigint(),
 }));
+
+/**
+ * One row per redeemer the phase 3 treasury (BalanceTreasuryV2) has registered. The registry, switch, caps and
+ * share are projected from events; the current bucket balance and the live cumulative in/out come from the chain
+ * (treasury.redeemers(address): bucket, totalIn, totalOut) because a sweep funds buckets in a lump by share with no
+ * per-redeemer breakdown in the event (docs/INDEXER.md section 9.6). The running totals here are the event-derived
+ * redemption and allocation history. A redeemer is scoped to its treasury (a later treasury re-registers its own).
+ * Redeemer 2 (MarketRedeemer) also projects its `premiumBps` / `premiumEpoch` here from its own PremiumSet event.
+ */
+export const redeemer = onchainTable(
+  "redeemer",
+  (t) => ({
+    id: t.text().primaryKey(), // treasury:redeemer
+    treasury: t.hex().notNull(),
+    redeemer: t.hex().notNull(),
+    registered: t.boolean().notNull().default(false),
+    on: t.boolean().notNull().default(false), // the switch, off by default
+    activeAt: t.bigint(), // RedeemerRegistered.activeAt, the earliest draw time
+    epoch: t.bigint(), // RedeemerCapsSet.epoch, the caps configuration epoch
+    shareBps: t.integer(), // SharesSet: this redeemer's share of a sweep
+    perCall: t.bigint(), // RedeemerCapsSet caps
+    perPeriod: t.bigint(),
+    lifetime: t.bigint(),
+    premiumBps: t.integer(), // redeemer 2 (MarketRedeemer) only: PremiumSet.premiumBps, the spread over the market rate
+    premiumEpoch: t.bigint(), // redeemer 2 only: PremiumSet.configEpoch, the premium's epoch (distinct from the caps `epoch`)
+    redeemedCcTotal: t.bigint().notNull().default(0n), // CCRedeemed.ccIn to this redeemer
+    paidBalanceTotal: t.bigint().notNull().default(0n), // CCRedeemed.amount through this redeemer
+    redemptions: t.bigint().notNull().default(0n),
+    allocatedTotal: t.bigint().notNull().default(0n), // Allocated.amount into this redeemer's bucket
+    unallocatedTotal: t.bigint().notNull().default(0n), // Unallocated.amount
+    claimReleasedTotal: t.bigint().notNull().default(0n), // ClaimReleased.amount for claims this redeemer created
+    firstBlock: t.bigint().notNull(),
+    lastEventBlock: t.bigint().notNull(),
+  }),
+  (table) => ({ byTreasury: index().on(table.treasury) }),
+);
 
 /**
  * One row per Credits token id. Fixed facts (seed to tokenUri) are read once, at the latest block, when the id is

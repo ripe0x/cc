@@ -7,8 +7,8 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAddress, parseEther, parseGwei, type Address } from "viem";
 
-export type Door = "buyListing" | "buyback" | "compose" | "collectEscrow" | "book" | "redeemStatement" | "refreshReference" | "distributeSplit";
-export const DOORS: readonly Door[] = ["buyListing", "buyback", "compose", "collectEscrow", "book", "redeemStatement", "refreshReference", "distributeSplit"];
+export type Door = "buyListing" | "buyback" | "compose" | "collectEscrow" | "book" | "redeemStatement" | "refreshReference" | "syncFill" | "refreshCcReference" | "distributeSplit";
+export const DOORS: readonly Door[] = ["buyListing", "buyback", "compose", "collectEscrow", "book", "redeemStatement", "refreshReference", "syncFill", "refreshCcReference", "distributeSplit"];
 
 // the owner key never signs a keeper transaction (decision 57)
 export const OWNER: Address = "0xCB43078C32423F5348Cab5885911C3B5faE217F9";
@@ -164,6 +164,8 @@ const DOOR_DEFAULT_TIP: { [d in Door]: string } = {
   book: "0.05",
   redeemStatement: "0.05",
   refreshReference: "0.05",
+  syncFill: "0.05",
+  refreshCcReference: "0.05",
   distributeSplit: "0.05",
 };
 
@@ -175,6 +177,8 @@ const DOOR_DEFAULT_BASEFEE: { [d in Door]: string } = {
   book: "3",
   redeemStatement: "3",
   refreshReference: "3",
+  syncFill: "3",
+  refreshCcReference: "3",
   distributeSplit: "3",
 };
 

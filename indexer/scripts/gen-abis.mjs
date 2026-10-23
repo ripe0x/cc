@@ -1,9 +1,14 @@
-// Generates abis/Core.ts, abis/ControllerV1.ts, abis/ControllerV2.ts, abis/Controller.ts and
-// abis/Phase2BalanceTreasury.ts from forge artifacts.
+// Generates abis/Core.ts, abis/ControllerV1.ts, abis/ControllerV2.ts, abis/Controller.ts,
+// abis/Phase2BalanceTreasury.ts, abis/BalanceTreasuryV2.ts and abis/Treasury.ts from forge artifacts.
 // Core: Core functions and events plus the CoreLib events. CoreLib events are emitted under the
 // Core address through delegatecall, so the union is the Core's log ABI.
-// Controller: ControllerV1 plus the ControllerV2 entries V1 lacks. Every controller named by ControllerSet is
-// indexed through one factory source, so its log ABI is the union of both versions.
+// Controller: ControllerV1 plus the ControllerV2 and ControllerV3 entries earlier versions lack. Every controller
+// named by ControllerSet is indexed through one factory source, so its log ABI is the union of all versions.
+// Treasury: the Phase2BalanceTreasury (phase 2) plus the BalanceTreasuryV2 (phase 3) entries it lacks. Every balance
+// module named by BalanceModuleSet is indexed through one factory source, so its log ABI is the union of both. The
+// two share a few event signatures (PaymentAccrued, OwedClaimed, WorkingWithdrawn, TokenRescued, SwitchesSet,
+// ConversionToClaimBpsSet); the union keeps one entry, and CCRedeemed, StatementConverted and MigrationReceived
+// differ in signature between the versions, so the union keeps both (overloaded, handled by full signature).
 // Usage: node scripts/gen-abis.mjs [outDir]   (default ../out, run `forge build` first)
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -34,16 +39,25 @@ const emit = (file, constName, abi, note) =>
 
 const v1 = abiOf("ControllerV1");
 const v2 = abiOf("ControllerV2");
-const controllerUnion = union(v1, v2);
+const v3 = abiOf("ControllerV3");
+const controllerUnion = union(union(v1, v2), v3);
 const treasury = abiOf("Phase2BalanceTreasury");
+const treasuryV2 = abiOf("BalanceTreasuryV2");
+const treasuryUnion = union(treasury, treasuryV2);
+const marketRedeemer = abiOf("MarketRedeemer");
 
 emit("Core.ts", "coreAbi", merged, "Core ABI plus CoreLib events.");
 emit("ControllerV1.ts", "controllerAbi", v1, "ControllerV1 ABI.");
 emit("ControllerV2.ts", "controllerV2Abi", v2, "ControllerV2 ABI.");
-emit("Controller.ts", "controllerLogAbi", controllerUnion, "ControllerV1 ABI plus the ControllerV2 entries V1 lacks: the log ABI of the Controller factory source.");
-emit("Phase2BalanceTreasury.ts", "treasuryAbi", treasury, "Phase2BalanceTreasury ABI: the balance module named by BalanceModuleSet in phase 2.");
+emit("Controller.ts", "controllerLogAbi", controllerUnion, "ControllerV1 ABI plus the ControllerV2 and ControllerV3 entries earlier versions lack: the log ABI of the Controller factory source.");
+emit("Phase2BalanceTreasury.ts", "treasuryAbi", treasury, "Phase2BalanceTreasury ABI: the phase 2 balance module named by BalanceModuleSet; read with it for phase 2 state.");
+emit("BalanceTreasuryV2.ts", "treasuryV2Abi", treasuryV2, "BalanceTreasuryV2 ABI: the phase 3 balance module; read with it for phase 3 state.");
+emit("Treasury.ts", "treasuryLogAbi", treasuryUnion, "Phase2BalanceTreasury ABI plus the BalanceTreasuryV2 entries it lacks: the log ABI of the Treasury factory source.");
+emit("MarketRedeemer.ts", "marketRedeemerAbi", marketRedeemer, "MarketRedeemer ABI: redeemer 2 of treasury v2; its PremiumSet event and its views (the web reads preview/prices/premiumBps).");
 const events = (abi) => abi.filter((e) => e.type === "event").length;
 console.log(
-  `Core: ${merged.length} entries (${events(merged)} events); ControllerV1 ${v1.length}; ControllerV2 ${v2.length}; ` +
-    `Controller union ${controllerUnion.length} (${events(controllerUnion)} events); Phase2BalanceTreasury ${treasury.length} (${events(treasury)} events)`,
+  `Core: ${merged.length} entries (${events(merged)} events); ControllerV1 ${v1.length}; ControllerV2 ${v2.length}; ControllerV3 ${v3.length}; ` +
+    `Controller union ${controllerUnion.length} (${events(controllerUnion)} events); ` +
+    `Phase2BalanceTreasury ${treasury.length} (${events(treasury)} events); BalanceTreasuryV2 ${treasuryV2.length} (${events(treasuryV2)} events); ` +
+    `Treasury union ${treasuryUnion.length} (${events(treasuryUnion)} events); MarketRedeemer ${marketRedeemer.length} (${events(marketRedeemer)} events)`,
 );

@@ -58,7 +58,7 @@ abstract contract LiveFixture is Fixture {
     address internal liveBalanceToken;
 
     function setUp() public virtual override {
-        uint256 forkBlock = vm.envOr("LIVE_FORK_BLOCK", LIVE_FORK_BLOCK);
+        uint256 forkBlock = _liveForkBlock();
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), forkBlock);
 
         core = ICore(payable(LIVE_CORE));
@@ -121,6 +121,12 @@ abstract contract LiveFixture is Fixture {
             vm.prank(owner);
             IStatementSales(st.controllerV2).setStatementSales(true);
         }
+    }
+
+    /// @notice the fork block of this suite: `LIVE_FORK_BLOCK` or the pin. a suite pinned elsewhere overrides this;
+    /// `vm.setEnv` would leak its block into every later suite of the same forge process
+    function _liveForkBlock() internal view virtual returns (uint256) {
+        return vm.envOr("LIVE_FORK_BLOCK", LIVE_FORK_BLOCK);
     }
 
     // ------------------------------------------------------------------ two live states

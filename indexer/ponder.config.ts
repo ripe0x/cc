@@ -6,7 +6,8 @@ import { getAbiItem, zeroAddress } from "viem";
 import { controllerLogAbi } from "./abis/Controller";
 import { coreAbi } from "./abis/Core";
 import { creditsAbi, erc20Abi, statementsAbi, strategyAbi } from "./abis/external";
-import { treasuryAbi } from "./abis/Phase2BalanceTreasury";
+import { marketRedeemerAbi } from "./abis/MarketRedeemer";
+import { treasuryLogAbi } from "./abis/Treasury";
 import { guardedHttp, type Endpoint } from "./src/lib/rpc";
 import { localRpc } from "./src/lib/rpc-selection";
 import { sanitizedRpc, temporaryFallbackTransport, withFastFallback } from "./rpc-config";
@@ -61,6 +62,28 @@ function strategyStart(): number {
   return Math.max(0, DEPLOY_BLOCK - LOCAL_STRATEGY_WINDOW);
 }
 const STRATEGY_START = strategyStart();
+
+// ---- Redeemer 2 (MarketRedeemer) ---------------------------------------------------------------------------
+// Redeemer 2 is a static source: it has no Core event that creates it (the factory sources discover the v2 treasury
+// and V3 controller, but not an adapter the owner registers), so its address comes from the phase 3 deployment
+// record `<chainId>-phase3.json` (a sibling of the main record; DEPLOYMENT_RECORD_PHASE3 overrides the path). The
+// record is operator-authored at deployment with `marketRedeemer` (the address), `treasuryV2` (the v2 treasury the
+// redeemer is registered on, so its premium lands on the right `treasury:redeemer` row) and `deployBlock` (the start
+// block). Env vars of the same meaning take precedence. When the record, the address or the treasury is absent the
+// source is not configured: the handler is not registered and the indexer behaves exactly as today.
+const PHASE3_PATH = resolve(process.cwd(), process.env.DEPLOYMENT_RECORD_PHASE3 ?? RECORD_PATH.replace(/\.json$/, "-phase3.json"));
+const phase3: Record<string, unknown> = existsSync(PHASE3_PATH) ? JSON.parse(readFileSync(PHASE3_PATH, "utf8")) : {};
+if (phase3.chainId !== undefined && Number(phase3.chainId) !== CHAIN_ID) {
+  throw new Error(`CHAIN_ID ${CHAIN_ID} does not match chainId ${String(phase3.chainId)} in ${PHASE3_PATH}. Refusing to start.`);
+}
+const lower = (v: string | undefined) => (v ? (v.toLowerCase() as `0x${string}`) : undefined);
+const marketAddr = lower(process.env.MARKET_REDEEMER_ADDRESS || (phase3.marketRedeemer as string | undefined));
+const marketTreasury = lower(process.env.MARKET_REDEEMER_TREASURY || (phase3.treasuryV2 as string | undefined));
+const marketBlock = process.env.MARKET_REDEEMER_START_BLOCK || (phase3.deployBlock as number | string | undefined);
+export const MARKET_REDEEMER =
+  marketAddr && marketTreasury && marketBlock !== undefined
+    ? { address: marketAddr, treasury: marketTreasury, deployBlock: Number(marketBlock) }
+    : undefined;
 
 // ---- RPC ---------------------------------------------------------------------------------------------------
 
@@ -119,10 +142,12 @@ export default createConfig({
       address: factory({ address: CORE, event: getAbiItem({ abi: coreAbi, name: "ControllerSet" }), parameter: "controller" }),
       startBlock: DEPLOY_BLOCK,
     },
-    // Every balance module named by BalanceModuleSet, from the block of that event, decoded with the phase 2
-    // treasury ABI. A StatementBalanceModule emits none of these events, so its registration is inert.
+    // Every balance module named by BalanceModuleSet, from the block of that event, decoded with the union of the
+    // phase 2 (Phase2BalanceTreasury) and phase 3 (BalanceTreasuryV2) ABIs, so both decode over the module's history
+    // (phase 2 migrates to phase 3 through v1 migrateTo). A StatementBalanceModule emits none of these events, so its
+    // registration is inert. No phase 3 deployment record is needed: the module is discovered here by its selection.
     Treasury: {
-      abi: treasuryAbi,
+      abi: treasuryLogAbi,
       chain: "chain",
       address: factory({ address: CORE, event: getAbiItem({ abi: coreAbi, name: "BalanceModuleSet" }), parameter: "balanceModule" }),
       startBlock: DEPLOY_BLOCK,
@@ -131,6 +156,15 @@ export default createConfig({
     Credits: { abi: creditsAbi, chain: "chain", address: CREDITS, startBlock: CREDITS_START },
     Statements: { abi: statementsAbi, chain: "chain", address: STATEMENTS, startBlock: STATEMENTS_START },
     Strategy: { abi: strategyAbi, chain: "chain", address: STRATEGY, startBlock: STRATEGY_START },
+    // Redeemer 2. The key is always present so the handler name type-checks; when MARKET_REDEEMER is undefined the
+    // placeholder address indexes nothing because src/index.ts registers the PremiumSet handler only when configured
+    // (a source with no registered handler builds no log filter, so it adds no RPC).
+    MarketRedeemer: {
+      abi: marketRedeemerAbi,
+      chain: "chain",
+      address: MARKET_REDEEMER?.address ?? zeroAddress,
+      startBlock: MARKET_REDEEMER?.deployBlock ?? DEPLOY_BLOCK,
+    },
   },
   blocks: {
     Tick: { chain: "chain", startBlock: DEPLOY_BLOCK, interval: Number(process.env.SNAPSHOT_INTERVAL_BLOCKS ?? 300) },

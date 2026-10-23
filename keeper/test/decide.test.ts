@@ -14,6 +14,8 @@ import {
   listingPayment,
   observe,
   refreshReferenceNeeded,
+  refreshCcReferenceNeeded,
+  syncFillNeeded,
   REFRESH_DRIFT_KEY,
   recheck,
   worstBaseFee,
@@ -74,6 +76,17 @@ function state(over: Partial<State> = {}): State {
     referenceRateBpsPerHour: 100n,
     referenceStepBps: 100n,
     spot: parseEther("0.49"),
+    // ControllerV3 defaults: not V3, so the two V3 doors are inert unless a test opts in
+    isV3: false,
+    idleKnown: true,
+    lastSyncFillBlock: 0n,
+    ccPoolKeySet: false,
+    ccReferencePrice: 0n,
+    ccReferenceTime: 0n,
+    ccMaxStale: 0n,
+    ccMinSeconds: 0n,
+    ccRateBpsPerHour: 0n,
+    ccStepBps: 0n,
     balanceToken: zeroAddress,
     ...over,
   };
@@ -329,6 +342,88 @@ test("refreshReference: other doors are unchanged", () => {
   assert.deepEqual(doorsOf(buyback), ["buyback"]);
   assert.equal(buyback.calls[0].functionName, "buyback");
   assert.equal(buyback.calls[0].target, undefined, "still the Core door");
+});
+
+// ------------------------------------------------------------------ ControllerV3: syncFill
+// a value-mode purchase leaves the fill hint unknown (idleSince().known false), which zeroes the idle loosening until
+// syncFill moves the hint to the pile tail. the keeper calls the controller's syncFill() directly, unpaid, V3 only,
+// value mode only, at most once per block, under the reference-refresh cost cap.
+const v3Idle = { isV3: true, valueModeOn: true, idleKnown: false };
+
+// promise: syncFill fires only on ControllerV3, in value mode, when the fill hint is unknown, and goes unpaid to the controller
+test("syncFill: an unknown hint in value mode on V3 makes one unpaid controller call", () => {
+  const p = policy();
+  // 0.2 gwei keeps the 120k-gas guess under the 0.00005 ETH cap
+  const r = decide(state({ ...v3Idle }), [], gas("0.2"), p, new Map());
+  assert.deepEqual(doorsOf(r), ["syncFill"]);
+  const c = r.calls[0];
+  assert.equal(c.target, "controller", "the call goes to the controller");
+  assert.equal(c.functionName, "syncFill");
+  assert.equal(c.payment, 0n, "syncFill is unpaid");
+  assert.equal(recheck(c, state({ ...v3Idle }), undefined, GAS_GUESS.syncFill, gas("0.3"), p).ok, true, "cheap measured gas clears the cap");
+  assert.equal(recheck(c, state({ ...v3Idle }), undefined, GAS_GUESS.syncFill, gas("1"), p).ok, false, "a dearer measured gas skips");
+});
+
+// promise: syncFill waits off V3, outside value mode, when the hint is known, and once it has already gone this block
+test("syncFill: the gates skip a known hint, value mode off, a non-V3 controller, and a second call in one block", () => {
+  const p = policy();
+  assert.match(reason(decide(state({ ...v3Idle, idleKnown: true }), [], gas("0.5"), p, new Map()), "syncFill"), /hint is known/);
+  assert.match(reason(decide(state({ ...v3Idle, valueModeOn: false }), [], gas("0.5"), p, new Map()), "syncFill"), /value mode off/);
+  assert.match(reason(decide(state({ ...v3Idle, isV3: false }), [], gas("0.5"), p, new Map()), "syncFill"), /not ControllerV3/);
+  const sameBlock = decide(state({ ...v3Idle, blockNumber: 1_000n, lastSyncFillBlock: 1_000n }), [], gas("0.5"), p, new Map());
+  assert.deepEqual(doorsOf(sameBlock), []);
+  assert.match(reason(sameBlock, "syncFill"), /already went this block/);
+  // the predicate alone: not V3 is refused even with an unknown hint in value mode
+  assert.equal(syncFillNeeded(state({ valueModeOn: true, idleKnown: false, isV3: false })).ok, false);
+});
+
+// promise: the unpaid syncFill still waits when the keeper's own gas would exceed REFRESH_MAX_COST_ETH
+test("syncFill: gas over the cap skips", () => {
+  // the 120k-gas guess at 1 gwei is over the 0.00005 ETH cap
+  const dear = decide(state({ ...v3Idle }), [], gas("1"), policy(), new Map());
+  assert.deepEqual(doorsOf(dear), []);
+  assert.match(reason(dear, "syncFill"), /gas over cap/);
+});
+
+// ------------------------------------------------------------------ ControllerV3: refreshCcReference
+// the CC reference has no pool spot view, so the keeper refreshes it on staleness rather than spot drift: V3, value
+// mode, the CC pool key set, a reference set and usable, the reference past ccMaxStale, ccMinSeconds elapsed and a
+// nonzero integer move. ccReferenceTime 1 keeps the sample old; timestamp 10_000 puts it well past a 600 s maxStale.
+const v3Cc = {
+  isV3: true,
+  valueModeOn: true,
+  ccPoolKeySet: true,
+  ccReferencePrice: parseEther("0.0004"),
+  ccReferenceTime: 1n,
+  ccMaxStale: 600n,
+  ccMinSeconds: 300n,
+  ccRateBpsPerHour: 1_200n,
+  ccStepBps: 200n,
+};
+
+// promise: a stale CC reference that a refresh would move makes one unpaid controller call to refreshCcReference
+test("refreshCcReference: a stale reference on V3 makes one unpaid controller call", () => {
+  const p = policy();
+  // 0.3 gwei keeps the 80k-gas guess under the 0.00005 ETH cap
+  const r = decide(state({ ...v3Cc, timestamp: 10_000n }), [], gas("0.3"), p, new Map());
+  assert.deepEqual(doorsOf(r), ["refreshCcReference"]);
+  const c = r.calls[0];
+  assert.equal(c.target, "controller", "the call goes to the controller");
+  assert.equal(c.functionName, "refreshCcReference");
+  assert.equal(c.payment, 0n, "refreshCcReference is unpaid");
+  assert.equal(recheck(c, state({ ...v3Cc, timestamp: 10_000n }), undefined, GAS_GUESS.refreshCcReference, gas("0.3"), p).ok, true, "cheap measured gas clears the cap");
+});
+
+// promise: the CC refresh waits while the reference is fresh, the pool key is unset, off V3, or the move rounds to zero
+test("refreshCcReference: the gates skip a fresh reference, an unset pool key, a non-V3 controller, and a zero move", () => {
+  const p = policy();
+  // within ccMaxStale: 300 s old against a 600 s maxStale
+  assert.match(reason(decide(state({ ...v3Cc, ccReferenceTime: 10_000n, timestamp: 10_300n }), [], gas("0.5"), p, new Map()), "refreshCcReference"), /still within ccMaxStale/);
+  assert.match(reason(decide(state({ ...v3Cc, ccPoolKeySet: false, timestamp: 10_000n }), [], gas("0.5"), p, new Map()), "refreshCcReference"), /CC pool key is not set/);
+  assert.match(reason(decide(state({ ...v3Cc, isV3: false, timestamp: 10_000n }), [], gas("0.5"), p, new Map()), "refreshCcReference"), /not ControllerV3/);
+  // a zero rate makes the integer move round to zero even when stale
+  assert.match(reason(decide(state({ ...v3Cc, ccRateBpsPerHour: 0n, timestamp: 10_000n }), [], gas("0.5"), p, new Map()), "refreshCcReference"), /move rounds to zero/);
+  assert.equal(refreshCcReferenceNeeded(state({ ...v3Cc, valueModeOn: false, timestamp: 10_000n })).ok, false, "value mode off is refused");
 });
 
 test("listing: the best gap goes first (Activity.s.sol rule), and every sweep precedes the buyback", () => {

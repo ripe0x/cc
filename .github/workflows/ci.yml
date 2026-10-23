@@ -3,7 +3,7 @@
 # passes when every job succeeded or was skipped.
 # Contract changes run a bounded smoke selection plus changed test files. Tools use offline checks.
 # The full suite, deployment rehearsal and deep invariants run in the candidate workflow.
-# Fork fixtures use the verified mainnet block shared with the candidate workflow.
+# Fork fixtures use the live fixture pin, after the live Core.
 # UPSTREAM_RPC_URL is the repo secret FORK_URL when set, else public Tenderly. foundry-toolchain saves foundry's rpc cache.
 name: ci
 
@@ -86,7 +86,7 @@ jobs:
       UPSTREAM_RPC_URL: ${{ secrets.FORK_URL || 'https://mainnet.gateway.tenderly.co' }}
       MAINNET_RPC_URL: http://127.0.0.1:8545
       FORK_BLOCK: "26208025"
-      RPC_FORK_BLOCK: "26250700"
+      RPC_FORK_BLOCK: "26251200"
     steps:
       - uses: actions/checkout@v4
         with:

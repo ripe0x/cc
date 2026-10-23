@@ -2,6 +2,7 @@ import type { Hex } from "viem";
 import { zeroAddress } from "viem";
 
 import { treasuryAbi } from "../abis/Phase2BalanceTreasury";
+import { treasuryV2Abi } from "../abis/BalanceTreasuryV2";
 import { controllerAbi } from "../abis/ControllerV1";
 import { controllerV2Abi } from "../abis/ControllerV2";
 import { coreAbi } from "../abis/Core";
@@ -279,11 +280,20 @@ export async function refreshStatementArt(ctx: Ctx, id: bigint) {
   return { tokenUri: uri, formatName: parseTokenUri(uri)?.attributes.Format ?? null };
 }
 
-/** Reads a controller's parameters at the event block. */
-/** The phase 2 treasury's ledger at its BalanceModuleSet block, read at that block (the pattern of readController): a
- * treasury is discovered by the factory at its selection, so its constructor and preselection events are not replayed;
- * this read seeds the row they would have written. Every read is tolerant: a StatementBalanceModule answers none */
+/**
+ * The balance module's state at its BalanceModuleSet block, read at that block (the pattern of readController): a
+ * module is discovered by the factory at its selection, so its constructor and preselection events are not replayed;
+ * this read seeds the row they would have written. The version is detected by a v2-only view (proRataRedeemer): a
+ * BalanceTreasuryV2 (phase 3) takes the v2 path, a Phase2BalanceTreasury the phase 2 path, and a StatementBalanceModule
+ * answers neither and returns null, leaving the row at its defaults.
+ */
 export async function readTreasury(ctx: Ctx, address: Hex) {
+  const [probe] = await ctx.client.multicall({
+    ...mc,
+    allowFailure: true,
+    contracts: [{ address, abi: treasuryV2Abi, functionName: "proRataRedeemer" }],
+  });
+  if (probe.status === "success") return readTreasuryV2(ctx, address);
   const t = { address, abi: treasuryAbi } as const;
   const r = await ctx.client.multicall({
     ...mc,
@@ -307,6 +317,7 @@ export async function readTreasury(ctx: Ctx, address: Hex) {
   const num = (i: number) => { const v = ok<bigint | number>(i); return v === null ? null : Number(v); };
   if (r[0].status !== "success") return null;
   return {
+    version: "phase2",
     claimReserve: big(0),
     totalOwed: big(1) ?? 0n,
     configEpoch: big(2),
@@ -318,6 +329,47 @@ export async function readTreasury(ctx: Ctx, address: Hex) {
     ccRedemptionEnabled: ok<boolean>(8),
     minimumWorkingBalance: big(9),
     migrated: ok<boolean>(10) ?? false,
+  };
+}
+
+/** The phase 3 treasury's state at its BalanceModuleSet block. The v2 third switch is the bid, not CC redemption. */
+async function readTreasuryV2(ctx: Ctx, address: Hex) {
+  const t = { address, abi: treasuryV2Abi } as const;
+  const r = await ctx.client.multicall({
+    ...mc,
+    allowFailure: true,
+    contracts: [
+      { ...t, functionName: "proRataRedeemer" },
+      { ...t, functionName: "cushion" },
+      { ...t, functionName: "bidBudget" },
+      { ...t, functionName: "bidShareBps" },
+      { ...t, functionName: "totalShareBps" },
+      { ...t, functionName: "conversionToClaimBps" },
+      { ...t, functionName: "conversionEnabled" },
+      { ...t, functionName: "workingPaymentsEnabled" },
+      { ...t, functionName: "bidEnabled" },
+      { ...t, functionName: "paused" },
+      { ...t, functionName: "totalOwed" },
+      { ...t, functionName: "migrated" },
+    ],
+  });
+  const ok = <T,>(i: number): T | null => (r[i].status === "success" ? (r[i].result as T) : null);
+  const big = (i: number) => { const v = ok<bigint | number>(i); return v === null ? null : BigInt(v); };
+  const num = (i: number) => { const v = ok<bigint | number>(i); return v === null ? null : Number(v); };
+  return {
+    version: "v2",
+    proRataRedeemer: ok<Hex>(0) ? (ok<Hex>(0)!.toLowerCase() as Hex) : null,
+    cushion: big(1),
+    bidBudget: big(2),
+    bidShareBps: num(3),
+    totalShareBps: num(4),
+    conversionToClaimBps: num(5),
+    conversionEnabled: ok<boolean>(6),
+    workingPaymentsEnabled: ok<boolean>(7),
+    bidEnabled: ok<boolean>(8),
+    paused: ok<boolean>(9),
+    totalOwed: big(10) ?? 0n,
+    migrated: ok<boolean>(11) ?? false,
   };
 }
 

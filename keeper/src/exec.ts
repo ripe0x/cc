@@ -14,7 +14,7 @@ import {
   type PrivateKeyAccount,
   type PublicClient,
 } from "viem";
-import { controllerAbi, coreAbi, splitV2Abi } from "@cc/engine/abis";
+import { controllerAbi, controllerV3Abi, coreAbi, splitV2Abi } from "@cc/engine/abis";
 import { revertName, txError } from "@cc/engine/errors";
 import type { Config } from "./config.ts";
 import { recheck, type Intended, type Listing, type Policy, type State } from "./decide.ts";
@@ -63,7 +63,10 @@ export class Executor {
   }
 
   private data(c: Intended): Hex {
-    const abi = c.target === "controller" ? controllerAbi : c.target === "split" ? splitV2Abi : coreAbi;
+    // ControllerV3's syncFill and refreshCcReference live in the keeper-only V3 abi; the Core's own refreshReference and
+    // the other controller calls stay in controllerAbi
+    const v3 = c.functionName === "syncFill" || c.functionName === "refreshCcReference";
+    const abi = c.target === "controller" ? (v3 ? controllerV3Abi : controllerAbi) : c.target === "split" ? splitV2Abi : coreAbi;
     return encodeFunctionData({ abi, functionName: c.functionName as any, args: c.args as any });
   }
 

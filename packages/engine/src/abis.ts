@@ -174,6 +174,23 @@ export const controllerAbi = parseAbi([
   "error StatementSalesOff()",
 ]);
 
+// ControllerV3 (src/ControllerV3.sol) adds three jobs the keeper drives, all unpaid and callable by anyone: the fill
+// hint sync that keeps the value-mode idle loosening known, and the CC price reference for later redeemers. V2 and V1
+// have none of these, so the keeper reads idleSince() tolerantly to detect V3 and leaves the doors inert otherwise.
+// A keeper-only export kept apart from controllerAbi so the web worker can extend that abi without colliding here.
+export const controllerV3Abi = parseAbi([
+  // the newest pile acquisition time and whether it is known; `known` false means the hint is stale and the idle
+  // loosening reads zero until syncFill moves the hint to the pile tail
+  "function idleSince() view returns (uint256 t, bool known)",
+  "function syncFill() returns (bool)",
+  // the CC price reference on the native eth / CC pool, for later redeemers; meaningful only once ccPoolKeySet is true
+  "function ccPoolKeySet() view returns (bool)",
+  "function ccReferencePrice() view returns (uint256)",
+  "function ccReferenceTime() view returns (uint40)",
+  "function ccQuote() view returns (uint32 rateBpsPerHour, uint16 stepBps, uint32 maxStale, uint32 minSeconds, uint32 avgSeconds, uint128 minLiquidity)",
+  "function refreshCcReference() returns (bool)",
+]);
+
 // The phase 2 balance module (src/interfaces/IPhase2BalanceTreasury.sol): the views the web claim panel and the keeper
 // read, the two public actions, the events the indexer projects and the custom errors a simulation decodes.
 export const treasuryAbi = parseAbi([
@@ -392,6 +409,59 @@ export const scoreAbi = parseAbi([
 export const seedAbi = parseAbi(["function seedOf(uint256 id) view returns (bytes21)", "function timestampOf(uint256 id) view returns (uint64)"]);
 export const multicallAbi = parseAbi(["function getEthBalance(address a) view returns (uint256)", "function getBlockNumber() view returns (uint256)"]);
 export const moduleAbi = parseAbi(["function unitPerPoint() view returns (uint256)", "function available() view returns (uint256)"]);
+
+// ---- treasury v2 and redeemer 1 (phase 3, web/) ------------------------------------------------------------------
+// The Core's balance module after the phase 3 migration (out/BalanceTreasuryV2.sol). A separate export so the phase 2
+// treasuryAbi above keeps working against the live v1 treasury: the web reads core.balanceModule() and detects v2 by
+// probing bidBpsNow() (a view v1 does not have). Only the surface web/ reads: the $BALANCE bid (quoteCredit/sellCredit
+// with bidBpsNow/bidBudget), redeemer 1 (redeemers/proRataRedeemer/redeemCC) and the receipt events and errors.
+export const treasuryV2Abi = parseAbi([
+  // $BALANCE bid (the treasury's own bid, separate from the Core's balanceBidOf 80% exchange)
+  "function quoteCredit(uint256 id) view returns (uint256 paid, uint256 toArtist)",
+  "function sellCredit(uint256[] ids, uint256 minOut) returns (uint256 total)",
+  "function bidEnabled() view returns (bool)",
+  "function bidBpsNow() view returns (uint256)",
+  "function bidBudget() view returns (uint256)",
+  "function available() view returns (uint256)",
+  "function working() view returns (uint256)",
+  "function conversionToClaimBps() view returns (uint16)",
+  "function paused() view returns (bool)",
+  // pluggable CC burn; redeemer 1 is proRataRedeemer()
+  "function proRataRedeemer() view returns (address)",
+  "function redeemers(address redeemer) view returns ((bool registered, bool on, uint16 shareBps, uint64 epoch, uint40 activeAt, uint40 periodStart, uint128 perCall, uint128 perPeriod, uint128 lifetime, uint128 periodUsed, uint128 lifetimeUsed, uint256 bucket, uint256 totalIn, uint256 totalOut))",
+  "function redeemCC(address redeemer, uint256 ccIn, address recipient, uint256 minOut, uint256 deadline, uint64 expectedEpoch, bytes data) returns (uint256 amount, uint256 claimId)",
+  // shared module views
+  "function unitPerPoint() view returns (uint256)",
+  "function balanceToken() view returns (address)",
+  "function ccToken() view returns (address)",
+  "function core() view returns (address)",
+  "function selected() view returns (bool)",
+  "function migrated() view returns (bool)",
+  // receipts the web decodes
+  "event BidFill(address indexed seller, uint256 credits, uint256 paid, uint256 toArtist, uint256 bidBudget)",
+  "event CCRedeemed(address indexed redeemer, address indexed burner, address indexed recipient, uint256 ccIn, uint256 amount, uint8 mode, uint32 duration, uint256 claimId, uint64 epoch)",
+  // errors a simulation decodes
+  "error BidOff()",
+  "error BidUnpriced()",
+  "error Paused()",
+  "error ReturnLocked(uint256 id)",
+  "error NotInPile(uint256 id)",
+  "error NotOwner(uint256 id)",
+  "error Slippage()",
+  "error StaleEpoch()",
+  "error RedemptionOff()",
+  "error InsufficientBucket()",
+  "error OverCap()",
+  "error Expired()",
+  "error BurnMismatch()",
+  "error Insolvent()",
+  "error UnknownRedeemer()",
+  "error ZeroAmount()",
+]);
+
+// redeemer 1 (out/ProRataRedeemer.sol): its fee only. the quote is pure (web/lib/v2.ts proRataV2Quote) and equals the
+// treasury payout floor(ccIn * bucket / ccSupply) less feeBps.
+export const redeemerV2Abi = parseAbi(["function feeBps() view returns (uint16)"]);
 
 export const strategyAbi = parseAbi([
   "event NFTBoughtByProtocol(uint256 indexed tokenId, uint256 purchasePrice, uint256 listPrice)",

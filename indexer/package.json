@@ -7,6 +7,7 @@
     "start": "ponder start",
     "codegen": "ponder codegen",
     "abis": "node scripts/gen-abis.mjs",
+    "check:handlers": "node scripts/check-handlers.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/lib/*.test.ts src/api/*.test.ts",
     "db": "ponder db"

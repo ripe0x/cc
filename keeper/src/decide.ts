@@ -22,6 +22,10 @@ export const GAS_GUESS: { [d in Door]: bigint } = {
   book: 100_000n,
   redeemStatement: 1_500_000n,
   refreshReference: 60_000n,
+  // syncFill walks the pile from the hint to the tail; after a single purchase that is a short walk. refreshCcReference
+  // mirrors refreshReference. both are measured by the simulation; these only decide whether the pre-sim cost cap passes
+  syncFill: 120_000n,
+  refreshCcReference: 80_000n,
   // a Splits v2 push distribute to two recipients: the hash check, the incentive and two transfers (ETH or ERC20),
   // each with a warehouse deposit fallback. a guess until the simulation measures it
   distributeSplit: 150_000n,
@@ -96,6 +100,21 @@ export interface State {
   referenceRateBpsPerHour: bigint;
   referenceStepBps: bigint;
   spot: bigint;
+  // ControllerV3 (src/ControllerV3.sol), all read tolerantly from the controller: isV3 is set only when idleSince()
+  // answers, so the two V3 doors stay inert against ControllerV2 or V1. idleKnown is idleSince().known; when false the
+  // value-mode idle loosening reads zero until syncFill moves the hint to the pile tail. lastSyncFillBlock is the block
+  // the keeper last sent a syncFill, carried in so the door fires at most once per block. The cc* fields are the CC
+  // price reference for later redeemers, meaningful only once ccPoolKeySet is true.
+  isV3: boolean;
+  idleKnown: boolean;
+  lastSyncFillBlock: bigint;
+  ccPoolKeySet: boolean;
+  ccReferencePrice: bigint;
+  ccReferenceTime: bigint;
+  ccMaxStale: bigint;
+  ccMinSeconds: bigint;
+  ccRateBpsPerHour: bigint;
+  ccStepBps: bigint;
   // Core.balanceToken() at the block: the token of the split's BALANCE leg, zero while no module is bound
   balanceToken: Address;
   // the split's ETH and balance token holdings at the block, read only while the distributeSplit door is configured;
@@ -124,7 +143,7 @@ export interface Gas {
 
 export interface Intended {
   door: Door;
-  functionName: "buyListing" | "buyback" | "compose" | "collectEscrow" | "book" | "redeemStatement" | "refreshReference" | "distribute";
+  functionName: "buyListing" | "buyback" | "compose" | "collectEscrow" | "book" | "redeemStatement" | "refreshReference" | "syncFill" | "refreshCcReference" | "distribute";
   // the contract the call goes to: the Core by default (every Core door, including the refreshReference door that
   // forwards to the controller); "split" is the artist and operator split of the distributeSplit door
   target?: "controller" | "split";
@@ -287,6 +306,45 @@ export function refreshReferenceNeeded(
   const move = (s.referenceRateBpsPerHour * elapsed) / 3_600n;
   if (move === 0n || s.referenceStepBps === 0n) return { ok: false, reason: "reference move rounds to zero", driftSince: since };
   return { ok: true, reason: `drift ${driftBps} bps persisted ${persisted} s`, driftSince: since };
+}
+
+// whether the keeper should call ControllerV3's unpaid syncFill() now. a purchase in value mode leaves the fill hint
+// stale (idleSince().known false), which makes the idle loosening of the ETH bid read zero; syncFill moves the hint to
+// the pile tail so the loosening is known again. the gates mirror decision 273's reference refresh: V3 only (idleSince
+// answers), value mode only, and at most once per block (lastSyncFillBlock, set when the keeper sent one; syncFill has
+// no on-chain per-block guard of its own, unlike the two refresh calls). the cost cap and the door ceiling are applied
+// by the caller, the same unpaid-door door policy and REFRESH_MAX_COST_ETH the reference refresh uses
+export function syncFillNeeded(s: State): { ok: boolean; reason: string } {
+  if (!s.isV3) return { ok: false, reason: "not ControllerV3: idleSince() did not answer" };
+  if (!s.valueModeOn) return { ok: false, reason: "value mode off" };
+  if (s.idleKnown) return { ok: false, reason: "the fill hint is known, the loosening is not lost" };
+  if (s.lastSyncFillBlock === s.blockNumber) return { ok: false, reason: "a syncFill already went this block" };
+  return { ok: true, reason: "the fill hint is unknown, the idle loosening reads zero" };
+}
+
+// whether the keeper should call ControllerV3's unpaid refreshCcReference() now. the CC reference has no pool spot view
+// (ccPrice() exposes the reference, not the spot), so this takes the smaller change decision 273 allows: it drops the
+// spot-drift gate and refreshes when the reference has gone stale and a refresh would move it, keeping the rest of the
+// rule. gates in order: V3 only, value mode on (the same rule as the balance reference), the CC pool key set, a CC
+// reference set and usable (maxStale nonzero), the reference past maxStale so a later redeemer's ccPrice() reads
+// unusable (the "only when needed" stand-in for drift), referenceMinSeconds elapsed since the sample (the contract
+// requires it and also no-ops a second refresh in one block), and a nonzero integer move this tick. the cost cap and
+// the ceiling are applied by the caller. known ceiling of this shortcut: when the pool is thin or emptied the on-chain
+// call no-ops, so the keeper can send one wasted (capped, once-per-block on chain) refresh; reading pool liquidity to
+// close that is deferred until a redeemer actually consumes the CC reference
+// ponytail: staleness trigger, not spot drift; add the slot0 read if a live redeemer needs the tighter gate
+export function refreshCcReferenceNeeded(s: State): { ok: boolean; reason: string } {
+  if (!s.isV3) return { ok: false, reason: "not ControllerV3: idleSince() did not answer" };
+  if (!s.valueModeOn) return { ok: false, reason: "value mode off" };
+  if (!s.ccPoolKeySet) return { ok: false, reason: "the CC pool key is not set" };
+  if (s.ccReferencePrice === 0n) return { ok: false, reason: "no CC reference set" };
+  if (s.ccMaxStale === 0n) return { ok: false, reason: "ccMaxStale is 0, the CC reference is never usable" };
+  const elapsed = s.timestamp - s.ccReferenceTime;
+  if (elapsed <= s.ccMaxStale) return { ok: false, reason: `CC reference ${elapsed} s old, still within ccMaxStale ${s.ccMaxStale} s` };
+  if (elapsed < s.ccMinSeconds) return { ok: false, reason: `CC reference sampled at ${s.ccReferenceTime}, next refresh at ${s.ccReferenceTime + s.ccMinSeconds}` };
+  const move = (s.ccRateBpsPerHour * elapsed) / 3_600n;
+  if (move === 0n || s.ccStepBps === 0n) return { ok: false, reason: "CC reference move rounds to zero" };
+  return { ok: true, reason: `CC reference ${elapsed} s old, past ccMaxStale ${s.ccMaxStale} s` };
 }
 
 // the legs of the artist and operator split that are due: ETH when the split holds at least minEth, the balance token
@@ -473,6 +531,39 @@ export function decide(
     }
   }
 
+  // 7b. syncFill: a direct, unpaid call to ControllerV3's syncFill(), under the same door policy and cost cap as the
+  // reference refresh. it keeps the value-mode idle loosening known after a purchase. inert on ControllerV2 and V1
+  if (on("syncFill")) {
+    const need = syncFillNeeded(s);
+    if (!need.ok) skips.push({ door: "syncFill", reason: need.reason });
+    else if (ceiling("syncFill")) {
+      const pol = p.doors.syncFill;
+      const cost = ownCost(GAS_GUESS.syncFill, gas, pol);
+      if (cost > p.refresh.maxCostEth) {
+        skips.push({ door: "syncFill", reason: `gas over cap: own cost ${cost} over REFRESH_MAX_COST_ETH ${p.refresh.maxCostEth}` });
+      } else {
+        calls.push({ door: "syncFill", functionName: "syncFill", target: "controller", args: [], gas: GAS_GUESS.syncFill, payment: 0n, cost, key: "syncFill", note: { controller: s.controller } });
+      }
+    }
+  }
+
+  // 7c. refreshCcReference: a direct, unpaid call to ControllerV3's refreshCcReference(), under the same door policy and
+  // cost cap. it keeps the CC price reference fresh for later redeemers, triggered on staleness (see the predicate).
+  // inert on ControllerV2 and V1 (and while the CC pool key is unset)
+  if (on("refreshCcReference")) {
+    const need = refreshCcReferenceNeeded(s);
+    if (!need.ok) skips.push({ door: "refreshCcReference", reason: need.reason });
+    else if (ceiling("refreshCcReference")) {
+      const pol = p.doors.refreshCcReference;
+      const cost = ownCost(GAS_GUESS.refreshCcReference, gas, pol);
+      if (cost > p.refresh.maxCostEth) {
+        skips.push({ door: "refreshCcReference", reason: `gas over cap: own cost ${cost} over REFRESH_MAX_COST_ETH ${p.refresh.maxCostEth}` });
+      } else {
+        calls.push({ door: "refreshCcReference", functionName: "refreshCcReference", target: "controller", args: [], gas: GAS_GUESS.refreshCcReference, payment: 0n, cost, key: "refreshCcReference", note: { controller: s.controller, ccReferenceTime: s.ccReferenceTime, ccReferencePrice: s.ccReferencePrice, reason: need.reason } });
+      }
+    }
+  }
+
   // 8. distributeSplit: the owner's own money (the artist and operator cut) moving from the split to its recipients, so
   // it is not profit gated: the split's distribution incentive, if any, pays the keeper as distributor, otherwise the
   // keeper pays the gas. gated on the balance thresholds and the door's base fee ceiling; the cost is logged
@@ -528,6 +619,8 @@ export function recheck(c: Intended, s: State, listing: Listing | undefined, gas
       payment = callerPayment(s, gasUsed, REDEEM_GAS, b);
       break;
     case "refreshReference":
+    case "syncFill":
+    case "refreshCcReference":
       // unpaid, direct to the controller: it clears while the measured gas keeps the keeper's own cost at or under the cap
       return { ok: cost <= p.refresh.maxCostEth, payment: 0n, cost };
     case "collectEscrow":
