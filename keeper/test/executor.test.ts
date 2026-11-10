@@ -1,7 +1,7 @@
 // promise: the keeper simulates the fee-bearing pending call, refuses a pending base fee above its ceiling, and treats an unpaid paid door as a breaker failure
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseEther, parseGwei, keccak256, encodeFunctionData } from "viem";
+import { parseEther, parseGwei, keccak256, encodeFunctionData, parseTransaction } from "viem";
 import { controllerV3Abi } from "@cc/engine/abis";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { mkdtempSync, mkdirSync, rmdirSync } from "node:fs";
@@ -357,4 +357,112 @@ test("executor: postMarketFloor is rechecked as an unpaid door and sent to the c
   assert.equal(out.kind, "sent", String((out as { reason?: string }).reason ?? out.kind));
   assert.equal(sentTo?.toLowerCase(), rec.controller.toLowerCase(), "the call goes to the controller");
   assert.equal(sentData?.slice(0, 10), encodeFunctionData({ abi: controllerV3Abi, functionName: "postMarketFloor", args: [8_700_000_000_000_000n] }).slice(0, 10), "encoded with the V3 abi");
+});
+
+// a client for the self-cancel tests: the door transaction never gets a receipt; `cancelMined` releases the cancel's
+function stuckClient(o: { nonce: number; latest: () => number; finalized?: () => number; cancelMined: () => boolean; originalMined?: () => boolean; strictFails?: () => boolean; sent: string[] }) {
+  return {
+    getBlock: async () => ({ baseFeePerGas: parseGwei("1") }),
+    estimateGas: async () => 60_000n,
+    getBalance: async () => parseEther("1"),
+    getTransactionCount: async ({ blockTag }: { blockTag?: string }) =>
+      blockTag === "latest" ? o.latest() : blockTag === "finalized" ? (o.finalized ?? o.latest)() : o.nonce,
+    request: async ({ method, params }: { method: string; params: string[] }) => {
+      if (method === "eth_getTransactionReceipt") { if (o.strictFails?.()) throw new Error("rpc down"); return receipt(params[0]); }
+      o.sent.push(params[0]);
+      return keccak256(params[0] as `0x${string}`);
+    },
+    getTransactionReceipt: async ({ hash }: { hash: string }) => receipt(hash),
+  } as any;
+  function receipt(hash: string) {
+    const isCancel = o.sent.length > 1 && hash === keccak256(o.sent[o.sent.length - 1] as `0x${string}`);
+    if (isCancel ? o.cancelMined() : o.originalMined?.()) return { status: "success", gasUsed: 21_000n, effectiveGasPrice: parseGwei("1"), blockNumber: 3n };
+    return null;
+  }
+}
+
+// promise: a dropped transaction is replaced by a same-nonce zero-value self-transfer whose receipt releases the keeper
+test("executor: a transaction with no receipt is cancelled at its nonce and the cancel is accounted", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "keeper-cancel-"));
+  const account = privateKeyToAccount(generatePrivateKey());
+  const localCfg = { ...cfg, receiptTimeoutSec: 0, cancelAfterSec: 0, stateDir: dir };
+  let mined = false;
+  const sent: string[] = [];
+  const client = stuckClient({ nonce: 9, latest: () => (mined ? 10 : 9), cancelMined: () => mined, sent });
+  const exec = new Executor(client, localCfg, policy, { address: account.address, account }, new Ledger(dir, cfg.dailyBudget), new Breaker(5, 60), new PendingStore(dir));
+  assert.equal((await exec.run(call, state)).kind, "failed");
+  const out = await exec.reconcile();
+  assert.equal(out?.kind, "skipped");
+  assert.equal(sent.length, 2);
+  const cancel = parseTransaction(sent[1] as `0x${string}`);
+  assert.equal(cancel.nonce, 9);
+  assert.equal(cancel.to?.toLowerCase(), account.address.toLowerCase());
+  assert.equal(cancel.value ?? 0n, 0n);
+  assert.equal(cancel.data ?? "0x", "0x");
+  assert.equal(cancel.gas, 21_000n);
+  assert.equal(new PendingStore(dir).current?.cancel, keccak256(sent[1] as `0x${string}`));
+  // a later tick rebroadcasts the identical bytes rather than signing a second distinct transaction
+  await exec.reconcile();
+  assert.equal(sent[2], sent[1]);
+  mined = true;
+  const done = await exec.reconcile();
+  assert.equal(done?.kind, "reconciled");
+  assert.equal(new PendingStore(dir).current, undefined);
+  assert.equal(new Ledger(dir, cfg.dailyBudget).snapshot().spent, 21_000n * parseGwei("1"));
+  assert.equal((await exec.reconcile()), undefined);
+});
+
+// promise: the original transaction landing after a cancel was signed is accounted as itself, not as the cancel
+test("executor: an original that lands after the cancel is the one accounted", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "keeper-cancel-race-"));
+  const account = privateKeyToAccount(generatePrivateKey());
+  const localCfg = { ...cfg, receiptTimeoutSec: 0, cancelAfterSec: 0, stateDir: dir };
+  let landed = false;
+  const sent: string[] = [];
+  const client = stuckClient({ nonce: 3, latest: () => (landed ? 4 : 3), cancelMined: () => false, originalMined: () => landed, sent });
+  const exec = new Executor(client, localCfg, policy, { address: account.address, account }, new Ledger(dir, cfg.dailyBudget), new Breaker(5, 60), new PendingStore(dir));
+  await exec.run(call, state);
+  await exec.reconcile();
+  assert.equal(sent.length, 2);
+  landed = true;
+  const out = await exec.reconcile();
+  assert.equal(out?.kind, "reconciled");
+  if (out?.kind === "reconciled") assert.equal(out.hash, keccak256(sent[0] as `0x${string}`));
+  assert.equal(new PendingStore(dir).current, undefined);
+});
+
+// promise: a marker written before sentAt existed is not cancelled on the first tick after an upgrade
+test("executor: a marker without sentAt starts its cancel clock instead of cancelling at once", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "keeper-cancel-legacy-"));
+  const account = privateKeyToAccount(generatePrivateKey());
+  const legacy = new PendingStore(dir);
+  legacy.save({ hash: `0x${"ab".repeat(32)}`, nonce: 5, chainId: rec.chainId, address: account.address, door: "book", before: parseEther("1") });
+  const sent: string[] = [];
+  const client = stuckClient({ nonce: 5, latest: () => 5, cancelMined: () => false, sent });
+  const exec = new Executor(client, { ...cfg, cancelAfterSec: 600, stateDir: dir }, policy, { address: account.address, account }, new Ledger(dir, cfg.dailyBudget), new Breaker(5, 60), new PendingStore(dir));
+  assert.equal((await exec.reconcile())?.kind, "skipped");
+  assert.equal(sent.length, 0);
+  assert.equal(typeof new PendingStore(dir).current?.sentAt, "number");
+});
+
+// promise: a nonce used by a transaction the keeper cannot see releases the marker only once that nonce is final
+test("executor: an externally used nonce releases the marker only at finality", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "keeper-cancel-external-"));
+  const account = privateKeyToAccount(generatePrivateKey());
+  let finalized = 6;
+  let rpcDown = false;
+  const sent: string[] = [];
+  const client = stuckClient({ nonce: 6, latest: () => 7, finalized: () => finalized, cancelMined: () => false, strictFails: () => rpcDown, sent });
+  const exec = new Executor(client, { ...cfg, receiptTimeoutSec: 0, cancelAfterSec: 0, stateDir: dir }, policy, { address: account.address, account }, new Ledger(dir, cfg.dailyBudget), new Breaker(5, 60), new PendingStore(dir));
+  await exec.run(call, state);
+  assert.match(((await exec.reconcile()) as any).reason, /waiting for finality/);
+  assert.equal(sent.length, 1, "no cancel is signed for a nonce already used");
+  finalized = 7;
+  // a failed receipt read is not absence: the marker stays until the RPC answers null
+  rpcDown = true;
+  assert.equal((await exec.reconcile())?.kind, "skipped");
+  assert.notEqual(new PendingStore(dir).current, undefined);
+  rpcDown = false;
+  assert.equal((await exec.reconcile())?.kind, "failed");
+  assert.equal(new PendingStore(dir).current, undefined);
 });

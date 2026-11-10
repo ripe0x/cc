@@ -173,17 +173,118 @@ export class Executor {
   }
 
   // A missing receipt is unresolved. In particular, a timed-out relay request can have accepted the raw transaction.
+  // A transaction a private relay dropped never gets one, so after `cancelAfterSec` the keeper signs a zero-value
+  // self-transfer at the same nonce: only one of the two can be included, and whichever is gets accounted.
   async reconcile(): Promise<Outcome | undefined> {
     const tx = this.pending.current;
     if (!tx) return undefined;
     if (tx.chainId !== this.cfg.record.chainId || tx.address.toLowerCase() !== this.signer.address.toLowerCase()) {
       return { kind: "failed", reason: "pending transaction belongs to another chain or signer" };
     }
-    let receipt;
-    try { receipt = await this.client.getTransactionReceipt({ hash: tx.hash }); }
-    catch { return { kind: "skipped", reason: `transaction ${tx.hash} still unresolved` }; }
-    if (!receipt) return { kind: "skipped", reason: `transaction ${tx.hash} still unresolved` };
-    return this.accountReceipt(tx, receipt, "reconciled");
+    const receipt = await this.receiptOf(tx.hash);
+    if (receipt) return this.accountReceipt(tx, receipt, "reconciled");
+    if (tx.cancel) {
+      const cancelled = await this.receiptOf(tx.cancel);
+      if (cancelled) return this.accountCancel(tx, cancelled);
+    }
+    return this.replaceStuck(tx);
+  }
+
+  // true only when the RPC answers null for the receipt; a transport failure or any receipt is false
+  private async noReceipt(hash: Hex): Promise<boolean> {
+    try { return (await this.client.request({ method: "eth_getTransactionReceipt", params: [hash] })) === null; }
+    catch { return false; }
+  }
+
+  private async receiptOf(hash: Hex) {
+    try { return (await this.client.getTransactionReceipt({ hash })) ?? undefined; }
+    catch { return undefined; }
+  }
+
+  // the self-cancel fee: twice the highest door ceiling and tip, so it also replaces any door's transaction a mempool
+  // still holds (a replacement needs at least 10 percent more on both fields)
+  private cancelFee() {
+    let maxFee = 0n;
+    let tip = 0n;
+    for (const p of Object.values(this.policy.doors)) {
+      if (p.maxBaseFee + p.tip > maxFee) maxFee = p.maxBaseFee + p.tip;
+      if (p.tip > tip) tip = p.tip;
+    }
+    return { maxFeePerGas: 2n * maxFee, maxPriorityFeePerGas: 2n * tip };
+  }
+
+  private async replaceStuck(tx: PendingTx): Promise<Outcome> {
+    const unresolved: Outcome = { kind: "skipped", reason: `transaction ${tx.hash} still unresolved` };
+    const now = Date.now();
+    // a marker written before sentAt existed starts its clock now rather than being cancelled at once
+    if (tx.sentAt === undefined) { this.pending.save({ ...tx, sentAt: now }); return unresolved; }
+    // the first cancel waits cancelAfterSec from the send; a relay can drop the cancel too, so its identical bytes go
+    // out again every receiptTimeoutSec
+    const wait = tx.cancelAt === undefined ? this.cfg.cancelAfterSec : this.cfg.receiptTimeoutSec;
+    if (now - (tx.cancelAt ?? tx.sentAt) < wait * 1000) return unresolved;
+    const account = this.signer.account;
+    if (!account || this.cfg.dryRun) return unresolved;
+
+    let latest: number;
+    try { latest = await this.client.getTransactionCount({ address: account.address, blockTag: "latest" }); }
+    catch { return unresolved; }
+    if (latest > tx.nonce) {
+      // the nonce went to a transaction with no receipt this keeper can see (an operator cancel, or a cancel signed
+      // under other fee settings). once that is final no send of this keeper can reuse the nonce, so the marker is
+      // released; that transaction's gas is not in the ledger
+      let finalized: number;
+      try { finalized = await this.client.getTransactionCount({ address: account.address, blockTag: "finalized" }); }
+      catch { return unresolved; }
+      if (finalized <= tx.nonce) return { kind: "skipped", reason: `nonce ${tx.nonce} used by another transaction, waiting for finality` };
+      // a receipt read that failed is not absence: release only when the RPC answers null for both own hashes, else
+      // the next tick accounts the one that landed
+      for (const h of [tx.hash, tx.cancel]) if (h && !(await this.noReceipt(h))) return unresolved;
+      this.pending.clear();
+      if (this.breaker.fail(tx.door)) void alert(this.cfg.alertWebhook, `breaker:${tx.door}`, `${tx.door} paused: its transaction was never included`, { hash: tx.hash });
+      void alert(this.cfg.alertWebhook, "pending", "keeper nonce was used by a transaction it did not account; sends resume, that gas is not in the ledger", { hash: tx.hash, nonce: tx.nonce });
+      return { kind: "failed", reason: `nonce ${tx.nonce} final under an unaccounted transaction; ${tx.hash} released` };
+    }
+
+    const fee = this.cancelFee();
+    let baseFee: bigint;
+    try { baseFee = (await this.client.getBlock({ blockTag: "pending" })).baseFeePerGas ?? 0n; }
+    catch { return unresolved; }
+    if (baseFee + fee.maxPriorityFeePerGas > fee.maxFeePerGas) return { kind: "skipped", reason: `base fee ${baseFee} above the self-cancel ceiling` };
+    const gas = 21_000n;
+    // a first broadcast reserves budget; a rebroadcast of the same signed bytes adds no liability
+    if (!tx.cancel && !this.ledger.allows(gas * fee.maxFeePerGas)) {
+      void alert(this.cfg.alertWebhook, "budget", "daily budget exhausted, the self-cancel of a stuck transaction waits", { hash: tx.hash });
+      return { kind: "skipped", reason: "daily budget exhausted" };
+    }
+    // deterministic signing: the same fields give the same bytes, so a rebroadcast keeps the saved cancel hash
+    const raw = await account.signTransaction({
+      type: "eip1559", chainId: tx.chainId, nonce: tx.nonce, to: account.address, value: 0n, data: "0x", gas, ...fee,
+    });
+    const cancel = keccak256(raw);
+    this.pending.save({ ...tx, cancel, cancelAt: now });
+    try { await this.broadcast(raw, cancel); }
+    catch (e) { log("warn", "self-cancel broadcast refused", { hash: tx.hash, cancel, error: txError(e) }); }
+    log("warn", "self-cancel sent", { hash: tx.hash, cancel, nonce: tx.nonce, door: tx.door });
+    if (!tx.cancel) void alert(this.cfg.alertWebhook, "pending", "keeper transaction had no receipt; a same-nonce self-cancel was sent", { hash: tx.hash, cancel, nonce: tx.nonce, door: tx.door });
+    return { kind: "skipped", reason: `self-cancel ${cancel} sent for ${tx.hash}` };
+  }
+
+  // the self-cancel took the nonce: its gas is the cost of the door's failed transaction
+  private async accountCancel(tx: PendingTx, receipt: Awaited<ReturnType<PublicClient["getTransactionReceipt"]>>): Promise<Outcome> {
+    const hash = tx.cancel!;
+    const spent = receipt.gasUsed * receipt.effectiveGasPrice;
+    const fields = { door: tx.door, replaced: tx.hash, hash, url: txUrl(hash, tx.chainId), block: receipt.blockNumber, spent };
+    try {
+      if (!tx.ledgerDay) { tx = { ...tx, ledgerDay: utcDay(Date.now()) }; this.pending.save(tx); }
+      this.ledger.record(spent, 0n, hash, tx.ledgerDay);
+      this.pending.clear();
+    } catch (e) {
+      log("error", "receipt accounting failed", { ...fields, error: txError(e) });
+      return { kind: "failed", reason: `receipt accounting failed: ${txError(e)}` };
+    }
+    log("warn", "self-cancel confirmed", fields);
+    if (this.breaker.fail(tx.door)) void alert(this.cfg.alertWebhook, `breaker:${tx.door}`, `${tx.door} paused: its transactions were never included`, fields);
+    return { kind: "reconciled", hash, status: receipt.status, spent, received: 0n };
   }
 
   private async accountReceipt(tx: PendingTx, receipt: Awaited<ReturnType<PublicClient["getTransactionReceipt"]>>, kind: "sent" | "reconciled"): Promise<Outcome> {
@@ -243,14 +344,18 @@ export class Executor {
         method: "eth_sendTransaction" as any,
         params: [{ from: this.signer.address, to: tx.to, data: tx.data, gas: hex(tx.gas), maxFeePerGas: hex(tx.maxFeePerGas), maxPriorityFeePerGas: hex(tx.maxPriorityFeePerGas) }] as any,
       })) as Hex;
-      this.pending.save({ hash, nonce, chainId, address: this.signer.address, door, before, listingKey });
+      this.pending.save({ hash, nonce, chainId, address: this.signer.address, door, before, listingKey, sentAt: Date.now() });
       return hash;
     }
     const account = this.signer.account!;
     const nonce = await this.client.getTransactionCount({ address: account.address, blockTag: "pending" });
     const raw = await account.signTransaction({ type: "eip1559", chainId, nonce, ...tx });
     const expected = keccak256(raw);
-    this.pending.save({ hash: expected, nonce, chainId, address: account.address, door, before, listingKey });
+    this.pending.save({ hash: expected, nonce, chainId, address: account.address, door, before, listingKey, sentAt: Date.now() });
+    return this.broadcast(raw, expected);
+  }
+
+  private async broadcast(raw: Hex, expected: Hex): Promise<Hex> {
     const relays = this.cfg.relayUrls;
     if (relays.length === 0) {
       const hash = (await this.client.request({ method: "eth_sendRawTransaction", params: [raw] })) as Hex;
