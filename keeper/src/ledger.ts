@@ -121,6 +121,9 @@ export interface PendingTx {
   before: bigint;
   ledgerDay?: string;
   listingKey?: string; // venue:id of a buyListing; survives receipt reconciliation after restart
+  sentAt?: number; // ms when the marker was written; a marker from before this field starts its clock at the next reconcile
+  cancel?: `0x${string}`; // the same-nonce self-transfer signed to replace this transaction, written before broadcast
+  cancelAt?: number; // ms when that self-transfer was last broadcast
 }
 
 // A signed transaction remains unresolved until a receipt is accounted, even if a relay request or receipt poll fails.
@@ -163,7 +166,10 @@ export class PendingStore {
         !Number.isSafeInteger(j.chainId) || j.chainId <= 0 || !/^0x[0-9a-fA-F]{40}$/.test(j.address) ||
         typeof j.door !== "string" || !/^\d+$/.test(j.before) ||
         (j.ledgerDay !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(j.ledgerDay)) ||
-        (j.listingKey !== undefined && (j.door !== "buyListing" || !/^(strategy|seaport):\d+$/.test(j.listingKey)))) {
+        (j.listingKey !== undefined && (j.door !== "buyListing" || !/^(strategy|seaport):\d+$/.test(j.listingKey))) ||
+        (j.sentAt !== undefined && (!Number.isSafeInteger(j.sentAt) || j.sentAt < 0)) ||
+        (j.cancel !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(j.cancel)) ||
+        (j.cancelAt !== undefined && (!Number.isSafeInteger(j.cancelAt) || j.cancelAt < 0))) {
       throw new Error(`invalid keeper pending transaction: ${this.path}`);
     }
     this.current = { ...j, before: BigInt(j.before) };

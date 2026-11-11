@@ -78,6 +78,8 @@ export interface Config {
   breakerThreshold: number;
   breakerPauseSec: number;
   receiptTimeoutSec: number;
+  // a sent transaction with no receipt this long is replaced by a same-nonce self-transfer (Executor.reconcile)
+  cancelAfterSec: number;
   stateDir: string;
   alertWebhook?: string;
   // ETH balance under which the keeper alerts
@@ -310,6 +312,7 @@ export function loadConfig(env: Env, readRec: (p: string) => Deployment = readRe
     breakerThreshold: num(env, "BREAKER_THRESHOLD", 3),
     breakerPauseSec: num(env, "BREAKER_PAUSE_SEC", 3600),
     receiptTimeoutSec: num(env, "RECEIPT_TIMEOUT_SEC", 300),
+    cancelAfterSec: num(env, "CANCEL_AFTER_SEC", 900),
     stateDir: env.STATE_DIR ?? "keeper/.state",
     alertWebhook: env.ALERT_WEBHOOK_URL || undefined,
     lowBalance: ether(env, "LOW_BALANCE_ETH", "0.05"),
