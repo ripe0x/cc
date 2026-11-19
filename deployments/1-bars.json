@@ -1,0 +1,18 @@
+{
+  "chainId": 1,
+  "bars": "0x7d9EdeA03dD97361c3e21389B95bc327e22752aE",
+  "barsMintEnd": 1795104000,
+  "treasury": "0xB85CF439Ca57b4bfC28fA1Cb8a97Ee85555B0496",
+  "balanceToken": "0x3620540c994433D7B4a628C46d2ED5F92572eA07",
+  "core": "0xcdb1889ae12074d750CD9B8531B692015465e0dD",
+  "vault": "0x2A518DC6776788f4969c8131CF134a31DE3c0d11",
+  "snapshot": {
+    "block": 26449797,
+    "timestamp": 1795099379,
+    "custody": "569687240229400000000000",
+    "freeWorking": "512638123385250000000000",
+    "barsMinted": 2934
+  },
+  "allocation": "284843620114700000000000",
+  "expectedAtSnapshot": { "bars": 95, "first": 2935, "last": 3029, "cost": "283290000000000000000000", "returned": "1553620114700000000000" }
+}
