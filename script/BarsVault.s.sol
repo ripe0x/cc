@@ -115,6 +115,10 @@ contract BarsVault is Script {
     function readback() public view {
         address vault = vaultAddress();
         console.log("vault", vault);
+        if (vault.code.length == 0) {
+            console.log("vault not deployed: nothing sent");
+            return;
+        }
         console.log("vault spent", CCBarsVault(vault).spent());
         console.log("vault Bars", IBars(BARS).balanceOf(vault));
         console.log("vault BALANCE", IErc20(BALANCE).balanceOf(vault));
