@@ -19,6 +19,8 @@ compilation_restrictions = [
     { paths = "src/lib/CoreLib.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
     { paths = "src/lib/CoreOpsLib.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
     { paths = "src/adapters/*.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
+    # evidence-only copy of ControllerV2 for the pricing review fork replay; needs via_ir like its source
+    { paths = "test/pricing/ControllerV2Floor.sol", via_ir = true, min_optimizer_runs = 200, max_optimizer_runs = 200 },
 ]
 fs_permissions = [{ access = "read", path = "./" }]
 ffi = false
