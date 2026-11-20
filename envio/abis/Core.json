@@ -1,0 +1,3865 @@
+[
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "owner_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "cfg_",
+    "type": "tuple",
+    "internalType": "struct IArtCoinsFactoryV2.DeploymentConfigV2",
+    "components": [
+     {
+      "name": "token",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.TokenConfigV2",
+      "components": [
+       {
+        "name": "tokenAdmin",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+       },
+       {
+        "name": "symbol",
+        "type": "string",
+        "internalType": "string"
+       },
+       {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+       },
+       {
+        "name": "image",
+        "type": "string",
+        "internalType": "string"
+       },
+       {
+        "name": "description",
+        "type": "string",
+        "internalType": "string"
+       },
+       {
+        "name": "totalSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+       },
+       {
+        "name": "renderer",
+        "type": "address",
+        "internalType": "address"
+       }
+      ]
+     },
+     {
+      "name": "pool",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.PoolConfigV2",
+      "components": [
+       {
+        "name": "hook",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "tickIfToken0IsCoin",
+        "type": "int24",
+        "internalType": "int24"
+       },
+       {
+        "name": "tickSpacing",
+        "type": "int24",
+        "internalType": "int24"
+       },
+       {
+        "name": "extension",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "extensionData",
+        "type": "bytes",
+        "internalType": "bytes"
+       }
+      ]
+     },
+     {
+      "name": "fee",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.FeeConfigV2",
+      "components": [
+       {
+        "name": "baselineSkimBps",
+        "type": "uint24",
+        "internalType": "uint24"
+       },
+       {
+        "name": "bountyBps",
+        "type": "uint16",
+        "internalType": "uint16"
+       },
+       {
+        "name": "bountyRecipient",
+        "type": "address",
+        "internalType": "address payable"
+       },
+       {
+        "name": "referralBps",
+        "type": "uint24",
+        "internalType": "uint24"
+       }
+      ]
+     },
+     {
+      "name": "locker",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.LockerConfigV2",
+      "components": [
+       {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "tickLower",
+        "type": "int24[]",
+        "internalType": "int24[]"
+       },
+       {
+        "name": "tickUpper",
+        "type": "int24[]",
+        "internalType": "int24[]"
+       },
+       {
+        "name": "positionBps",
+        "type": "uint16[]",
+        "internalType": "uint16[]"
+       }
+      ]
+     },
+     {
+      "name": "mev",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.MevConfigV2",
+      "components": [
+       {
+        "name": "module",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "startingSkimBps",
+        "type": "uint24",
+        "internalType": "uint24"
+       },
+       {
+        "name": "windowSeconds",
+        "type": "uint32",
+        "internalType": "uint32"
+       }
+      ]
+     },
+     {
+      "name": "restriction",
+      "type": "tuple",
+      "internalType": "struct IArtCoinsFactoryV2.RestrictionConfigV2",
+      "components": [
+       {
+        "name": "restricted",
+        "type": "bool",
+        "internalType": "bool"
+       },
+       {
+        "name": "allowed",
+        "type": "address[]",
+        "internalType": "address[]"
+       }
+      ]
+     },
+     {
+      "name": "extensions",
+      "type": "tuple[]",
+      "internalType": "struct IArtCoinsFactoryV2.ExtensionConfigV2[]",
+      "components": [
+       {
+        "name": "extension",
+        "type": "address",
+        "internalType": "address"
+       },
+       {
+        "name": "msgValue",
+        "type": "uint256",
+        "internalType": "uint256"
+       },
+       {
+        "name": "extensionBps",
+        "type": "uint16",
+        "internalType": "uint16"
+       },
+       {
+        "name": "extensionData",
+        "type": "bytes",
+        "internalType": "bytes"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "launcher_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "coin_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "payee_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "stack_",
+    "type": "tuple",
+    "internalType": "struct Stack",
+    "components": [
+     {
+      "name": "poolManager",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "hook",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "tickSpacing",
+      "type": "int24",
+      "internalType": "int24"
+     },
+     {
+      "name": "poolFee",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "factory",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "locker",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "escrow",
+      "type": "address",
+      "internalType": "address"
+     }
+    ]
+   },
+   {
+    "name": "rateStart_",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "settings_",
+    "type": "tuple",
+    "internalType": "struct Settings",
+    "components": [
+     {
+      "name": "dropPer100PointsBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "dropFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "ceilBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "idleLoosenBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToBuybackBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryClimbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryGapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "peakHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "buybackDelay",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "balanceBidOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "redeemSlippageBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceBidMarginBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "buybackSlice",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "keeperFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "keeperMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "rateCap",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "feeToRedeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "payeePpm",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "pointsPerPage",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "swapFeeCc",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToOperatorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbMultiplierCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "spendCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "bucketSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "balanceBidCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "idleStepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "sniperSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "reserveWei",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "returnLockSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "valueModeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "buyToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceDiscountBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   },
+   {
+    "name": "credit_",
+    "type": "tuple",
+    "internalType": "struct Credit",
+    "components": [
+     {
+      "name": "costToPotBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "chosenComposeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "minCcToChoose",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   },
+   {
+    "name": "artist_",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "receive",
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "COIN",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ESCROW",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "FACTORY",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "HOOK",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "LOCKER",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MANAGER",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "contract IPoolManager"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "POOL_FEE",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint24",
+    "internalType": "uint24"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "RATE_START",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "TICK_SPACING",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "int24",
+    "internalType": "int24"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "acceptOwnership",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "adaptersLocked",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "addAdapter",
+  "inputs": [
+   {
+    "name": "a",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "adopt",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "allowedAdapter",
+  "inputs": [
+   {
+    "name": "adapter",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "artist",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceBidForScore",
+  "inputs": [
+   {
+    "name": "score",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceBidOf",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceModule",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceModuleLocked",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceRate",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceToken",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "bidForScore",
+  "inputs": [
+   {
+    "name": "score",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "bidOf",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "book",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "buyListing",
+  "inputs": [
+   {
+    "name": "adapter",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "params",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "buyback",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "checkpointTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "chosenComposeOn",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "climbMultiplier",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "collectEscrow",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "compose",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "compose",
+  "inputs": [
+   {
+    "name": "format",
+    "type": "uint8",
+    "internalType": "uint8"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "composeChosen",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[80]",
+    "internalType": "uint256[80]"
+   },
+   {
+    "name": "format",
+    "type": "uint8",
+    "internalType": "uint8"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "composerOf",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "controller",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "controllerLocked",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditCostToPotBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditInfo",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "inPile",
+    "type": "bool",
+    "internalType": "bool"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "acquiredAt",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethPerPoint",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethPot",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethPrice",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethRate",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethRedeemBurn",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ethToBuyback",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "floorRate",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "fund",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "heldStatements",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "sids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "isForbidden",
+  "inputs": [
+   {
+    "name": "t",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "lastBuybackBlock",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "lastFillTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "lockAdapters",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "lockBalanceModule",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "lockController",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "lockSuccessor",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "migrate",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "minCcToChoose",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint96",
+    "internalType": "uint96"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "onERC721Received",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bytes4",
+    "internalType": "bytes4"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "owner",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "paused",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pausedSince",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pausedTotal",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "payee",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "payeeOn",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pendingOwner",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pilePage",
+  "inputs": [
+   {
+    "name": "startAfter",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "n",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pileSize",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "rateAtCheckpoint",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ratingOf",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "redeemStatement",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "refreshReference",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "releaseRedeemBurn",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "removeAdapter",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "rescueCoin",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "rescueNft",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "rescueToken",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "reserve",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "retired",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "sellCreditTo",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "sellForBalance",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sellForBalance",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sellForBalance",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   },
+   {
+    "name": "minOut",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sellForEth",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   },
+   {
+    "name": "minOut",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sellForEth",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sellTo",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "setArtist",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setBalanceModule",
+  "inputs": [
+   {
+    "name": "module",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setChosenComposeOn",
+  "inputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setController",
+  "inputs": [
+   {
+    "name": "c",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setCreditCostToPotBps",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setHeldFormat",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "format",
+    "type": "uint8",
+    "internalType": "uint8"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setMinCcToChoose",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint96",
+    "internalType": "uint96"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setOpeningRate",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setPaused",
+  "inputs": [
+   {
+    "name": "on",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setPayee",
+  "inputs": [
+   {
+    "name": "to",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setRate",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setSettings",
+  "inputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct Settings",
+    "components": [
+     {
+      "name": "dropPer100PointsBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "dropFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "ceilBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "idleLoosenBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToBuybackBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryClimbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryGapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "peakHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "buybackDelay",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "balanceBidOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "redeemSlippageBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceBidMarginBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "buybackSlice",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "keeperFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "keeperMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "rateCap",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "feeToRedeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "payeePpm",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "pointsPerPage",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "swapFeeCc",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToOperatorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbMultiplierCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "spendCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "bucketSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "balanceBidCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "idleStepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "sniperSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "reserveWei",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "returnLockSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "valueModeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "buyToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceDiscountBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setSuccessor",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "settings",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct Settings",
+    "components": [
+     {
+      "name": "dropPer100PointsBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "dropFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "ceilBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "idleLoosenBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToBuybackBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryClimbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryGapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "peakHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "buybackDelay",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "balanceBidOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "redeemSlippageBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceBidMarginBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "buybackSlice",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "keeperFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "keeperMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "rateCap",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "feeToRedeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "payeePpm",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "pointsPerPage",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "swapFeeCc",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToOperatorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbMultiplierCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "spendCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "bucketSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "balanceBidCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "idleStepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "sniperSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "reserveWei",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "returnLockSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "valueModeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "buyToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceDiscountBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "sharedRate",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "spendState",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "bucket",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "budget",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "spent",
+    "type": "uint128",
+    "internalType": "uint128"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "statementAge",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "statementInfo",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "held",
+    "type": "bool",
+    "internalType": "bool"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "composedAt",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "successor",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "successorLocked",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "swapCredit",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "transferOwnership",
+  "inputs": [
+   {
+    "name": "to",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "unlockCallback",
+  "inputs": [
+   {
+    "name": "data",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "AdapterSet",
+  "inputs": [
+   {
+    "name": "adapter",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "allowed",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "AdaptersLocked",
+  "inputs": [],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ArtistSet",
+  "inputs": [
+   {
+    "name": "artist",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BalanceFill",
+  "inputs": [
+   {
+    "name": "paid",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toArtist",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "available",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BalanceModuleLocked",
+  "inputs": [],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BalanceModuleSet",
+  "inputs": [
+   {
+    "name": "balanceModule",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "balanceToken",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "unitPerPoint",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BalanceRateSet",
+  "inputs": [
+   {
+    "name": "rateBps",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Buyback",
+  "inputs": [
+   {
+    "name": "caller",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amountIn",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "paid",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ChosenComposeOnSet",
+  "inputs": [
+   {
+    "name": "on",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CoinRescued",
+  "inputs": [
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Composed",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "ids",
+    "type": "uint256[80]",
+    "indexed": false,
+    "internalType": "uint256[80]"
+   },
+   {
+    "name": "format",
+    "type": "uint8",
+    "indexed": false,
+    "internalType": "uint8"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "caller",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ControllerLocked",
+  "inputs": [],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ControllerSet",
+  "inputs": [
+   {
+    "name": "controller",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditAdopted",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditBought",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toArtist",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditCostToPotBpsSet",
+  "inputs": [
+   {
+    "name": "bps",
+    "type": "uint16",
+    "indexed": false,
+    "internalType": "uint16"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditSold",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toArtist",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toOperator",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditSwapped",
+  "inputs": [
+   {
+    "name": "inId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "outId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "caller",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "fee",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EngineRetired",
+  "inputs": [
+   {
+    "name": "successor",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EscrowCollected",
+  "inputs": [
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EthRateFill",
+  "inputs": [
+   {
+    "name": "spent",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "rate",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "pot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "FeesAdded",
+  "inputs": [
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toPayee",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Funded",
+  "inputs": [
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "HeldFormatSet",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "format",
+    "type": "uint8",
+    "indexed": false,
+    "internalType": "uint8"
+   },
+   {
+    "name": "caller",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ListingBought",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "adapter",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "caller",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "paid",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "rate",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toArtist",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Migrated",
+  "inputs": [
+   {
+    "name": "successor",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "eth",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "credits",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "MinCcToChooseSet",
+  "inputs": [
+   {
+    "name": "min",
+    "type": "uint96",
+    "indexed": false,
+    "internalType": "uint96"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "NftRescued",
+  "inputs": [
+   {
+    "name": "token",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OwnershipTransferStarted",
+  "inputs": [
+   {
+    "name": "owner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "pending",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OwnershipTransferred",
+  "inputs": [
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "PausedSet",
+  "inputs": [
+   {
+    "name": "paused",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "PayeeSet",
+  "inputs": [
+   {
+    "name": "payee",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "RateSet",
+  "inputs": [
+   {
+    "name": "rate",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "RedeemBurnReleased",
+  "inputs": [
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "SettingsSet",
+  "inputs": [
+   {
+    "name": "settings",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct Settings",
+    "components": [
+     {
+      "name": "dropPer100PointsBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "dropFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "ceilBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "idleLoosenBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleFloorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToBuybackBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryClimbPerMinBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "recoveryGapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "peakHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "buybackDelay",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "balanceBidOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "redeemSlippageBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceBidMarginBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "redeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "buybackSlice",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "keeperFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "keeperMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "rateCap",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerFee",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "callerMaxBaseFee",
+      "type": "uint48",
+      "internalType": "uint48"
+     },
+     {
+      "name": "feeToRedeemBurnBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "payeePpm",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "pointsPerPage",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "swapFeeCc",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "saleToOperatorBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "climbMultiplierCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "spendCapBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "bucketSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "balanceBidCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "idleStepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "sniperSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "reserveWei",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "returnLockSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "valueModeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "buyToArtistBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "balanceDiscountBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "StatementRedeemed",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "received",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "StatementSoldTo",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toBuyback",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toArtist",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "toOperator",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "SuccessorLocked",
+  "inputs": [],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "SuccessorSet",
+  "inputs": [
+   {
+    "name": "successor",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "TokenRescued",
+  "inputs": [
+   {
+    "name": "token",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ValueRateFill",
+  "inputs": [
+   {
+    "name": "spent",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "rateBps",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "pot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "AboveBid",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "AdapterNotAllowed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "AlreadyOwned",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadController",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadCost",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadFormat",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadModule",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadQuote",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadRate",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadSender",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadSetting",
+  "inputs": [
+   {
+    "name": "field",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "BadStack",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadStatement",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadSuccessor",
+  "inputs": [
+   {
+    "name": "who",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "BadSwap",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BalanceBidOff",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BalanceTokenChanged",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BelowFloor",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BelowMinCc",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "CallFailed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ChosenComposeOff",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Empty",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ForbiddenTarget",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Held",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InPile",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InWindow",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "Locked",
+  "inputs": [
+   {
+    "name": "what",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "NoBalanceModule",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NoCode",
+  "inputs": [
+   {
+    "name": "who",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "NoCredit",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NoCreditRescue",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NoQuote",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NoSuccessor",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotEligible",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotForSale",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotHeld",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotHolder",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotInPile",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "NotOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotReady",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NothingBought",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NothingToBuy",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OnlyController",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OnlyOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OnlyPendingOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OnlyPoolManager",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OpeningRateClosed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Paused",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "PotTooSmall",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "RedeemOff",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Reentrancy",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Retired",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ReturnLocked",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "until",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "ScoreTooLow",
+  "inputs": [
+   {
+    "name": "inId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "outId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "SliceTooSmall",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Slippage",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "SpendCapReached",
+  "inputs": [
+   {
+    "name": "spent",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "cost",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "budget",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "TooSoon",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UseFund",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ZeroAddress",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ZeroAmount",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ZeroId",
+  "inputs": []
+ }
+]

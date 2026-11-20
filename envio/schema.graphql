@@ -1,0 +1,482 @@
+# Entities mirror indexer/ponder.schema.ts table for table. Differences are listed in README.md.
+
+enum CreditState {
+  outside
+  held
+  composed
+  sold
+  swapped_out
+  migrated
+}
+
+enum AcquiredHow {
+  eth_bid
+  balance_bid
+  listing
+  adopted
+  swap_in
+}
+
+enum StatementState {
+  outside
+  held
+  sold
+  redeemed
+}
+
+enum ComposeMode {
+  default
+  chosen
+}
+
+enum ActivityKind {
+  credit_bought
+  credit_adopted
+  listing_bought
+  credit_swapped
+  composed
+  restyled
+  statement_sold
+  credit_sold
+  redeemed
+  buyback
+  fees_added
+  funded
+  escrow_collected
+}
+
+enum TreasuryEventKind {
+  statement_converted
+  cc_redeemed
+  claims_funded
+  claims_allocated
+  claims_returned
+  working_withdrawn
+  policy_set
+  fee_set
+  switches_set
+  contribution_set
+  minimum_working_set
+  payment_accrued
+  owed_claimed
+  migrated_out
+  migration_received
+  bid_fill
+  swept
+  allocated
+  unallocated
+  redeemer_registered
+  redeemer_caps_set
+  redeemer_switched
+  shares_set
+  claim_released
+  cushion_set
+  paused_set
+  bid_set
+  drawn
+}
+
+type Log @index(fields: ["contract", "event", "blockNumber"]) {
+  id: ID!
+  address: String!
+  contract: String!
+  event: String!
+  args: Json!
+  txFrom: String
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type TransactionFact {
+  id: ID!
+  ethFillPending: Boolean!
+  balanceBuyId: BigInt
+  balanceBuyActivityId: String
+  coreBurn: BigInt!
+}
+
+type Engine {
+  id: ID!
+  core: String!
+  controller: String
+  coin: String
+  balanceModule: String
+  balanceToken: String
+  owner: String
+  pendingOwner: String
+  payee: String
+  artist: String
+  successor: String
+  paused: Boolean!
+  retired: Boolean!
+  controllerLocked: Boolean!
+  balanceModuleLocked: Boolean!
+  adaptersLocked: Boolean!
+  successorLocked: Boolean!
+  chosenComposeOn: Boolean!
+  payeeOn: Boolean!
+  settings: Json
+  saleToArtistBps: Int
+  saleToOperatorBps: Int
+  saleToBuybackBps: Int
+  feeToRedeemBurnBps: Int
+  payeePpm: Int
+  buyToArtistBps: Int
+  balanceDiscountBps: Int
+  creditCostToPotBps: Int
+  minCcToChoose: BigInt
+  lastBuybackBlock: BigInt
+  ethPot: BigInt
+  ethToBuyback: BigInt
+  ethRedeemBurn: BigInt
+  ethRate: BigInt
+  floorRate: BigInt
+  balanceRate: BigInt
+  coreEthBalance: BigInt
+  balanceAvailable: BigInt
+  pileSize: BigInt
+  snapshotBlock: BigInt
+  pileSeq: BigInt!
+  deployBlock: BigInt!
+}
+
+type EngineSnapshot {
+  id: ID!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  ethPot: BigInt!
+  ethToBuyback: BigInt!
+  ethRedeemBurn: BigInt!
+  ethRate: BigInt!
+  floorRate: BigInt!
+  balanceRate: BigInt!
+  coreEthBalance: BigInt!
+  balanceAvailable: BigInt
+  balanceToken: String
+  pileSize: BigInt!
+  payeeOn: Boolean!
+  paused: Boolean!
+  valueBuy: BigInt
+  valueSell: BigInt
+  referencePrice: BigInt
+  spotPrice: BigInt
+  treasuryBalance: BigInt
+  treasuryWorking: BigInt
+  claimReserve: BigInt
+  ccSupply: BigInt
+}
+
+type SettingChange @index(fields: ["name", "blockNumber"]) {
+  id: ID!
+  source: String!
+  name: String!
+  before: Json
+  after: Json
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type Controller {
+  id: ID!
+  setBlock: BigInt!
+  active: Boolean!
+  markupBps: Int
+  startCapBps: BigInt
+  decayHours: Int
+  anchorHalfLife: BigInt
+  anchorMinCost: BigInt
+  saleOn: Boolean
+  ageEligibilityOn: Boolean
+  window: BigInt
+  spreadBps: Int
+  startBps: BigInt
+  anchorBps: BigInt
+  anchorBlock: BigInt
+  balancePoolSet: Boolean!
+  balanceCurrency0: String
+  balanceCurrency1: String
+  balanceFee: Int
+  balanceTickSpacing: Int
+  balanceHooks: String
+  referenceRateBpsPerHour: BigInt
+  referenceStepBps: Int
+  referenceTolBps: Int
+  referenceMaxStale: BigInt
+  referenceMinSeconds: BigInt
+  referenceMinLiquidity: BigInt
+  referencePrice: BigInt
+  referenceSpot: BigInt
+  referenceTime: BigInt
+  statementSalesEnabled: Boolean
+  statementSaleMultiplierBps: BigInt
+  statementRedeemDelaySeconds: BigInt
+}
+
+type TreasuryEvent @index(fields: ["treasury", "blockNumber"]) @index(fields: ["kind", "blockNumber"]) {
+  id: ID!
+  treasury: String!
+  kind: TreasuryEventKind!
+  ccIn: BigInt
+  balanceOut: BigInt
+  claimReserve: BigInt
+  ccSupply: BigInt
+  configEpoch: BigInt
+  amount: BigInt
+  bps: Int
+  actor: String @index
+  recipient: String
+  redeemer: String @index
+  policy: String
+  statementId: BigInt
+  detail: Json
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type TreasuryState {
+  id: ID!
+  version: String
+  balanceToken: String!
+  setBlock: BigInt!
+  active: Boolean!
+  claimReserve: BigInt
+  totalOwed: BigInt!
+  configEpoch: BigInt
+  policy: String
+  conversionToClaimBps: Int
+  redemptionFeeBps: Int
+  conversionEnabled: Boolean
+  workingPaymentsEnabled: Boolean
+  ccRedemptionEnabled: Boolean
+  bidEnabled: Boolean
+  paused: Boolean
+  minimumWorkingBalance: BigInt
+  migrated: Boolean!
+  successor: String
+  proRataRedeemer: String
+  cushion: BigInt
+  bidBudget: BigInt
+  bidShareBps: Int
+  totalShareBps: Int
+  convertedTotal: BigInt!
+  contributedTotal: BigInt!
+  conversions: BigInt!
+  redeemedCcTotal: BigInt!
+  paidBalanceTotal: BigInt!
+  redemptions: BigInt!
+  ownerFundedTotal: BigInt!
+  ownerAllocatedTotal: BigInt!
+  ownerReturnedTotal: BigInt!
+  ownerWithdrawnTotal: BigInt!
+  accruedTotal: BigInt!
+  claimedTotal: BigInt!
+  bidInTotal: BigInt!
+  bidOutTotal: BigInt!
+  bidFills: BigInt!
+  bidCreditsTotal: BigInt!
+  sweptSurplusTotal: BigInt!
+  bucketsFundedTotal: BigInt!
+  allocatedTotal: BigInt!
+  unallocatedTotal: BigInt!
+  claimReleasedTotal: BigInt!
+  lastEventBlock: BigInt
+}
+
+type Redeemer {
+  id: ID!
+  treasury: String! @index
+  redeemer: String!
+  registered: Boolean!
+  on: Boolean!
+  activeAt: BigInt
+  epoch: BigInt
+  shareBps: Int
+  perCall: BigInt
+  perPeriod: BigInt
+  lifetime: BigInt
+  premiumBps: Int
+  premiumEpoch: BigInt
+  redeemedCcTotal: BigInt!
+  paidBalanceTotal: BigInt!
+  redemptions: BigInt!
+  allocatedTotal: BigInt!
+  unallocatedTotal: BigInt!
+  claimReleasedTotal: BigInt!
+  firstBlock: BigInt!
+  lastEventBlock: BigInt!
+}
+
+type Credit @index(fields: ["state", "pileOrder"]) {
+  id: ID!
+  seed: String!
+  paidAt: BigInt!
+  score: BigInt!
+  rating: String!
+  mask: Int!
+  active: Int!
+  occupied: Int!
+  eights: Int!
+  band: Int!
+  owner: String @index
+  state: CreditState!
+  costBasis: BigInt
+  acquiredAt: BigInt
+  acquiredBlock: BigInt
+  acquiredTx: String
+  acquiredHow: AcquiredHow
+  seller: String
+  royalty: BigInt
+  balancePaid: BigInt
+  balancePaidToken: String
+  pileOrder: BigInt
+  statementId: BigInt
+  pagePosition: Int
+  salePrice: BigInt
+  buyer: String
+  toArtist: BigInt
+  toOperator: BigInt
+  toPot: BigInt
+  toBuyback: BigInt
+  costToPotBps: Int
+  tokenUri: String
+}
+
+type Statement {
+  id: ID!
+  state: StatementState! @index
+  owner: String @index
+  composedAt: BigInt
+  composedBlock: BigInt
+  composeTx: String
+  composer: String
+  mode: ComposeMode
+  cost: BigInt
+  composePrice: BigInt
+  rating: BigInt
+  format: Int
+  salePrice: BigInt
+  buyer: String
+  toBuyback: BigInt
+  toArtist: BigInt
+  toOperator: BigInt
+  toPot: BigInt
+  redeemedReceived: BigInt
+  tokenUri: String
+  formatName: String
+}
+
+type StatementCredit {
+  id: ID!
+  statementId: BigInt! @index
+  position: Int!
+  creditId: BigInt! @index
+}
+
+type StatementFormat {
+  id: ID!
+  statementId: BigInt! @index
+  from: Int!
+  to: Int!
+  caller: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type AnchorMove {
+  id: ID!
+  controller: String!
+  statementId: BigInt! @index
+  saleBps: BigInt!
+  anchorBps: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type Activity @index(fields: ["kind", "blockNumber"]) @index(fields: ["blockNumber", "logIndex"]) {
+  id: ID!
+  kind: ActivityKind!
+  creditId: BigInt @index
+  otherCreditId: BigInt
+  statementId: BigInt @index
+  account: String @index
+  amount: BigInt
+  amount2: BigInt
+  balanceToken: String
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  txHash: String!
+  logIndex: Int!
+}
+
+type Stats {
+  id: ID!
+  creditsBought: BigInt!
+  creditsEth: BigInt!
+  creditsBalance: BigInt!
+  creditsListing: BigInt!
+  creditsAdopted: BigInt!
+  creditsSwapped: BigInt!
+  composed: BigInt!
+  restyled: BigInt!
+  statementsSold: BigInt!
+  creditsSold: BigInt!
+  redeemed: BigInt!
+  buybacks: BigInt!
+  ethIntoCredits: BigInt!
+  feesBooked: BigInt!
+  toPayee: BigInt!
+  toArtist: BigInt!
+  toArtistBuys: BigInt!
+  toOperator: BigInt!
+  ccBurned: BigInt!
+  ethToBuybackSpent: BigInt!
+  balanceCommittedByToken: Json!
+}
+
+type StatsHourly {
+  id: ID!
+  hour: BigInt!
+  creditsBought: BigInt!
+  creditsEth: BigInt!
+  creditsBalance: BigInt!
+  creditsListing: BigInt!
+  creditsAdopted: BigInt!
+  creditsSwapped: BigInt!
+  composed: BigInt!
+  restyled: BigInt!
+  statementsSold: BigInt!
+  creditsSold: BigInt!
+  redeemed: BigInt!
+  buybacks: BigInt!
+  ethIntoCredits: BigInt!
+  feesBooked: BigInt!
+  toPayee: BigInt!
+  toArtist: BigInt!
+  toArtistBuys: BigInt!
+  toOperator: BigInt!
+  ccBurned: BigInt!
+  ethToBuybackSpent: BigInt!
+  balanceCommittedByToken: Json!
+}
+
+type StrategyListing @index(fields: ["active", "listPrice"]) {
+  id: ID!
+  listPrice: BigInt!
+  active: Boolean!
+  boughtBlock: BigInt!
+  boughtAt: BigInt!
+  soldBlock: BigInt
+  soldAt: BigInt
+  buyer: String
+}
+

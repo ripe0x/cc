@@ -1,0 +1,2319 @@
+[
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "core",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "sale",
+    "type": "tuple",
+    "internalType": "struct Sale",
+    "components": [
+     {
+      "name": "markupBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "decayHours",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "anchorHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "anchorMinCost",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "anchorMoveBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   },
+   {
+    "name": "credit",
+    "type": "tuple",
+    "internalType": "struct Credit",
+    "components": [
+     {
+      "name": "costToPotBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "chosenComposeOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "minCcToChoose",
+      "type": "uint96",
+      "internalType": "uint96"
+     },
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   },
+   {
+    "name": "quote_",
+    "type": "tuple",
+    "internalType": "struct Quote",
+    "components": [
+     {
+      "name": "referenceRateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceStepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "tolBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "referenceMaxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceMinSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "CORE",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "contract ICoreViews"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ageEligibilityOn",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "anchorBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "anchorHalfLife",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "anchorMinCost",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint128",
+    "internalType": "uint128"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "anchorMoveBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "anchorTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "atFloor",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceClampFor",
+  "inputs": [
+   {
+    "name": "score",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "posted",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "paid",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ok",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balancePoolKey",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "currency0",
+    "type": "address",
+    "internalType": "Currency"
+   },
+   {
+    "name": "currency1",
+    "type": "address",
+    "internalType": "Currency"
+   },
+   {
+    "name": "fee",
+    "type": "uint24",
+    "internalType": "uint24"
+   },
+   {
+    "name": "tickSpacing",
+    "type": "int24",
+    "internalType": "int24"
+   },
+   {
+    "name": "hooks",
+    "type": "address",
+    "internalType": "contract IHooks"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balancePoolKeySet",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "buy",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "buyCredit",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "buyCredits",
+  "inputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "creditPrice",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "price",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditSaleOn",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditSpreadBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditStartBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditWindow",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "decayHours",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "floorMultBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "markupBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "nextPage",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "ready",
+    "type": "bool",
+    "internalType": "bool"
+   },
+   {
+    "name": "ids",
+    "type": "uint256[80]",
+    "internalType": "uint256[80]"
+   },
+   {
+    "name": "format",
+    "type": "uint8",
+    "internalType": "uint8"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pastWindow",
+  "inputs": [
+   {
+    "name": "acquiredAt",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pointRate",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "priceOf",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "price",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "quote",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "referenceRateBpsPerHour",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "referenceStepBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "tolBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "referenceMaxStale",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "referenceMinSeconds",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "minLiquidity",
+    "type": "uint128",
+    "internalType": "uint128"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "referenceOf",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "referencePrice",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "referenceTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "refreshReference",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setAgeEligibilityOn",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setAnchorBps",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setBalancePoolKey",
+  "inputs": [
+   {
+    "name": "key",
+    "type": "tuple",
+    "internalType": "struct PoolKey",
+    "components": [
+     {
+      "name": "currency0",
+      "type": "address",
+      "internalType": "Currency"
+     },
+     {
+      "name": "currency1",
+      "type": "address",
+      "internalType": "Currency"
+     },
+     {
+      "name": "fee",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "tickSpacing",
+      "type": "int24",
+      "internalType": "int24"
+     },
+     {
+      "name": "hooks",
+      "type": "address",
+      "internalType": "contract IHooks"
+     }
+    ]
+   },
+   {
+    "name": "expectedSpot",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setCredit",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct CreditSale",
+    "components": [
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setQuote",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct Quote",
+    "components": [
+     {
+      "name": "referenceRateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceStepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "tolBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "referenceMaxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceMinSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setSale",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct Sale",
+    "components": [
+     {
+      "name": "markupBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "decayHours",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "anchorHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "anchorMinCost",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "anchorMoveBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "spotPrice",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "spot",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ok",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "startBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "startCapBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "storedAnchorBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "valueOf",
+  "inputs": [
+   {
+    "name": "points",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "valuePerPoint",
+  "inputs": [
+   {
+    "name": "forSale",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "value",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ok",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "event",
+  "name": "AgeEligibilitySet",
+  "inputs": [
+   {
+    "name": "on",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "AnchorBpsSet",
+  "inputs": [
+   {
+    "name": "anchorBps",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "AnchorMoved",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "saleBps",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "anchorBps",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BalancePoolKeySet",
+  "inputs": [
+   {
+    "name": "currency0",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "currency1",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "fee",
+    "type": "uint24",
+    "indexed": false,
+    "internalType": "uint24"
+   },
+   {
+    "name": "tickSpacing",
+    "type": "int24",
+    "indexed": false,
+    "internalType": "int24"
+   },
+   {
+    "name": "hooks",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Bought",
+  "inputs": [
+   {
+    "name": "sid",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditSaleSet",
+  "inputs": [
+   {
+    "name": "credit",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct CreditSale",
+    "components": [
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "QuoteSet",
+  "inputs": [
+   {
+    "name": "quote",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct Quote",
+    "components": [
+     {
+      "name": "referenceRateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceStepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "tolBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "referenceMaxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceMinSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ReferenceRefreshed",
+  "inputs": [
+   {
+    "name": "referencePrice",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "spot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "SaleSet",
+  "inputs": [
+   {
+    "name": "sale",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct Sale",
+    "components": [
+     {
+      "name": "markupBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startCapBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "decayHours",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "anchorHalfLife",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "anchorMinCost",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "anchorMoveBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "BadSetting",
+  "inputs": [
+   {
+    "name": "field",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "CreditSaleOff",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NoQuote",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotForSale",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "OnlyOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Reentrant",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Underpaid",
+  "inputs": []
+ },
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "core",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "credit",
+    "type": "tuple",
+    "internalType": "struct CreditSale",
+    "components": [
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   },
+   {
+    "name": "quote_",
+    "type": "tuple",
+    "internalType": "struct Quote",
+    "components": [
+     {
+      "name": "referenceRateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceStepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "tolBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "referenceMaxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceMinSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   },
+   {
+    "name": "statementSaleMultiplierBps_",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "statementRedeemDelaySeconds_",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setStatementRedeemDelaySeconds",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setStatementSaleMultiplierBps",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setStatementSales",
+  "inputs": [
+   {
+    "name": "enabled",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "statementRedeemDelaySeconds",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "statementSaleMultiplierBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "statementSalesEnabled",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "event",
+  "name": "StatementRedeemDelaySet",
+  "inputs": [
+   {
+    "name": "delaySeconds",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "StatementSaleMultiplierSet",
+  "inputs": [
+   {
+    "name": "multiplierBps",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "StatementSalesSet",
+  "inputs": [
+   {
+    "name": "enabled",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "StatementSalesOff",
+  "inputs": []
+ },
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "core",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "credit",
+    "type": "tuple",
+    "internalType": "struct CreditSale",
+    "components": [
+     {
+      "name": "saleOn",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "window",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "startBps",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   },
+   {
+    "name": "quote_",
+    "type": "tuple",
+    "internalType": "struct Quote",
+    "components": [
+     {
+      "name": "referenceRateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceStepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "tolBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "referenceMaxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "referenceMinSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   },
+   {
+    "name": "statementSaleMultiplierBps_",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "statementRedeemDelaySeconds_",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "idle_",
+    "type": "tuple",
+    "internalType": "struct IdleLoosening",
+    "components": [
+     {
+      "name": "stepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "bps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "capBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "balancePriorSample",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccPoolKey",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "currency0",
+    "type": "address",
+    "internalType": "Currency"
+   },
+   {
+    "name": "currency1",
+    "type": "address",
+    "internalType": "Currency"
+   },
+   {
+    "name": "fee",
+    "type": "uint24",
+    "internalType": "uint24"
+   },
+   {
+    "name": "tickSpacing",
+    "type": "int24",
+    "internalType": "int24"
+   },
+   {
+    "name": "hooks",
+    "type": "address",
+    "internalType": "contract IHooks"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccPoolKeySet",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccPrice",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "price",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ok",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccPriorSample",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccQuote",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "rateBpsPerHour",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "stepBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "maxStale",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "minSeconds",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "avgSeconds",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "minLiquidity",
+    "type": "uint128",
+    "internalType": "uint128"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccReferencePrice",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ccReferenceTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "creditSoldAt",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "fillHint",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "idle",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "stepSeconds",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "bps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "capBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "idleLoosenBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "b",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "idleSince",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "t",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "known",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "lastFillSeen",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "marketFloor",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "poster",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "spreadBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "stepBps",
+    "type": "uint16",
+    "internalType": "uint16"
+   },
+   {
+    "name": "minSeconds",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "maxStale",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "marketFloorAsk",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "ask",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "fresh",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "marketFloorTime",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint40",
+    "internalType": "uint40"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "marketFloorWei",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint128",
+    "internalType": "uint128"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "postMarketFloor",
+  "inputs": [
+   {
+    "name": "floorWei",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "refreshCcReference",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setCcPoolKey",
+  "inputs": [
+   {
+    "name": "key",
+    "type": "tuple",
+    "internalType": "struct PoolKey",
+    "components": [
+     {
+      "name": "currency0",
+      "type": "address",
+      "internalType": "Currency"
+     },
+     {
+      "name": "currency1",
+      "type": "address",
+      "internalType": "Currency"
+     },
+     {
+      "name": "fee",
+      "type": "uint24",
+      "internalType": "uint24"
+     },
+     {
+      "name": "tickSpacing",
+      "type": "int24",
+      "internalType": "int24"
+     },
+     {
+      "name": "hooks",
+      "type": "address",
+      "internalType": "contract IHooks"
+     }
+    ]
+   },
+   {
+    "name": "expectedSpot",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setCcQuote",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct CcQuote",
+    "components": [
+     {
+      "name": "rateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "stepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "maxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "avgSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setIdleLoosening",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct IdleLoosening",
+    "components": [
+     {
+      "name": "stepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "bps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "capBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setMarketFloor",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct MarketFloor",
+    "components": [
+     {
+      "name": "poster",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "stepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "minSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "maxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "syncFill",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "CcPoolKeySet",
+  "inputs": [
+   {
+    "name": "currency0",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "currency1",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   },
+   {
+    "name": "fee",
+    "type": "uint24",
+    "indexed": false,
+    "internalType": "uint24"
+   },
+   {
+    "name": "tickSpacing",
+    "type": "int24",
+    "indexed": false,
+    "internalType": "int24"
+   },
+   {
+    "name": "hooks",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CcQuoteSet",
+  "inputs": [
+   {
+    "name": "quote",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct CcQuote",
+    "components": [
+     {
+      "name": "rateBpsPerHour",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "stepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "maxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "avgSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "minLiquidity",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CcReferenceRefreshed",
+  "inputs": [
+   {
+    "name": "referencePrice",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "spot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CreditSoldRecorded",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "FillSynced",
+  "inputs": [
+   {
+    "name": "tail",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "acquiredAt",
+    "type": "uint64",
+    "indexed": false,
+    "internalType": "uint64"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "IdleLooseningSet",
+  "inputs": [
+   {
+    "name": "idle",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct IdleLoosening",
+    "components": [
+     {
+      "name": "stepSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "bps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "capBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "MarketFloorPosted",
+  "inputs": [
+   {
+    "name": "floorWei",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "by",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "MarketFloorSet",
+  "inputs": [
+   {
+    "name": "floor",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct MarketFloor",
+    "components": [
+     {
+      "name": "poster",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "spreadBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "stepBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "minSeconds",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "maxStale",
+      "type": "uint32",
+      "internalType": "uint32"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "OnlyPoster",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "StaleFloor",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "TooSoon",
+  "inputs": []
+ }
+]

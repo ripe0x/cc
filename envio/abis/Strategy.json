@@ -1,0 +1,46 @@
+[
+ {
+  "type": "event",
+  "name": "NFTBoughtByProtocol",
+  "anonymous": false,
+  "inputs": [
+   {
+    "name": "tokenId",
+    "type": "uint256",
+    "indexed": true
+   },
+   {
+    "name": "purchasePrice",
+    "type": "uint256",
+    "indexed": false
+   },
+   {
+    "name": "listPrice",
+    "type": "uint256",
+    "indexed": false
+   }
+  ]
+ },
+ {
+  "type": "event",
+  "name": "NFTSoldByProtocol",
+  "anonymous": false,
+  "inputs": [
+   {
+    "name": "tokenId",
+    "type": "uint256",
+    "indexed": true
+   },
+   {
+    "name": "price",
+    "type": "uint256",
+    "indexed": false
+   },
+   {
+    "name": "buyer",
+    "type": "address",
+    "indexed": false
+   }
+  ]
+ }
+]

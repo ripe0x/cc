@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: credits-engine-envio
+description: Credits engine (Core, controllers, balance treasury, Credits and Statements NFTs, CreditStrategy listings). HyperIndex port of indexer/ (Ponder).
+disable_default_cross_chain: true
+# Ponder hands handlers (and stores in log.args) lowercase addresses.
+address_format: lowercase
+contracts:
+  - name: Core
+    abi_file_path: ./abis/Core.json
+    events:
+      - event: EthRateFill(uint256 spent, uint256 rate, uint256 pot)
+      - event: ValueRateFill(uint256 spent, uint256 rateBps, uint256 pot)
+      - event: CreditBought(uint256 indexed id, address indexed from, uint256 cost, uint256 toArtist)
+      - event: BalanceFill(uint256 paid, uint256 toArtist, uint256 available)
+      - event: ListingBought(uint256 indexed id, address indexed adapter, address indexed caller, uint256 cost, uint256 paid, uint256 rate, uint256 toArtist)
+      - event: CreditAdopted(uint256 indexed id, uint256 cost)
+      - event: CreditSwapped(uint256 indexed inId, uint256 indexed outId, address indexed caller, uint256 fee)
+      - event: Composed(uint256 indexed sid, uint256[80] ids, uint8 format, uint256 cost, uint256 price, address indexed caller)
+      - event: HeldFormatSet(uint256 indexed sid, uint8 format, address indexed caller)
+      - event: StatementSoldTo(uint256 indexed sid, address indexed buyer, uint256 price, uint256 toBuyback, uint256 toArtist, uint256 toOperator)
+      - event: CreditSold(uint256 indexed id, address indexed buyer, uint256 price, uint256 toArtist, uint256 toOperator)
+      - event: StatementRedeemed(uint256 indexed sid, uint256 received)
+      - event: Buyback(address indexed caller, uint256 amountIn, uint256 paid)
+      - event: FeesAdded(uint256 amount, uint256 toPayee)
+      - event: Funded(address indexed from, uint256 amount)
+      - event: EscrowCollected(uint256 amount)
+      - event: SettingsSet((uint16 dropPer100PointsBps, uint16 dropFloorBps, uint16 climbPerMinBps, uint16 ceilBps, uint16 idleLoosenBps, uint16 saleFloorBps, uint16 saleToBuybackBps, uint16 recoveryClimbPerMinBps, uint16 recoveryGapBps, uint32 peakHalfLife, uint16 buybackDelay, bool redeemOn, bool balanceBidOn, uint16 redeemSlippageBps, uint16 balanceBidMarginBps, uint16 redeemBurnBps, uint128 buybackSlice, uint64 keeperFee, uint48 keeperMaxBaseFee, uint64 rateCap, uint64 callerFee, uint48 callerMaxBaseFee, uint16 feeToRedeemBurnBps, uint24 payeePpm, uint32 pointsPerPage, uint96 swapFeeCc, uint16 saleToArtistBps, uint16 saleToOperatorBps, uint16 climbMultiplierCapBps, uint16 spendCapBps, uint32 bucketSeconds, uint32 balanceBidCapBps, uint32 idleStepSeconds, uint32 sniperSeconds, uint64 reserveWei, uint32 returnLockSeconds, bool valueModeOn, uint16 buyToArtistBps, uint16 balanceDiscountBps) settings)
+      - event: RateSet(uint256 rate)
+      - event: BalanceRateSet(uint256 rateBps)
+      - event: CreditCostToPotBpsSet(uint16 bps)
+      - event: ChosenComposeOnSet(bool on)
+      - event: MinCcToChooseSet(uint96 min)
+      - event: PausedSet(bool paused)
+      - event: PayeeSet(address indexed payee)
+      - event: ArtistSet(address indexed artist)
+      - event: BalanceModuleSet(address balanceModule, address balanceToken, uint256 unitPerPoint)
+      - event: AdapterSet(address indexed adapter, bool allowed)
+      - event: ControllerSet(address controller)
+      - event: ControllerLocked()
+      - event: BalanceModuleLocked()
+      - event: AdaptersLocked()
+      - event: SuccessorLocked()
+      - event: SuccessorSet(address successor)
+      - event: EngineRetired(address indexed successor)
+      - event: OwnershipTransferStarted(address indexed owner, address indexed pending)
+      - event: OwnershipTransferred(address indexed from, address indexed to)
+      - event: RedeemBurnReleased(uint256 amount)
+      - event: CoinRescued(address indexed to, uint256 amount)
+      - event: NftRescued(address indexed token, uint256 indexed id, address indexed to)
+      - event: TokenRescued(address indexed token, address indexed to, uint256 amount)
+      - event: Migrated(address indexed successor, uint256 eth, uint256 credits)
+  - name: Controller
+    abi_file_path: ./abis/Controller.json
+    events:
+      - event: Bought(uint256 indexed sid, address indexed buyer, uint256 price)
+      - event: AnchorMoved(uint256 indexed sid, uint256 saleBps, uint32 anchorBps)
+      - event: SaleSet((uint16 markupBps, uint32 startCapBps, uint16 decayHours, uint32 anchorHalfLife, uint128 anchorMinCost, uint16 anchorMoveBps) sale)
+      - event: CreditSaleSet((bool saleOn, uint32 window, uint16 spreadBps, uint32 startBps) credit)
+      - event: AgeEligibilitySet(bool on)
+      - event: AnchorBpsSet(uint32 anchorBps)
+      - event: BalancePoolKeySet(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)
+      - event: QuoteSet((uint32 referenceRateBpsPerHour, uint16 referenceStepBps, uint16 tolBps, uint32 referenceMaxStale, uint32 referenceMinSeconds, uint128 minLiquidity) quote)
+      - event: ReferenceRefreshed(uint256 referencePrice, uint256 spot)
+      - event: StatementSalesSet(bool enabled)
+      - event: StatementSaleMultiplierSet(uint32 multiplierBps)
+      - event: StatementRedeemDelaySet(uint32 delaySeconds)
+      - event: IdleLooseningSet((uint32 stepSeconds, uint16 bps, uint16 capBps) idle)
+      - event: CcPoolKeySet(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)
+      - event: CcQuoteSet((uint32 rateBpsPerHour, uint16 stepBps, uint32 maxStale, uint32 minSeconds, uint32 avgSeconds, uint128 minLiquidity) quote)
+      - event: FillSynced(uint256 indexed tail, uint64 acquiredAt)
+      - event: CreditSoldRecorded(uint256 indexed id, address indexed buyer, uint256 price)
+      - event: CcReferenceRefreshed(uint256 referencePrice, uint256 spot)
+  - name: Treasury
+    abi_file_path: ./abis/Treasury.json
+    events:
+      - event: StatementConverted(uint256 indexed statementId, uint256 received, uint256 allocated, uint16 contributionBps, uint256 claimReserve)
+        name: StatementConvertedPhase2
+      - event: StatementConverted(uint256 indexed statementId, uint256 received, uint256 toProRata, uint16 contributionBps)
+        name: StatementConvertedV2
+      - event: PaymentAccrued(address indexed to, uint256 amount)
+      - event: OwedClaimed(address indexed to, uint256 amount)
+      - event: CCRedeemed(address indexed burner, address indexed recipient, uint256 ccIn, uint256 balanceOut, uint256 claimReserve, uint256 ccSupply, uint64 configEpoch)
+        name: CCRedeemedPhase2
+      - event: CCRedeemed(address indexed redeemer, address indexed burner, address indexed recipient, uint256 ccIn, uint256 amount, uint8 mode, uint32 duration, uint256 claimId, uint64 epoch)
+        name: CCRedeemedV2
+      - event: SwitchesSet(bool conversionEnabled, bool workingPaymentsEnabled, bool ccRedemptionEnabled)
+        name: SwitchesSetPhase2
+      - event: SwitchesSet(bool conversionEnabled, bool workingPaymentsEnabled)
+        name: SwitchesSetV2
+      - event: ConversionToClaimBpsSet(uint16 bps)
+      - event: RedemptionFeeSet(uint16 bps, uint64 configEpoch)
+      - event: MinimumWorkingBalanceSet(uint256 amount)
+      - event: RedemptionPolicySet(address indexed policy, uint64 configEpoch)
+      - event: ClaimsFunded(address indexed from, uint256 amount, uint256 claimReserve)
+      - event: ClaimsAllocated(uint256 amount, uint256 claimReserve)
+      - event: ClaimsReturned(uint256 amount, uint256 claimReserve, uint64 configEpoch)
+      - event: WorkingWithdrawn(address indexed to, uint256 amount)
+      - event: TreasuryMigrated(address indexed successor, uint256 moved, uint256 claimsImported, uint64 configEpoch)
+        name: TreasuryMigratedPhase2
+      - event: TreasuryMigrated(address indexed successor, uint256 moved, uint256 claimsExported)
+        name: TreasuryMigratedV2
+      - event: MigrationReceived(address indexed predecessor, uint256 claimsImported, uint256 claimReserve, uint64 configEpoch)
+        name: MigrationReceivedPhase2
+      - event: MigrationReceived(address indexed predecessor, uint256 claimsImported, uint256 custody)
+        name: MigrationReceivedV2
+      - event: Swept(uint256 surplus, uint256 toBuckets)
+      - event: Drawn(address indexed spender, address indexed to, uint256 amount, uint256 accrued, uint256 bucket)
+      - event: Allocated(address indexed spender, uint256 amount)
+      - event: Unallocated(address indexed spender, uint256 amount)
+      - event: SpenderRegistered(address indexed spender, uint40 activeAt)
+      - event: SpenderCapsSet(address indexed spender, uint128 perCall, uint128 perPeriod, uint128 lifetime, uint64 epoch)
+      - event: SpenderSwitched(address indexed spender, bool on)
+      - event: SharesSet(address indexed spender, uint16 shareBps, uint16 totalShareBps)
+      - event: ClaimReleased(uint256 indexed claimId, address indexed recipient, uint256 amount)
+      - event: CushionSet(uint256 cushion)
+      - event: PausedSet(bool paused)
+      - event: TokenRescued(address indexed token, address indexed to, uint256 amount)
+  - name: Coin
+    abi_file_path: ./abis/Coin.json
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 value)
+  - name: Credits
+    abi_file_path: ./abis/Credits.json
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed id)
+  - name: Statements
+    abi_file_path: ./abis/Statements.json
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed id)
+  - name: Strategy
+    abi_file_path: ./abis/Strategy.json
+    events:
+      - event: NFTBoughtByProtocol(uint256 indexed tokenId, uint256 purchasePrice, uint256 listPrice)
+      - event: NFTSoldByProtocol(uint256 indexed tokenId, uint256 price, address buyer)
+chains:
+  - id: 1 # Ethereum mainnet
+    start_block: 26037292 # earliest source: Credits
+    end_block: ${ENVIO_END_BLOCK:-}
+    contracts:
+      - name: Core
+        address: "0xcdb1889ae12074d750cd9b8531b692015465e0dd"
+        start_block: 26229330
+      # Discovered from Core.ControllerSet / Core.BalanceModuleSet (indexer/ponder.config.ts factory sources).
+      - name: Controller
+        start_block: 26229330
+      - name: Treasury
+        start_block: 26229330
+      - name: Coin
+        address: "0x28ef14a55dc93cdcb9001fa038a184967146c789"
+        start_block: 26229330
+      - name: Credits
+        address: "0x97630aa70ab14ed9883b41dafccbc11349723043"
+        start_block: 26037292
+      - name: Statements
+        address: "0x75edd94b7e49b3bd5c8047b91f165a5e265a069b"
+        start_block: 26100733
+      - name: Strategy
+        address: "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6"
+        start_block: 26037623
