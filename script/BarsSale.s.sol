@@ -7,9 +7,15 @@ import {CCBarsVault} from "../src/adapters/CCBarsVault.sol";
 
 /// @notice the owner's Bars sale, one command that resumes from chain state: the sale by CREATE2 at a fixed address
 /// (skipped when its code exists), every Bar the CC Bars vault holds moved into it (skipped when none are left), then
-/// sales switched on (skipped when on). the price settings are this script's constants, set at creation; a later
+/// sales switched on (skipped when on), and the BALANCE left in the vault returned to the v1 treasury while that is still
+/// the Core's balance module (skipped when none is left). after this the vault holds nothing and melting runs from the
+/// sale, which pays the Core's balance module of the moment. the price settings are this script's constants, set at creation; a later
 /// change is the owner's `setSale`. the constants are part of the CREATE2 initcode: editing one after the first send
 /// predicts a new, empty sale and would leave the Bars in the first one, so price edits go through `setSale` only
+interface IErc20Balance {
+    function balanceOf(address who) external view returns (uint256);
+}
+
 contract BarsSale is Script {
     address public constant CORE = 0xcdb1889ae12074d750CD9B8531B692015465e0dD;
     address public constant BALANCE = 0x3620540c994433D7B4a628C46d2ED5F92572eA07;
@@ -37,12 +43,15 @@ contract BarsSale is Script {
         return vm.computeCreate2Address(SALT, keccak256(_initcode()), FACTORY);
     }
 
-    /// the Bars `holder` owns in the vault's mint range
+    /// the Bars `holder` owns in the vault's mint range, skipping melted (burned) Bars
     function barsOf(address holder) public view returns (uint256[] memory ids) {
         uint256[] memory all = new uint256[](LAST_ID - FIRST_ID + 1);
         uint256 n;
         for (uint256 id = FIRST_ID; id <= LAST_ID; ++id) {
-            if (IBarsForSale(BARS).ownerOf(id) == holder) all[n++] = id;
+            // a melted Bar is burned and `ownerOf` reverts for it
+            try IBarsForSale(BARS).ownerOf(id) returns (address o) {
+                if (o == holder) all[n++] = id;
+            } catch {}
         }
         ids = new uint256[](n);
         for (uint256 i; i < n; ++i) ids[i] = all[i];
@@ -59,6 +68,11 @@ contract BarsSale is Script {
         }
         if (ids.length != 0) CCBarsVault(VAULT).transferBars(address(sale), ids);
         if (!sale.on()) sale.setOn(true);
+        CCBarsVault vault = CCBarsVault(VAULT);
+        if (
+            IErc20Balance(BALANCE).balanceOf(VAULT) != 0
+                && ICoreForBarsSale(CORE).balanceModule() == vault.treasury()
+        ) vault.returnBalance();
         vm.stopBroadcast();
     }
 
@@ -73,6 +87,7 @@ contract BarsSale is Script {
         console.log("sale on", sale.on());
         console.log("Bars in sale", held.length);
         console.log("Bars left in vault", barsOf(VAULT).length);
+        console.log("BALANCE left in vault", IErc20Balance(BALANCE).balanceOf(VAULT));
         console.log("curve price wei", sale.curvePrice());
         if (held.length != 0) {
             console.log("first Bar", held[0]);

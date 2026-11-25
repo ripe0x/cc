@@ -20,11 +20,13 @@ interface IBarsForSale {
     function ownerOf(uint256 id) external view returns (address);
     function transferFrom(address from, address to, uint256 id) external;
     function safeTransferFrom(address from, address to, uint256 id) external;
+    function meltBatch(uint256[] calldata ids) external returns (uint256 total);
 }
 
 interface ICoreForBarsSale {
     function owner() external view returns (address);
     function controller() external view returns (address);
+    function balanceModule() external view returns (address);
     function fund() external payable;
 }
 
@@ -35,7 +37,8 @@ interface IBalancePrice {
 }
 
 /// @notice sells CC treasury Bars for ETH and pays every wei of the proceeds into the Core's pot (`Core.fund`), which
-/// funds the Credit bid. the Core's current owner alone sets the price and moves Bars out.
+/// funds the Credit bid. the Core's current owner alone sets the price, melts Bars and moves Bars out. melting pays the
+/// Core's balance module read at the melt, so a treasury migration needs no change here.
 ///
 /// the ask of a held Bar is the larger of two terms:
 /// 1. the curve: one ETH price for every Bar, falling in a straight line from `start` at `since` to `floor` at
@@ -58,11 +61,13 @@ contract CCBarsSale {
     error Underpaid();
     error BadSetting();
     error Reentrant();
+    error NoModule();
 
     event SaleSet(uint256 start, uint256 floor, uint256 window, uint256 marginBps, uint256 since);
     event SaleOn(bool on);
     event BarsSold(address indexed buyer, uint256[] ids, uint256 paid);
     event BarsTransferred(address indexed to, uint256[] ids);
+    event BarsMelted(uint256[] ids, address indexed module, uint256 recovered);
 
     uint256 internal constant BPS = 10_000;
 
@@ -169,7 +174,19 @@ contract CCBarsSale {
         _busy = false;
     }
 
-    /// moves Bars held here to `to` by safe transfer, such as back to the CC Bars vault to melt
+    /// melts Bars held here (at most 10, the Bars contract's cap) and sends everything their vaults released to the
+    /// Core's balance module now. BALANCE held here before the call stays here
+    function meltBars(uint256[] calldata ids) external onlyOwner returns (uint256 recovered) {
+        address module = core.balanceModule();
+        if (module == address(0)) revert NoModule();
+        uint256 before = SafeTransferLib.balanceOf(balance, address(this));
+        bars.meltBatch(ids);
+        recovered = SafeTransferLib.balanceOf(balance, address(this)) - before;
+        SafeTransferLib.safeTransfer(balance, module, recovered);
+        emit BarsMelted(ids, module, recovered);
+    }
+
+    /// moves Bars held here to `to` by safe transfer
     function transferBars(address to, uint256[] calldata ids) external onlyOwner {
         for (uint256 i; i < ids.length; ++i) {
             bars.safeTransferFrom(address(this), to, ids[i]);

@@ -63,6 +63,7 @@ contract CCBarsSaleTest is Test {
     address internal owner;
     address internal buyer;
     uint256[] internal held;
+    uint256 internal vaultLeftover;
     address internal constant BALANCE = 0x3620540c994433D7B4a628C46d2ED5F92572eA07;
     address internal constant BARS = 0x7d9EdeA03dD97361c3e21389B95bc327e22752aE;
 
@@ -75,7 +76,12 @@ contract CCBarsSaleTest is Test {
         core = ICoreView(script.CORE());
         owner = core.owner();
         assertEq(script.barsOf(script.VAULT()).length, 63, "the vault's 63 Bars at the pin");
+        vaultLeftover = IErc20(BALANCE).balanceOf(script.VAULT());
+        assertEq(vaultLeftover, 541.789275702 ether, "the vault's unreturned BALANCE at the pin");
+        IPhase2BalanceTreasury v1 = IPhase2BalanceTreasury(CCBarsVault(script.VAULT()).treasury());
+        uint256 custody0 = v1.custody();
         sale = script.execute(owner);
+        assertEq(v1.custody(), custody0 + vaultLeftover, "the leftover reached the v1 treasury");
         held = script.barsOf(address(sale));
         buyer = makeAddr("buyer");
         vm.deal(buyer, 100 ether);
@@ -109,6 +115,7 @@ contract CCBarsSaleTest is Test {
         for (uint256 i; i < held.length; ++i) sum += held[i] * 1 ether;
         assertEq(sum, CCBarsVault(script.VAULT()).spent(), "the sale holds every Bar the vault bought");
         assertEq(script.barsOf(script.VAULT()).length, 0);
+        assertEq(IErc20(BALANCE).balanceOf(script.VAULT()), 0, "the vault's leftover went back");
         assertTrue(sale.on());
         assertEq(sale.start(), 0.08 ether);
         assertEq(sale.floor(), 0.03 ether);
@@ -271,21 +278,30 @@ contract CCBarsSaleTest is Test {
         assertEq(IBarsForSale(BARS).ownerOf(held[0]), address(sale), "the reverted buy moved nothing");
     }
 
-    // promise: the owner can take Bars back to the vault and melt them into the treasury, so the sale strands nothing
-    function test_backToVaultAndMelt() public {
-        IPhase2BalanceTreasury treasury = IPhase2BalanceTreasury(CCBarsVault(script.VAULT()).treasury());
+    // promise: melting from the sale pays every released wei to the Core's balance module of the moment, and only the
+    // owner melts
+    function test_meltPaysTheCurrentModule() public {
+        address module = ICoreForBarsSale(address(core)).balanceModule();
+        assertEq(module, CCBarsVault(script.VAULT()).treasury(), "the v1 treasury is the module at the pin");
         uint256[] memory ids = new uint256[](10);
         uint256 sum;
         for (uint256 i; i < 10; ++i) {
             ids[i] = held[i];
             sum += held[i] * 1 ether;
         }
+        vm.prank(makeAddr("eve"));
+        vm.expectRevert(CCBarsSale.OnlyOwner.selector);
+        sale.meltBars(ids);
+
+        IPhase2BalanceTreasury treasury = IPhase2BalanceTreasury(module);
         uint256 custody0 = treasury.custody();
-        vm.startPrank(owner);
-        sale.transferBars(script.VAULT(), ids);
-        uint256 got = CCBarsVault(script.VAULT()).meltBars(ids);
-        vm.stopPrank();
-        assertEq(got, sum);
-        assertEq(treasury.custody(), custody0 + sum, "every melted wei in the treasury");
+        uint256 free0 = treasury.freeWorking();
+        vm.prank(owner);
+        uint256 got = sale.meltBars(ids);
+        assertEq(got, sum, "each Bar released its number in BALANCE");
+        assertEq(treasury.custody(), custody0 + sum, "every melted wei in the module");
+        assertEq(treasury.freeWorking(), free0 + sum, "as working funds");
+        assertEq(IErc20(BALANCE).balanceOf(address(sale)), 0);
+        assertEq(script.barsOf(address(sale)).length, 53);
     }
 }
