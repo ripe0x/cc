@@ -37,21 +37,16 @@ interface IBalancePrice {
 }
 
 /// @notice sells CC treasury Bars for ETH and pays every wei of the proceeds into the Core's pot (`Core.fund`), which
-/// funds the Credit bid. the Core's current owner alone sets the price, melts Bars and moves Bars out. melting pays the
-/// Core's balance module read at the melt, so a treasury migration needs no change here.
+/// funds the Credit bid. the Core's current owner alone sets the multipliers, melts Bars and moves Bars out. melting
+/// pays the Core's balance module read at the melt, so a treasury migration needs no change here.
 ///
-/// the ask of a held Bar is the larger of two terms:
-/// 1. the curve: one ETH price for every Bar, falling in a straight line from `start` at `since` to `floor` at
-///    `since + window`, resting at `floor` after
-/// 2. the backing: the BALANCE in the Bar's vault, valued at the larger of the controller's rate-limited reference and
-///    the live pool spot, times `(10_000 + marginBps) / 10_000`
-///
-/// the backing term means a sale never pays less ETH than the Bar's BALANCE is worth at that price, so buying and
-/// melting is never cheaper than buying BALANCE. pushing the spot up only raises the ask; pushing it down leaves the
-/// reference, which moves at most its rate-limited step per refresh. this contract never refreshes the reference, so a
-/// buyer cannot drag it toward a spot it just moved. the reference lags a fast rise in the BALANCE price: while the
-/// spot is pushed below a lagging reference, the backing term reads the reference, and `marginBps` is the cushion
-/// against that lag. no quote (no reference, no priced spot) means no sale
+/// the ask follows the BALANCE price, like the Core's Credit and Statement asks: a Bar asks its BALANCE value times a
+/// multiplier that falls in a straight line from `startBps` at the Bar's arrival here to `floorBps` at arrival plus
+/// `window`, and rests at `floorBps` after. `floorBps` is at least 10_000, so no Bar sells for less ETH than its BALANCE
+/// is worth. the value is the BALANCE in the Bar's vault at the larger of the controller's rate-limited reference and
+/// the live pool spot: a spot pushed up raises the ask at once, a spot pushed down leaves the reference, which this
+/// contract never refreshes. no quote (no reference, no priced spot) means no sale. a Bar that arrived by a plain
+/// `transferFrom` has no arrival time and asks `floorBps`
 contract CCBarsSale {
     error OnlyOwner();
     error OnlyBars();
@@ -63,7 +58,7 @@ contract CCBarsSale {
     error Reentrant();
     error NoModule();
 
-    event SaleSet(uint256 start, uint256 floor, uint256 window, uint256 marginBps, uint256 since);
+    event SaleSet(uint256 startBps, uint256 floorBps, uint256 window);
     event SaleOn(bool on);
     event BarsSold(address indexed buyer, uint256[] ids, uint256 paid);
     event BarsTransferred(address indexed to, uint256[] ids);
@@ -75,31 +70,28 @@ contract CCBarsSale {
     address public immutable balance;
     IBarsForSale public immutable bars;
 
-    /// the curve's start and floor, wei per Bar. start is at least floor
-    uint128 public start;
-    uint128 public floor;
-    /// the seconds the curve falls over, at least 1
+    /// the multiplier on a Bar's BALANCE value at its arrival and after `window`, bps. start >= floor >= 10_000
+    uint32 public startBps;
+    uint32 public floorBps;
+    /// the seconds the multiplier falls over, at least 1
     uint32 public window;
-    /// the time the curve started, set by every `setSale`
-    uint40 public since;
-    /// the margin over the backing, bps. any value: 0 sells at the backing, never under it
-    uint32 public marginBps;
     bool public on;
     bool private _busy;
+    /// when each Bar arrived here by safe transfer; the start of its fall
+    mapping(uint256 id => uint256) public arrivedAt;
 
     constructor(
         ICoreForBarsSale core_,
         address balance_,
         IBarsForSale bars_,
-        uint128 start_,
-        uint128 floor_,
-        uint32 window_,
-        uint32 marginBps_
+        uint32 startBps_,
+        uint32 floorBps_,
+        uint32 window_
     ) {
         core = core_;
         balance = balance_;
         bars = bars_;
-        _setSale(start_, floor_, window_, marginBps_);
+        _setSale(startBps_, floorBps_, window_);
     }
 
     modifier onlyOwner() {
@@ -107,20 +99,17 @@ contract CCBarsSale {
         _;
     }
 
-    /// sets the curve and the margin and restarts the curve at `start` now
-    function setSale(uint128 start_, uint128 floor_, uint32 window_, uint32 marginBps_) external onlyOwner {
-        _setSale(start_, floor_, window_, marginBps_);
+    /// sets the multipliers and the window. each Bar keeps its arrival time
+    function setSale(uint32 startBps_, uint32 floorBps_, uint32 window_) external onlyOwner {
+        _setSale(startBps_, floorBps_, window_);
     }
 
-    function _setSale(uint128 start_, uint128 floor_, uint32 window_, uint32 marginBps_) private {
-        if (start_ < floor_ || window_ == 0) revert BadSetting();
-        start = start_;
-        floor = floor_;
+    function _setSale(uint32 startBps_, uint32 floorBps_, uint32 window_) private {
+        if (floorBps_ < BPS || startBps_ < floorBps_ || window_ == 0) revert BadSetting();
+        startBps = startBps_;
+        floorBps = floorBps_;
         window = window_;
-        marginBps = marginBps_;
-        // forge-lint: disable-next-line(unsafe-typecast)
-        since = uint40(block.timestamp);
-        emit SaleSet(start_, floor_, window_, marginBps_, block.timestamp);
+        emit SaleSet(startBps_, floorBps_, window_);
     }
 
     /// sales start off; the owner switches them on once the Bars are here
@@ -129,11 +118,12 @@ contract CCBarsSale {
         emit SaleOn(on_);
     }
 
-    /// the curve term now, wei
-    function curvePrice() public view returns (uint256) {
-        uint256 age = block.timestamp - since;
-        if (age >= window) return floor;
-        return start - (start - floor) * age / window;
+    /// the multiplier of Bar `id` now, bps
+    function multiplierOf(uint256 id) public view returns (uint256) {
+        uint256 t = arrivedAt[id];
+        uint256 age = t == 0 ? type(uint256).max : block.timestamp - t;
+        if (age >= window) return floorBps;
+        return startBps - (startBps - floorBps) * age / window;
     }
 
     /// the wei value of the BALANCE in Bar `id`'s vault at the larger of the reference and the live spot, rounded up.
@@ -150,9 +140,7 @@ contract CCBarsSale {
     /// the ask of a Bar held here, wei. reverts `NotForSale` for any other Bar and `NoQuote` without a quote
     function priceOf(uint256 id) public view returns (uint256) {
         if (bars.ownerOf(id) != address(this)) revert NotForSale(id);
-        uint256 backed = FixedPointMathLib.mulDivUp(backingOf(id), BPS + marginBps, BPS);
-        uint256 curve = curvePrice();
-        return curve > backed ? curve : backed;
+        return FixedPointMathLib.mulDivUp(backingOf(id), multiplierOf(id), BPS);
     }
 
     /// buys `ids` at their asks, pays the total into the Core's pot and refunds the excess of `msg.value` last. the
@@ -194,9 +182,10 @@ contract CCBarsSale {
         emit BarsTransferred(to, ids);
     }
 
-    /// accepts Bars only; any other ERC721 would be stranded here
-    function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
+    /// accepts Bars only, any other ERC721 would be stranded here, and starts the Bar's fall
+    function onERC721Received(address, address, uint256 id, bytes calldata) external returns (bytes4) {
         if (msg.sender != address(bars)) revert OnlyBars();
+        arrivedAt[id] = block.timestamp;
         return this.onERC721Received.selector;
     }
 }

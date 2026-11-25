@@ -30,10 +30,6 @@ interface IErc20 {
     function approve(address to, uint256 amount) external returns (bool);
 }
 
-interface IBarsMelt {
-    function meltBatch(uint256[] calldata ids) external returns (uint256 total);
-}
-
 /// a buyer whose refund re-enters the sale
 contract ReentrantBuyer {
     CCBarsSale internal immutable sale;
@@ -97,88 +93,89 @@ contract CCBarsSaleTest is Test {
             IControllerPrice(core.controller()).balancePoolKey();
     }
 
-    /// the backing ask computed here from the live controller views, independent of the sale's own code path
-    function _backedAsk(uint256 id, uint256 marginBps) internal view returns (uint256) {
+    /// Bar `id`'s ask at multiplier `bps`, computed here from the live controller views, independent of the sale's code
+    function _ask(uint256 id, uint256 bps) internal view returns (uint256) {
         IControllerPrice c = IControllerPrice(core.controller());
         uint256 ref = c.referencePrice();
         (uint256 spot,) = c.spotPrice();
         uint256 px = spot > ref ? spot : ref;
-        uint256 backing = FixedPointMathLib.mulDivUp(id * 1 ether, px, 1e18);
-        return FixedPointMathLib.mulDivUp(backing, 10_000 + marginBps, 10_000);
+        return FixedPointMathLib.mulDivUp(FixedPointMathLib.mulDivUp(id * 1 ether, px, 1e18), bps, 10_000);
     }
 
-    // promise: the owner command moves every vault Bar into the sale, switches it on, and a rerun sends nothing new
+    // promise: the owner command moves every vault Bar into the sale, starts each Bar's fall, switches sales on, and
+    // a rerun sends nothing new
     function test_scriptMovesEveryBarAndResumes() public {
         assertEq(held.length, 63);
         // the vault's mints interleaved with other minters: the 63 Bars it holds are every wei it spent, none missing
         uint256 sum;
-        for (uint256 i; i < held.length; ++i) sum += held[i] * 1 ether;
+        for (uint256 i; i < held.length; ++i) {
+            sum += held[i] * 1 ether;
+            assertEq(sale.arrivedAt(held[i]), block.timestamp, "each Bar's fall starts at its arrival");
+        }
         assertEq(sum, CCBarsVault(script.VAULT()).spent(), "the sale holds every Bar the vault bought");
         assertEq(script.barsOf(script.VAULT()).length, 0);
         assertEq(IErc20(BALANCE).balanceOf(script.VAULT()), 0, "the vault's leftover went back");
         assertTrue(sale.on());
-        assertEq(sale.start(), 0.08 ether);
-        assertEq(sale.floor(), 0.03 ether);
+        assertEq(sale.startBps(), 40_000);
+        assertEq(sale.floorBps(), 15_000);
         assertEq(sale.window(), 14 days);
-        assertEq(sale.marginBps(), 1_000);
         assertEq(address(sale), script.saleAddress());
         script.execute(owner);
         assertEq(script.barsOf(address(sale)).length, 63, "rerun changed nothing");
     }
 
-    // promise: Bars sell on the falling curve while it exceeds the backing, and every wei paid reaches the Core's pot
-    function test_curveSaleFundsThePot() public {
+    // promise: a Bar asks its BALANCE value times a multiplier falling from 4x to 1.5x over 14 days from its arrival,
+    // and every wei paid reaches the Core's pot
+    function test_fallingSaleFundsThePot() public {
         uint256 id = held[0];
-        uint256 backed = _backedAsk(id, 1_000);
+        uint256 ask = sale.priceOf(id);
+        assertEq(ask, _ask(id, 40_000));
         console.log("Bar", id);
-        console.log("backing plus 10% wei", backed);
-        assertLt(backed, 0.03 ether, "at the pin the curve binds over the whole window");
-        assertEq(sale.priceOf(id), 0.08 ether);
+        console.log("ask at arrival wei", ask);
 
         core.book();
         uint256 pot0 = core.ethPot();
         vm.prank(buyer);
-        uint256 paid = sale.buy{value: 0.1 ether}(_one(id));
-        assertEq(paid, 0.08 ether);
-        assertEq(core.ethPot(), pot0 + 0.08 ether, "pot got the price");
-        assertEq(buyer.balance, 100 ether - 0.08 ether, "excess refunded");
+        uint256 paid = sale.buy{value: 1 ether}(_one(id));
+        assertEq(paid, ask);
+        assertEq(core.ethPot(), pot0 + ask, "pot got the price");
+        assertEq(buyer.balance, 100 ether - ask, "excess refunded");
         assertEq(address(sale).balance, 0);
         assertEq(IBarsForSale(BARS).ownerOf(id), buyer);
         vm.expectRevert(abi.encodeWithSelector(CCBarsSale.NotForSale.selector, id));
         sale.priceOf(id);
 
-        // half way: 0.055 for each of two Bars. absolute warps: the test reads block.timestamp once
-        uint256 t0 = sale.since();
+        // half way: 2.75x. absolute warps: the test reads block.timestamp once
+        uint256 t0 = sale.arrivedAt(held[1]);
         vm.warp(t0 + 7 days);
+        assertEq(sale.multiplierOf(held[1]), 27_500);
         uint256[] memory two = new uint256[](2);
         two[0] = held[1];
         two[1] = held[2];
+        uint256 due = _ask(held[1], 27_500) + _ask(held[2], 27_500);
         core.book();
         pot0 = core.ethPot();
         vm.prank(buyer);
-        paid = sale.buy{value: 0.11 ether}(two);
-        assertEq(paid, 0.11 ether);
-        assertEq(core.ethPot(), pot0 + 0.11 ether);
+        paid = sale.buy{value: due}(two);
+        assertEq(paid, due);
+        assertEq(core.ethPot(), pot0 + due);
 
-        // past the window: the floor
+        // past the window: the floor, 1.5x
         vm.warp(t0 + 14 days);
-        assertEq(sale.curvePrice(), 0.03 ether);
-        assertEq(sale.priceOf(held[3]), 0.03 ether);
+        assertEq(sale.multiplierOf(held[3]), 15_000);
+        uint256 floorAsk = _ask(held[3], 15_000);
+        assertEq(sale.priceOf(held[3]), floorAsk);
         vm.prank(buyer);
         vm.expectRevert(CCBarsSale.Underpaid.selector);
-        sale.buy{value: 0.03 ether - 1}(_one(held[3]));
+        sale.buy{value: floorAsk - 1}(_one(held[3]));
     }
 
-    // promise: a BALANCE rise lifts the ask to the Bar's BALANCE value plus the margin at once, and a dump of the
-    // pool cannot buy a Bar under its value at the reference; the dump-buy-melt-sell round trip loses the attacker ETH
-    function test_backingBindsAndADumpDoesNotPay() public {
-        vm.prank(owner);
-        sale.setSale(0.001 ether, 0.001 ether, 1, 1_000);
+    // promise: the ask follows the BALANCE price with no owner action: a rise lifts it the same block, and a spot pushed
+    // under the reference leaves the ask at the reference
+    function test_askFollowsTheBalancePrice() public {
         uint256 id = held[0];
         uint256 before = sale.priceOf(id);
-        assertEq(before, _backedAsk(id, 1_000), "the backing binds over a low curve");
 
-        // a real buy of BALANCE with 10 ETH lifts the spot; the ask follows the spot the same block
         uint256 snap = vm.snapshotState();
         TestSwapRouter router = new TestSwapRouter();
         address whale = makeAddr("whale");
@@ -186,17 +183,13 @@ contract CCBarsSaleTest is Test {
         vm.prank(whale);
         router.swap{value: 10 ether}(_key(), true, -int256(10 ether), whale);
         uint256 lifted = sale.priceOf(id);
-        assertEq(lifted, _backedAsk(id, 1_000));
+        assertEq(lifted, _ask(id, 40_000));
         assertGt(lifted, before * 2, "a 10 ETH buy into a 12 ETH pool more than doubles the ask");
         console.log("ask before", before);
         console.log("ask after the lift", lifted);
         vm.revertToState(snap);
 
-        // an attacker holding 100,000 BALANCE dumps it: the spot falls under the reference, which the sale never
-        // refreshes, so the ask stays at the reference
         router = new TestSwapRouter();
-        whale = makeAddr("whale");
-        vm.deal(whale, 1 ether);
         IPhase2BalanceTreasury treasury = IPhase2BalanceTreasury(CCBarsVault(script.VAULT()).treasury());
         vm.prank(owner);
         treasury.withdrawWorking(whale, 100_000 ether);
@@ -204,49 +197,47 @@ contract CCBarsSaleTest is Test {
         vm.startPrank(whale);
         IErc20(BALANCE).approve(address(router), 100_000 ether);
         router.swap(_key(), false, -int256(100_000 ether), whale);
+        vm.stopPrank();
         (uint256 spot,) = IControllerPrice(core.controller()).spotPrice();
         assertLt(spot, ref, "the dump leaves the spot under the reference");
-        uint256 ask = sale.priceOf(id);
-        assertEq(ask, FixedPointMathLib.mulDivUp(FixedPointMathLib.mulDivUp(id * 1 ether, ref, 1e18), 11_000, 10_000));
-
-        // the dumper buys at the reference ask, melts, and sells the BALANCE back: ETH ends lower than it started
-        uint256 eth0 = whale.balance;
-        sale.buy{value: ask}(_one(id));
-        uint256 melted = IBarsMelt(BARS).meltBatch(_one(id));
-        assertEq(melted, id * 1 ether, "the melt releases the Bar's number in BALANCE");
-        IErc20(BALANCE).approve(address(router), melted);
-        router.swap(_key(), false, -int256(melted), whale);
-        vm.stopPrank();
-        console.log("round trip ETH lost", eth0 - whale.balance);
-        assertLt(whale.balance, eth0, "buy and melt at the reference ask loses ETH");
+        assertEq(
+            sale.priceOf(id),
+            FixedPointMathLib.mulDivUp(FixedPointMathLib.mulDivUp(id * 1 ether, ref, 1e18), 40_000, 10_000)
+        );
     }
 
-    // promise: the owner alone edits the curve and margin; margin 0 sells at the backing, never under it
-    function test_ownerEditsTheMargin() public {
+    // promise: the owner alone edits the multipliers, never below 1x; each Bar keeps its own arrival clock, and a Bar
+    // that comes back starts a new fall
+    function test_ownerEditsTheMultipliers() public {
         uint256 id = held[0];
+        uint256 t0 = sale.arrivedAt(id);
         vm.startPrank(owner);
-        sale.setSale(0, 0, 1, 0);
-        assertEq(sale.priceOf(id), _backedAsk(id, 0), "margin 0 is the backing");
-        sale.setSale(0, 0, 1, 5_000);
-        assertEq(sale.priceOf(id), _backedAsk(id, 5_000), "margin 5,000 is 1.5x the backing");
+        sale.setSale(10_000, 10_000, 1);
+        assertEq(sale.priceOf(id), _ask(id, 10_000), "a 1x floor sells at the BALANCE value");
         vm.expectRevert(CCBarsSale.BadSetting.selector);
-        sale.setSale(1, 2, 1, 0);
+        sale.setSale(10_000, 9_999, 1);
         vm.expectRevert(CCBarsSale.BadSetting.selector);
-        sale.setSale(2, 1, 0, 0);
+        sale.setSale(19_999, 20_000, 1);
+        vm.expectRevert(CCBarsSale.BadSetting.selector);
+        sale.setSale(20_000, 20_000, 0);
+        sale.setSale(30_000, 20_000, 10 days);
         vm.stopPrank();
+        assertEq(sale.arrivedAt(id), t0, "a setting change keeps the arrival");
+        vm.warp(t0 + 5 days);
+        assertEq(sale.multiplierOf(id), 25_000);
 
-        // a new curve restarts from its start now
-        vm.warp(block.timestamp + 30 days);
+        // out and back: the Bar's fall restarts at its return
         vm.prank(owner);
-        sale.setSale(1 ether, 0.5 ether, 10 days, 1_000);
-        assertEq(sale.curvePrice(), 1 ether);
-        vm.warp(block.timestamp + 5 days);
-        assertEq(sale.curvePrice(), 0.75 ether);
+        sale.transferBars(owner, _one(id));
+        vm.prank(owner);
+        IBarsForSale(BARS).safeTransferFrom(owner, address(sale), id);
+        assertEq(sale.arrivedAt(id), t0 + 5 days);
+        assertEq(sale.multiplierOf(id), 30_000);
 
         address eve = makeAddr("eve");
         vm.startPrank(eve);
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
-        sale.setSale(0, 0, 1, 0);
+        sale.setSale(20_000, 20_000, 1);
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
         sale.setOn(false);
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
@@ -272,9 +263,9 @@ contract CCBarsSaleTest is Test {
         sale.onERC721Received(buyer, buyer, 1, "");
 
         ReentrantBuyer r = new ReentrantBuyer(sale, held[0]);
-        vm.deal(address(this), 1 ether);
+        vm.deal(address(this), 2 ether);
         vm.expectRevert();
-        r.go{value: 0.09 ether}();
+        r.go{value: 1 ether}();
         assertEq(IBarsForSale(BARS).ownerOf(held[0]), address(sale), "the reverted buy moved nothing");
     }
 

@@ -9,7 +9,7 @@ import {CCBarsVault} from "../src/adapters/CCBarsVault.sol";
 /// (skipped when its code exists), every Bar the CC Bars vault holds moved into it (skipped when none are left), then
 /// sales switched on (skipped when on), and the BALANCE left in the vault returned to the v1 treasury while that is still
 /// the Core's balance module (skipped when none is left). after this the vault holds nothing and melting runs from the
-/// sale, which pays the Core's balance module of the moment. the price settings are this script's constants, set at creation; a later
+/// sale, which pays the Core's balance module of the moment. the multipliers are this script's constants, set at creation; a later
 /// change is the owner's `setSale`. the constants are part of the CREATE2 initcode: editing one after the first send
 /// predicts a new, empty sale and would leave the Bars in the first one, so price edits go through `setSale` only
 interface IErc20Balance {
@@ -24,11 +24,10 @@ contract BarsSale is Script {
     address public constant FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     bytes32 public constant SALT = keccak256("cc.bars-sale.1");
 
-    /// decision 302: 0.08 ETH falling to 0.03 ETH over 14 days, never under the backing plus 10 percent
-    uint128 public constant START = 0.08 ether;
-    uint128 public constant FLOOR = 0.03 ether;
+    /// decision 302: each Bar asks 4x its BALANCE value at arrival, falling to 1.5x over 14 days
+    uint32 public constant START_BPS = 40_000;
+    uint32 public constant FLOOR_BPS = 15_000;
     uint32 public constant WINDOW = 14 days;
-    uint32 public constant MARGIN_BPS = 1_000;
 
     /// the vault minted Bars 2942 to 3007 (decision 301); the scan covers every Bar minted after its first mint
     uint256 public constant FIRST_ID = 2935;
@@ -88,10 +87,10 @@ contract BarsSale is Script {
         console.log("Bars in sale", held.length);
         console.log("Bars left in vault", barsOf(VAULT).length);
         console.log("BALANCE left in vault", IErc20Balance(BALANCE).balanceOf(VAULT));
-        console.log("curve price wei", sale.curvePrice());
         if (held.length != 0) {
             console.log("first Bar", held[0]);
             console.log("its backing wei", sale.backingOf(held[0]));
+            console.log("its multiplier bps", sale.multiplierOf(held[0]));
             console.log("its ask wei", sale.priceOf(held[0]));
         }
     }
@@ -99,7 +98,7 @@ contract BarsSale is Script {
     function _initcode() internal pure returns (bytes memory) {
         return abi.encodePacked(
             type(CCBarsSale).creationCode,
-            abi.encode(CORE, BALANCE, BARS, START, FLOOR, WINDOW, MARGIN_BPS)
+            abi.encode(CORE, BALANCE, BARS, START_BPS, FLOOR_BPS, WINDOW)
         );
     }
 }
