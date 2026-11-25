@@ -11,6 +11,8 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {Phase3} from "../script/Phase3.s.sol";
+import {IBalanceTreasuryV2} from "../src/interfaces/IBalanceTreasuryV2.sol";
 
 interface ICoreView {
     function owner() external view returns (address);
@@ -28,6 +30,10 @@ interface IControllerPrice {
 interface IErc20 {
     function balanceOf(address who) external view returns (uint256);
     function approve(address to, uint256 amount) external returns (bool);
+}
+
+interface IBarsMeltAll {
+    function meltBatch(uint256[] calldata ids) external returns (uint256 total);
 }
 
 /// a buyer whose refund re-enters the sale
@@ -234,6 +240,14 @@ contract CCBarsSaleTest is Test {
         assertEq(sale.arrivedAt(id), t0 + 5 days);
         assertEq(sale.multiplierOf(id), 30_000);
 
+        // out and back by plain transfer: no arrival is recorded, and moving it out cleared the old one, so the floor
+        vm.prank(owner);
+        sale.transferBars(owner, _one(id));
+        assertEq(sale.arrivedAt(id), 0, "moving a Bar out clears its arrival");
+        vm.prank(owner);
+        IBarsForSale(BARS).transferFrom(owner, address(sale), id);
+        assertEq(sale.multiplierOf(id), 20_000, "a plain return asks the floor");
+
         address eve = makeAddr("eve");
         vm.startPrank(eve);
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
@@ -243,6 +257,32 @@ contract CCBarsSaleTest is Test {
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
         sale.transferBars(eve, _one(id));
         vm.stopPrank();
+    }
+
+    // promise: the whole inventory sells in one buy for exactly the sum of the asks into the pot, and the buyer's
+    // melts release the 187,455 BALANCE inside
+    function test_fullInventoryBuyThenMelt() public {
+        uint256 due;
+        for (uint256 i; i < held.length; ++i) due += sale.priceOf(held[i]);
+        console.log("63 Bars at 4x, wei", due);
+        core.book();
+        uint256 pot0 = core.ethPot();
+        vm.deal(buyer, due);
+        vm.prank(buyer);
+        assertEq(sale.buy{value: due}(held), due);
+        assertEq(core.ethPot(), pot0 + due);
+        assertEq(script.barsOf(address(sale)).length, 0);
+
+        uint256 got;
+        for (uint256 i; i < held.length; i += 10) {
+            uint256 k = held.length - i < 10 ? held.length - i : 10;
+            uint256[] memory batch = new uint256[](k);
+            for (uint256 j; j < k; ++j) batch[j] = held[i + j];
+            vm.prank(buyer);
+            got += IBarsMeltAll(BARS).meltBatch(batch);
+        }
+        assertEq(got, 187_455 ether, "the BALANCE the vault paid for these Bars");
+        assertEq(IErc20(BALANCE).balanceOf(buyer), 187_455 ether);
     }
 
     // promise: off means no sale; Bars not held here, other ERC721s and a re-entering refund are refused
@@ -294,5 +334,100 @@ contract CCBarsSaleTest is Test {
         assertEq(treasury.freeWorking(), free0 + sum, "as working funds");
         assertEq(IErc20(BALANCE).balanceOf(address(sale)), 0);
         assertEq(script.barsOf(address(sale)).length, 53);
+    }
+}
+
+/// the sale across the pending phase 3 migration, run by the production Phase3 script on the same pinned fork
+contract CCBarsSalePhase3Test is Test {
+    uint256 internal constant FORK_BLOCK = 26494300;
+    address internal constant BALANCE = 0x3620540c994433D7B4a628C46d2ED5F92572eA07;
+    address internal constant BARS = 0x7d9EdeA03dD97361c3e21389B95bc327e22752aE;
+
+    BarsSale internal script;
+    Phase3 internal p3;
+    ICoreView internal core;
+    address internal owner;
+
+    function setUp() public {
+        vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://mainnet.gateway.tenderly.co")), FORK_BLOCK);
+        vm.txGasPrice(0);
+        vm.fee(0);
+        script = new BarsSale();
+        p3 = new Phase3();
+        core = ICoreView(script.CORE());
+        owner = core.owner();
+    }
+
+    function _phase3() internal returns (Phase3.Deployed memory d) {
+        d = p3.deploy(address(core), p3.params(), false);
+        p3.migrate(address(core), d, p3.params(), false);
+        assertEq(ICoreForBarsSale(address(core)).balanceModule(), d.treasury, "the module is v2");
+        assertEq(core.controller(), d.controller, "the controller is V3");
+    }
+
+    // promise: a sale run before phase 3 keeps working after it: V3 prices the Bars, a buy funds the same Core's pot,
+    // and a melt pays v2, not the migrated v1
+    function test_saleThenPhase3MeltsIntoV2() public {
+        CCBarsSale sale = script.execute(owner);
+        uint256[] memory held = script.barsOf(address(sale));
+        Phase3.Deployed memory d = _phase3();
+        IBalanceTreasuryV2 v2 = IBalanceTreasuryV2(d.treasury);
+        IPhase2BalanceTreasury v1 = IPhase2BalanceTreasury(CCBarsVault(script.VAULT()).treasury());
+
+        uint256 ref = IControllerPrice(d.controller).referencePrice();
+        (uint256 spot,) = IControllerPrice(d.controller).spotPrice();
+        uint256 px = spot > ref ? spot : ref;
+        uint256 ask = sale.priceOf(held[0]);
+        assertEq(ask, FixedPointMathLib.mulDivUp(FixedPointMathLib.mulDivUp(held[0] * 1 ether, px, 1e18), 40_000, 10_000));
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 1 ether);
+        core.book();
+        uint256 pot0 = core.ethPot();
+        vm.prank(buyer);
+        sale.buy{value: ask}(_ids(held[0]));
+        assertEq(core.ethPot(), pot0 + ask, "the pot got the price under V3");
+
+        uint256[] memory ids = new uint256[](10);
+        uint256 sum;
+        for (uint256 i; i < 10; ++i) {
+            ids[i] = held[i + 1];
+            sum += ids[i] * 1 ether;
+        }
+        uint256 custody2 = v2.custody();
+        uint256 working2 = v2.working();
+        uint256 custody1 = v1.custody();
+        vm.prank(owner);
+        assertEq(sale.meltBars(ids), sum);
+        assertEq(v2.custody(), custody2 + sum, "every melted wei in v2");
+        assertEq(v2.working(), working2 + sum, "as v2 working funds");
+        assertEq(v1.custody(), custody1, "nothing to the migrated v1");
+    }
+
+    // promise: with the vault's leftover unreturned, the script stops before any send once phase 3 has run, and the
+    // documented recovery (return to v1, withdraw to v2) lets it finish with the vault empty
+    function test_scriptStopsAfterPhase3UntilTheLeftoverIsRecovered() public {
+        Phase3.Deployed memory d = _phase3();
+        uint256 leftover = IErc20(BALANCE).balanceOf(script.VAULT());
+        assertEq(leftover, 541.789275702 ether);
+        vm.expectRevert(bytes("the module is no longer v1: return the vault's BALANCE by hand first"));
+        script.execute(owner);
+        assertEq(script.saleAddress().code.length, 0, "nothing sent");
+
+        IPhase2BalanceTreasury v1 = IPhase2BalanceTreasury(CCBarsVault(script.VAULT()).treasury());
+        uint256 custody2 = IBalanceTreasuryV2(d.treasury).custody();
+        vm.startPrank(owner);
+        CCBarsVault(script.VAULT()).returnBalance();
+        v1.withdrawWorking(d.treasury, leftover);
+        vm.stopPrank();
+        assertEq(IBalanceTreasuryV2(d.treasury).custody(), custody2 + leftover, "the leftover reached v2");
+
+        CCBarsSale sale = script.execute(owner);
+        assertEq(script.barsOf(address(sale)).length, 63);
+        assertEq(IErc20(BALANCE).balanceOf(script.VAULT()), 0);
+    }
+
+    function _ids(uint256 id) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = id;
     }
 }

@@ -6,10 +6,11 @@ import {CCBarsSale, ICoreForBarsSale, IBarsForSale} from "../src/adapters/CCBars
 import {CCBarsVault} from "../src/adapters/CCBarsVault.sol";
 
 /// @notice the owner's Bars sale, one command that resumes from chain state: the sale by CREATE2 at a fixed address
-/// (skipped when its code exists), every Bar the CC Bars vault holds moved into it (skipped when none are left), then
-/// sales switched on (skipped when on), and the BALANCE left in the vault returned to the v1 treasury while that is still
-/// the Core's balance module (skipped when none is left). after this the vault holds nothing and melting runs from the
-/// sale, which pays the Core's balance module of the moment. the multipliers are this script's constants, set at creation; a later
+/// (skipped when its code exists), every Bar the CC Bars vault holds moved into it (skipped when none are left) and
+/// sales switched on (skipped when on). the BALANCE left in the vault goes back to the v1 treasury first (skipped when
+/// none is left), and only while v1 is still the Core's balance module: run this before phase 3. after it the vault
+/// holds nothing, which the run checks, and melting runs from the sale, which pays the Core's balance module of the
+/// moment. the multipliers are this script's constants, set at creation; a later
 /// change is the owner's `setSale`. the constants are part of the CREATE2 initcode: editing one after the first send
 /// predicts a new, empty sale and would leave the Bars in the first one, so price edits go through `setSale` only
 interface IErc20Balance {
@@ -58,21 +59,28 @@ contract BarsSale is Script {
 
     function execute(address owner) public returns (CCBarsSale sale) {
         require(owner == ICoreForBarsSale(CORE).owner(), "not the owner");
+        require(ICoreForBarsSale(CORE).balanceToken() == BALANCE, "the Core's balance token is not BALANCE");
+        CCBarsVault vault = CCBarsVault(VAULT);
+        // the vault returns only to the immutable v1 treasury. once phase 3 has switched the module, a return would
+        // land in migrated v1: stop before any send. recovery: `returnBalance`, then v1 `withdrawWorking` to the module
+        uint256 leftover = IErc20Balance(BALANCE).balanceOf(VAULT);
+        require(
+            leftover == 0 || ICoreForBarsSale(CORE).balanceModule() == vault.treasury(),
+            "the module is no longer v1: return the vault's BALANCE by hand first"
+        );
         sale = CCBarsSale(saleAddress());
         uint256[] memory ids = barsOf(VAULT);
         vm.startBroadcast(owner);
+        if (leftover != 0) vault.returnBalance();
         if (address(sale).code.length == 0) {
             (bool ok,) = FACTORY.call(abi.encodePacked(SALT, _initcode()));
             require(ok && address(sale).code.length != 0, "sale creation failed");
         }
-        if (ids.length != 0) CCBarsVault(VAULT).transferBars(address(sale), ids);
+        if (ids.length != 0) vault.transferBars(address(sale), ids);
         if (!sale.on()) sale.setOn(true);
-        CCBarsVault vault = CCBarsVault(VAULT);
-        if (
-            IErc20Balance(BALANCE).balanceOf(VAULT) != 0
-                && ICoreForBarsSale(CORE).balanceModule() == vault.treasury()
-        ) vault.returnBalance();
         vm.stopBroadcast();
+        require(IErc20Balance(BALANCE).balanceOf(VAULT) == 0, "BALANCE left in the vault");
+        require(barsOf(VAULT).length == 0, "Bars left in the vault");
     }
 
     function readback() public view {

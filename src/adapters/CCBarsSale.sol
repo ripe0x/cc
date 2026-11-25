@@ -27,6 +27,7 @@ interface ICoreForBarsSale {
     function owner() external view returns (address);
     function controller() external view returns (address);
     function balanceModule() external view returns (address);
+    function balanceToken() external view returns (address);
     function fund() external payable;
 }
 
@@ -46,7 +47,10 @@ interface IBalancePrice {
 /// is worth. the value is the BALANCE in the Bar's vault at the larger of the controller's rate-limited reference and
 /// the live pool spot: a spot pushed up raises the ask at once, a spot pushed down leaves the reference, which this
 /// contract never refreshes. no quote (no reference, no priced spot) means no sale. a Bar that arrived by a plain
-/// `transferFrom` has no arrival time and asks `floorBps`
+/// `transferFrom` has no arrival time and asks `floorBps`; `transferBars` clears a Bar's arrival time, so a Bar that
+/// leaves and comes back by plain transfer asks `floorBps` too. pricing and melting refuse while the Core's balance
+/// token differs from this sale's: the controller would price another token and a melt would pay a module that does
+/// not hold BALANCE. the owner then moves the Bars out with `transferBars`
 contract CCBarsSale {
     error OnlyOwner();
     error OnlyBars();
@@ -57,6 +61,7 @@ contract CCBarsSale {
     error BadSetting();
     error Reentrant();
     error NoModule();
+    error TokenChanged();
 
     event SaleSet(uint256 startBps, uint256 floorBps, uint256 window);
     event SaleOn(bool on);
@@ -129,6 +134,7 @@ contract CCBarsSale {
     /// the wei value of the BALANCE in Bar `id`'s vault at the larger of the reference and the live spot, rounded up.
     /// reverts `NoQuote` without a reference or a priced spot
     function backingOf(uint256 id) public view returns (uint256) {
+        if (core.balanceToken() != balance) revert TokenChanged();
         IBalancePrice c = IBalancePrice(core.controller());
         uint256 ref = c.referencePrice();
         (uint256 spot, bool ok) = c.spotPrice();
@@ -167,6 +173,7 @@ contract CCBarsSale {
     function meltBars(uint256[] calldata ids) external onlyOwner returns (uint256 recovered) {
         address module = core.balanceModule();
         if (module == address(0)) revert NoModule();
+        if (core.balanceToken() != balance) revert TokenChanged();
         uint256 before = SafeTransferLib.balanceOf(balance, address(this));
         bars.meltBatch(ids);
         recovered = SafeTransferLib.balanceOf(balance, address(this)) - before;
@@ -174,9 +181,10 @@ contract CCBarsSale {
         emit BarsMelted(ids, module, recovered);
     }
 
-    /// moves Bars held here to `to` by safe transfer
+    /// moves Bars held here to `to` by safe transfer and clears their arrival times
     function transferBars(address to, uint256[] calldata ids) external onlyOwner {
         for (uint256 i; i < ids.length; ++i) {
+            delete arrivedAt[ids[i]];
             bars.safeTransferFrom(address(this), to, ids[i]);
         }
         emit BarsTransferred(to, ids);
