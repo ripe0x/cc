@@ -181,7 +181,8 @@ contract CCBarsSale {
         emit BarsMelted(ids, module, recovered);
     }
 
-    /// moves Bars held here to `to` by safe transfer and clears their arrival times
+    /// moves Bars held here to `to` by safe transfer and clears their arrival times. a transfer to this contract
+    /// itself records a new arrival through `onERC721Received`, restarting the fall
     function transferBars(address to, uint256[] calldata ids) external onlyOwner {
         for (uint256 i; i < ids.length; ++i) {
             delete arrivedAt[ids[i]];
