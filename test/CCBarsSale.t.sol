@@ -13,6 +13,7 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Phase3} from "../script/Phase3.s.sol";
 import {IBalanceTreasuryV2} from "../src/interfaces/IBalanceTreasuryV2.sol";
+import {IControllerV2} from "../src/interfaces/IControllerV2.sol";
 
 interface ICoreView {
     function owner() external view returns (address);
@@ -32,18 +33,29 @@ interface IErc20 {
     function approve(address to, uint256 amount) external returns (bool);
 }
 
+interface IControllerV2Time {
+    function referenceTime() external view returns (uint40);
+}
+
+interface IErc721Bal {
+    function balanceOf(address owner) external view returns (uint256);
+}
+
 interface IBarsMeltAll {
     function meltBatch(uint256[] calldata ids) external returns (uint256 total);
 }
 
-/// a buyer whose refund re-enters the sale
+/// a buyer whose refund tries to buy again, recording how the inner buy failed
 contract ReentrantBuyer {
     CCBarsSale internal immutable sale;
     uint256[] internal ids;
+    uint256[] internal second;
+    bytes public innerError;
 
-    constructor(CCBarsSale sale_, uint256 id) {
+    constructor(CCBarsSale sale_, uint256 id, uint256 other) {
         sale = sale_;
         ids.push(id);
+        second.push(other);
     }
 
     function go() external payable {
@@ -51,7 +63,12 @@ contract ReentrantBuyer {
     }
 
     receive() external payable {
-        sale.buy{value: msg.value}(ids);
+        if (innerError.length != 0) return;
+        try sale.buy{value: msg.value}(second) {
+            innerError = hex"01";
+        } catch (bytes memory err) {
+            innerError = err;
+        }
     }
 }
 
@@ -240,13 +257,22 @@ contract CCBarsSaleTest is Test {
         assertEq(sale.arrivedAt(id), t0 + 5 days);
         assertEq(sale.multiplierOf(id), 30_000);
 
-        // out and back by plain transfer: no arrival is recorded, and moving it out cleared the old one, so the floor
+        // out and back by plain transfer: moving it out cleared the arrival and a plain return records none, so the Bar
+        // is not for sale until the owner starts its clock with a transfer to the sale itself
         vm.prank(owner);
         sale.transferBars(owner, _one(id));
         assertEq(sale.arrivedAt(id), 0, "moving a Bar out clears its arrival");
         vm.prank(owner);
         IBarsForSale(BARS).transferFrom(owner, address(sale), id);
-        assertEq(sale.multiplierOf(id), 20_000, "a plain return asks the floor");
+        vm.expectRevert(abi.encodeWithSelector(CCBarsSale.NotForSale.selector, id));
+        sale.priceOf(id);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(CCBarsSale.NotForSale.selector, id));
+        sale.buy{value: 1 ether}(_one(id));
+        vm.prank(owner);
+        sale.transferBars(address(sale), _one(id));
+        assertEq(sale.arrivedAt(id), t0 + 5 days);
+        assertEq(sale.priceOf(id), _ask(id, 30_000), "the clock starts at the start multiplier");
 
         address eve = makeAddr("eve");
         vm.startPrank(eve);
@@ -263,8 +289,9 @@ contract CCBarsSaleTest is Test {
     // melts release the 187,455 BALANCE inside
     function test_fullInventoryBuyThenMelt() public {
         uint256 due;
-        for (uint256 i; i < held.length; ++i) due += sale.priceOf(held[i]);
+        for (uint256 i; i < held.length; ++i) due += _ask(held[i], 40_000);
         console.log("63 Bars at 4x, wei", due);
+        assertEq(due, 5_113_446_618_908_231_520, "4 x 187,455 BALANCE at the pinned reference");
         core.book();
         uint256 pot0 = core.ethPot();
         vm.deal(buyer, due);
@@ -285,6 +312,23 @@ contract CCBarsSaleTest is Test {
         assertEq(IErc20(BALANCE).balanceOf(buyer), 187_455 ether);
     }
 
+    // promise: no sale while the controller's own protected quote is unusable, the gate of the Core's Credit sales
+    function test_saleStopsWhenTheProtectedQuoteIsUnusable() public {
+        // the live reference lifetime is 4,294,967,295 seconds; one second past it the controller's quote is stale
+        IControllerV2 c = IControllerV2(core.controller());
+        (,,, uint32 maxStale,,) = c.quote();
+        (, bool usable) = c.valuePerPoint(true);
+        assertTrue(usable, "usable at the pin");
+        vm.warp(uint256(IControllerV2Time(address(c)).referenceTime()) + maxStale + 1);
+        (, usable) = c.valuePerPoint(true);
+        assertFalse(usable, "stale past the reference lifetime");
+        vm.expectRevert(CCBarsSale.NoQuote.selector);
+        sale.priceOf(held[0]);
+        vm.prank(buyer);
+        vm.expectRevert(CCBarsSale.NoQuote.selector);
+        sale.buy{value: 1 ether}(_one(held[0]));
+    }
+
     // promise: off means no sale; Bars not held here, other ERC721s and a re-entering refund are refused
     function test_guards() public {
         vm.prank(owner);
@@ -302,11 +346,15 @@ contract CCBarsSaleTest is Test {
         vm.expectRevert(CCBarsSale.OnlyBars.selector);
         sale.onERC721Received(buyer, buyer, 1, "");
 
-        ReentrantBuyer r = new ReentrantBuyer(sale, held[0]);
-        vm.deal(address(this), 2 ether);
-        vm.expectRevert();
+        // the refund re-enters: the inner buy fails on the guard, the outer buy completes for one Bar only
+        ReentrantBuyer r = new ReentrantBuyer(sale, held[0], held[1]);
+        uint256 ask = sale.priceOf(held[0]);
+        vm.deal(address(this), 1 ether);
         r.go{value: 1 ether}();
-        assertEq(IBarsForSale(BARS).ownerOf(held[0]), address(sale), "the reverted buy moved nothing");
+        assertEq(r.innerError(), abi.encodeWithSelector(CCBarsSale.Reentrant.selector), "the guard stopped the re-entry");
+        assertEq(IBarsForSale(BARS).ownerOf(held[0]), address(r));
+        assertEq(IBarsForSale(BARS).ownerOf(held[1]), address(sale), "the second Bar never moved");
+        assertEq(address(r).balance, 1 ether - ask, "the refund arrived");
     }
 
     // promise: melting from the sale pays every released wei to the Core's balance module of the moment, and only the
@@ -324,14 +372,17 @@ contract CCBarsSaleTest is Test {
         vm.expectRevert(CCBarsSale.OnlyOwner.selector);
         sale.meltBars(ids);
 
+        // 1 BALANCE sent to the sale directly goes to the module with the melt
         IPhase2BalanceTreasury treasury = IPhase2BalanceTreasury(module);
+        vm.prank(owner);
+        treasury.withdrawWorking(address(sale), 1 ether);
         uint256 custody0 = treasury.custody();
         uint256 free0 = treasury.freeWorking();
         vm.prank(owner);
         uint256 got = sale.meltBars(ids);
-        assertEq(got, sum, "each Bar released its number in BALANCE");
-        assertEq(treasury.custody(), custody0 + sum, "every melted wei in the module");
-        assertEq(treasury.freeWorking(), free0 + sum, "as working funds");
+        assertEq(got, sum + 1 ether, "each Bar released its number in BALANCE, plus the stray");
+        assertEq(treasury.custody(), custody0 + sum + 1 ether, "every melted wei in the module");
+        assertEq(treasury.freeWorking(), free0 + sum + 1 ether, "as working funds");
         assertEq(IErc20(BALANCE).balanceOf(address(sale)), 0);
         assertEq(script.barsOf(address(sale)).length, 53);
     }
@@ -424,6 +475,23 @@ contract CCBarsSalePhase3Test is Test {
         CCBarsSale sale = script.execute(owner);
         assertEq(script.barsOf(address(sale)).length, 63);
         assertEq(IErc20(BALANCE).balanceOf(script.VAULT()), 0);
+    }
+
+    // promise: a Bar outside the scanned range in the vault stops the script before any send; after the owner moves
+    // it out, the run finishes with the Bars contract counting zero in the vault
+    function test_scriptStopsOnABarOutsideTheScan() public {
+        uint256 stray = 2934;
+        address holder = IBarsForSale(BARS).ownerOf(stray);
+        address vault = script.VAULT();
+        vm.prank(holder);
+        IBarsForSale(BARS).safeTransferFrom(holder, vault, stray);
+        vm.expectRevert(bytes("the vault holds Bars outside the scan: move them by hand"));
+        script.execute(owner);
+        assertEq(script.saleAddress().code.length, 0, "nothing sent");
+        vm.prank(owner);
+        CCBarsVault(vault).transferBars(owner, _ids(stray));
+        script.execute(owner);
+        assertEq(IErc721Bal(BARS).balanceOf(script.VAULT()), 0);
     }
 
     function _ids(uint256 id) internal pure returns (uint256[] memory ids) {

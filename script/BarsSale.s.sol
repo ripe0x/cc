@@ -9,10 +9,15 @@ import {CCBarsVault} from "../src/adapters/CCBarsVault.sol";
 /// (skipped when its code exists), every Bar the CC Bars vault holds moved into it (skipped when none are left) and
 /// sales switched on (skipped when on). the BALANCE left in the vault goes back to the v1 treasury first (skipped when
 /// none is left), and only while v1 is still the Core's balance module: run this before phase 3. after it the vault
-/// holds nothing, which the run checks, and melting runs from the sale, which pays the Core's balance module of the
-/// moment. the multipliers are this script's constants, set at creation; a later
+/// holds nothing, which the run checks against the Bars contract's own count, and melting runs from the sale, which
+/// pays the Core's balance module of the moment. `--resume` replays the saved sends without these checks: run phase 3
+/// only after all four receipts and the readback, and before any resume confirm the module is still v1. the multipliers are this script's constants, set at creation; a later
 /// change is the owner's `setSale`. the constants are part of the CREATE2 initcode: editing one after the first send
 /// predicts a new, empty sale and would leave the Bars in the first one, so price edits go through `setSale` only
+interface IErc721Count {
+    function balanceOf(address owner) external view returns (uint256);
+}
+
 interface IErc20Balance {
     function balanceOf(address who) external view returns (uint256);
 }
@@ -70,6 +75,7 @@ contract BarsSale is Script {
         );
         sale = CCBarsSale(saleAddress());
         uint256[] memory ids = barsOf(VAULT);
+        require(IErc721Count(BARS).balanceOf(VAULT) == ids.length, "the vault holds Bars outside the scan: move them by hand");
         vm.startBroadcast(owner);
         if (leftover != 0) vault.returnBalance();
         if (address(sale).code.length == 0) {
@@ -80,7 +86,7 @@ contract BarsSale is Script {
         if (!sale.on()) sale.setOn(true);
         vm.stopBroadcast();
         require(IErc20Balance(BALANCE).balanceOf(VAULT) == 0, "BALANCE left in the vault");
-        require(barsOf(VAULT).length == 0, "Bars left in the vault");
+        require(IErc721Count(BARS).balanceOf(VAULT) == 0, "Bars left in the vault");
     }
 
     function readback() public view {

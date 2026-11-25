@@ -35,6 +35,7 @@ interface ICoreForBarsSale {
 interface IBalancePrice {
     function referencePrice() external view returns (uint256);
     function spotPrice() external view returns (uint256 spot, bool ok);
+    function valuePerPoint(bool forSale) external view returns (uint256 value, bool ok);
 }
 
 /// @notice sells CC treasury Bars for ETH and pays every wei of the proceeds into the Core's pot (`Core.fund`), which
@@ -46,9 +47,11 @@ interface IBalancePrice {
 /// `window`, and rests at `floorBps` after. `floorBps` is at least 10_000, so no Bar sells for less ETH than its BALANCE
 /// is worth. the value is the BALANCE in the Bar's vault at the larger of the controller's rate-limited reference and
 /// the live pool spot: a spot pushed up raises the ask at once, a spot pushed down leaves the reference, which this
-/// contract never refreshes. no quote (no reference, no priced spot) means no sale. a Bar that arrived by a plain
-/// `transferFrom` has no arrival time and asks `floorBps`; `transferBars` clears a Bar's arrival time, so a Bar that
-/// leaves and comes back by plain transfer asks `floorBps` too. pricing and melting refuse while the Core's balance
+/// contract never refreshes. no sale while the controller's own protected quote is unusable (a stale reference, thin
+/// pool liquidity, no module: `valuePerPoint(true)` not ok), the gate the Core's Credit and Statement sales use. a Bar
+/// with no arrival time is not for sale: one that came by a plain `transferFrom`, or left through `transferBars`
+/// (which clears it) and came back by plain transfer; the owner starts its clock with `transferBars` to this
+/// contract. pricing and melting refuse while the Core's balance
 /// token differs from this sale's: the controller would price another token and a melt would pay a module that does
 /// not hold BALANCE. the owner then moves the Bars out with `transferBars`
 contract CCBarsSale {
@@ -123,10 +126,9 @@ contract CCBarsSale {
         emit SaleOn(on_);
     }
 
-    /// the multiplier of Bar `id` now, bps
+    /// the multiplier of Bar `id` now, bps, from its arrival time (`floorBps` for a Bar with none)
     function multiplierOf(uint256 id) public view returns (uint256) {
-        uint256 t = arrivedAt[id];
-        uint256 age = t == 0 ? type(uint256).max : block.timestamp - t;
+        uint256 age = block.timestamp - arrivedAt[id];
         if (age >= window) return floorBps;
         return startBps - (startBps - floorBps) * age / window;
     }
@@ -138,14 +140,16 @@ contract CCBarsSale {
         IBalancePrice c = IBalancePrice(core.controller());
         uint256 ref = c.referencePrice();
         (uint256 spot, bool ok) = c.spotPrice();
-        if (ref == 0 || !ok || spot == 0) revert NoQuote();
+        (, bool usable) = c.valuePerPoint(true);
+        if (ref == 0 || !ok || spot == 0 || !usable) revert NoQuote();
         uint256 held = SafeTransferLib.balanceOf(balance, bars.work(id).vault);
         return FixedPointMathLib.mulDivUp(held, spot > ref ? spot : ref, 1e18);
     }
 
-    /// the ask of a Bar held here, wei. reverts `NotForSale` for any other Bar and `NoQuote` without a quote
+    /// the ask of a Bar held here with an arrival time, wei. reverts `NotForSale` for any other Bar and `NoQuote`
+    /// without a usable quote
     function priceOf(uint256 id) public view returns (uint256) {
-        if (bars.ownerOf(id) != address(this)) revert NotForSale(id);
+        if (bars.ownerOf(id) != address(this) || arrivedAt[id] == 0) revert NotForSale(id);
         return FixedPointMathLib.mulDivUp(backingOf(id), multiplierOf(id), BPS);
     }
 
@@ -168,15 +172,14 @@ contract CCBarsSale {
         _busy = false;
     }
 
-    /// melts Bars held here (at most 10, the Bars contract's cap) and sends everything their vaults released to the
-    /// Core's balance module now. BALANCE held here before the call stays here
+    /// melts Bars held here (at most 10, the Bars contract's cap, none for a sweep) and sends every BALANCE held here,
+    /// what their vaults released and anything sent here directly, to the Core's balance module now
     function meltBars(uint256[] calldata ids) external onlyOwner returns (uint256 recovered) {
         address module = core.balanceModule();
         if (module == address(0)) revert NoModule();
         if (core.balanceToken() != balance) revert TokenChanged();
-        uint256 before = SafeTransferLib.balanceOf(balance, address(this));
-        bars.meltBatch(ids);
-        recovered = SafeTransferLib.balanceOf(balance, address(this)) - before;
+        if (ids.length != 0) bars.meltBatch(ids);
+        recovered = SafeTransferLib.balanceOf(balance, address(this));
         SafeTransferLib.safeTransfer(balance, module, recovered);
         emit BarsMelted(ids, module, recovered);
     }
