@@ -165,6 +165,12 @@ contract CCBarsSaleTest is Test {
         assertEq(buyer.balance, 100 ether - ask, "excess refunded");
         assertEq(address(sale).balance, 0);
         assertEq(IBarsForSale(BARS).ownerOf(id), buyer);
+        assertEq(sale.arrivedAt(id), 0, "a sale clears the arrival time");
+        vm.expectRevert(abi.encodeWithSelector(CCBarsSale.NotForSale.selector, id));
+        sale.priceOf(id);
+        // the buyer sends it back by plain transfer: still not for sale until the owner restarts its clock
+        vm.prank(buyer);
+        IBarsForSale(BARS).transferFrom(buyer, address(sale), id);
         vm.expectRevert(abi.encodeWithSelector(CCBarsSale.NotForSale.selector, id));
         sale.priceOf(id);
 

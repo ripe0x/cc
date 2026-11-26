@@ -49,9 +49,9 @@ interface IBalancePrice {
 /// the live pool spot: a spot pushed up raises the ask at once, a spot pushed down leaves the reference, which this
 /// contract never refreshes. no sale while the controller's own protected quote is unusable (a stale reference, thin
 /// pool liquidity, no module: `valuePerPoint(true)` not ok), the gate the Core's Credit and Statement sales use. a Bar
-/// with no arrival time is not for sale: one that came by a plain `transferFrom`, or left through `transferBars`
-/// (which clears it) and came back by plain transfer; the owner starts its clock with `transferBars` to this
-/// contract. pricing and melting refuse while the Core's balance
+/// with no arrival time is not for sale: one that came by a plain `transferFrom`, or left through `buy` or
+/// `transferBars` (both clear it) and came back by plain transfer; the owner starts its clock with `transferBars` to
+/// this contract. pricing and melting refuse while the Core's balance
 /// token differs from this sale's: the controller would price another token and a melt would pay a module that does
 /// not hold BALANCE. the owner then moves the Bars out with `transferBars`
 contract CCBarsSale {
@@ -164,6 +164,7 @@ contract CCBarsSale {
         }
         if (msg.value < total) revert Underpaid();
         for (uint256 i; i < ids.length; ++i) {
+            delete arrivedAt[ids[i]];
             bars.transferFrom(address(this), msg.sender, ids[i]);
         }
         core.fund{value: total}();
